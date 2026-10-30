@@ -503,6 +503,8 @@ local JOURNAL_PHRASES = {exact = {
     ["automatic toggle skipped: unsupported availability data"] = "journal.provider.plan_skipped_unsupported",
     ["undiscovered in the client mirror"] = "journal.provider.reason_undiscovered",
     ["discovery state unavailable"] = "journal.provider.reason_discovery_unavailable",
+    ["members have different disable states"] = "journal.provider.reason_members_mixed",
+    ["member state unavailable or unreadable"] = "journal.provider.reason_member_unreadable",
 }, formats = {
     {format = "Pending (%d)", key = "journal.provider.title_pending", fields = {"count"}},
     {format = "Known client catalog: %d tomes; coverage of the whole game is unverified.", key = "journal.provider.catalog_known", fields = {"count"}},
@@ -518,13 +520,57 @@ local JOURNAL_PHRASES = {exact = {
     {format = "%s (stale)", key = "journal.provider.tome_status_stale", fields = {"status"}, nested = {status = true}},
 }}
 -- JOURNAL-PROVIDER END
-local journalBook
+-- Tome-state reasons are code-owned lists: core/GameAdapter.lua
+-- TomeStateObservation gives a tome's member reason and the stale reasons,
+-- the runtime adds a discovery reason and joins them with "; ". Each list
+-- component that is exactly one of these reasons is said through its key;
+-- the "; " separators and any other component (an unknown or later detail)
+-- stay byte for byte. Only these lists are split, never other text.
+local REASON_SEPARATOR = "; "
+local REASON_TEXTS = {"catalog is unavailable", "character data is not ready", "discovery mirror is unsynced",
+    "client mirror update is awaiting reconciliation", "discovery state is unavailable", "world transition in progress",
+    "character data is settling after a world transition", "undiscovered in the client mirror",
+    "discovery state unavailable", "members have different disable states", "member state unavailable or unreadable"}
+local REASON_PHRASES = {exact = {}, formats = {
+    {format = "catalog may be stale (%s)", key = "journal.provider.catalog_stale", fields = {"state"}},
+}}
+for _, text in ipairs(REASON_TEXTS) do REASON_PHRASES.exact[text] = JOURNAL_PHRASES.exact[text] end
+local STALE_PREFIX = "State may be stale: "
+local journalBook, reasonBook
+local function ReasonShown(raw)
+    local L = Nexus.Localization
+    if type(raw) ~= "string" or raw == "" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return raw, false end
+    if not reasonBook or reasonBook.seam ~= L then
+        reasonBook = L.PhraseBook(REASON_PHRASES)
+        reasonBook.seam = L
+    end
+    local parts, from, said = {}, 1, false
+    while true do
+        local at = raw:find(REASON_SEPARATOR, from, true)
+        local shown, known = L.Phrase(raw:sub(from, (at or (#raw + 1)) - 1), reasonBook)
+        parts[#parts + 1] = shown
+        said = said or known
+        if not at then break end
+        from = at + #REASON_SEPARATOR
+    end
+    return table.concat(parts, REASON_SEPARATOR), said
+end
+M.ReasonShown = ReasonShown
 local function JournalShown(raw)
     local L = Nexus.Localization
     if type(raw) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return raw, false end
     if not journalBook or journalBook.seam ~= L then
         journalBook = L.PhraseBook(JOURNAL_PHRASES)
         journalBook.seam = L
+    end
+    -- The coverage line's reasons, said one by one inside the outer key; when
+    -- the active language has no valid outer candidate the whole line is the
+    -- runtime's exact English.
+    if #raw > #STALE_PREFIX + 1 and raw:sub(1, #STALE_PREFIX) == STALE_PREFIX and raw:sub(-1) == "." then
+        local text, source = L.Format("journal.provider.state_stale",
+            {reasons = (ReasonShown(raw:sub(#STALE_PREFIX + 1, -2)))})
+        if source == "candidate" then return text, true end
+        return raw, source ~= "unavailable"
     end
     return L.Phrase(raw, journalBook)
 end
@@ -561,7 +607,7 @@ local function TomeRowEnter(self)
             0.82, 0.82, 0.82, true)
         if t.pending ~= nil then GameTooltip:AddLine(RequestText(t.pending), 1, 0.82, 0, true) end
     end
-    if Filled(t.reason) then GameTooltip:AddLine((JournalShown(t.reason)), 0.82, 0.82, 0.82, true) end
+    if Filled(t.reason) then GameTooltip:AddLine((ReasonShown(t.reason)), 0.82, 0.82, 0.82, true) end
     if Filled(t.plan) then GameTooltip:AddLine((JournalShown(t.plan)), 0.82, 0.82, 0.82, true) end
     local names = {}
     if type(t.echoNames) == "table" then

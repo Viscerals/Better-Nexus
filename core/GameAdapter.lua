@@ -3669,6 +3669,7 @@ end
 function A.Wishlist(slots, context)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
+    A._wishlistNoteFacts = nil
     if slots == nil then slots = A.Slots() end
     if not slots or slots.activeKnown==false then
         local saved = Store and Store.State and Store.State()
@@ -3716,6 +3717,11 @@ function A.Wishlist(slots, context)
                 A._wishlistNote = A._wishlistNote
                     .. " Open the Wishlist Editor to choose and confirm its locked targets."
             end
+            -- Display facts of exactly this note: its reason and whether the
+            -- editor instruction follows (A.WishlistNoteFacts).
+            A._wishlistNoteFacts = {text = A._wishlistNote,
+                reason = tostring(reason or "locked roles are unavailable"),
+                pending = status == "evidence-pending"}
             return nil
         end
         return WishlistRoles.Wishlist(linked,"loadout-association",linked.evidenceSource=="verified-active")
@@ -3758,6 +3764,15 @@ function A.Wishlist(slots, context)
 end
 
 function A.WishlistNote() return A._wishlistNote end
+-- Display only: the facts of the identity-found note when `text` is exactly
+-- the current note (its reason, and whether the editor instruction follows);
+-- nil for any other text. The note itself is unchanged.
+function A.WishlistNoteFacts(text)
+    local facts = A._wishlistNoteFacts
+    if type(facts) ~= "table" or type(text) ~= "string" or text ~= A._wishlistNote
+        or facts.text ~= text then return nil end
+    return {reason = facts.reason, pending = facts.pending == true}
+end
 
 -- The retired flat locked-design table moved under a Wishlist's content key
 -- (AutomationRuntime and WishlistController do this once). That changes what

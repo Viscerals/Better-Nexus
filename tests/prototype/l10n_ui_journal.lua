@@ -798,6 +798,161 @@ do
  end
 end
 
+------------------------------------------------------------------------------
+-- Source16 P60 (SOURCE15-5A8-SPEC-P2-01): the REAL GameAdapter tome-state
+-- reasons through the bound runtime provider to the actual Journal receivers
+-- (the visible tome row's hover and the Show details coverage line). The two
+-- member reasons and every known reason of a code-owned "; " list are said
+-- through their keys; separators, names, identifiers and an unknown detail
+-- stay as given; the producer's raw values are unchanged. Expected texts are
+-- written out here, not derived from the code under test.
+------------------------------------------------------------------------------
+local O,C=S.OPEN,S.CLOSE
+local MIXED_EN,UNREAD_EN='members have different disable states','member state unavailable or unreadable'
+local function TomeFixture(entries)
+ Nexus=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusDB=nil
+ if entries~=false then S.InstallBootHook(nil,entries) end
+ local h=dofile('tests/prototype/harness.lua')
+ H=h
+ local LEVER=777001
+ h.names[LEVER]='Tome of {Shared}; %s Evidence'
+ for i=1,2 do
+  h.AddEcho(300000+i,'Evidence Echo '..i,1,1,0)
+  h.db[300000+i].requiredSpell=LEVER
+  h.discovered[300000+i]=true
+ end
+ h.perks.discoveredEchoes=h.discovered
+ h.disabled[300001]=true
+ h.Boot()
+ local provider
+ for i=1,80 do local n,v=debug.getupvalue(Nexus.JournalTab.TryInstall,i);if not n then break end;if n=='provider' then provider=v end end
+ assert(type(provider)=='function','SETUP S16: the real runtime provider is bound')
+ local journal=CreateFrame('Frame','ProjectEbonholdEchoJournal',UIParent);journal:SetSize(570,450)
+ CreateFrame('ScrollFrame','ProjectEbonholdEchoJournalScroll',journal)
+ CreateFrame('Button','ProjectEbonholdEchoJournalTab1',journal)
+ assert(Nexus.JournalTab.TryInstall(provider),'SETUP S16: the real Journal is installed')
+ NexusJournalScroll:SetSize(520,360);journal:Show();OpenPage()
+ local toggle=ButtonOn(Page(),function(f) return f:GetText()==Nexus.Localization.Text('journal.button.show_details') end)
+ assert(toggle,'SETUP S16: the Show details control');toggle:Click();Nexus.JournalTab.Refresh()
+ return h,provider,LEVER
+end
+local function TomeSnap(h)
+ return F.Serialize(NexusDB)..'|'..F.Serialize(WishlistRealizerDB)..'|'..#h.sent..'|'..#h.actions..'|'..tostring(h.popup)
+end
+-- The provider's raw row for the lever, and the visible row's hover lines,
+-- read with every store write counted.
+local function TomeRead(h,provider,lever)
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local old,writes=owner.UpdateStateV1,0
+ owner.UpdateStateV1=function(...) writes=writes+1;return old(...) end
+ local before=TomeSnap(h)
+ local data=provider();local rows={}
+ for _,sec in ipairs(data.sections) do for _,t in ipairs(sec.tomeRows or {}) do if t.leverId==lever then rows[#rows+1]=t end end end
+ Nexus.JournalTab.Refresh()
+ local receivers={}
+ for _,r in ipairs(h.frames) do if r.parent==Page() and r.tome and r.tome.leverId==lever and r:IsVisible() then receivers[#receivers+1]=r end end
+ local tips={}
+ for i,r in ipairs(receivers) do tips[i]=S.CaptureTooltip(r:GetScript('OnEnter'),r);if r:GetScript('OnLeave') then r:GetScript('OnLeave')(r) end end
+ local stale
+ for _,item in ipairs(S.VisibleTexts(Page())) do if item.text:find('State may be stale',1,true) or item.text:find('PERIME',1,true) then stale=item.text end end
+ local rawStale
+ for _,sec in ipairs(data.sections) do for _,l in ipairs(sec.lines or {}) do if l:find('^State may be stale: ') then rawStale=l end end end
+ owner.UpdateStateV1=old
+ return {rows=rows,receivers=receivers,tips=tips,stale=stale,rawStale=rawStale,passive=TomeSnap(h)==before and writes==0,writes=writes}
+end
+local function Has(lines,want) for _,l in ipairs(lines or {}) do if l==want then return true end end return false end
+-- PSEUDO: mixed, unreadable, member+discovery and known+known stale.
+do
+ local h,provider,lever=TomeFixture(nil)
+ local r=TomeRead(h,provider,lever)
+ check(#r.rows>=1 and r.rows[1].reason==MIXED_EN,'S16 P60 mixed: the producer keeps its raw English reason',r.rows[1] and r.rows[1].reason)
+ check(#r.receivers>=1 and Has(r.tips[1],O..MIXED_EN..C),'S16 P60 mixed: the visible tome hover says the member reason through its key',table.concat(r.tips[1] or {},' | '))
+ check(r.receivers[1] and r.receivers[1].status:GetText()==O..'Mixed'..C,'S16 P60 mixed: close control, the status badge stays translated',r.receivers[1] and r.receivers[1].status:GetText())
+ check(Has(r.tips[1],'Tome of {Shared}; %s Evidence'),'S16 P60 mixed: the tome name with braces, a "; " and a percent stays verbatim')
+ check(r.passive,'S16 P60 mixed: reading and hovering write nothing, send nothing, act on nothing',r.writes)
+ h.service.IsTomeEchoDisabled=function() return nil end
+ r=TomeRead(h,provider,lever)
+ check(r.rows[1] and r.rows[1].reason==UNREAD_EN,'S16 P60 unreadable: the producer keeps its raw English reason',r.rows[1] and r.rows[1].reason)
+ check(Has(r.tips[1],O..UNREAD_EN..C),'S16 P60 unreadable: the visible tome hover says the member reason through its key',table.concat(r.tips[1] or {},' | '))
+ check(r.receivers[1] and r.receivers[1].status:GetText()==O..'Unknown'..C,'S16 P60 unreadable: close control, the Unknown status stays translated')
+ check(r.passive,'S16 P60 unreadable: passive read and hover')
+ -- A pending disable request on the same tome, discovery data absent: the
+ -- runtime joins the member reason and the discovery reason; the coverage
+ -- line has one known reason. Direction and observation keep their words.
+ h.service.IsTomeEchoDisabled=function(id) return id==300001 end
+ local state=Nexus.Store.State();state.tomeTogglePending=state.tomeTogglePending or {};state.tomeTogglePending[lever]={want=true}
+ h.perks.discoveredEchoes=nil
+ r=TomeRead(h,provider,lever)
+ check(r.rows[1] and r.rows[1].reason==MIXED_EN..'; discovery state unavailable','S16 P60 member+discovery: the producer joins its two reasons raw',r.rows[1] and r.rows[1].reason)
+ local wantReason=O..MIXED_EN..C..'; '..O..'discovery state unavailable'..C
+ local reqTip,obsTip
+ for i,rcv in ipairs(r.receivers) do if rcv.tomeRequest then reqTip=r.tips[i] else obsTip=r.tips[i] end end
+ check(obsTip and Has(obsTip,wantReason),'S16 P60 member+discovery: each known reason said through its key, "; " kept',table.concat(obsTip or {},' | '))
+ check(reqTip and Has(reqTip,wantReason),'S16 P60 member+discovery: the request row says the same reason',table.concat(reqTip or {},' | '))
+ check(reqTip and Has(reqTip,O..'Disable requested; awaiting confirmation. A request is not a confirmed change.'..C),'S16 P60 pending: close control, the request direction keeps its own key',reqTip and table.concat(reqTip,' | '))
+ check(r.rawStale=='State may be stale: discovery mirror is unsynced.','S16 P60 single: the producer writes one known stale reason',r.rawStale)
+ check(r.stale==O..'State may be stale: '..O..'discovery mirror is unsynced'..C..'.'..C,'S16 P60 single: one known reason at the coverage line, outer and inner keys',r.stale)
+ check(r.passive,'S16 P60 member+discovery: passive read and hover')
+ -- World transition: members unreadable, two known stale reasons.
+ h.Fire('PLAYER_LEAVING_WORLD')
+ r=TomeRead(h,provider,lever)
+ check(r.rows[1] and r.rows[1].reason==UNREAD_EN..'; discovery state unavailable','S16 P60 unreadable+discovery: the producer joins its two reasons raw',r.rows[1] and r.rows[1].reason)
+ local unreadTip
+ for i,rcv in ipairs(r.receivers) do if not rcv.tomeRequest then unreadTip=r.tips[i] end end
+ check(unreadTip and Has(unreadTip,O..UNREAD_EN..C..'; '..O..'discovery state unavailable'..C),'S16 P60 unreadable+discovery: each known reason said through its key',table.concat(unreadTip or {},' | '))
+ local wantStale=O..'State may be stale: '..O..'world transition in progress'..C..'; '..O..'discovery mirror is unsynced'..C..'.'..C
+ check(r.rawStale=='State may be stale: world transition in progress; discovery mirror is unsynced.','S16 P60 stale: the producer writes two known reasons joined raw',r.rawStale)
+ check(r.stale==wantStale,'S16 P60 stale: both known joined reasons said through their keys at the coverage line',r.stale)
+ check(r.passive,'S16 P60 stale: passive read and hover')
+ -- Single known reason, an identifier-bearing reason and an unknown detail.
+ check(Nexus.JournalTab.JournalShown('State may be stale: catalog may be stale (waiting-for-class); discovery mirror is unsynced.')
+  ==O..'State may be stale: '..O..'catalog may be stale (waiting-for-class)'..C..'; '..O..'discovery mirror is unsynced'..C..'.'..C,'S16 P60 identifier: the catalog state stays a raw identifier inside its key')
+ check(Nexus.JournalTab.JournalShown('State may be stale: world transition in progress; external opaque; detail.')
+  ==O..'State may be stale: '..O..'world transition in progress'..C..'; external opaque; detail.'..C,'S16 P60 unknown: an unknown detail stays exactly as given, known reasons said')
+ check(Nexus.JournalTab.JournalShown('external opaque detail')=='external opaque detail','S16 P60 unknown: an unknown reason alone is unchanged')
+ check(type(Nexus.JournalTab.ReasonShown)=='function' and Nexus.JournalTab.ReasonShown(MIXED_EN..'; '..'Members Have Different Disable States')==O..MIXED_EN..C..'; Members Have Different Disable States','S16 P60 exact: a component is known only byte for byte')
+end
+-- REORDERED / MISSING / INVALID candidates at the same real receivers.
+do
+ local entries=S.PseudoEntries()
+ entries['journal.provider.state_stale']='{reasons} :PERIME'
+ entries['journal.provider.stale_world_transition']='TRANSITION'
+ entries['journal.provider.stale_mirror_unsynced']='MIROIR'
+ entries['journal.provider.reason_member_unreadable']='ILLISIBLE'
+ entries['journal.provider.reason_discovery_unavailable']=nil
+ local h,provider,lever=TomeFixture(entries)
+ h.perks.discoveredEchoes=nil
+ h.Fire('PLAYER_LEAVING_WORLD')
+ local r=TomeRead(h,provider,lever)
+ check(r.stale=='TRANSITION; MIROIR :PERIME','S16 P60 reordered: a valid reordered candidate places the said reasons, "; " kept',r.stale)
+ check(Has(r.tips[1],'ILLISIBLE; discovery state unavailable'),'S16 P60 missing: a missing component candidate shows that component\'s exact English',table.concat(r.tips[1] or {},' | '))
+ check(r.passive,'S16 P60 reordered: passive')
+end
+do
+ local entries=S.PseudoEntries()
+ entries['journal.provider.state_stale']='{reasons} {unknown_slot}'
+ local h,provider,lever=TomeFixture(entries)
+ h.perks.discoveredEchoes=nil
+ h.Fire('PLAYER_LEAVING_WORLD')
+ local r=TomeRead(h,provider,lever)
+ check(r.stale=='State may be stale: world transition in progress; discovery mirror is unsynced.','S16 P60 invalid: an invalid outer candidate shows the whole line in exact English',r.stale)
+ entries=S.PseudoEntries();entries['journal.provider.state_stale']=nil
+ h,provider,lever=TomeFixture(entries)
+ h.perks.discoveredEchoes=nil
+ h.Fire('PLAYER_LEAVING_WORLD')
+ r=TomeRead(h,provider,lever)
+ check(r.stale=='State may be stale: world transition in progress; discovery mirror is unsynced.','S16 P60 missing: a missing outer candidate shows the whole line in exact English',r.stale)
+end
+-- ENGLISH: no pack; exact bytes at the same receivers.
+do
+ local h,provider,lever=TomeFixture(false)
+ h.perks.discoveredEchoes=nil
+ h.Fire('PLAYER_LEAVING_WORLD')
+ local r=TomeRead(h,provider,lever)
+ check(r.stale==r.rawStale and r.stale=='State may be stale: world transition in progress; discovery mirror is unsynced.','S16 P60 English: the coverage line is the producer\'s exact bytes',r.stale)
+ check(Has(r.tips[1],UNREAD_EN..'; discovery state unavailable'),'S16 P60 English: the hover reason is the producer\'s exact bytes',table.concat(r.tips[1] or {},' | '))
+ check(r.passive,'S16 P60 English: passive')
+end
+
 if #failures>0 then
  for _,f in ipairs(failures) do print('FAIL '..f) end
  error('l10n_ui_journal: '..#failures..' of '..checks..' checks failed')

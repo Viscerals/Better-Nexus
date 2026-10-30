@@ -238,5 +238,37 @@ do
  check(shown=="assigned 'Alpha' to Build' to C." and known==false,'GUARD a delimiter inside the other value: raw text kept')
 end
 
+-- Source16 (global v6): the declared contracts of the real catalog. Fourteen
+-- templates are lines = true with result limit 2048, two static texts are
+-- blocks, the offer paragraph's three keys each fit raw 1024 and, with the
+-- largest text slot (1024 bytes), render within 2048. The catalog stays at or
+-- below the unchanged 4096 cap.
+do
+ local function Declared(key)
+  return source:match('\n    %["'..key:gsub('%.','%%.')..'"%] = (%b{}),')
+ end
+ for _,key in ipairs({'orb.runtime.blocked_submitted_unresolved','orb.runtime.blocked_unattributable_next','editor.notify.already_created',
+  'editor.notify.assignment_changed_open','editor.notify.destination_empty','editor.notify.host_error',
+  'editor.notify.import_overflow_unassigned','editor.notify.lock_design_collisions','editor.notify.lock_slots_unstated',
+  'editor.notify.saved_session_only','editor.notify.saved_unassigned_opened','editor.notify.server_slot_stale',
+  'editor.notify.server_slot_stale_missing','editor.notify.lock_slots_occupied','editor.notify.maybe_sent'}) do
+  local d=Declared(key) or ''
+  check(d:find('kind = "template"',1,true) and d:find('resultLimit = 2048',1,true) and d:find('lines = true',1,true),'S16 contract: '..key..' is a lines template, result 2048: '..d)
+ end
+ for _,key in ipairs({'orb.runtime.recovery_needs_fresh_reply','orb.status.headline_paused_continue','orb.recovery.offer_open_proposed_exits',
+  'orb.recovery.offer_open_proposed_route'}) do
+  check(Declared(key)=='{kind = "block"}','S16 contract: '..key..' is a block: '..tostring(Declared(key)))
+ end
+ check(Declared('editor.reason.every_saved_build_already_holds_a_plan_this')=='{kind = "text"}','S16 contract: RU-18 keeps its text contract (justified, fits 256)')
+ local english=Nexus.LocalizationEnglish
+ local n=0;for _ in pairs(english) do n=n+1 end
+ check(n<=L.MAX_BASE_ENTRIES and L.MAX_BASE_ENTRIES==4096,'S16 contract: the catalog ('..n..') stays within the unchanged 4096 cap')
+ local seg1,seg2,seg3=english['orb.recovery.offer_open_proposed'],english['orb.recovery.offer_open_proposed_exits'],english['orb.recovery.offer_open_proposed_route']
+ check(#seg1<=1024 and #seg2<=1024 and #seg3<=1024,'S16 contract: each offer paragraph is within raw 1024')
+ check(1024-#'{echo}'+1024<=2048,'S16 contract: paragraph 1 renders within 2048 with a 1024-byte Echo slot')
+ local shown,source1=L.Format('orb.recovery.offer_open_proposed',{echo=string.rep('e',1024)})
+ check(source1~='unavailable' and #shown<=2048,'S16 contract: paragraph 1 with a 1024-byte Echo name renders ('..#shown..' bytes)')
+end
+
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')
 print('l10n_full_contract: '..checks..' checks')

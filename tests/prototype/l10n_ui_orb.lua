@@ -158,7 +158,9 @@ do
  check(#failures==0,'English: every Orb book entry shows the producer bytes:\n'..table.concat(failures,'\n'))
  local exactN=0
  for _ in pairs(BOOK.exact) do exactN=exactN+1 end
- check(exactN>340 and #BOOK.formats==26,'Orb book admitted whole: '..exactN..' exact, '..#BOOK.formats..' formats')
+ -- Source16: the offer-open paragraph left the book; the window says it as
+ -- three keyed paragraphs (section 7b), so 25 formats remain.
+ check(exactN>340 and #BOOK.formats==25,'Orb book admitted whole: '..exactN..' exact, '..#BOOK.formats..' formats')
 end
 -- Raw text of a key in the book (the producer's bytes).
 local function RawOf(key)
@@ -492,5 +494,283 @@ f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
 check(f.usage:GetText():find('^Orbs used: 0 / 3 approved; '..S.OPEN..'pending:')==nil
  and f.usage:GetText():find('^Orbs used: 0 / 3 approved; pending: 1 Orb requested, not confirmed yet')~=nil,
  'missing template entries: exact English composition: '..f.usage:GetText())
+
+
+------------------------------------------------------------------------------
+-- 7. Source16 (global v6) at the real Orb receivers. Expected texts are
+-- written out here, not derived from the code under test. A section-local
+-- collector lists every miss, then one assertion reports them all.
+------------------------------------------------------------------------------
+local O,C=S.OPEN,S.CLOSE
+local S16={}
+local function soft(ok,label,detail) checks=checks+1;if not ok then S16[#S16+1]=label..(detail and (' :: '..tostring(detail)) or '') end end
+local function Texts(root) local out={} for _,t in ipairs(S.VisibleTexts(root)) do out[#out+1]=t.text end return out end
+local function HasText(list,want) for _,t in ipairs(list) do if t==want then return true end end return false end
+local function Status(extra,cv)
+ local status,view=M.Status,M.ContinueView
+ M.Status=function(...) local s=status(...);for k,v in pairs(extra) do s[k]=v end;return s end
+ if cv then M.ContinueView=function() local v=view();for k,x in pairs(cv) do v[k]=x end;return v end end
+ UI.Refresh()
+ local shown=UI.Show().status:GetText()
+ M.Status,M.ContinueView=status,view
+ return shown
+end
+local OUTER_EN='Local character data is not ready: %s No Orb action will be sent.'
+local MARKER_EN='The saved data format marker is not a valid format number (%s). This build writes format %s. The data is kept unchanged and read-only.'
+local function StartWhy(f)
+ f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
+ return f.startWhy:GetText(),M.Status().startReason
+end
+local function StubWrite(status)
+ local real=Nexus.Store.StateWriteStatus
+ Nexus.Store.StateWriteStatus=function() local s={} for k,v in pairs(status) do s[k]=v end return s end
+ return function() Nexus.Store.StateWriteStatus=real end
+end
+-- 7a. P206: the malformed saved-format marker, through the real Store.
+do
+ Boot('wrap');Plan(3)
+ local f=UI.Show()
+ NexusDB.settingsVersion='7x }'
+ local shown,raw=StartWhy(f)
+ local inner=MARKER_EN:format('string "7x ?"','2')
+ soft(raw==OUTER_EN:format(inner),'S16 P206 real Store: the runtime keeps its exact English refusal',raw)
+ local want=O..'Start:'..C..' '..O..'Local character data is not ready: '..O..inner..C..' No Orb action will be sent.'..C
+ soft(shown==want,'S16 P206 real Store: the Start line says the marker sentence through its key with the producer\'s own fields',shown)
+ local before=Snapshot();UI.Refresh();UI.Refresh()
+ local after=Snapshot();for k,v in pairs(before) do soft(after[k]==v,'S16 P206 real Store: showing is passive: '..k) end
+ NexusDB.settingsVersion={}
+ shown,raw=StartWhy(f)
+ inner=MARKER_EN:format('table','2')
+ soft(raw==OUTER_EN:format(inner),'S16 P206 empty text: the runtime keeps its exact English refusal',raw)
+ soft(shown==O..'Start:'..C..' '..O..'Local character data is not ready: '..O..inner..C..' No Orb action will be sent.'..C,'S16 P206 empty text: no marker text and no separator',shown)
+ NexusDB.settingsVersion=nil
+ -- Producer-level statuses: unknown type, and delimiter-like marker data.
+ local restore=StubWrite({mode='unavailable',reason='saved-format',format='malformed',supportedFormat=5})
+ shown,raw=StartWhy(f);restore()
+ inner=MARKER_EN:format('unknown type','5')
+ soft(raw==OUTER_EN:format(inner),'S16 P206 unknown type: raw English kept',raw)
+ soft(shown==O..'Start:'..C..' '..O..'Local character data is not ready: '..O..'The saved data format marker is not a valid format number ('..O..'unknown type'..C..'). This build writes format 5. The data is kept unchanged and read-only.'..C..' No Orb action will be sent.'..C,
+  'S16 P206 unknown type: the type is said through its own key',shown)
+ restore=StubWrite({mode='unavailable',reason='saved-format',format='unverified',savedFormat=4,supportedFormat=2,field='rows'})
+ shown,raw=StartWhy(f);restore()
+ soft(raw:find('did not pass this build',1,true) and S.IsPseudo(shown) and S.LooksUntranslated(shown)==nil,'S16 P206 neighbour: an unverified format stays translated',shown)
+ restore=StubWrite({mode='unavailable',reason='saved-format',format='future',savedFormat=9,supportedFormat=2,knownFirst=3,knownLast=5})
+ shown,raw=StartWhy(f);restore()
+ soft(raw:find('is not supported',1,true) and S.IsPseudo(shown) and S.LooksUntranslated(shown)==nil,'S16 P206 neighbour: an unsupported format stays translated',shown)
+ f:Hide()
+end
+do
+ local entries=S.PseudoEntries()
+ entries['orb.runtime.format_marker_invalid']='[{supported}]{marker_text} <- {marker_type} ILLISIBLE'
+ entries['orb.runtime.character_data_not_ready']='PAS PRET: {reason} RIEN'
+ entries['orb.label.start_reason']='Debut:'
+ Boot('wrap',entries);Plan(3)
+ local f=UI.Show()
+ local restore=StubWrite({mode='unavailable',reason='saved-format',format='malformed',markerType='string',markerText='{a}%s; 7x)(',supportedFormat=5})
+ local shown,raw=StartWhy(f);restore()
+ soft(raw==OUTER_EN:format(MARKER_EN:format('string {a}%s; 7x)(','5')),'S16 P206 reordered: raw English kept with the marker bytes',raw)
+ soft(shown=='Debut: PAS PRET: [5] {a}%s; 7x)( <- string ILLISIBLE RIEN','S16 P206 reordered: a valid reordered candidate places each field; braces, percent and separators stay data',shown)
+ f:Hide()
+end
+do
+ local entries=S.PseudoEntries();entries['orb.runtime.format_marker_invalid']=nil
+ Boot('wrap',entries);Plan(3)
+ local f=UI.Show()
+ NexusDB.settingsVersion='7x }'
+ local shown=StartWhy(f)
+ NexusDB.settingsVersion=nil
+ soft(shown==O..'Start:'..C..' '..O..'Local character data is not ready: '..MARKER_EN:format('string "7x ?"','2')..' No Orb action will be sent.'..C,'S16 P206 missing: a missing marker candidate keeps the complete English sentence',shown)
+ entries=S.PseudoEntries();entries['orb.runtime.character_data_not_ready']='{reason} {nope}'
+ Boot('wrap',entries);Plan(3)
+ f=UI.Show()
+ NexusDB.settingsVersion='7x }'
+ shown=StartWhy(f)
+ NexusDB.settingsVersion=nil
+ soft(shown==O..'Start:'..C..' '..OUTER_EN:format(MARKER_EN:format('string "7x ?"','2')),'S16 P206 invalid: an invalid outer candidate shows the whole refusal in exact English',shown)
+end
+-- 7b. The offer-open paragraph: one runtime meaning, three ordered keyed
+-- paragraphs joined by one space at the receiver.
+local SEG1="The earlier Orb offer is still open. Before the reload Nexus proposed %s for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept."
+local SEG2="For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation."
+local SEG3="Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend."
+-- The producer's own composition (core/OrbRuntime.lua RECOVERY_TEXT):
+-- its literal head, then the shared KEPT and NO_EXIT constants, then the tail.
+local ORB_SRC=S.readFile('core/OrbRuntime.lua')
+local OFFER_FMT=assert(ORB_SRC:match('OFFER_OPEN_PROPOSED="(.-)"%.%.KEPT%.%.NO_EXIT%.%." Nexus will not choose or spend%.",'),'the producer head')
+ ..assert(ORB_SRC:match('\nlocal KEPT="(.-)"[\r\n]'),'KEPT')..assert(ORB_SRC:match('\nlocal NO_EXIT="(.-)"[\r\n]'),'NO_EXIT')
+ .." Nexus will not choose or spend."
+local ECHO='Ashen {Tithe} 100%; x'
+do
+ soft(OFFER_FMT==SEG1..' '..SEG2..' '..SEG3,'S16 offer: the producer format is exactly the three paragraphs joined by one space')
+ local raw=OFFER_FMT:format(ECHO)
+ Boot('wrap');Plan(3);UI.Show()
+ local shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason=raw},{eligible=true})
+ local want=O..'Details:'..C..' '..O..SEG1:format(ECHO)..C..' '..O..SEG2..C..' '..O..SEG3..C
+ soft(shown:find(want,1,true)~=nil,'S16 offer: the Details line says the three paragraphs in order, one space between, the Echo name verbatim',shown)
+ soft(shown:find('^'..O..'Paused')~=nil,'S16 offer: close control, the paused headline stays translated',shown)
+ local ut=Nexus.UserText.Message(raw)
+ soft(ut==O..SEG1:format(ECHO)..C..' '..O..SEG2..C..' '..O..SEG3..C,'S16 offer: another window (UserText) says the same paragraphs',ut)
+end
+do
+ local entries=S.PseudoEntries()
+ entries['orb.recovery.offer_open_proposed']='{echo} :UN'
+ entries['orb.recovery.offer_open_proposed_exits']='DEUX'
+ entries['orb.recovery.offer_open_proposed_route']='TROIS'
+ Boot('wrap',entries);Plan(3);UI.Show()
+ local shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason=OFFER_FMT:format(ECHO)},{eligible=true})
+ soft(shown:find(O..'Details:'..C..' Ashen {Tithe} 100%; x :UN DEUX TROIS',1,true)~=nil,'S16 offer reordered: each paragraph in its place, the Echo name verbatim',shown)
+ entries['orb.recovery.offer_open_proposed_route']=nil
+ Boot('wrap',entries);Plan(3);UI.Show()
+ shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason=OFFER_FMT:format(ECHO)},{eligible=true})
+ soft(shown:find(O..'Details:'..C..' '..OFFER_FMT:format(ECHO),1,true)~=nil,'S16 offer missing: one missing paragraph shows the whole paragraph in exact English',shown)
+end
+do
+ local long=S.PseudoEntries('long')
+ for _,k in ipairs({'orb.recovery.offer_open_proposed','orb.recovery.offer_open_proposed_exits','orb.recovery.offer_open_proposed_route'}) do
+  soft(long[k] and #long[k]<=1024,'S16 offer long: the long candidate fits raw 1024: '..k,long[k] and #long[k])
+ end
+ Boot('long');Plan(3);UI.Show()
+ local shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason=OFFER_FMT:format(ECHO)},{eligible=true})
+ soft(#shown>1645 and shown:find(ECHO,1,true)~=nil and select(2,shown:gsub(O,''))>=4,'S16 offer long: the whole long paragraph is shown with the Echo name',#shown)
+end
+-- 7c. The paused headline (RU source-fit 19): a complete >256-byte
+-- candidate is shown; selection and its neighbours unchanged.
+do
+ local entries=S.PseudoEntries()
+ local full=O..'Paused - a result restored after a reload is unresolved: no new Orb run or ordinary roll until it settles or you continue past it.'..string.rep(' complete',20)..C
+ entries['orb.status.headline_paused_continue']=full
+ Boot('wrap',entries);Plan(3);UI.Show()
+ local shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason='Waiting.'},{eligible=true})
+ soft(#full>256 and shown:sub(1,#full)==full,'S16 headline: a complete candidate above 256 bytes is the paused-Continue headline',shown:sub(1,80))
+ shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason='Waiting.'},{eligible=false})
+ soft(shown:find('^'..O..'Paused')~=nil and shown:sub(1,#full)~=full,'S16 headline: close control, paused without Continue keeps its own headline',shown:sub(1,80))
+ shown=Status({state='RECOVERY',running=false,pending=true,reason='Waiting.'},{eligible=true})
+ soft(shown:sub(1,#full)~=full and S.IsPseudo(shown),'S16 headline: close control, the recovery headline is not the paused one',shown:sub(1,80))
+ entries['orb.status.headline_paused_continue']=string.rep('x',1100)
+ Boot('wrap',entries);Plan(3);UI.Show()
+ shown=Status({state='PAUSED',recovery={},running=false,pending=true,reason='Waiting.'},{eligible=true})
+ soft(shown:find('^Paused %- a result restored after a reload is unresolved: no new Orb run or ordinary roll until it settles or you continue past it%.\n')~=nil,'S16 headline: an invalid candidate shows the exact English headline',shown:sub(1,80))
+end
+-- 7d. Recovery needs a fresh reply (RU-V4-P2-15): a complete block.
+do
+ local entries=S.PseudoEntries()
+ local raw='Recovery needs a fresh empty-choice reply after newer activity. Resolve any open offer in the game, or Stop and approve a new run. No new Orb is sent.'
+ local full=O..raw..string.rep(' complete',20)..C
+ entries['orb.runtime.recovery_needs_fresh_reply']=full
+ Boot('wrap',entries)
+ soft(#full>256 and (UI.Phrase(raw))==full,'S16 RU-15: a complete candidate above 256 bytes is shown',(UI.Phrase(raw)))
+end
+-- 7e. The archived diagnostic pair (orb.continue.attribution_owned_gain).
+do
+ local key='orb.continue.attribution_owned_gain'
+ local function PairKept(v) return type(v)=='string' and v:find('%f[%w]UNCONFIRMED%f[%W]')~=nil and v:find('%f[%w]NONE%f[%W]')~=nil end
+ local src=S.readFile('core/OrbRuntime.lua')
+ soft(src:find('resolution={outcome="UNCONFIRMED",confidence="NONE"}',1,true)~=nil,'S16 pair: the archive producer stores the literal pair')
+ soft(src:find('e.resolution.outcome~="UNCONFIRMED" or e.resolution.confidence~="NONE"',1,true)~=nil,'S16 pair: the archive validator requires the literal pair')
+ soft(src:find('confidence=childFact(e.resolution,"confidence","NONE")',1,true)~=nil and src:find('outcome=childFact(e.resolution,"outcome","UNCONFIRMED")',1,true)~=nil,'S16 pair: the support export repeats the literal pair')
+ local english=RawOf(key)
+ soft(src:find('"'..english..'"',1,true)~=nil and PairKept(english),'S16 pair: the paragraph is the producer literal and names both identifiers')
+ local ctx=S.readFile('docs/localization/KEY_CONTEXT.json')
+ local row=ctx:match('"key": "'..key:gsub('%.','%%.')..'".-"meaning": "(.-)"')
+ soft(row and row:find('UNCONFIRMED',1,true) and row:find('NONE',1,true) and row:find('literal',1,true),'S16 pair: the key context names both archived identifiers as literal',row)
+ local good='PREUVE FRAICHE: cette action reste UNCONFIRMED; archivee sans changement avec la confiance NONE. '
+ local bad='PREUVE FRAICHE: cette action reste NON CONFIRMEE; archivee sans changement avec la confiance AUCUNE. '
+ soft(PairKept(good) and not PairKept(bad),'S16 pair: the acceptance rule keeps a candidate with both literals and refuses one that translates them')
+ local entries=S.PseudoEntries();entries[key]=good
+ Boot('wrap',entries);Plan(3)
+ local view=M.ContinueView
+ local c=assert(UI.ShowContinue(),'the Continue window opens')
+ M.ContinueView=function() local v=view();v.text=INTRO..RawOf('orb.continue.choose_check_confirm');return v end
+ local before=Snapshot()
+ UI.ShowContinue()
+ local body=c.body:GetText()
+ M.ContinueView=view
+ soft(body:sub(1,#good)==good and PairKept(body) and body:find('PREUVE FRAICHE',1,true)==1,'S16 pair: the real Continue body shows distinct prose with both literal identifiers',body:sub(1,120))
+ local after=Snapshot();for k,v in pairs(before) do soft(after[k]==v,'S16 pair: showing is passive: '..k) end
+ c:Hide()
+end
+-- 7f. The composed identity-found note (core/GameAdapter.lua), from the
+-- real adapter after a real association, at the Orb window's targets line
+-- (whole note) and at /nexus wishlist (UserText: without its prefix).
+local ID_SUFFIX=' Open the Wishlist Editor to choose and confirm its locked targets.'
+local function IdentityWorld(entries)
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;UISpecialFrames=nil
+ NexusOrbPanel=nil;NexusOrbMini=nil;NexusOrbContinue=nil;NexusOrbRunLog=nil;NexusOrbHistoryCopy=nil
+ if entries~=false then S.InstallBootHook(nil,entries) end
+ local h=dofile('tests/prototype/harness.lua')
+ local locks={200690,200756,200882,201250,201262,201270};local q={2,3,2,3,3,3};local total={}
+ for i=1,79 do local id=210000+i;h.AddEcho(id,'Ordinary '..i,2,5);total[#total+1]={spellId=id,quality=2,stacks=1,locked=false} end
+ for i,id in ipairs(locks) do h.AddEcho(id,'Locked '..i,q[i],5);total[#total+1]={spellId=id,quality=q[i],stacks=1,locked=false};h.locked[#h.locked+1]={spellId=id,stacks=1} end
+ h.perks.serverBuildSlots={[1]={name='Synthetic active',verified=true,echoes=h.Clone(total)},[101]={name='Synthetic plan',verified=false,echoes=h.Clone(total)}}
+ h.perks.serverActiveSlot=1
+ h.Boot()
+ local A=Nexus.GameAdapter
+ local c;for _,row in ipairs(A.GetWishlistCandidates()) do if row.slot==101 then c=row end end
+ assert(c and A.SetLoadoutWishlist(1,101,c),'SETUP S16 identity: a real association')
+ h.perks.serverBuildSlots[101]=nil
+ return h,A
+end
+local function IdRead(h,A)
+ local before={F=Serialize(NexusDB),L=Serialize(WishlistRealizerDB),sent=#h.sent,actions=#h.actions}
+ local wish=A.Wishlist()
+ local note=A.WishlistNote()
+ local f=Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh()
+ local orb=f.targets:GetText();f:Hide()
+ h.chat={};SlashCmdList.NEXUS('wishlist')
+ local chat=h.chat[#h.chat]
+ local after={F=Serialize(NexusDB),L=Serialize(WishlistRealizerDB),sent=#h.sent,actions=#h.actions}
+ local passive=true;for k,v in pairs(before) do if after[k]~=v then passive=false end end
+ return wish,note,orb,chat,passive
+end
+local TAG='|cff7fd5ffNexus:|r '
+do
+ local h,A=IdentityWorld(nil)
+ h.perks.serverBuildSlots[1].verified=false
+ local wish,note,orb,chat,passive=IdRead(h,A)
+ local reason='active loadout is not verified; locked-Echo evidence is pending'
+ soft(wish==nil and note=='Wishlist identity found; '..reason..'.'..ID_SUFFIX,'S16 identity: the adapter keeps its raw note',note)
+ soft(orb==O..'Wishlist identity found; '..O..reason..C..'.'..ID_SUFFIX..C,'S16 identity: the Orb window says the whole note, the reason through its key',orb)
+ soft(chat==TAG..O..O..reason..C..'.'..ID_SUFFIX..C,'S16 identity: /nexus wishlist says the note without its prefix, the reason through its key',chat)
+ soft(passive,'S16 identity: reading and showing write nothing, send nothing, act on nothing')
+ h.perks.serverBuildSlots[1].verified=true;h.locked=nil
+ wish,note,orb,chat,passive=IdRead(h,A)
+ reason='waiting for synchronized permanent locked-Echo evidence'
+ soft(note=='Wishlist identity found; '..reason..'.'..ID_SUFFIX,'S16 identity sync: the adapter keeps its raw note',note)
+ soft(orb==O..'Wishlist identity found; '..O..reason..C..'.'..ID_SUFFIX..C,'S16 identity sync: the Orb window says the whole note',orb)
+ soft(chat==TAG..O.."Waiting for the server's current locked Echo list. Details: "..note..C,'S16 identity sync: close control, UserText keeps its keyed wait sentence with the raw note as details',chat)
+ soft(passive,'S16 identity sync: passive')
+ -- Unknown reason and the note without the editor instruction (the
+ -- adapter's other branch), as the adapter records them.
+ local unknown='an external; reason {x} 100%'
+ A._wishlistNote='Wishlist identity found; '..unknown..'.';A._wishlistNoteFacts={text=A._wishlistNote,reason=unknown,pending=false}
+ local ut=(Nexus.UserText.Message(A._wishlistNote))
+ soft(ut==O..unknown..'.'..C,'S16 identity unknown: UserText keeps an unknown reason verbatim inside the key',ut)
+ ut=(Nexus.OrbPanel.Phrase(A._wishlistNote))
+ soft(ut==O..'Wishlist identity found; '..unknown..'.'..C,'S16 identity unknown: the Orb window keeps an unknown reason verbatim inside the key',ut)
+ A._wishlistNote='Wishlist identity found; wishlist identity or structure is invalid.';A._wishlistNoteFacts={text=A._wishlistNote,reason='wishlist identity or structure is invalid',pending=false}
+ ut=(Nexus.UserText.Message(A._wishlistNote))
+ soft(ut==O..O..'Wishlist identity or structure is invalid'..C..'.'..C,'S16 identity no instruction: the note without the editor instruction',ut)
+ ut=(Nexus.UserText.Message('Wishlist identity found; wishlist identity or structure is invalid. Open it'))
+ soft(ut=='wishlist identity or structure is invalid. Open it','S16 identity: a text the adapter did not produce keeps the existing English rewrite',ut)
+end
+do
+ local entries=S.PseudoEntries()
+ entries['orb.assignment.identity_found_open_editor']=nil
+ entries['orb.assignment.identity_found_reason_open_editor']=nil
+ local h,A=IdentityWorld(entries)
+ h.perks.serverBuildSlots[1].verified=false
+ local _,note,orb,chat=IdRead(h,A)
+ soft(orb==note,'S16 identity missing: a missing Orb candidate shows the whole note in exact English',orb)
+ soft(chat==TAG..'active loadout is not verified; locked-Echo evidence is pending.'..ID_SUFFIX,'S16 identity missing: a missing UserText candidate shows the existing English',chat)
+end
+do
+ local h,A=IdentityWorld(false)
+ h.perks.serverBuildSlots[1].verified=false
+ local _,note,orb,chat,passive=IdRead(h,A)
+ soft(orb==note and note=='Wishlist identity found; active loadout is not verified; locked-Echo evidence is pending.'..ID_SUFFIX,'S16 identity English: the Orb window shows the exact note',orb)
+ soft(chat==TAG..'active loadout is not verified; locked-Echo evidence is pending.'..ID_SUFFIX,'S16 identity English: /nexus wishlist shows the exact current English',chat)
+ soft(passive,'S16 identity English: passive')
+end
+check(#S16==0,'Source16 Orb receivers:\n'..table.concat(S16,'\n'))
 
 print('l10n_ui_orb: '..checks..' checks')

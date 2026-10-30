@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4068,
+    "declaredKeys": 4076,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -22670,11 +22670,11 @@
     },
     {
       "key": "orb.status.headline_paused_continue",
-      "kind": "text",
+      "kind": "block",
       "english": "Paused - a result restored after a reload is unresolved: no new Orb run or ordinary roll until it settles or you continue past it.",
       "placeholders": [],
       "group": "orb",
-      "meaning": "As orb.status.headline_paused, when an explicit Continue is offered.",
+      "meaning": "As orb.status.headline_paused, when an explicit Continue is offered. v6 contract: a block (up to 1024 bytes); translate completely, keeping every fact. Add no line break (the receiver wraps). Keep: paused; a result restored after a reload is unresolved; neither a new Orb run nor an ordinary roll until it settles (its outcome becomes determined) OR the player explicitly continues PAST it.",
       "consumer": "Orb window (title \"Orbs / Lost Memories\"), Run controls page status",
       "familySurface": "orb: Orb window (title \"Orbs / Lost Memories\"), Run controls page (status); family coverage PENDING review",
       "cohort": "fullui:orb"
@@ -37158,7 +37158,7 @@
       "english": "Your fresh Echo ownership shows the distinct chosen gain, but an earlier unconfirmed action could have caused it. This action remains UNCONFIRMED. Explicit Continue ends this old run and archives its original receipt unchanged, with confidence NONE. ",
       "placeholders": [],
       "group": "orb",
-      "meaning": "Text of the explicit Continue check of an unresolved Orb action (core/OrbRuntime.lua). Shown in the Continue window body/notice and the status Details. Consent and refusal wording: keep every consequence (nothing is refunded, repeated or chosen).",
+      "meaning": "Text of the explicit Continue check of an unresolved Orb action (core/OrbRuntime.lua). Shown in the Continue window body/notice and the status Details. Consent and refusal wording: keep every consequence (nothing is refunded, repeated or chosen). v6 diagnostic pair: UNCONFIRMED and NONE are the literal values of the archived record (resolution.outcome and resolution.confidence; the support export repeats them). In this paragraph keep both exactly, in capitals and untranslated, as literal identifiers; translate all surrounding prose, including the lower-case word 'unconfirmed'. Ordinary 'unconfirmed' labels elsewhere are translated normally.",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
@@ -38499,7 +38499,7 @@
     {
       "key": "orb.recovery.offer_open_proposed",
       "kind": "template",
-      "english": "The earlier Orb offer is still open. Before the reload Nexus proposed {echo} for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept. For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
+      "english": "The earlier Orb offer is still open. Before the reload Nexus proposed {echo} for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept.",
       "placeholders": [
         {
           "name": "echo",
@@ -38510,7 +38510,7 @@
       "resultLimitBytes": 2048,
       "lines": true,
       "group": "orb",
-      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots.",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots. v6: one runtime paragraph is shown as three keyed paragraphs, in this order, joined by one space (code-owned): 1 the open offer and the refused proposal (orb.recovery.offer_open_proposed), 2 the two exit classes (orb.recovery.offer_open_proposed_exits), 3 where to look and what Nexus never does (orb.recovery.offer_open_proposed_route). Translate each completely (up to 1024 bytes each); do not move facts between them; add no line break. This is paragraph 1: keep that the earlier offer is still open, that Nexus proposed {echo} before the reload and the call was refused before it reached the game, that ONLY choosing that SAME Echo in the game's offer window can confirm (a different Echo cannot), and that the record and its spending exposure are kept.",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook format)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
@@ -38704,8 +38704,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "orb",
-      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots.",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook format)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
@@ -38727,8 +38728,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "orb",
-      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots.",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook format)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
@@ -39589,11 +39591,11 @@
     },
     {
       "key": "orb.runtime.recovery_needs_fresh_reply",
-      "kind": "text",
+      "kind": "block",
       "english": "Recovery needs a fresh empty-choice reply after newer activity. Resolve any open offer in the game, or Stop and approve a new run. No new Orb is sent.",
       "placeholders": [],
       "group": "orb",
-      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel.",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. v6 contract: a block (up to 1024 bytes); translate completely, keeping every fact. Add no line break (the receiver wraps). Keep: a FRESH empty-choice reply observed AFTER the newer activity is needed; resolve any open offer in the game, or Stop and approve a new run; no new Orb is sent.",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
@@ -40925,8 +40927,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41075,8 +41078,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41335,8 +41339,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41371,8 +41376,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41405,8 +41411,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41515,8 +41522,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41551,8 +41559,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41569,8 +41578,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41953,8 +41963,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -41989,8 +42000,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -42007,8 +42019,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -42025,8 +42038,9 @@
         }
       ],
       "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. v6 contract: translate completely, keeping every condition, negation, destination and name distinction; the raw template may be up to 1024 bytes (result at most 2048). It stays ONE displayed line: add no line break (the receiver wraps).",
       "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
       "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
       "cohort": "fullui:remainder_wishlist_chat"
@@ -46461,12 +46475,12 @@
         {
           "name": "reasons",
           "type": "text",
-          "meaning": "why (one reason shown through its key; several are joined by '; ' and shown as given)"
+          "meaning": "why: one or more reasons, each already in the shown language, joined by '; ' (the separator is code-owned; an unknown detail is shown as given)"
         }
       ],
       "resultLimitBytes": 1400,
       "group": "journal",
-      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections).  v6: every known reason is said through its own key; keep {reasons} once and add no separator.",
       "consumer": "Echo Journal > Nexus Progress body",
       "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
       "cohort": "fullui:v5_source86_supplemental"
@@ -47051,6 +47065,122 @@
       "consumer": "Support page (status and Prepare report file lines) status",
       "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
       "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.reason_member_unreadable",
+      "kind": "text",
+      "english": "member state unavailable or unreadable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover reason (lower-case, no final period): the disable state of at least one member Echo could not be read. It may be followed by other reasons after '; '.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v6_source16_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "journal.provider.reason_members_mixed",
+      "kind": "text",
+      "english": "members have different disable states",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover reason (lower-case, no final period): the tome's member Echoes disagree, some disabled and some enabled in the client mirror. It may be followed by other reasons after '; '.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v6_source16_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.assignment.identity_found",
+      "kind": "template",
+      "english": "Wishlist identity found; {reason}.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the Wishlist's locked roles are not known yet: a Nexus reason already in the shown language when it has a translation, otherwise as Nexus wrote it (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "orb",
+      "meaning": "Orb window line (targets, Start reason, notices) when Nexus found the assigned Wishlist but cannot use it yet. 'Wishlist identity found' says the Wishlist itself was identified; keep it before the reason. ",
+      "consumer": "Orb window status",
+      "familySurface": "v6_source16_supplemental: Orb window (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.assignment.identity_found_open_editor",
+      "kind": "template",
+      "english": "Wishlist identity found; {reason}. Open the Wishlist Editor to choose and confirm its locked targets.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the Wishlist's locked roles are not known yet: a Nexus reason already in the shown language when it has a translation, otherwise as Nexus wrote it (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "orb",
+      "meaning": "Orb window line (targets, Start reason, notices) when Nexus found the assigned Wishlist but cannot use it yet. 'Wishlist identity found' says the Wishlist itself was identified; keep it before the reason. Then the instruction: open the Wishlist Editor to choose AND confirm the locked targets.",
+      "consumer": "Orb window status",
+      "familySurface": "v6_source16_supplemental: Orb window (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.assignment.identity_found_reason",
+      "kind": "template",
+      "english": "{reason}.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the Wishlist's locked roles are not known yet: a Nexus reason already in the shown language when it has a translation, otherwise as Nexus wrote it (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "orb",
+      "meaning": "Chat and page line (UserText: /nexus wishlist, the Echo Journal target line; not the Orb window) when Nexus found the assigned Wishlist but cannot use it yet. This form starts with the reason (lower-case, as written), then a period. ",
+      "consumer": "Chat / Echo Journal status",
+      "familySurface": "v6_source16_supplemental: Chat / Echo Journal (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.assignment.identity_found_reason_open_editor",
+      "kind": "template",
+      "english": "{reason}. Open the Wishlist Editor to choose and confirm its locked targets.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the Wishlist's locked roles are not known yet: a Nexus reason already in the shown language when it has a translation, otherwise as Nexus wrote it (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "orb",
+      "meaning": "Chat and page line (UserText: /nexus wishlist, the Echo Journal target line; not the Orb window) when Nexus found the assigned Wishlist but cannot use it yet. This form starts with the reason (lower-case, as written), then a period. Then the instruction: open the Wishlist Editor to choose AND confirm the locked targets.",
+      "consumer": "Chat / Echo Journal status",
+      "familySurface": "v6_source16_supplemental: Chat / Echo Journal (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.recovery.offer_open_proposed_exits",
+      "kind": "block",
+      "english": "For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots. v6: one runtime paragraph is shown as three keyed paragraphs, in this order, joined by one space (code-owned): 1 the open offer and the refused proposal (orb.recovery.offer_open_proposed), 2 the two exit classes (orb.recovery.offer_open_proposed_exits), 3 where to look and what Nexus never does (orb.recovery.offer_open_proposed_route). Translate each completely (up to 1024 bytes each); do not move facts between them; add no line break. This is paragraph 2: keep both exit classes apart. The original no-choice class: only after a reload, a client-observed spend, no USABLE recorded choice, no open offer, and after a read-only check. Separately, a stopped attribution-ambiguous action: its fresh distinct chosen gain is actually owned. BOTH exits need a quiet read-only check AND the player's confirmation.",
+      "consumer": "Orb window (Orbs / Lost Memories), Continue window, history and mini panel status",
+      "familySurface": "v6_source16_supplemental: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
+    },
+    {
+      "key": "orb.recovery.offer_open_proposed_route",
+      "kind": "block",
+      "english": "Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb run status text produced by core/OrbRuntime.lua; the runtime keeps and compares the raw English. Shown in the Orb window (status, Start reason, notice, Details), the history note lines and the mini panel. A whole sentence with code-filled slots. v6: one runtime paragraph is shown as three keyed paragraphs, in this order, joined by one space (code-owned): 1 the open offer and the refused proposal (orb.recovery.offer_open_proposed), 2 the two exit classes (orb.recovery.offer_open_proposed_exits), 3 where to look and what Nexus never does (orb.recovery.offer_open_proposed_route). Translate each completely (up to 1024 bytes each); do not move facts between them; add no line break. This is paragraph 3: /nexus orbs is a command (verbatim) and explains THIS record's eligibility; Nexus never continues by itself, and will not choose or spend.",
+      "consumer": "Orb window (Orbs / Lost Memories), Continue window, history and mini panel status",
+      "familySurface": "v6_source16_supplemental: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
+      "cohort": "fullui:v6_source16_supplemental"
     },
     {
       "key": "editor.body.role_help_plan_only",
@@ -54431,7 +54561,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 4068,
+    "totalKeys": 4076,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -54455,7 +54585,9 @@
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
       "v5_source86_amendments": 0,
-      "v5_source86_supplemental": 73
+      "v5_source86_supplemental": 73,
+      "v6_source16_amendments": 0,
+      "v6_source16_supplemental": 8
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

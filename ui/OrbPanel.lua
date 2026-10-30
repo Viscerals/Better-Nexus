@@ -25,6 +25,10 @@ local refreshFailing=false
 -- every entry equals the seam's English base.
 -- ORB-ENGLISH BEGIN (the English base of every orb.* key; see above)
 local ENGLISH={
+    ["orb.assignment.identity_found"]="Wishlist identity found; {reason}.",
+    ["orb.assignment.identity_found_open_editor"]="Wishlist identity found; {reason}. Open the Wishlist Editor to choose and confirm its locked targets.",
+    ["orb.assignment.identity_found_reason"]="{reason}.",
+    ["orb.assignment.identity_found_reason_open_editor"]="{reason}. Open the Wishlist Editor to choose and confirm its locked targets.",
     ["orb.body.copy_report_help"]="Press Select all, then copy with Ctrl+C. Opening this view sends nothing anywhere.",
     ["orb.body.history_consumed_source"]="Consumed source: {echo}",
     ["orb.body.history_eligible_surplus"]="Eligible surplus at selection: {value} copy(ies). This is what the policy could draw from, not a count of copies sacrificed.",
@@ -151,6 +155,9 @@ local ENGLISH={
     ["orb.note.history_reload_cleared"]="History clears on reload or logout; steps before the reload are not listed.",
     ["orb.note.history_session"]="History clears on reload or logout.",
     ["orb.note.mini_close_keeps_run"]="Closing this panel does not stop the run.",
+    ["orb.recovery.offer_open_proposed"]="The earlier Orb offer is still open. Before the reload Nexus proposed {echo} for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept.",
+    ["orb.recovery.offer_open_proposed_exits"]="For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation.",
+    ["orb.recovery.offer_open_proposed_route"]="Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
     ["orb.status.action_continue"]="What you can do: Continue... below checks the game, then asks you to confirm.",
     ["orb.status.action_finish_check"]="What you can do: finish or cancel the check in the Continue window.",
     ["orb.status.action_follow_details"]="What you can do: follow the details below.",
@@ -965,8 +972,6 @@ local ORB_REMAINDER={exact={
         key="orb.continue.confirm", fields={"spent", "limit"}},
     {format="Recovered past %d unconfirmed Orb outcome(s). Earlier results may still arrive. All attempts remain within your approved maximum; completion uses your observed Echoes.",
         key="orb.runtime.recovered_past", fields={"count"}},
-    {format="The earlier Orb offer is still open. Before the reload Nexus proposed %s for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept. For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
-        key="orb.recovery.offer_open_proposed", fields={"echo"}},
     {format="A choice for the earlier Orb action is recorded: %s. The game still reports its Orb offer as open. If you have not chosen in the game's offer window since the reload, choose %s there; a different Echo cannot confirm this action. Nexus then waits, read-only, for the matching result. Nexus will not choose or spend.",
         key="orb.recovery.offer", fields={"echo", "echo_again"}},
     {format="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action. The record and its spending exposure are kept.",
@@ -1003,11 +1008,68 @@ UI.RUNTIME_TEXT_KEYS=RUNTIME_TEXT
 -- (segments), through the seam's display phrasebook. Anything else (player or
 -- game data, an unknown text) is shown exactly as the producer wrote it.
 local orbBook
+-- A runtime text with display facts (core/OrbRuntime.lua M.DisplayFacts:
+-- a key, typed values and nested code values): said through its key with
+-- those values when every level has a valid candidate; otherwise nil and the
+-- book below shows it (the English keeps its exact bytes).
+local function typedShown(facts)
+    local L=Nexus.Localization
+    if type(L)~="table" or type(L.Format)~="function" or type(facts)~="table" or type(facts.args)~="table" then return nil end
+    local args={}
+    for name,value in pairs(facts.args) do
+        if type(value)=="table" then
+            value=typedShown(value)
+            if value==nil then return nil end
+        else
+            local map=type(facts.nested)=="table" and facts.nested[name] or nil
+            local nestedKey=type(map)=="table" and map[value] or nil
+            if nestedKey then
+                local text,source=L.Text(nestedKey)
+                if source~="unavailable" then value=text end
+            end
+        end
+        args[name]=value
+    end
+    local text,source=L.Format(facts.key,args)
+    if source=="candidate" then return text end
+    return nil
+end
+-- One runtime paragraph said as ordered keyed paragraphs, each within the
+-- 1024-byte raw / 2048-byte render contract (the runtime keeps and compares
+-- its whole English). Shown joined by one space only when every paragraph
+-- has a valid candidate; otherwise the whole exact English.
+local SEGMENTED={
+    {head="The earlier Orb offer is still open. Before the reload Nexus proposed ", tail=" for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept. For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.", slot="echo",
+        keys={"orb.recovery.offer_open_proposed","orb.recovery.offer_open_proposed_exits","orb.recovery.offer_open_proposed_route"}},
+}
+local function segmentedShown(value)
+    local L=Nexus.Localization
+    if type(L)~="table" or type(L.Format)~="function" then return nil end
+    for _,entry in ipairs(SEGMENTED) do
+        local head,tail=entry.head,entry.tail
+        if #value>=#head+#tail and value:sub(1,#head)==head and value:sub(#value-#tail+1)==tail then
+            local slotValue,parts=value:sub(#head+1,#value-#tail),{}
+            for i,key in ipairs(entry.keys) do
+                local text,source
+                if i==1 then text,source=L.Format(key,{[entry.slot]=slotValue}) else text,source=L.Text(key) end
+                if source~="candidate" then return value end
+                parts[i]=text
+            end
+            return table.concat(parts," ")
+        end
+    end
+end
 local function orbPhrase(value)
     if type(value)~="string" then return value,false end
     local key=OBSOLETE_TEXT[value]
     if key then return T(key),true end
     local L=Nexus.Localization
+    local runtime=Nexus.OrbRuntime
+    local facts=type(runtime)=="table" and type(runtime.DisplayFacts)=="function" and runtime.DisplayFacts(value) or nil
+    local typed=facts and typedShown(facts)
+    if typed then return typed,true end
+    local segmented=segmentedShown(value)
+    if segmented then return segmented,true end
     if type(L)=="table" and type(L.PhraseBook)=="function" and type(L.Phrase)=="function" then
         if not orbBook or orbBook.seam~=L then
             local exact={}
@@ -1021,7 +1083,16 @@ local function orbPhrase(value)
     if key then return T(key),true end
     return value,false
 end
-UI.Phrase=orbPhrase
+-- The Orb window's own receivers also say the adapter's identity-found note
+-- in its whole form (core/UserText.lua T.IdentityNote); other windows reach
+-- orbPhrase as a UserText phrase source and keep UserText's own form.
+local function orbShown(value)
+    local text=Nexus.UserText and type(Nexus.UserText.IdentityNote)=="function"
+        and Nexus.UserText.IdentityNote(value,true) or nil
+    if text then return text,true end
+    return orbPhrase(value)
+end
+UI.Phrase=orbShown
 -- The book itself (tests read its entries back); nil without the seam.
 function UI.PhraseBook()
     orbPhrase("")
@@ -1034,7 +1105,7 @@ if Nexus.UserText and type(Nexus.UserText.AddPhraseSource)=="function" then
 end
 local function truthful(value)
     if value==nil then return nil end
-    return (orbPhrase(value))
+    return (orbShown(value))
 end
 -- Legacy EditBox has no Button Enable/Disable API. Lock both input routes and
 -- release focus so an approved maximum cannot remain editable during a run.

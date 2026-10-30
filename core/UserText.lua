@@ -252,6 +252,50 @@ local function FromPhraseSources(s)
     end
     return nil
 end
+-- The adapter's composed identity-found note (core/GameAdapter.lua
+-- A.WishlistNoteFacts: its reason, and whether the editor instruction
+-- follows), said from those facts. `whole` is the Orb window's form, which
+-- keeps the "Wishlist identity found;" lead; otherwise the form this file's
+-- rewrite always showed (without it). A known reason is said through its
+-- key when the active language has it; any other reason stays as given.
+-- nil for a text the adapter did not produce, or when the form's key has
+-- no valid candidate (the display then keeps its exact English).
+local IDENTITY_REASONS={
+    ["wishlist identity or structure is invalid"]="editor.reason.wishlist_identity_or_structure_is_invalid",
+    ["Choose locked targets in the Wishlist Editor; the saved role choice is unavailable"]="library.reason.evidence_choose_in_editor",
+    ["associated loadout is not active; locked roles remain unknown"]="library.reason.evidence_loadout_inactive",
+    ["no verified active loadout for locked-Echo evidence"]="library.reason.evidence_no_verified_active",
+    ["active loadout is not verified; locked-Echo evidence is pending"]="library.reason.evidence_active_unverified",
+    ["wishlist does not exactly match the verified active loadout; locked roles remain unknown"]="library.reason.evidence_not_exact_match",
+    ["active loadout contains malformed Echo evidence"]="library.reason.evidence_malformed",
+    ["active loadout contains conflicting Echo quality evidence"]="library.reason.evidence_conflicting_quality",
+    ["active loadout exceeds the supported Echo count"]="library.reason.evidence_too_many",
+    ["waiting for synchronized permanent locked-Echo evidence"]="library.reason.evidence_waiting_sync",
+    ["permanent locked-Echo counts do not fit the exact active loadout"]="library.reason.evidence_counts_mismatch",
+    ["locked evidence cannot establish at most 79 ordinary and 6 locked copies"]="library.reason.evidence_envelope",
+    ["waiting for authoritative locked-Echo evidence"]="library.reason.evidence_waiting_authoritative",
+}
+function T.IdentityNote(value,whole)
+    local adapter,localization=Nexus.GameAdapter,Nexus.Localization
+    local facts=type(value)=="string" and type(adapter)=="table" and type(adapter.WishlistNoteFacts)=="function"
+        and adapter.WishlistNoteFacts(value) or nil
+    if not facts or type(localization)~="table" or type(localization.Format)~="function" then return nil end
+    local reason,reasonKey=facts.reason,IDENTITY_REASONS[facts.reason]
+    if reasonKey then
+        local text,source=localization.Text(reasonKey)
+        if source=="candidate" then reason=text end
+    end
+    local key
+    if whole then
+        key=facts.pending and "orb.assignment.identity_found_open_editor" or "orb.assignment.identity_found"
+    else
+        key=facts.pending and "orb.assignment.identity_found_reason_open_editor" or "orb.assignment.identity_found_reason"
+    end
+    local shown,source=localization.Format(key,{reason=reason})
+    if source=="candidate" then return shown end
+    return nil
+end
+
 -- A text another owner's display recognizes (an English reason wording or
 -- a phrase source), in the active language; any other text unchanged. Unlike
 -- T.Message it never rewrites an unknown text.
@@ -317,6 +361,8 @@ function T.Message(value)
     end
     if s:find("no net gain",1,true) then return Say("reason.not_saved_no_gain","Not saved: no additional matching Wishlist copies were confirmed.") end
     if s:find("coverage lost:",1,true) then return Say("reason.not_saved_coverage_lost","Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.") end
+    local identity=T.IdentityNote(s,false)
+    if identity then return identity,true end
     local phrased,phrasedText=FromPhraseSources(s)
     if phrased then return phrased,phrasedText end
     if s:match("^[A-Z][A-Z0-9_]+$") then

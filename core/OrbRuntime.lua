@@ -134,13 +134,53 @@ local function writeStatus()
     if not ok or type(status)~="table" then return {mode="unavailable",reason="lifecycle"} end
     return status
 end
+-- Display facts (display only; read by ui/OrbPanel.lua). A text this runtime
+-- returns can join two producer values with nothing between them, so its
+-- display cannot split the English back into them. For such a text the
+-- runtime also keeps, under the exact text, the key and typed values the
+-- display says; the text and everything that compares, records, logs or
+-- sends it are unchanged. At most 16 texts; a text noted again with other
+-- values has no facts (ambiguous).
+local displayFacts={order={},byText={}}
+local function noteDisplayFacts(text,facts)
+    local function same(a,b)
+        if type(a)~=type(b) then return false end
+        if type(a)~="table" then return a==b end
+        for k,v in pairs(a) do if not same(v,b[k]) then return false end end
+        for k in pairs(b) do if a[k]==nil then return false end end
+        return true
+    end
+    local known=displayFacts.byText[text]
+    if known~=nil then
+        if known~=false and not same(known,facts) then displayFacts.byText[text]=false end
+        return
+    end
+    displayFacts.order[#displayFacts.order+1]=text
+    displayFacts.byText[text]=facts
+    if #displayFacts.order>16 then displayFacts.byText[table.remove(displayFacts.order,1)]=nil end
+end
+-- The facts kept for exactly this text (a copy), or nil.
+function M.DisplayFacts(text)
+    local facts=type(text)=="string" and displayFacts.byText[text] or nil
+    if not facts then return nil end
+    local function clone(v)
+        if type(v)~="table" then return v end
+        local out={};for k,x in pairs(v) do out[k]=clone(x) end;return out
+    end
+    return clone(facts)
+end
 -- The actual saved and supported markers, never a guess about who wrote them.
+-- A malformed marker also returns its display facts: the type and the text
+-- ("" or " " plus the text) are separate fields of the same sentence.
 local function savedFormatText(status)
     if status.format=="malformed" then
+        local markerType=tostring(status.markerType or "unknown type")
+        local markerText=status.markerText and (" "..tostring(status.markerText)) or ""
+        local supported=tostring(tonumber(status.supportedFormat) or "?")
         return string.format("The saved data format marker is not a valid format number (%s%s). This build writes format %s. The data is kept unchanged and read-only.",
-            tostring(status.markerType or "unknown type"),
-            status.markerText and (" "..tostring(status.markerText)) or "",
-            tostring(tonumber(status.supportedFormat) or "?"))
+            markerType,markerText,supported),
+            {key="orb.runtime.format_marker_invalid",args={marker_type=markerType,marker_text=markerText,supported=supported},
+                nested={marker_type={["unknown type"]="orb.runtime.marker_type_unknown"}}}
     end
     local saved,supported=tonumber(status.savedFormat),tonumber(status.supportedFormat)
     if not saved or not supported then return WRITE_REASON.lifecycle end
@@ -154,7 +194,10 @@ end
 local function writeRefusal(status)
     local key=status.reason
     if key=="saved-format" then
-        return "Local character data is not ready: "..savedFormatText(status).." No Orb action will be sent."
+        local reason,facts=savedFormatText(status)
+        local text="Local character data is not ready: "..reason.." No Orb action will be sent."
+        if facts then noteDisplayFacts(text,{key="orb.runtime.character_data_not_ready",args={reason=facts}}) end
+        return text
     end
     if status.mode=="loading" and key=="lifecycle" then key="lifecycle_loading" end
     return "Local character data is not ready: "..(WRITE_REASON[key] or WRITE_REASON.lifecycle).." No Orb action will be sent."

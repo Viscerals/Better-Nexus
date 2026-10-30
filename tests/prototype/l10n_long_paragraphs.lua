@@ -247,4 +247,104 @@ Receivers(function(key) return ENGLISH[key] end,'English')
 check(Snapshot()==before,'English: showing, hovering and reading write nothing')
 ImportLines(function(key) return ENGLISH[key] end,'English')
 
+------------------------------------------------------------------------------
+-- 4. Source16 (global v6): RU source-fit contracts. Fourteen one-line
+-- templates move to lines = true (raw template up to 1024 bytes, result up to
+-- 2048): a complete candidate above 256 bytes is shown whole by its real
+-- presentation (the Orb book, the Wishlist chat phrasebook, the controller's
+-- typed notices), still one line; an over-bound candidate shows the exact
+-- English. maybe_sent keeps its existing lines = true contract (control).
+------------------------------------------------------------------------------
+local RU_LINES={'orb.runtime.blocked_submitted_unresolved','orb.runtime.blocked_unattributable_next','editor.notify.already_created',
+ 'editor.notify.assignment_changed_open','editor.notify.destination_empty','editor.notify.host_error',
+ 'editor.notify.import_overflow_unassigned','editor.notify.lock_design_collisions','editor.notify.lock_slots_unstated',
+ 'editor.notify.saved_session_only','editor.notify.saved_unassigned_opened','editor.notify.server_slot_stale',
+ 'editor.notify.server_slot_stale_missing','editor.notify.lock_slots_occupied'}
+local RU_ARGS={
+ ['orb.runtime.blocked_submitted_unresolved']={subject='Ordinary rolling'},
+ ['orb.runtime.blocked_unattributable_next']={subject='A new Orb run',next_step='Stop this Orb run first, then open'},
+ ['editor.notify.already_created']={name="Qv {Plan} 100%"},
+ ['editor.notify.assignment_changed_open']={destination="Saved Build 2"},
+ ['editor.notify.destination_empty']={slot='3'},
+ ['editor.notify.host_error']={name="Qv {Plan} 100%"},
+ ['editor.notify.import_overflow_unassigned']={max=79,count=4},
+ ['editor.notify.lock_design_collisions']={count=2},
+ ['editor.notify.lock_slots_unstated']={max=6},
+ ['editor.notify.saved_session_only']={count=12},
+ ['editor.notify.saved_unassigned_opened']={name="Qv {Plan} 100%"},
+ ['editor.notify.server_slot_stale']={slot='4'},
+ ['editor.notify.server_slot_stale_missing']={slot='4'},
+ ['editor.notify.lock_slots_occupied']={count=6},
+ ['editor.notify.maybe_sent']={name="Qv {Plan} 100%"},
+}
+local TYPED={['editor.notify.already_created']=true,['editor.notify.host_error']=true,['editor.notify.saved_unassigned_opened']=true,
+ ['editor.notify.assignment_changed_open']=true,['editor.notify.maybe_sent']=true}
+local NOTIFY_TAG='|cffff9040Nexus:|r '
+local function LongCandidate(english)
+ local text=S.OPEN..english..' '..string.rep('complete facts kept ',16)..S.CLOSE
+ assert(#text>256 and #text<=1024,'SETUP a long candidate within the bound')
+ return text
+end
+-- What the real presentation shows for `key` (raw producer English filled
+-- from the same values; the presentation reads only the raw text, or the
+-- controller's typed record for the name-bearing notices).
+local function Present(key,english)
+ local args=RU_ARGS[key]
+ local raw=Fill(english,args)
+ if key:sub(1,4)=='orb.' then return (Nexus.OrbPanel.Phrase(raw)),raw end
+ local controller=Nexus.WishlistInternals and Nexus.WishlistInternals.Controller
+ if TYPED[key] then
+  local typed={key=key,args={}}
+  for k,v in pairs(args) do typed.args[k]=v end
+  return controller.SayTyped(NOTIFY_TAG..raw,typed),raw
+ end
+ return (controller.NotifyPhrase(NOTIFY_TAG..raw)),raw
+end
+local EN4=S.English()
+do
+ local entries=S.PseudoEntries()
+ for _,key in ipairs(RU_LINES) do entries[key]=LongCandidate(EN4[key]) end
+ entries['editor.notify.maybe_sent']=LongCandidate(EN4['editor.notify.maybe_sent'])
+ Boot('wrap',entries)
+ local before={db=F.Serialize(NexusDB),legacy=F.Serialize(WishlistRealizerDB),sent=#H.sent,actions=#H.actions}
+ for _,key in ipairs(RU_LINES) do
+  local shown=Present(key,EN4[key])
+  local args={}
+  for k,v in pairs(RU_ARGS[key]) do args[k]=v end
+  if key:sub(1,4)=='orb.' then
+   args.subject=S.OPEN..args.subject..S.CLOSE
+   if args.next_step then args.next_step=S.OPEN..args.next_step..S.CLOSE end
+  end
+  local want=(key:sub(1,4)=='orb.' and '' or NOTIFY_TAG)..Fill(entries[key],args)
+  check(shown==want and #shown>256+#NOTIFY_TAG and not shown:find('\n',1,true),'S16 RU lines: '..key..' shows its complete candidate above 256 bytes on one line: '..tostring(shown):sub(1,120))
+ end
+ local key='editor.notify.maybe_sent'
+ local shown=Present(key,EN4[key])
+ check(shown==NOTIFY_TAG..Fill(entries[key],RU_ARGS[key]),'S16 RU control: maybe_sent keeps its lines contract and its raw name: '..tostring(shown):sub(1,120))
+ local after={db=F.Serialize(NexusDB),legacy=F.Serialize(WishlistRealizerDB),sent=#H.sent,actions=#H.actions}
+ for k,v in pairs(before) do check(after[k]==v,'S16 RU lines: presenting is passive: '..k) end
+end
+do
+ local entries=S.PseudoEntries()
+ for _,key in ipairs(RU_LINES) do entries[key]=S.OPEN..EN4[key]..string.rep(' x',520)..S.CLOSE end
+ Boot('wrap',entries)
+ for _,key in ipairs(RU_LINES) do
+  local shown,raw=Present(key,EN4[key])
+  check(#entries[key]>1024 and not shown:find(' x x x',1,true),'S16 RU lines: an over-bound '..key..' candidate is not shown: '..tostring(shown):sub(1,100))
+  if key:sub(1,4)=='orb.' then
+   local tail=raw:match('.*(/nexus orbs.*)$')
+   check(shown:find(tail,1,true)~=nil,'S16 RU lines: '..key..' over-bound keeps the exact English sentence: '..tostring(shown):sub(1,100))
+  else
+   check(shown==NOTIFY_TAG..raw,'S16 RU lines: '..key..' over-bound shows the exact English: '..tostring(shown):sub(1,100))
+  end
+ end
+end
+do
+ Boot('english')
+ for _,key in ipairs(RU_LINES) do
+  local shown,raw=Present(key,EN4[key])
+  check(shown==(key:sub(1,4)=='orb.' and '' or NOTIFY_TAG)..raw,'S16 RU English: '..key..' is the exact English: '..tostring(shown):sub(1,100))
+ end
+end
+
 print('l10n_long_paragraphs: '..checks..' checks')
