@@ -15,6 +15,11 @@ four-input validate_catalog_data and catalog_report keep report schemaVersion
 the uiLanguages enum of data/DefaultProfile.lua by an explicit equality test
 on its bytes, which are not an API input.
 
+S7 adds the required-CI check of the current per-pack provenance records of
+RELEASE_LANGUAGES.json through pack_provenance_diagnostics: the real UNKNOWN
+records are technically valid with support held, while malformed and stale
+variants of the real bytes are refused.
+
 Synthetic offline evidence only: no Lua runs, and this is not fluent, human
 or native evidence. Python 3.9+, standard library only. Registered in
 PYTHON_TESTS of tools/run_prototype_tests.py.
@@ -1010,6 +1015,607 @@ class DiagnosticCommandLineTests(unittest.TestCase):
                     self.assertIs(record["diagnostics"]["valid"], False)
                     self.assertEqual(record["diagnostics"]["problemCounts"],
                                      {"invalid": 2, "obsolete": 1, "orphan": 2})
+            after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+
+# S7 (Refs #147): per-pack provenance metadata and the opt-in provenance
+# receipt. The real records hold UNKNOWN facts; every DECLARED record below is
+# a synthetic in-memory edit of the real bytes and is not rights, authorship
+# or drafting-history evidence. No URL is fetched.
+OPTIONAL_IDS = ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")
+FACTS = ("authorship", "attribution", "rightsStatement", "importedCorpus")
+BASIS = "exact-supplied-english-bytes"
+EXPECTED_PROVENANCE_CODES = (
+    "provenance-contract", "provenance-structure", "provenance-field",
+    "provenance-unknown-product", "provenance-duplicate-product", "provenance-missing-product",
+    "provenance-status", "provenance-reason", "provenance-value", "provenance-reference",
+    "provenance-basis", "provenance-hash-format", "provenance-stale",
+)
+# The historical document-level declarations of the accepted predecessor
+# 83417bc, kept verbatim; they never fill a per-pack fact.
+HISTORICAL_LINEAGE = {
+    "kind": "independently_drafted_nexus_presentation_text",
+    "newHumanRightsAttestation": "none",
+    "importedCorpus": "none",
+    "excludedSources": ["another addon's translation corpus", "game client text",
+                        "player or private client content"],
+}
+HISTORICAL_PACK_REVIEW = (
+    "data/LocalizationPacks.lua states that the pack wording was drafted and has had a "
+    "technical review only, and that no competent human reviewer of each language has "
+    "accepted it. No reviewer identity or date is recorded, so no review record is entered "
+    "here.")
+SYNTHETIC_REFERENCE = "https://example.invalid/synthetic-provenance"
+
+
+def fact_pattern(product_id, fact):
+    """The one-line fact object of one provenance record in the release bytes."""
+    return re.compile(rb'("productId": "' + product_id.encode() + rb'",'
+                      rb'(?:\r?\n {8}"[A-Za-z]+": \{[^{}\r\n]*\},)*?\r?\n {8}"'
+                      + fact.encode() + rb'": )(\{[^{}\r\n]*\})(,?)')
+
+
+def with_fact(release, product_id, fact, value):
+    """release with only the fact object of one record replaced by the JSON of
+    value; every other byte is kept."""
+    pattern = fact_pattern(product_id, fact)
+    found = list(pattern.finditer(release))
+    if len(found) != 1:
+        raise AssertionError("expected exactly one %s.%s" % (product_id, fact))
+    start, end = found[0].span(2)
+    text = json.dumps(value, ensure_ascii=False).encode("utf-8")
+    return release[:start] + text + release[end:]
+
+
+def without_fact_line(release, product_id, fact):
+    """release without the whole line of one fact (not the last of a record),
+    in whichever line break it uses."""
+    found = list(fact_pattern(product_id, fact).finditer(release))
+    if len(found) != 1 or found[0].group(3) != b",":
+        raise AssertionError("expected exactly one inner %s.%s" % (product_id, fact))
+    start = release.rindex(b"\n", 0, found[0].start(2))
+    start -= 1 if release[start - 1:start] == b"\r" else 0
+    return release[:start] + release[found[0].end(3):]
+
+
+def with_record_id(release, product_id, new_id):
+    """release with the productId of one provenance record replaced."""
+    old = re.compile(rb'"productId": "' + product_id.encode() + rb'",(?=\r?\n {8}"englishBase")')
+    if len(old.findall(release)) != 1:
+        raise AssertionError("expected exactly one record %s" % product_id)
+    return old.sub(b'"productId": ' + json.dumps(new_id).encode() + b",", release)
+
+
+def with_provenance(release, change):
+    """release re-encoded with change applied to its packProvenance member
+    (structural controls only)."""
+    document = json.loads(release.decode("utf-8"))
+    change(document)
+    return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def declared_base(digest, **extra):
+    record = {"status": "DECLARED", "algorithm": "SHA-256", "basis": BASIS, "sha256": digest,
+              "evidenceReference": SYNTHETIC_REFERENCE}
+    record.update(extra)
+    return record
+
+
+def declared_fact(value, **extra):
+    record = {"status": "DECLARED", "value": value, "evidenceReference": SYNTHETIC_REFERENCE}
+    record.update(extra)
+    return record
+
+
+def assert_current_provenance(test, catalog, inputs):
+    """The required-CI gate on the current repository metadata: technically
+    valid, every declared base still matching, every pack held. Returns the
+    receipt."""
+    receipt = catalog.pack_provenance_diagnostics(*inputs)
+    test.assertIs(receipt["valid"], True, receipt["metadata"]["problems"])
+    test.assertEqual(receipt["catalogVerdict"], {"result": "valid"})
+    test.assertEqual((receipt["metadata"]["technicalValidity"], receipt["metadata"]["problems"]),
+                     ("VALID", []))
+    test.assertEqual([row["productId"] for row in receipt["packs"]], list(OPTIONAL_IDS))
+    test.assertEqual(receipt["baseRelations"]["STALE"], 0)
+    for row in receipt["packs"]:
+        test.assertIn(row["englishBase"]["relation"], ("UNKNOWN", "MATCHED"))
+        test.assertEqual((row["attestedFacts"], row["supportEligibility"]),
+                         ("NOT_ESTABLISHED", "HELD"))
+    test.assertEqual((receipt["attestedFacts"], receipt["supportEligibility"]),
+                     ("NOT_ESTABLISHED", "HELD"))
+    test.assertIs(receipt["completeness"]["established"], False)
+    return receipt
+
+
+class ProvenanceTests(unittest.TestCase):
+    """S7: per-pack provenance records and the opt-in provenance receipt
+    beside the unchanged strict, report and diagnostic seams."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog()
+        cls.inputs = current_inputs()
+        cls.provenance = staticmethod(cls.catalog.pack_provenance_diagnostics)
+        cls.release = json.loads(cls.inputs[3].decode("utf-8"))
+
+    def with_release(self, release):
+        return [self.inputs[0], self.inputs[1], self.inputs[2], release, self.inputs[4]]
+
+    def assert_refused(self, release, code, key=None):
+        """The provenance receipt refuses release while the strict, report and
+        diagnostic seams keep their verdict on the same bytes."""
+        data = self.with_release(release)
+        self.catalog.registry_catalog_report(*data)
+        self.catalog.catalog_report(*data[:4])
+        self.assertIs(self.catalog.registry_catalog_diagnostics(*data)["valid"], True)
+        receipt = self.provenance(*data)
+        self.assertIs(receipt["valid"], False)
+        self.assertEqual(receipt["catalogVerdict"], {"result": "valid"})
+        self.assertEqual(receipt["metadata"]["technicalValidity"], "INVALID")
+        problem = receipt["metadata"]["problems"][0]
+        self.assertEqual((problem["code"], problem.get("key")), (code, key))
+        self.assertIn(problem["code"], self.catalog.PROVENANCE_CODES)
+        self.assertEqual((receipt["attestedFacts"], receipt["supportEligibility"]),
+                         ("NOT_ESTABLISHED", "HELD"))
+        self.assertIs(receipt["completeness"]["established"], False)
+        return receipt
+
+    def test_p1_real_packs_are_unknown_technical_valid_and_held(self):
+        receipt = assert_current_provenance(self, self.catalog, self.inputs)
+        self.assertEqual(receipt["baseRelations"], {"UNKNOWN": 6, "MATCHED": 0, "STALE": 0})
+        for row in receipt["packs"]:
+            product_id = row["productId"]
+            base = row["englishBase"]
+            self.assertEqual((sorted(base), base["status"], base["relation"]),
+                             (["reason", "relation", "status"], "UNKNOWN", "UNKNOWN"))
+            self.assertEqual(sorted(row["facts"]), sorted(FACTS))
+            for name in FACTS:
+                fact = row["facts"][name]
+                self.assertEqual((sorted(fact), fact["status"]), (["reason", "status"], "UNKNOWN"))
+                self.assertTrue(fact["reason"].strip())
+            holds = [(reason["code"], reason["subject"]) for reason in row["holdReasons"]]
+            self.assertEqual(holds, [("base-unknown", product_id + ".englishBase")]
+                             + [("fact-unknown", product_id + "." + name) for name in FACTS]
+                             + [("support-gates-outside-provenance", product_id)])
+        # The real records: one per optional pack, never the English baseline.
+        records = self.release["packProvenance"]["records"]
+        self.assertEqual([record["productId"] for record in records], list(OPTIONAL_IDS))
+        self.assertEqual((self.release["packProvenance"]["contract"],
+                          self.release["packProvenance"]["contractVersion"]),
+                         ("nexus.l10n.pack_provenance", 1))
+        # Entry and review facts are unchanged: 28 English keys, six packs of
+        # 27 draft entries (162), no review declaration or gate upgrade.
+        report = self.catalog.registry_catalog_report(*self.inputs)
+        self.assertEqual(report["denominator"]["englishKeys"], 28)
+        self.assertEqual([row["entriesPresent"] for row in report["products"]], [27] * 6)
+        self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 162)
+        for row in report["products"]:
+            self.assertEqual((row["counts"]["translated_and_reviewed"],
+                              row["counts"]["reviewed_legitimately_identical"]), (0, 0))
+        self.assertEqual(self.release["entryReview"]["declarations"], [])
+        for product in self.release["products"]:
+            self.assertEqual(product["review"]["nativeAcceptance"], {"status": "NOT_RUN",
+                                                                     "records": []})
+            self.assertEqual(product["review"]["fluentHumanAcceptance"]["status"], "pending")
+
+    def test_p2_malformed_metadata_derived_from_the_real_bytes_is_refused(self):
+        release = self.inputs[3]
+        reason = self.release["packProvenance"]["records"][1]["authorship"]["reason"]
+        digest = hashlib.sha256(self.inputs[0]).hexdigest()
+        cases = {
+            "status false": (with_fact(release, "deDE", "authorship",
+                                       {"status": False, "reason": reason}), "provenance-status"),
+            "fact false": (with_fact(release, "deDE", "authorship", False),
+                           "provenance-structure"),
+            "fact string": (with_fact(release, "deDE", "authorship", "UNKNOWN"),
+                            "provenance-structure"),
+            "lower-case unknown": (with_fact(release, "deDE", "authorship",
+                                             {"status": "unknown", "reason": reason}),
+                                   "provenance-status"),
+            "pending status": (with_fact(release, "deDE", "rightsStatement",
+                                         {"status": "pending", "reason": reason}),
+                               "provenance-status"),
+            "verified status": (with_fact(release, "deDE", "rightsStatement",
+                                          {"status": "VERIFIED", "value": "Granted",
+                                           "evidenceReference": SYNTHETIC_REFERENCE}),
+                                "provenance-status"),
+            "unknown with value": (with_fact(release, "deDE", "authorship",
+                                             {"status": "UNKNOWN", "reason": reason,
+                                              "value": "Somebody"}), "provenance-field"),
+            "unknown without reason": (with_fact(release, "deDE", "authorship",
+                                                 {"status": "UNKNOWN"}), "provenance-field"),
+            "empty reason": (with_fact(release, "deDE", "authorship",
+                                       {"status": "UNKNOWN", "reason": ""}), "provenance-reason"),
+            "placeholder reason": (with_fact(release, "deDE", "authorship",
+                                             {"status": "UNKNOWN", "reason": "pending"}),
+                                   "provenance-reason"),
+            "empty identity": (with_fact(release, "deDE", "authorship", declared_fact("")),
+                               "provenance-value"),
+            "padded identity": (with_fact(release, "deDE", "authorship",
+                                          declared_fact(" Somebody")), "provenance-value"),
+            "pending identity": (with_fact(release, "deDE", "authorship",
+                                           declared_fact("pending")), "provenance-value"),
+            "unassigned identity": (with_fact(release, "deDE", "authorship",
+                                              declared_fact("UNASSIGNED")), "provenance-value"),
+            "none as no-import": (with_fact(release, "deDE", "importedCorpus",
+                                            declared_fact("none")), "provenance-value"),
+            "false as no-import": (with_fact(release, "deDE", "importedCorpus",
+                                             declared_fact(False)), "provenance-value"),
+            "unknown as a value": (with_fact(release, "deDE", "attribution",
+                                             declared_fact("UNKNOWN")), "provenance-value"),
+            "declared without reference": (with_fact(release, "deDE", "authorship",
+                                                     {"status": "DECLARED",
+                                                      "value": "Somebody"}), "provenance-field"),
+            "http reference": (with_fact(release, "deDE", "authorship",
+                                         declared_fact("Somebody", evidenceReference=
+                                                       "http://example.invalid/x")),
+                               "provenance-reference"),
+            "missing fact": (without_fact_line(release, "deDE", "authorship"),
+                             "provenance-field"),
+            "English baseline record": (with_record_id(release, "deDE", "enUS"),
+                                        "provenance-unknown-product"),
+            "unknown product": (with_record_id(release, "deDE", "xxXX"),
+                                "provenance-unknown-product"),
+            "duplicate product": (with_record_id(release, "deDE", "frFR"),
+                                  "provenance-duplicate-product"),
+            "git blob basis": (with_fact(release, "deDE", "englishBase",
+                                         declared_base(digest, basis="git-blob-sha1")),
+                               "provenance-basis"),
+            "decoded entry basis": (with_fact(release, "deDE", "englishBase",
+                                              declared_base(digest, basis="decoded-entries")),
+                                    "provenance-basis"),
+            "other algorithm": (with_fact(release, "deDE", "englishBase",
+                                          declared_base(digest, algorithm="SHA-1")),
+                                "provenance-basis"),
+            "upper-case digest": (with_fact(release, "deDE", "englishBase",
+                                            declared_base(digest.upper())),
+                                  "provenance-hash-format"),
+            "short digest": (with_fact(release, "deDE", "englishBase",
+                                       declared_base(digest[:40])), "provenance-hash-format"),
+            "base without reference": (with_fact(release, "deDE", "englishBase",
+                                                 {key: value for key, value
+                                                  in declared_base(digest).items()
+                                                  if key != "evidenceReference"}),
+                                       "provenance-field"),
+        }
+        keys = {"English baseline record": "enUS", "unknown product": "xxXX",
+                "duplicate product": "frFR"}
+        for name, (data, code) in cases.items():
+            with self.subTest(case=name):
+                self.assertNotEqual(data, release)
+                receipt = self.assert_refused(data, code, keys.get(name, "deDE"))
+                self.assertIsNone(receipt["packs"])
+                self.assertIsNone(receipt["baseRelations"])
+
+    def test_p2_structural_metadata_is_refused(self):
+        def drop(document):
+            del document["packProvenance"]
+
+        def records(change):
+            return lambda document: change(document["packProvenance"]["records"])
+
+        cases = {
+            "member absent (the predecessor shape)": (drop, "provenance-structure", None),
+            "member not an object": (lambda d: d.update(packProvenance=[]),
+                                     "provenance-structure", None),
+            "contract version 2": (lambda d: d["packProvenance"].update(contractVersion=2),
+                                   "provenance-contract", None),
+            "contract version true": (lambda d: d["packProvenance"].update(contractVersion=True),
+                                      "provenance-contract", None),
+            "other contract": (lambda d: d["packProvenance"].update(contract="nexus.other"),
+                               "provenance-contract", None),
+            "records object": (lambda d: d["packProvenance"].update(records={}),
+                               "provenance-structure", None),
+            "record not an object": (records(lambda r: r.__setitem__(2, "esES")),
+                                     "provenance-structure", None),
+            "extra record field": (records(lambda r: r[2].update(translator={
+                "status": "UNKNOWN", "reason": "x y"})), "provenance-field", "esES"),
+            "product ID not text": (records(lambda r: r[2].update(productId=7)),
+                                    "provenance-field", None),
+            "missing record": (records(lambda r: r.pop()), "provenance-missing-product", "ruRU"),
+            "repeated record": (records(lambda r: r.append(dict(r[0]))),
+                                "provenance-duplicate-product", "frFR"),
+        }
+        for name, (change, code, key) in cases.items():
+            with self.subTest(case=name):
+                self.assert_refused(with_provenance(self.inputs[3], change), code, key)
+
+    def test_p3_declared_base_matches_goes_stale_and_is_never_refreshed(self):
+        english = self.inputs[0]
+        digest = hashlib.sha256(english).hexdigest()
+        matched = with_fact(self.inputs[3], "deDE", "englishBase", declared_base(digest))
+        receipt = assert_current_provenance(self, self.catalog, self.with_release(matched))
+        self.assertEqual(receipt["baseRelations"], {"UNKNOWN": 5, "MATCHED": 1, "STALE": 0})
+        rows = {row["productId"]: row for row in receipt["packs"]}
+        self.assertEqual(rows["deDE"]["englishBase"], dict(declared_base(digest),
+                                                            relation="MATCHED"))
+        self.assertEqual(rows["deDE"]["holdReasons"][0]["code"], "base-declared-not-attested")
+        self.assertEqual(rows["deDE"]["attestedFacts"], "NOT_ESTABLISHED")
+        for product_id in OPTIONAL_IDS:
+            if product_id != "deDE":
+                self.assertEqual(rows[product_id]["englishBase"]["relation"], "UNKNOWN")
+        # A different declared digest is STALE: a technical failure that keeps
+        # the declaration as written.
+        other = hashlib.sha256(english + b"-- other bytes\n").hexdigest()
+        stale = with_fact(self.inputs[3], "deDE", "englishBase", declared_base(other))
+        receipt = self.provenance(*self.with_release(stale))
+        self.assert_stale(receipt, other, digest)
+        # The supplied English changes but stays a valid catalog: the other
+        # line-break representation and a trailing comment. The declaration is
+        # not normalized to match and not refreshed.
+        changed = dict(representations(english))
+        changed["comment"] = english + b"-- trailing comment\n"
+        for name, value in changed.items():
+            if value == english:
+                continue
+            with self.subTest(english=name):
+                data = [value] + self.with_release(matched)[1:]
+                self.catalog.registry_catalog_report(*data)
+                receipt = self.provenance(*data)
+                self.assert_stale(receipt, digest, hashlib.sha256(value).hexdigest())
+                self.assertEqual(data[3], matched)
+                # UNKNOWN is never stale, whatever the English bytes.
+                unknown = self.provenance(value, *self.inputs[1:])
+                self.assertIs(unknown["valid"], True)
+                self.assertEqual(unknown["baseRelations"],
+                                 {"UNKNOWN": 6, "MATCHED": 0, "STALE": 0})
+
+    def assert_stale(self, receipt, declared, observed):
+        self.assertIs(receipt["valid"], False)
+        self.assertEqual(receipt["catalogVerdict"], {"result": "valid"})
+        self.assertEqual(receipt["metadata"]["technicalValidity"], "INVALID")
+        self.assertEqual([(problem["code"], problem["key"])
+                          for problem in receipt["metadata"]["problems"]],
+                         [("provenance-stale", "deDE")])
+        self.assertEqual(receipt["baseRelations"], {"UNKNOWN": 5, "MATCHED": 0, "STALE": 1})
+        base = {row["productId"]: row for row in receipt["packs"]}["deDE"]["englishBase"]
+        self.assertEqual((base["sha256"], base["relation"]), (declared, "STALE"))
+        self.assertEqual(receipt["englishObservation"]["sha256"], observed)
+        self.assertEqual(receipt["supportEligibility"], "HELD")
+
+    def test_p4_observation_documented_claims_and_facts_stay_apart(self):
+        receipt = assert_current_provenance(self, self.catalog, self.inputs)
+        digest = hashlib.sha256(self.inputs[0]).hexdigest()
+        observation = receipt["englishObservation"]
+        self.assertEqual((observation["source"], observation["algorithm"], observation["basis"],
+                          observation["sha256"], observation["byteLength"]),
+                         (INPUTS[0], "SHA-256", BASIS, digest, len(self.inputs[0])))
+        self.assertIn("not a drafting base", observation["role"])
+        # The observation and the legacy statements fill no per-pack fact.
+        packs = json.dumps(receipt["packs"])
+        self.assertNotIn(digest, packs)
+        self.assertNotIn(digest.encode(), self.inputs[3])
+        for row in receipt["packs"]:
+            for fact in [row["englishBase"]] + list(row["facts"].values()):
+                self.assertEqual(fact["status"], "UNKNOWN")
+                self.assertNotIn(fact["reason"], ("none", HISTORICAL_LINEAGE["kind"]))
+        # The historical declarations are kept verbatim and echoed as such.
+        self.assertEqual(self.release["sourceLineage"], HISTORICAL_LINEAGE)
+        self.assertEqual(self.release["packReviewStatementAtBase"], HISTORICAL_PACK_REVIEW)
+        historical = receipt["historicalDeclarations"]
+        self.assertEqual((historical["sourceLineage"], historical["packReviewStatementAtBase"]),
+                         (HISTORICAL_LINEAGE, HISTORICAL_PACK_REVIEW))
+        self.assertEqual(historical["nature"], "documented_claim")
+        self.assertEqual(historical["perPackFacts"], "NOT_DERIVED")
+        # Changing the legacy statements changes no per-pack fact.
+        changed = with_provenance(self.inputs[3], lambda d: d["sourceLineage"].update(
+            importedCorpus="UNKNOWN"))
+        self.assertEqual(self.provenance(*self.with_release(changed))["packs"], receipt["packs"])
+        # Structurally qualified DECLARED facts are recorded, never verified.
+        release = with_fact(self.inputs[3], "esES", "englishBase", declared_base(digest))
+        for name in FACTS:
+            release = with_fact(release, "esES", name, declared_fact("Synthetic %s statement"
+                                                                     % name))
+        declared = assert_current_provenance(self, self.catalog, self.with_release(release))
+        row = {row["productId"]: row for row in declared["packs"]}["esES"]
+        for name in FACTS:
+            self.assertEqual(row["facts"][name], declared_fact("Synthetic %s statement" % name))
+        self.assertEqual([reason["code"] for reason in row["holdReasons"]],
+                         ["base-declared-not-attested"] + ["fact-declared-not-verified"] * 4
+                         + ["support-gates-outside-provenance"])
+        self.assertEqual((row["attestedFacts"], row["supportEligibility"]),
+                         ("NOT_ESTABLISHED", "HELD"))
+
+    def test_p5_no_support_review_or_count_upgrade(self):
+        digest = hashlib.sha256(self.inputs[0]).hexdigest()
+        release = self.inputs[3]
+        for product_id in OPTIONAL_IDS:
+            release = with_fact(release, product_id, "englishBase", declared_base(digest))
+            for name in FACTS:
+                release = with_fact(release, product_id, name, declared_fact("Synthetic text"))
+        data = self.with_release(release)
+        receipt = assert_current_provenance(self, self.catalog, data)
+        self.assertEqual(receipt["baseRelations"], {"UNKNOWN": 0, "MATCHED": 6, "STALE": 0})
+        self.assertNotIn("100%", json.dumps(receipt))
+        # Only the technical verdict may be true; nothing grants support.
+        flags = []
+
+        def walk(value, path):
+            if value is True:
+                flags.append(path)
+            elif isinstance(value, dict):
+                for name, item in value.items():
+                    walk(item, path + "." + name)
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    walk(item, "%s[%d]" % (path, index))
+
+        walk(receipt, "receipt")
+        self.assertEqual(flags, ["receipt.valid"])
+        # Entry categories, review gates and completeness reasons are those of
+        # the real metadata: provenance is not review or coverage.
+        for api, count in ((self.catalog.registry_catalog_report, 5),
+                           (self.catalog.catalog_report, 4)):
+            with self.subTest(api=api.__name__):
+                with_records, real = api(*data[:count]), api(*self.inputs[:count])
+                del with_records["inputs"], real["inputs"]
+                self.assertEqual(with_records, real)
+
+    def test_p6_existing_seams_ignore_provenance_metadata(self):
+        stripped = with_provenance(self.inputs[3], lambda d: d.pop("packProvenance"))
+        old = self.with_release(stripped)
+        for name, count in (("validate_catalog_data", 4), ("catalog_report", 4),
+                            ("validate_registry_catalog_data", 5),
+                            ("registry_catalog_report", 5),
+                            ("registry_catalog_diagnostics", 5)):
+            with self.subTest(api=name):
+                api = getattr(self.catalog, name)
+                new, before = api(*self.inputs[:count]), api(*old[:count])
+                for result in (new, before):
+                    result.pop("inputs", None)
+                    if result.get("coverage"):
+                        result["coverage"].pop("inputs")
+                    if "release" in result:
+                        result["release"].pop("packProvenance", None)
+                self.assertEqual(new, before)
+
+    def test_p6_seam_is_pure_deterministic_and_bytes_only(self):
+        catalog = self.catalog
+        five = ["english_source", "packs_source", "key_context_json", "release_json",
+                "localization_source"]
+        self.assertEqual(list(inspect.signature(catalog.pack_provenance_diagnostics).parameters),
+                         five)
+        self.assertEqual(catalog.PROVENANCE_CODES, EXPECTED_PROVENANCE_CODES)
+        for codes in (catalog.CODES, catalog.VALIDATION_CODES, catalog.EVIDENCE_CODES,
+                      catalog.REGISTRY_CODES, catalog.CLI_CODES, catalog.DIAGNOSTIC_CODES):
+            self.assertFalse(set(codes) & set(EXPECTED_PROVENANCE_CODES))
+        for index, name in enumerate(five):
+            with self.subTest(argument=name):
+                changed = list(self.inputs)
+                changed[index] = changed[index].decode("utf-8")
+                with self.assertRaises(TypeError) as raised:
+                    self.provenance(*changed)
+                self.assertIn(name, str(raised.exception))
+        stale = with_fact(self.inputs[3], "ptBR", "englishBase", declared_base("0" * 64))
+        for release in (self.inputs[3], stale):
+            data = self.with_release(release)
+            mutable = [bytearray(value) for value in data]
+            before = [hashlib.sha256(value).hexdigest() for value in mutable]
+            expected = self.provenance(*data)
+            self.assertEqual(self.provenance(*mutable), expected)
+            self.assertEqual([hashlib.sha256(value).hexdigest() for value in mutable], before)
+            self.assertEqual(self.provenance(*data), expected)
+            json.dumps(expected, sort_keys=True).encode("ascii")
+            for row, value in zip(expected["inputs"], data):
+                self.assertEqual((row["sha256"], row["byteLength"]),
+                                 (hashlib.sha256(value).hexdigest(), len(value)))
+            # No file, process or network access during the call.
+            blocked = self.blocked_calls()
+            try:
+                self.assertEqual(self.provenance(*data), expected)
+            finally:
+                blocked()
+
+    @staticmethod
+    def blocked_calls():
+        import builtins
+        import io
+        import socket
+
+        def refuse(*args, **kwargs):
+            raise AssertionError("I/O or process access during the provenance call")
+
+        saved = [(builtins, "open"), (io, "open"), (os, "open"), (os, "listdir"),
+                 (os, "scandir"), (os, "stat"), (subprocess, "Popen"), (socket, "socket")]
+        saved = [(owner, name, getattr(owner, name)) for owner, name in saved]
+        for owner, name, _ in saved:
+            setattr(owner, name, refuse)
+
+        def restore():
+            for owner, name, value in saved:
+                setattr(owner, name, value)
+        return restore
+
+    def test_p6_catalog_verdict_stays_separate_from_metadata_validity(self):
+        data = multi_error_inputs(self.inputs)
+        receipt = self.provenance(*data)
+        self.assertIs(receipt["valid"], False)
+        self.assertEqual((receipt["catalogVerdict"]["result"], receipt["catalogVerdict"]["code"],
+                          receipt["catalogVerdict"]["key"]), ("invalid", "orphan-entry", RETIRED))
+        self.assertEqual((receipt["metadata"]["technicalValidity"], receipt["metadata"]["problems"]),
+                         ("VALID", []))
+        self.assertEqual(receipt["baseRelations"], {"UNKNOWN": 6, "MATCHED": 0, "STALE": 0})
+        broken = self.provenance(*self.with_release(self.inputs[3][:-3]))
+        self.assertEqual(broken["catalogVerdict"]["code"], "json-invalid")
+        self.assertEqual([(problem["errorClass"], problem["code"])
+                          for problem in broken["metadata"]["problems"]],
+                         [("CatalogValidationError", "json-invalid")])
+        self.assertIsNone(broken["historicalDeclarations"])
+
+    def test_p7_registered_gate_detects_malformed_and_stale_current_metadata(self):
+        # The gate passes the actual repository metadata ...
+        assert_current_provenance(self, self.catalog, self.inputs)
+        # ... and fails variants of it, each differing only in the targeted field.
+        digest = hashlib.sha256(self.inputs[0]).hexdigest()
+        variants = {
+            "stale base": ("ruRU", "englishBase",
+                           declared_base(hashlib.sha256(b"older English").hexdigest())),
+            "placeholder authorship": ("plPL", "authorship", declared_fact("pending")),
+            "boolean no-import": ("frFR", "importedCorpus", False),
+            "Git object basis": ("esES", "englishBase",
+                                 declared_base(digest, basis="git-blob-sha1")),
+        }
+        for name, (product_id, fact, value) in variants.items():
+            with self.subTest(variant=name):
+                release = with_fact(self.inputs[3], product_id, fact, value)
+                # Only the targeted field differs from the real document.
+                expected = json.loads(self.inputs[3].decode("utf-8"))
+                index = OPTIONAL_IDS.index(product_id)
+                expected["packProvenance"]["records"][index][fact] = value
+                self.assertEqual(json.loads(release.decode("utf-8")), expected)
+                with self.assertRaises(AssertionError):
+                    assert_current_provenance(self, self.catalog, self.with_release(release))
+
+
+class ProvenanceCommandLineTests(unittest.TestCase):
+    """S7: --provenance prints one provenance record; the default, --registry
+    and --diagnose outcomes are unchanged."""
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, "-B", str(CATALOG_TOOL), *[str(a) for a in args]],
+                              capture_output=True, cwd=str(ROOT))
+
+    def test_repository_root(self):
+        run = self.run_cli("--provenance")
+        self.assertEqual((run.returncode, run.stderr), (0, b""))
+        record = json.loads(run.stdout)
+        self.assertEqual((record["record"], record["exitCode"]), ("provenance", 0))
+        expected = load_catalog().pack_provenance_diagnostics(*current_inputs())
+        self.assertEqual(record["provenance"], json.loads(json.dumps(expected)))
+        held = self.run_cli("--provenance", "--require-complete")
+        self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
+        for args, code in ((("--provenance", "--provenance"), "argument-duplicate"),
+                           (("--provenance", "--diagnose"), "argument-conflict")):
+            with self.subTest(args=args):
+                run = self.run_cli(*args)
+                self.assertEqual((run.returncode, run.stdout), (2, b""))
+                self.assertEqual(json.loads(run.stderr)["code"], code)
+
+    def test_stale_root_fails_only_in_provenance_mode(self):
+        data = current_inputs()
+        data[3] = with_fact(data[3], "ruRU", "englishBase", declared_base("1" * 64))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for relative, value in zip(INPUTS, data):
+                target = root.joinpath(*relative.split("/"))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(value)
+            shutil.copyfile(str(ROOT / "Nexus.toc"), str(root / "Nexus.toc"))
+            before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            for args in (("--provenance",), ("--provenance", "--require-complete"),
+                         ("--provenance", "--registry")):
+                with self.subTest(args=args):
+                    run = self.run_cli("--root", root, *args)
+                    self.assertEqual((run.returncode, run.stderr), (2, b""))
+                    receipt = json.loads(run.stdout)["provenance"]
+                    self.assertIs(receipt["valid"], False)
+                    self.assertEqual([problem["code"] for problem in
+                                      receipt["metadata"]["problems"]], ["provenance-stale"])
+            for args in ((), ("--registry",), ("--diagnose",)):
+                with self.subTest(args=args):
+                    self.assertEqual(self.run_cli("--root", root, *args).returncode, 0)
             after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
             self.assertEqual(after, before)
 

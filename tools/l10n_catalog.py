@@ -70,6 +70,18 @@ Opt-in diagnostic seam (S6 of #147, after the registry-bound seam):
     CatalogDiagnosticError
         .code (stable, one of DIAGNOSTIC_CODES), .path and .key
 
+Opt-in provenance seam (S7 of #147, at the end of this file):
+
+    pack_provenance_diagnostics(the same five byte strings) -> dict
+        a read-only provenance receipt that never raises for catalog or
+        metadata data: the unchanged catalog verdict, the technical validity
+        of the per-pack provenance records in RELEASE_LANGUAGES.json, each
+        declared English base as UNKNOWN, MATCHED or STALE against the exact
+        supplied English bytes, and attested facts NOT_ESTABLISHED with
+        support HELD. A STALE base or malformed record makes it invalid.
+    CatalogProvenanceError
+        .code (stable, one of PROVENANCE_CODES), .path and .key
+
 Both functions take the exact bytes of a source (bytes or bytearray), never a
 filename. They read and write no file. They never evaluate, import or execute
 Lua, never call back into the data and never interpret its text. After Lua 5.1
@@ -135,7 +147,7 @@ Error codes (CODES):
 Run directly, this file is the read-only report command line:
 
     python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
-                                 [--diagnose]
+                                 [--diagnose | --provenance]
 
 DIR defaults to the repository that contains this tool, never the current
 directory. Inside the resolved root it reads exactly
@@ -161,8 +173,13 @@ record then carries registryBinding "requested". With --diagnose,
 core/Localization.lua is read the same way and one diagnostics record with
 the registry_catalog_diagnostics receipt is written on stdout instead; its
 exit status is 2 while the catalog is invalid or the collection is
-incomplete, else 0, or 1 with --require-complete. Python 3.9+, standard
-library only.
+incomplete, else 0, or 1 with --require-complete. With --provenance,
+core/Localization.lua is read the same way and one provenance record with
+the pack_provenance_diagnostics receipt is written on stdout; its exit
+status is 2 while the receipt is invalid, else 0, or 1 with
+--require-complete, because support is always held. --diagnose and
+--provenance together are argument-conflict. Python 3.9+, standard library
+only.
 """
 from __future__ import annotations
 
@@ -1375,6 +1392,7 @@ CLI_CODES = (
     'root-missing', 'root-not-directory', 'root-unreadable',
     'input-missing', 'input-escape', 'input-not-file', 'input-unreadable',
     'toc-not-utf8', 'toc-missing-entry', 'toc-duplicate-entry', 'toc-order',
+    'argument-conflict',
 )
 
 _EXIT_REPORT, _EXIT_NOT_ESTABLISHED, _EXIT_ERROR = 0, 1, 2
@@ -1416,14 +1434,15 @@ _CLI_FAILURES = (CatalogCliError, CatalogSyntaxError, CatalogValidationError,
 
 
 def _cli_arguments(arguments):
-    """Return (root or None, require_complete, registry, diagnose). Only
-    --root DIR, --root=DIR, --require-complete, --registry and --diagnose are
-    accepted, each at most once."""
+    """Return (root or None, require_complete, registry, diagnose,
+    provenance). Only --root DIR, --root=DIR, --require-complete, --registry,
+    --diagnose and --provenance are accepted, each at most once, and
+    --diagnose and --provenance not together."""
     root, seen, index = None, set(), 0
     while index < len(arguments):
         argument, position = arguments[index], index
         index += 1
-        if argument in ('--require-complete', '--registry', '--diagnose'):
+        if argument in ('--require-complete', '--registry', '--diagnose', '--provenance'):
             name, value = argument, None
         elif argument == '--root':
             if index >= len(arguments):
@@ -1441,7 +1460,10 @@ def _cli_arguments(arguments):
             raise CatalogCliError('argument-missing-value', name)
         if value is not None:
             root = value
-    return root, '--require-complete' in seen, '--registry' in seen, '--diagnose' in seen
+    if '--diagnose' in seen and '--provenance' in seen:
+        raise CatalogCliError('argument-conflict', '--provenance')
+    return (root, '--require-complete' in seen, '--registry' in seen, '--diagnose' in seen,
+            '--provenance' in seen)
 
 
 def _cli_root(root):
@@ -1580,7 +1602,7 @@ def main(argv=None) -> int:
     """The read-only report command line described in the module documentation:
 
         python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
-                                     [--diagnose]
+                                     [--diagnose | --provenance]
 
     Exactly one ASCII JSON record is written: a report on stdout or an error
     on stderr. The return value is 0 for a valid report, also for partial
@@ -1590,18 +1612,22 @@ def main(argv=None) -> int:
     (report schemaVersion 1). With it, core/Localization.lua is read as a
     sixth fixed input and the report is registry_catalog_report
     (schemaVersion 2), marked registryBinding "requested". With --diagnose a
-    diagnostics record is written on stdout instead (_cli_diagnostics)."""
+    diagnostics record is written on stdout instead (_cli_diagnostics), and
+    with --provenance a provenance record (_cli_provenance)."""
     arguments = sys.argv[1:] if argv is None else list(argv)
     try:
-        root, require_complete, registry, diagnose = _cli_arguments(arguments)
+        root, require_complete, registry, diagnose, provenance = _cli_arguments(arguments)
         resolved = _cli_root(_DEFAULT_ROOT if root is None else root)
         data = [_cli_read(resolved, source) for source in _CLI_INPUTS]
-        if registry or diagnose:
+        if registry or diagnose or provenance:
             localization = _cli_read(resolved, _AUTHORITY)
         toc_entries = _cli_toc(data[-1])
         if diagnose:
             return _cli_diagnostics(registry_catalog_diagnostics(*data[:-1], localization),
                                     _cli_toc_row(data[-1], toc_entries), require_complete)
+        if provenance:
+            return _cli_provenance(pack_provenance_diagnostics(*data[:-1], localization),
+                                   _cli_toc_row(data[-1], toc_entries), require_complete)
         if registry:
             report = registry_catalog_report(*data[:-1], localization)
         else:
@@ -2203,6 +2229,321 @@ def _cli_diagnostics(receipt, toc, require_complete):
         'inputBinding': _INPUT_BINDING,
         'toc': toc,
         'diagnostics': receipt,
+    })
+    return exit_code
+
+
+# ---------------------------------------------------------------------------
+# S7 (Refs #147): per-pack provenance metadata and an opt-in, read-only
+# provenance receipt. release.packProvenance (contract
+# nexus.l10n.pack_provenance, version 1) holds one record per optional_ui_pack
+# product with exactly productId and the facts of _PROVENANCE_FACTS. A fact is
+# either
+#
+#     {"status": "UNKNOWN", "reason": <statement>}
+#
+# or DECLARED: englishBase as {"status", "algorithm": "SHA-256", "basis":
+# _ENGLISH_BASIS, "sha256": 64 lower-case hex, "evidenceReference"}, every
+# other fact as {"status", "value": <statement>, "evidenceReference"}. A
+# statement is 1 to 512 characters without surrounding whitespace or control
+# characters and is no placeholder (_NOT_A_STATEMENT); a reference is an
+# https:// URL that is never fetched. Anything else is a CatalogProvenanceError
+# (PROVENANCE_CODES): a boolean, a placeholder, a mixed shape or another basis,
+# such as a Git object ID or a hash of decoded entries.
+#
+# pack_provenance_diagnostics takes the five registry-bound byte strings and
+# reports, separately:
+# - catalogVerdict: registry_catalog_report's own verdict, unchanged;
+# - metadata.technicalValidity: the record schema plus every declared base,
+#   compared only with the exact supplied English bytes. Equal is MATCHED,
+#   different is STALE, a technical failure (provenance-stale); UNKNOWN is
+#   never stale. Nothing is normalized, and a declaration is never refreshed;
+# - englishObservation: the digest of the supplied English bytes, an
+#   observation only, never a drafting base and never written anywhere;
+# - historicalDeclarations: sourceLineage and packReviewStatementAtBase,
+#   verbatim, as documented claims that fill no per-pack fact;
+# - attestedFacts NOT_ESTABLISHED and supportEligibility HELD, always: no
+#   attestation contract exists, and no record, statement, reference or match
+#   grants review, rights, human, native or language-support acceptance.
+# valid is true only when the catalog verdict and the metadata are valid. The
+# strict APIs, the coverage reports and the S6 diagnostics never read
+# packProvenance, so their outcomes are unchanged. The command line writes
+# the receipt with --provenance (exit 2 while invalid).
+
+PROVENANCE_SCHEMA = 'nexus.l10n.provenance_receipt'
+PROVENANCE_SCHEMA_VERSION = 1
+PROVENANCE_CODES = (
+    'provenance-contract', 'provenance-structure', 'provenance-field',
+    'provenance-unknown-product', 'provenance-duplicate-product', 'provenance-missing-product',
+    'provenance-status', 'provenance-reason', 'provenance-value', 'provenance-reference',
+    'provenance-basis', 'provenance-hash-format', 'provenance-stale',
+)
+_PROVENANCE_CONTRACT = 'nexus.l10n.pack_provenance'
+_PROVENANCE_FACTS = ('englishBase', 'authorship', 'attribution', 'rightsStatement',
+                     'importedCorpus')
+_RECORD_FIELDS = frozenset(('productId',) + _PROVENANCE_FACTS)
+_UNKNOWN, _DECLARED_FACT = 'UNKNOWN', 'DECLARED'
+_UNKNOWN_FIELDS = frozenset(('status', 'reason'))
+_DECLARED_FIELDS = frozenset(('status', 'value', 'evidenceReference'))
+_DECLARED_BASE_FIELDS = frozenset(('status', 'algorithm', 'basis', 'sha256',
+                                   'evidenceReference'))
+_BASE_ALGORITHM = 'SHA-256'
+_ENGLISH_BASIS = 'exact-supplied-english-bytes'
+_MAX_STATEMENT_CHARS = 512
+_NOT_A_STATEMENT = _NOT_A_REVIEWER | frozenset((
+    'declared', 'verified', 'accepted', 'attested', 'yes', 'no', 'true', 'false', 'todo',
+    '-', '?'))
+_NOT_ESTABLISHED, _HELD = 'NOT_ESTABLISHED', 'HELD'
+_RELATIONS = ('UNKNOWN', 'MATCHED', 'STALE')
+PROVENANCE_SCOPE = (
+    'Per-pack provenance metadata only: the record schema and each declared English base '
+    'against the exact supplied English bytes. Not catalog validity, translation quality, '
+    'review, rights, authorship, human, native or language-support acceptance; not whole '
+    '#147.')
+_PROVENANCE_MODE = ('opt-in read-only provenance receipt over the exact supplied bytes; the '
+                    'catalog verdict is reported unchanged')
+_OBSERVATION_ROLE = ('observation of the supplied bytes only: not a drafting base, not a Git '
+                     'object ID and not recorded in any metadata')
+_TECHNICAL_RULE = ('VALID: every record has the schema and no declared base is stale. It is '
+                   'technical validity only and attests no fact')
+_HISTORICAL_NATURE = 'documented_claim'
+_SUPPORT_RULE = ('review, rights, fluent human, native and language-support acceptance are '
+                 'separate evidence gates; no provenance record grants them')
+_ATTESTATION_RULE = ('no attestation contract exists: a DECLARED fact or a MATCHED base is a '
+                     'documented claim, not an independently evidenced fact')
+_PROVENANCE_COMPLETENESS = ('this receipt never establishes completeness, support or release '
+                            'readiness')
+
+
+class CatalogProvenanceError(ValueError):
+    """Raised inside pack_provenance_diagnostics for malformed provenance
+    metadata or a stale declared base, and reported as a metadata problem. It
+    carries a stable code (one of PROVENANCE_CODES) and, when known, the path
+    and the product ID."""
+
+    def __init__(self, code: str, path: str = None, key=None):
+        detail = '' if path is None else ' at ' + path
+        if key is not None:
+            detail += ' (%r)' % (key,)
+        super().__init__(code + detail)
+        self.code, self.path, self.key = code, path, key
+
+
+def _provenance(condition, code, path, key=None):
+    if not condition:
+        raise CatalogProvenanceError(code, path, key)
+
+
+def _valid_statement(text):
+    """A recorded statement: 1 to 512 characters without leading or trailing
+    whitespace, C0 or C1 controls or DEL, and not a placeholder. It is
+    recorded, never verified."""
+    if type(text) is not str or not 1 <= len(text) <= _MAX_STATEMENT_CHARS:
+        return False
+    if text != text.strip() or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in text):
+        return False
+    return text.casefold() not in _NOT_A_STATEMENT
+
+
+def _check_fact(fact, name, path, product_id):
+    """One UNKNOWN or DECLARED fact of a provenance record, returned as a copy."""
+    _provenance(type(fact) is dict, 'provenance-structure', path, product_id)
+    status = fact.get('status')
+    _provenance(type(status) is str and status in (_UNKNOWN, _DECLARED_FACT),
+                'provenance-status', path + '.status', product_id)
+    if status == _UNKNOWN:
+        _provenance(set(fact) == _UNKNOWN_FIELDS, 'provenance-field', path, product_id)
+        _provenance(_valid_statement(fact['reason']), 'provenance-reason', path + '.reason',
+                    product_id)
+        return dict(fact)
+    base = name == 'englishBase'
+    _provenance(set(fact) == (_DECLARED_BASE_FIELDS if base else _DECLARED_FIELDS),
+                'provenance-field', path, product_id)
+    if base:
+        _provenance(fact['algorithm'] == _BASE_ALGORITHM and fact['basis'] == _ENGLISH_BASIS,
+                    'provenance-basis', path + '.basis', product_id)
+        _provenance(type(fact['sha256']) is str and _SHA256_HEX.fullmatch(fact['sha256'])
+                    is not None, 'provenance-hash-format', path + '.sha256', product_id)
+    else:
+        _provenance(_valid_statement(fact['value']), 'provenance-value', path + '.value',
+                    product_id)
+    reference = fact['evidenceReference']
+    _provenance(type(reference) is str and _valid_reference(reference), 'provenance-reference',
+                path + '.evidenceReference', product_id)
+    return dict(fact)
+
+
+def _check_provenance(release, optional_ids):
+    """release.packProvenance: the contract and exactly one record per
+    optional product. Returns {product ID: (path, {fact: copy})}."""
+    where = 'release.packProvenance'
+    member = release.get('packProvenance')
+    _provenance(type(member) is dict, 'provenance-structure', where)
+    _provenance(member.get('contract') == _PROVENANCE_CONTRACT, 'provenance-contract',
+                where + '.contract')
+    _provenance(_is_int(member.get('contractVersion'), 1), 'provenance-contract',
+                where + '.contractVersion')
+    records = member.get('records')
+    _provenance(type(records) is list, 'provenance-structure', where + '.records')
+    found = {}
+    for index, record in enumerate(records):
+        path = '%s.records[%d]' % (where, index)
+        _provenance(type(record) is dict, 'provenance-structure', path)
+        product_id = record.get('productId')
+        key = product_id if type(product_id) is str else None
+        _provenance(set(record) == _RECORD_FIELDS and key is not None, 'provenance-field',
+                    path, key)
+        _provenance(product_id in optional_ids, 'provenance-unknown-product',
+                    path + '.productId', product_id)
+        _provenance(product_id not in found, 'provenance-duplicate-product',
+                    path + '.productId', product_id)
+        found[product_id] = (path, {name: _check_fact(record[name], name, path + '.' + name,
+                                                      product_id)
+                                    for name in _PROVENANCE_FACTS})
+    for product_id in optional_ids:
+        _provenance(product_id in found, 'provenance-missing-product', where + '.records',
+                    product_id)
+    return found
+
+
+def _strict_verdict(sources):
+    """registry_catalog_report's own verdict on the exact sources."""
+    try:
+        registry_catalog_report(*sources)
+    except _STRICT_FAILURES as error:
+        verdict = {'result': 'invalid', 'api': 'registry_catalog_report'}
+        verdict.update(_error_fields(error))
+        return verdict
+    return {'result': 'valid'}
+
+
+def _historical_declarations(release):
+    """The historical document-level declarations, verbatim."""
+    return {'sourceLineage': json.loads(json.dumps(release.get('sourceLineage'))),
+            'packReviewStatementAtBase': release.get('packReviewStatementAtBase'),
+            'nature': _HISTORICAL_NATURE, 'perPackFacts': 'NOT_DERIVED'}
+
+
+def _provenance_rows(records, optional_ids, observed):
+    """One row per optional product in release order, with its base relation
+    and hold reasons, and the stale-base problems."""
+    rows, problems = [], []
+    for product_id in optional_ids:
+        path, facts = records[product_id]
+        base = dict(facts['englishBase'])
+        subject = product_id + '.englishBase'
+        if base['status'] == _UNKNOWN:
+            base['relation'] = 'UNKNOWN'
+            holds = [_reason('base-unknown', subject, base['reason'])]
+        elif base['sha256'] == observed:
+            base['relation'] = 'MATCHED'
+            holds = [_reason('base-declared-not-attested', subject,
+                             'the declared digest equals the supplied English bytes')]
+        else:
+            base['relation'] = 'STALE'
+            holds = [_reason('base-stale', subject, 'declared %s; supplied %s'
+                             % (base['sha256'], observed))]
+            problem = {'stage': 'binding'}
+            problem.update(_error_fields(CatalogProvenanceError(
+                'provenance-stale', path + '.englishBase.sha256', product_id)))
+            problems.append(problem)
+        for name in _PROVENANCE_FACTS[1:]:
+            fact = facts[name]
+            if fact['status'] == _UNKNOWN:
+                holds.append(_reason('fact-unknown', product_id + '.' + name, fact['reason']))
+            else:
+                holds.append(_reason('fact-declared-not-verified', product_id + '.' + name,
+                                     fact['value']))
+        holds.append(_reason('support-gates-outside-provenance', product_id, _SUPPORT_RULE))
+        rows.append({'productId': product_id, 'englishBase': base,
+                     'facts': {name: facts[name] for name in _PROVENANCE_FACTS[1:]},
+                     'attestedFacts': _NOT_ESTABLISHED, 'supportEligibility': _HELD,
+                     'holdReasons': holds})
+    return rows, problems
+
+
+def pack_provenance_diagnostics(english_source: bytes, packs_source: bytes,
+                                key_context_json: bytes, release_json: bytes,
+                                localization_source: bytes) -> dict:
+    """The opt-in provenance receipt (see above) for the exact bytes of the
+    five registry-bound inputs. Each argument must be bytes or bytearray,
+    else TypeError; no catalog or metadata failure is raised. Nothing is
+    read, written, fetched, executed or modified."""
+    sources = (english_source, packs_source, key_context_json, release_json,
+               localization_source)
+    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
+                            'release_json', 'localization_source'), sources):
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    sources = tuple(bytes(value) for value in sources)
+    strict = _strict_verdict(sources)
+    observed = hashlib.sha256(sources[0]).hexdigest()
+    historical, rows, problems, stage = None, None, [], 'release'
+    try:
+        release = _strict_json(sources[3], 'release')
+        products = _check_release(release)
+        historical = _historical_declarations(release)
+        stage = 'schema'
+        optional_ids = [product_id for product_id, (_, product) in products.items()
+                        if product['kind'] == _OPTIONAL]
+        records = _check_provenance(release, optional_ids)
+    except (CatalogValidationError, CatalogProvenanceError) as error:
+        problem = {'stage': stage}
+        problem.update(_error_fields(error))
+        problems.append(problem)
+    else:
+        rows, problems = _provenance_rows(records, optional_ids, observed)
+    relations = None if rows is None else {
+        relation: sum(1 for row in rows if row['englishBase']['relation'] == relation)
+        for relation in _RELATIONS}
+    return {
+        'schema': PROVENANCE_SCHEMA,
+        'schemaVersion': PROVENANCE_SCHEMA_VERSION,
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'scope': PROVENANCE_SCOPE,
+        'mode': _PROVENANCE_MODE,
+        'inputs': _input_rows(_REGISTRY_INPUTS, sources),
+        'valid': strict['result'] == 'valid' and not problems,
+        'catalogVerdict': strict,
+        'metadata': {'contract': _PROVENANCE_CONTRACT, 'contractVersion': 1,
+                     'technicalValidity': 'INVALID' if problems else 'VALID',
+                     'problems': problems, 'rule': _TECHNICAL_RULE},
+        'englishObservation': {'source': _ENGLISH_SOURCE, 'algorithm': _BASE_ALGORITHM,
+                               'basis': _ENGLISH_BASIS, 'sha256': observed,
+                               'byteLength': len(sources[0]), 'role': _OBSERVATION_ROLE},
+        'historicalDeclarations': historical,
+        'baseRelations': relations,
+        'packs': rows,
+        'attestedFacts': _NOT_ESTABLISHED,
+        'attestationRule': _ATTESTATION_RULE,
+        'supportEligibility': _HELD,
+        'supportRule': _SUPPORT_RULE,
+        'completeness': {'established': False, 'rule': _PROVENANCE_COMPLETENESS},
+        'nonexecution': _NONEXECUTION,
+    }
+
+
+def _cli_provenance(receipt, toc, require_complete):
+    """Write one provenance record on stdout and return its exit status: 2
+    while the receipt is not valid, else 1 with --require-complete (support is
+    always held) or 0."""
+    if not receipt['valid']:
+        exit_code = _EXIT_ERROR
+    else:
+        exit_code = _EXIT_NOT_ESTABLISHED if require_complete else _EXIT_REPORT
+    _cli_emit(sys.stdout, {
+        'schema': CLI_SCHEMA,
+        'schemaVersion': CLI_SCHEMA_VERSION,
+        'record': 'provenance',
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'requireComplete': 'requested' if require_complete else 'not_requested',
+        'registryBinding': 'requested',
+        'exitCode': exit_code,
+        'inputBinding': _INPUT_BINDING,
+        'toc': toc,
+        'provenance': receipt,
     })
     return exit_code
 

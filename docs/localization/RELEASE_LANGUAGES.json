@@ -197,6 +197,64 @@
     "importedCorpus": "none",
     "excludedSources": ["another addon's translation corpus", "game client text", "player or private client content"]
   },
+  "packProvenance": {
+    "contract": "nexus.l10n.pack_provenance",
+    "contractVersion": 1,
+    "checkedBy": "tools/l10n_catalog.py pack_provenance_diagnostics (command line --provenance); required CI: tools/tests/test_l10n_registry.py",
+    "rule": "One record per optional_ui_pack product. Each of englishBase, authorship, attribution, rightsStatement and importedCorpus is either UNKNOWN with a reason or DECLARED with a value and an https:// evidenceReference that the tool never fetches. A boolean, an empty value or a placeholder such as pending, UNASSIGNED or none is refused. A DECLARED fact is a documented claim, never verified by the tool; no record grants review, rights, human or native acceptance or language support.",
+    "englishBaseBinding": "A DECLARED englishBase records algorithm SHA-256 and basis exact-supplied-english-bytes: the exact bytes of data/LocalizationEnglish.lua supplied to the tool, with no line-break or text normalization, so a checkout's line breaks change them. The tool compares it with those supplied bytes only: equal is MATCHED, different is STALE and fails, and the declaration is never refreshed. A Git object ID or a hash of decoded entries is a different fact and is not accepted. A match is byte agreement, not drafting history.",
+    "historicalDeclarations": "sourceLineage, packReviewStatementAtBase and the header of data/LocalizationPacks.lua stay unchanged as historical document-level declarations; they fill no per-pack fact.",
+    "records": [
+      {
+        "productId": "frFR",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      },
+      {
+        "productId": "deDE",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      },
+      {
+        "productId": "esES",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      },
+      {
+        "productId": "plPL",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      },
+      {
+        "productId": "ptBR",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      },
+      {
+        "productId": "ruRU",
+        "englishBase": {"status": "UNKNOWN", "reason": "No traceable record identifies the English bytes this pack was drafted against. The current English file is only an observation and is not recorded as this base."},
+        "authorship": {"status": "UNKNOWN", "reason": "No traceable record names who drafted this pack or establishes its independent authorship."},
+        "attribution": {"status": "UNKNOWN", "reason": "No traceable record establishes which attribution, if any, this pack requires."},
+        "rightsStatement": {"status": "UNKNOWN", "reason": "No traceable record establishes contributor rights or redistribution terms for this pack."},
+        "importedCorpus": {"status": "UNKNOWN", "reason": "No per-pack evidence attests that no imported corpus was used. The document-level sourceLineage and the pack file header are historical declarations, not per-pack evidence."}
+      }
+    ]
+  },
   "names": {
     "englishGameNames": "retained",
     "userIdentities": "retained_exact",
