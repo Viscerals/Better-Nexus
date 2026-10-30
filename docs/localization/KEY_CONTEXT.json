@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3366,
+    "declaredKeys": 3494,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -34445,6 +34445,1799 @@
       "cohort": "fullui:records"
     },
     {
+      "key": "library.chat.catalog_completion_failed",
+      "kind": "template",
+      "english": "Catalog completion failed: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the raw Lua error text of the failed completion callback (diagnostic, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Chat line: the follow-up step after a catalog write raised an error.",
+      "consumer": "core/CommunityController.lua notify / ShareStatusText",
+      "familySurface": "remainder_library: Build Library chat / Share status (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.chat.catalog_envelope_limits",
+      "kind": "template",
+      "english": "{code} ({representation} record: {ordinary} ordinary, {locked} locked, {total} total Echo copies); at most {max_ordinary} ordinary copies, and {max_locked} copies in one locked row, are stored. Nothing was saved and the source is unchanged",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "the raw refusal code SEMANTIC_ENVELOPE"
+        },
+        {
+          "name": "representation",
+          "type": "text",
+          "meaning": "the raw record representation id"
+        },
+        {
+          "name": "ordinary",
+          "type": "text",
+          "meaning": "ordinary copy count as recorded"
+        },
+        {
+          "name": "locked",
+          "type": "text",
+          "meaning": "locked copy count as recorded"
+        },
+        {
+          "name": "total",
+          "type": "text",
+          "meaning": "total copy count as recorded"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "text",
+          "meaning": "stored ordinary copy limit (a whole number)"
+        },
+        {
+          "name": "max_locked",
+          "type": "text",
+          "meaning": "stored copies limit of one locked row (a whole number)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "The envelope refusal with the stored limits. No final period: none in the source either.",
+      "consumer": "core/CommunityController.lua notify / ShareStatusText",
+      "familySurface": "remainder_library: Build Library chat / Share status (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.chat.catalog_envelope_nothing_saved",
+      "kind": "template",
+      "english": "{code} ({representation} record: {ordinary} ordinary, {locked} locked, {total} total Echo copies). Nothing was saved and the source is unchanged",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "the raw refusal code SEMANTIC_ENVELOPE"
+        },
+        {
+          "name": "representation",
+          "type": "text",
+          "meaning": "the raw record representation id"
+        },
+        {
+          "name": "ordinary",
+          "type": "text",
+          "meaning": "ordinary copy count as recorded"
+        },
+        {
+          "name": "locked",
+          "type": "text",
+          "meaning": "locked copy count as recorded"
+        },
+        {
+          "name": "total",
+          "type": "text",
+          "meaning": "total copy count as recorded"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "The envelope refusal when the limits are not known.",
+      "consumer": "core/CommunityController.lua notify / ShareStatusText",
+      "familySurface": "remainder_library: Build Library chat / Share status (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.chat.catalog_failed",
+      "kind": "template",
+      "english": "Catalog {operation} failed: {reason}",
+      "placeholders": [
+        {
+          "name": "operation",
+          "type": "text",
+          "meaning": "the catalog operation identifier (raw code, e.g. mutation)"
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the refusal: a raw catalog reason code, or the envelope sentence below"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Chat line after a Build Library catalog write was refused. {operation} and a raw {reason} code are identifiers, never translated.",
+      "consumer": "core/CommunityController.lua notify / ShareStatusText",
+      "familySurface": "remainder_library: Build Library chat / Share status (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_count_unreadable",
+      "kind": "template",
+      "english": "{label} contains an Echo copy count that cannot be read. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_envelope",
+      "kind": "template",
+      "english": "{label} has {ordinary} ordinary and {locked} locked Echo copies ({total} total). A Share holds at most {max_ordinary} ordinary, {max_locked} locked and {max_total} total. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "ordinary",
+          "type": "count",
+          "meaning": "ordinary Echo copies of the source"
+        },
+        {
+          "name": "locked",
+          "type": "count",
+          "meaning": "locked Echo copies of the source"
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "max_total",
+          "type": "count",
+          "meaning": "the Share limit of all copies"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_locked_list_unreadable",
+      "kind": "template",
+      "english": "{label} states its locked Echoes in a form that cannot be read. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_locked_lists_disagree",
+      "kind": "template",
+      "english": "{label} states its locked Echoes in two lists that do not agree. Nothing was shared. Save the source again, then share it.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_locked_row_unreadable",
+      "kind": "template",
+      "english": "{label} contains a locked Echo row that cannot be read. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_no_ordinary",
+      "kind": "template",
+      "english": "{label} has no ordinary Echoes to share.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_plan_differs",
+      "kind": "template",
+      "english": "{label} states locked Echoes that differ from its saved locked-target plan. Nothing was shared. Save the source again, then share it.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_plan_outdated",
+      "kind": "template",
+      "english": "{label} changed after its saved locked-target plan was made, so the plan does not match it. Open the Wishlist in the Wishlist Editor and save it again. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_plan_unbound",
+      "kind": "template",
+      "english": "{label} matches a saved locked-target plan, but Nexus cannot tell which server Wishlist that plan belongs to (it was renamed, changed or copied), so its locked Echoes are not known. Open the Wishlist in the Wishlist Editor and save it again. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_plan_unreadable",
+      "kind": "template",
+      "english": "{label} has a saved locked-target plan that cannot be read. Open the Wishlist in the Wishlist Editor and save its locked targets again. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_plans_disagree",
+      "kind": "template",
+      "english": "{label} has two saved locked-target plans that do not agree. Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same locked targets. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_marked_ordinary_quality",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_marked_ordinary_saved_build",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_marked_ordinary_wishlist",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_unstated_quality",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. It does not say which copies are locked: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_unstated_saved_build",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. It does not say which copies are locked: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_roles_unstated_wishlist",
+      "kind": "template",
+      "english": "{label} has {total} Echo copies. It does not say which copies are locked: a Share holds at most {max_ordinary} ordinary copies, so up to {max_locked} of them must be locked Echoes, and Nexus must know which. Missing evidence: {why}. To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "all Echo copies of the source"
+        },
+        {
+          "name": "max_ordinary",
+          "type": "count",
+          "meaning": "the Share limit of ordinary copies"
+        },
+        {
+          "name": "max_locked",
+          "type": "count",
+          "meaning": "the Share limit of locked copies"
+        },
+        {
+          "name": "why",
+          "type": "text",
+          "meaning": "the missing-evidence reason (shown through its library.reason.evidence_* words, else raw)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_row_unreadable",
+      "kind": "template",
+      "english": "{label} contains an Echo row that cannot be read. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.error.share_server_row_unreadable",
+      "kind": "template",
+      "english": "{label} contains a server Echo row that cannot be read, so its copies are not complete. Nothing was shared.",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "{label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'."
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Share refusal sentence; nothing was shared. {label} is the Share source's name (a Wishlist or Saved Build name, player data, verbatim) or 'This source'. Keep every instruction and the consequence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (phrasebook) at the Share form and chat",
+      "familySurface": "remainder_library: Build Library Share form refusal line and chat (error); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.dropped",
+      "kind": "text",
+      "english": "dropped",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). A Share outcome code shown before its reason: the send was dropped.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.expired",
+      "kind": "text",
+      "english": "expired",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code: the retry window ended.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.not_queued",
+      "kind": "text",
+      "english": "not-queued",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.rejected",
+      "kind": "text",
+      "english": "rejected",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.reset",
+      "kind": "text",
+      "english": "reset",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code: cleared by an explicit reset.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.sent_attempted",
+      "kind": "text",
+      "english": "sent-attempted",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code: a send was attempted (delivery is not confirmed).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.stopped",
+      "kind": "text",
+      "english": "stopped",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code (default).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.superseded",
+      "kind": "text",
+      "english": "superseded",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code: a newer Share replaced it.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.outcome.throttle_exhausted",
+      "kind": "text",
+      "english": "throttle-exhausted",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Outcome code: the send budget ran out.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.build_evidence_dense",
+      "kind": "text",
+      "english": "build Echo evidence must be a dense array",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.candidate_contract_unsupported",
+      "kind": "text",
+      "english": "unsupported candidate evidence contract",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.candidate_evidence_unavailable",
+      "kind": "text",
+      "english": "candidate evidence is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.copy_authority_unavailable",
+      "kind": "text",
+      "english": "independently verified current Copy authority is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. Nexus cannot confirm the record is current enough to copy.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_active_unverified",
+      "kind": "text",
+      "english": "active loadout is not verified; locked-Echo evidence is pending",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_choose_in_editor",
+      "kind": "text",
+      "english": "Choose locked targets in the Wishlist Editor; the saved role choice is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period. Starts with a capital in the source; keep that.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_conflicting_quality",
+      "kind": "text",
+      "english": "active loadout contains conflicting Echo quality evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_counts_mismatch",
+      "kind": "text",
+      "english": "permanent locked-Echo counts do not fit the exact active loadout",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_envelope",
+      "kind": "text",
+      "english": "locked evidence cannot establish at most 79 ordinary and 6 locked copies",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_loadout_inactive",
+      "kind": "text",
+      "english": "associated loadout is not active; locked roles remain unknown",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_malformed",
+      "kind": "text",
+      "english": "active loadout contains malformed Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_no_role_choice",
+      "kind": "text",
+      "english": "no role choice is saved for this exact content",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_no_verified_active",
+      "kind": "text",
+      "english": "no verified active loadout for locked-Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_not_exact_match",
+      "kind": "text",
+      "english": "wishlist does not exactly match the verified active loadout; locked roles remain unknown",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_too_many",
+      "kind": "text",
+      "english": "active loadout exceeds the supported Echo count",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_two_qualities",
+      "kind": "text",
+      "english": "the source states two qualities for one Echo, and the saved role evidence does not match that exact content",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_waiting_authoritative",
+      "kind": "text",
+      "english": "waiting for authoritative locked-Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.evidence_waiting_sync",
+      "kind": "text",
+      "english": "waiting for synchronized permanent locked-Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A reason why the locked-Echo roles of a Share source are not known, produced by core/GameAdapter.lua or the Library controller; shown after 'Missing evidence:' in the Share refusal. Lower-case clause, no final period.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.historical_locked_not_authority",
+      "kind": "text",
+      "english": "historical locked evidence is not current copy authority",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. An old record of the locked Echoes is not proof of the current build.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_evidence_dense",
+      "kind": "text",
+      "english": "locked Echo evidence must be a dense array",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. Technical: the locked Echo list has gaps. Keep the meaning 'the data is malformed'.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_evidence_invalid",
+      "kind": "text",
+      "english": "locked Echo evidence is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_fingerprint_mismatch",
+      "kind": "text",
+      "english": "locked Echo fingerprint does not match its evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. The locked Echo fingerprint is a checksum of the locked rows; it does not fit them.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_record_category_invalid",
+      "kind": "text",
+      "english": "locked Echo record category is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_record_invalid",
+      "kind": "text",
+      "english": "locked Echo record is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_row_too_many_copies",
+      "kind": "text",
+      "english": "a locked Echo row holds more copies than Nexus reads",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.locked_rows_too_many",
+      "kind": "text",
+      "english": "locked Echo evidence has more rows than Nexus reads",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_evidence_dense",
+      "kind": "text",
+      "english": "ordinary Echo evidence must be a dense array",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. Technical: the ordinary Echo list has gaps.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_evidence_invalid",
+      "kind": "text",
+      "english": "ordinary Echo evidence is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_evidence_syncing",
+      "kind": "text",
+      "english": "ordinary Echo evidence is still syncing",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. The full Echo list has not arrived yet; distinct from 'invalid'.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_evidence_unavailable",
+      "kind": "text",
+      "english": "ordinary Echo evidence is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. 'Ordinary' Echoes are the normal (not locked) rolled copies.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_has_locked_data",
+      "kind": "text",
+      "english": "ordinary Echo evidence contains locked-role data",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.ordinary_over_79",
+      "kind": "text",
+      "english": "ordinary Echo evidence exceeds 79 copies",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. 79 is the fixed maximum of ordinary copies.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_binding_inconsistent",
+      "kind": "text",
+      "english": "record evidence binding is inconsistent",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_build_identity_invalid",
+      "kind": "text",
+      "english": "record build identity is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_catalog_build_id_mismatch",
+      "kind": "text",
+      "english": "record and catalog build IDs do not match",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_catalog_identity_mismatch",
+      "kind": "text",
+      "english": "record and catalog identities do not match",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_categories_build_disagree",
+      "kind": "text",
+      "english": "record categories disagree on resolved build identity",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_categories_locked_disagree",
+      "kind": "text",
+      "english": "record categories disagree on locked Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. The record's Training Dummy and Lich King categories state different locked Echoes.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_echo_evidence_changed",
+      "kind": "text",
+      "english": "record Echo evidence changed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_evidence_changed",
+      "kind": "text",
+      "english": "record evidence changed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_evidence_is_unavailable",
+      "kind": "text",
+      "english": "record evidence is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_evidence_provider_ambiguous",
+      "kind": "text",
+      "english": "record evidence provider is ambiguous",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_evidence_provider_invalid",
+      "kind": "text",
+      "english": "record evidence provider is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_evidence_unavailable",
+      "kind": "text",
+      "english": "record evidence unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_fingerprint_invalid",
+      "kind": "text",
+      "english": "record fingerprint is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_fingerprint_mismatch",
+      "kind": "text",
+      "english": "record fingerprint does not match its Echo evidence",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_fingerprint_unavailable",
+      "kind": "text",
+      "english": "record fingerprint is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_identity_changed",
+      "kind": "text",
+      "english": "record identity changed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language. The record changed after it was read; try again.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_projection_changed",
+      "kind": "text",
+      "english": "record projection changed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_projection_unavailable",
+      "kind": "text",
+      "english": "record projection unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_revision_provider_invalid",
+      "kind": "text",
+      "english": "record revision provider is invalid",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_revision_unavailable",
+      "kind": "text",
+      "english": "record revision is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_validation_failed",
+      "kind": "text",
+      "english": "record validation failed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.record_validation_unavailable",
+      "kind": "text",
+      "english": "record validation is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Shown after 'Copy unavailable:' / 'Open unavailable:' in the Build Library and Leaderboard. A raw evidence check result produced by core/CandidateEvidence.lua and compared there; shown, never compared, in this language.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_already_waiting",
+      "kind": "text",
+      "english": "a request for this build is already waiting",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_invalid_build_id",
+      "kind": "text",
+      "english": "invalid build ID",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_manual_mode",
+      "kind": "text",
+      "english": "Sync is in Manual mode. Press Sync Now, then request again",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard. 'Sync Now' is the button label; Manual is a Sync mode name.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_not_connected",
+      "kind": "text",
+      "english": "not connected to the Nexus sync channel",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_not_in_library",
+      "kind": "text",
+      "english": "the build's Echo list is not in your library",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_own_build",
+      "kind": "text",
+      "english": "this is your own build",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_owner_unverified",
+      "kind": "text",
+      "english": "the build owner is not verified",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_queue_full",
+      "kind": "text",
+      "english": "the request queue is full",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.request_roles_known",
+      "kind": "text",
+      "english": "the locked Echo roles are already known",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.roles_validation_unavailable",
+      "kind": "text",
+      "english": "Echo role validation is unavailable",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Share refusal: Nexus cannot check the Echo roles of the source now.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_already_queued",
+      "kind": "text",
+      "english": "already queued",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_duplicate_suppressed",
+      "kind": "text",
+      "english": "duplicate suppressed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_explicit_reset",
+      "kind": "text",
+      "english": "explicit reset",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_invalid_prepared",
+      "kind": "text",
+      "english": "invalid prepared build",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_no_echoes",
+      "kind": "text",
+      "english": "no echoes",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). The build has no Echoes to send.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_no_source",
+      "kind": "text",
+      "english": "no source selected",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Share refusal: no Wishlist or Saved Build is chosen as the source.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_queue_full",
+      "kind": "text",
+      "english": "sync queue full",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_queued",
+      "kind": "text",
+      "english": "queued",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). A state: waiting in the send queue.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_queued_after_retry",
+      "kind": "text",
+      "english": "queued after retry",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_relay_unauthorized",
+      "kind": "text",
+      "english": "relay unauthorized",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). This player may not relay that build.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_retry_admitted",
+      "kind": "text",
+      "english": "bounded retry admitted",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_retry_exhausted",
+      "kind": "text",
+      "english": "share retry attempts exhausted",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_retry_expired",
+      "kind": "text",
+      "english": "share retry expired",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_retry_stopped",
+      "kind": "text",
+      "english": "retry stopped",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_send_attempt",
+      "kind": "text",
+      "english": "send attempt",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_source_changed",
+      "kind": "text",
+      "english": "share source changed",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_source_empty",
+      "kind": "text",
+      "english": "the source has no Echoes",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Share refusal: the chosen source has no Echoes.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_stale_prepared",
+      "kind": "text",
+      "english": "stale prepared build",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). The prepared copy is out of date.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_superseded",
+      "kind": "text",
+      "english": "superseded by newer Share Build",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). 'Share Build' is the action/button name.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_too_large",
+      "kind": "text",
+      "english": "too large",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). The record is too large to send.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.share_transport_admitted",
+      "kind": "text",
+      "english": "transport admitted",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it).",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_already_queued",
+      "kind": "text",
+      "english": "sync request already queued",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_cooldown",
+      "kind": "text",
+      "english": "please wait a few seconds between syncs",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_not_connected",
+      "kind": "text",
+      "english": "not connected to the sync channel",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_paused",
+      "kind": "text",
+      "english": "Nexus paused for this session",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_paused_resume",
+      "kind": "text",
+      "english": "Nexus is paused for this session. Type /nexus resume, then Sync again.",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard. '/nexus resume' is a slash command: keep it literal.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_prep_failed",
+      "kind": "text",
+      "english": "shared data preparation failed; see /nexus log errors",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard. '/nexus log errors' is a slash command: keep it literal.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.sync_preparing",
+      "kind": "text",
+      "english": "shared data is preparing; try Sync again when ready",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync request refusal or state produced by core/Sync.lua / core/SyncSession.lua (compared there), shown in the Sync Now chat line or 'Request not sent: {reason}.' of the Library and Leaderboard.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.transport_bandwidth",
+      "kind": "text",
+      "english": "CTL bandwidth",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Sending waits for the chat bandwidth limit (CTL = ChatThrottleLib, a library name; keep 'CTL').",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.reason.transport_combat",
+      "kind": "text",
+      "english": "combat",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "A Sync queue / transport reason produced by core/Sync.lua or core/SyncWire.lua and compared there, shown inside the Share / Retry / Stop Sharing status line of the Build Library. Lower-case clause, no final period (the line adds it). Sending waits while the player is in combat.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.status.share_outcome_reason",
+      "kind": "template",
+      "english": "{outcome} ({reason})",
+      "placeholders": [
+        {
+          "name": "outcome",
+          "type": "text",
+          "meaning": "the Share outcome code, shown through its library.outcome.* words"
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the Sync reason, shown through its library.reason.* words when known, else raw"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "library",
+      "meaning": "Inside the Share stopped line: the outcome, then its reason in parentheses.",
+      "consumer": "core/CommunityController.lua notify / ShareStatusText",
+      "familySurface": "remainder_library: Build Library chat / Share status (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
+      "key": "library.value.this_source",
+      "kind": "text",
+      "english": "This source",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Share refusal subject used when the source has no name. Capitalized: it starts the sentence.",
+      "consumer": "Nexus.CommunityInternals.ShownReason (core/CommunityController.lua)",
+      "familySurface": "remainder_library: Build Library / Leaderboard reason display (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_library"
+    },
+    {
       "key": "count.copies_progress",
       "kind": "template",
       "english": "{have} / {want} copies",
@@ -45238,7 +47031,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3366,
+    "totalKeys": 3494,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -45252,7 +47045,8 @@
       "wishlist": 381,
       "orb": 436,
       "guide": 700,
-      "integration2": 10
+      "integration2": 10,
+      "remainder_library": 128
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

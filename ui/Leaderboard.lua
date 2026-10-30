@@ -120,6 +120,12 @@ local REASON_KEYS = {
 local function ReasonText(raw)
     local key = type(raw) == "string" and REASON_KEYS[raw]
     if key then return T(key) end
+    -- Full-UI remainder (v3): the Library's shared display words for the raw
+    -- reasons of CandidateEvidence and Sync (shown, never compared).
+    local internals = Nexus.CommunityInternals
+    local shown = internals and type(internals.ShownReason) == "function"
+        and type(raw) == "string" and internals.ShownReason(raw) or nil
+    if type(shown) == "string" then return shown end
     return tostring(raw)
 end
 -- "Copy unavailable: <reason>" / "Open unavailable: <reason>".
@@ -615,8 +621,8 @@ local function RolesRequestText(state, reason, name)
     elseif state == "timeout" then
         return T("leaderboard.status.roles_no_reply")
     elseif state == "offline" or state == "refused" then
-        -- The reason is the Sync owner's own text, shown as it is.
-        local shown = reason and tostring(reason)
+        -- The Sync owner's reason, in its display words when known.
+        local shown = reason and ReasonText(reason)
             or T("leaderboard.value.reason_unavailable")
         return TF("leaderboard.status.request_not_sent", {reason=shown},
             "Request not sent: " .. shown .. ".")
@@ -1366,10 +1372,10 @@ local function EnsureFrame()
         local S=Nexus.Sync
         if not (S and type(S.RequestSync)=="function") then return end
         local ok,reason=S.RequestSync()
-        -- A reason is the Sync owner's own text, shown as it is.
-        if ok==nil then print("|cff7fd5ffNexus:|r "..tostring(reason or T("leaderboard.chat.preparing_sync_data")))
-        elseif ok then print("|cff7fd5ffNexus:|r "..tostring(reason or T("leaderboard.chat.asking_for_builds")))
-        else print("|cffff6060Nexus:|r "..tostring(reason or T("leaderboard.chat.sync_unavailable"))) end
+        -- A reason is the Sync owner's, in its display words when known.
+        if ok==nil then print("|cff7fd5ffNexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.preparing_sync_data")))
+        elseif ok then print("|cff7fd5ffNexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.asking_for_builds")))
+        else print("|cffff6060Nexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.sync_unavailable"))) end
         M.RefreshStatus()
     end)
     -- The same Sync words as the Build Library's Sync Now and Help. Reading

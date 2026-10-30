@@ -3050,6 +3050,135 @@ local DECLARATIONS = {
     ["support.status.stored_report_mismatch"] = {kind = "template", fields = {"id", "bytes", "chunks", "checksum"}, slots = {"text", "text", "text", "text"}, resultLimit = 1600},
     ["support.title.support_report"] = {kind = "text"},
     ["support.value.unavailable"] = {kind = "text"},
+    -- remainder_library (128)
+    ["library.chat.catalog_completion_failed"] = {kind = "template", fields = {"reason"}, slots = {"text"}, resultLimit = 2048},
+    ["library.chat.catalog_envelope_limits"] = {kind = "template", fields = {"code", "representation", "ordinary", "locked", "total", "max_ordinary", "max_locked"}, slots = {"text", "text", "text", "text", "text", "text", "text"}, resultLimit = 2048},
+    ["library.chat.catalog_envelope_nothing_saved"] = {kind = "template", fields = {"code", "representation", "ordinary", "locked", "total"}, slots = {"text", "text", "text", "text", "text"}, resultLimit = 2048},
+    ["library.chat.catalog_failed"] = {kind = "template", fields = {"operation", "reason"}, slots = {"text", "text"}, resultLimit = 2048},
+    ["library.error.share_count_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_envelope"] = {kind = "template", fields = {"label", "ordinary", "locked", "total", "max_ordinary", "max_locked", "max_total"}, slots = {"text", "count", "count", "count", "count", "count", "count"}, resultLimit = 2048},
+    ["library.error.share_locked_list_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_locked_lists_disagree"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_locked_row_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_no_ordinary"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_plan_differs"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_plan_outdated"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_plan_unbound"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_plan_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_plans_disagree"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_roles_marked_ordinary_quality"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_roles_marked_ordinary_saved_build"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_roles_marked_ordinary_wishlist"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_roles_unstated_quality"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_roles_unstated_saved_build"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_roles_unstated_wishlist"] = {kind = "template", fields = {"label", "total", "max_ordinary", "max_locked", "why"}, slots = {"text", "count", "count", "count", "text"}, resultLimit = 2048, lines = true},
+    ["library.error.share_row_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.error.share_server_row_unreadable"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048},
+    ["library.outcome.dropped"] = {kind = "text"},
+    ["library.outcome.expired"] = {kind = "text"},
+    ["library.outcome.not_queued"] = {kind = "text"},
+    ["library.outcome.rejected"] = {kind = "text"},
+    ["library.outcome.reset"] = {kind = "text"},
+    ["library.outcome.sent_attempted"] = {kind = "text"},
+    ["library.outcome.stopped"] = {kind = "text"},
+    ["library.outcome.superseded"] = {kind = "text"},
+    ["library.outcome.throttle_exhausted"] = {kind = "text"},
+    ["library.reason.build_evidence_dense"] = {kind = "text"},
+    ["library.reason.candidate_contract_unsupported"] = {kind = "text"},
+    ["library.reason.candidate_evidence_unavailable"] = {kind = "text"},
+    ["library.reason.copy_authority_unavailable"] = {kind = "text"},
+    ["library.reason.evidence_active_unverified"] = {kind = "text"},
+    ["library.reason.evidence_choose_in_editor"] = {kind = "text"},
+    ["library.reason.evidence_conflicting_quality"] = {kind = "text"},
+    ["library.reason.evidence_counts_mismatch"] = {kind = "text"},
+    ["library.reason.evidence_envelope"] = {kind = "text"},
+    ["library.reason.evidence_loadout_inactive"] = {kind = "text"},
+    ["library.reason.evidence_malformed"] = {kind = "text"},
+    ["library.reason.evidence_no_role_choice"] = {kind = "text"},
+    ["library.reason.evidence_no_verified_active"] = {kind = "text"},
+    ["library.reason.evidence_not_exact_match"] = {kind = "text"},
+    ["library.reason.evidence_too_many"] = {kind = "text"},
+    ["library.reason.evidence_two_qualities"] = {kind = "text"},
+    ["library.reason.evidence_waiting_authoritative"] = {kind = "text"},
+    ["library.reason.evidence_waiting_sync"] = {kind = "text"},
+    ["library.reason.historical_locked_not_authority"] = {kind = "text"},
+    ["library.reason.locked_evidence_dense"] = {kind = "text"},
+    ["library.reason.locked_evidence_invalid"] = {kind = "text"},
+    ["library.reason.locked_fingerprint_mismatch"] = {kind = "text"},
+    ["library.reason.locked_record_category_invalid"] = {kind = "text"},
+    ["library.reason.locked_record_invalid"] = {kind = "text"},
+    ["library.reason.locked_row_too_many_copies"] = {kind = "text"},
+    ["library.reason.locked_rows_too_many"] = {kind = "text"},
+    ["library.reason.ordinary_evidence_dense"] = {kind = "text"},
+    ["library.reason.ordinary_evidence_invalid"] = {kind = "text"},
+    ["library.reason.ordinary_evidence_syncing"] = {kind = "text"},
+    ["library.reason.ordinary_evidence_unavailable"] = {kind = "text"},
+    ["library.reason.ordinary_has_locked_data"] = {kind = "text"},
+    ["library.reason.ordinary_over_79"] = {kind = "text"},
+    ["library.reason.record_binding_inconsistent"] = {kind = "text"},
+    ["library.reason.record_build_identity_invalid"] = {kind = "text"},
+    ["library.reason.record_catalog_build_id_mismatch"] = {kind = "text"},
+    ["library.reason.record_catalog_identity_mismatch"] = {kind = "text"},
+    ["library.reason.record_categories_build_disagree"] = {kind = "text"},
+    ["library.reason.record_categories_locked_disagree"] = {kind = "text"},
+    ["library.reason.record_echo_evidence_changed"] = {kind = "text"},
+    ["library.reason.record_evidence_changed"] = {kind = "text"},
+    ["library.reason.record_evidence_is_unavailable"] = {kind = "text"},
+    ["library.reason.record_evidence_provider_ambiguous"] = {kind = "text"},
+    ["library.reason.record_evidence_provider_invalid"] = {kind = "text"},
+    ["library.reason.record_evidence_unavailable"] = {kind = "text"},
+    ["library.reason.record_fingerprint_invalid"] = {kind = "text"},
+    ["library.reason.record_fingerprint_mismatch"] = {kind = "text"},
+    ["library.reason.record_fingerprint_unavailable"] = {kind = "text"},
+    ["library.reason.record_identity_changed"] = {kind = "text"},
+    ["library.reason.record_projection_changed"] = {kind = "text"},
+    ["library.reason.record_projection_unavailable"] = {kind = "text"},
+    ["library.reason.record_revision_provider_invalid"] = {kind = "text"},
+    ["library.reason.record_revision_unavailable"] = {kind = "text"},
+    ["library.reason.record_validation_failed"] = {kind = "text"},
+    ["library.reason.record_validation_unavailable"] = {kind = "text"},
+    ["library.reason.request_already_waiting"] = {kind = "text"},
+    ["library.reason.request_invalid_build_id"] = {kind = "text"},
+    ["library.reason.request_manual_mode"] = {kind = "text"},
+    ["library.reason.request_not_connected"] = {kind = "text"},
+    ["library.reason.request_not_in_library"] = {kind = "text"},
+    ["library.reason.request_own_build"] = {kind = "text"},
+    ["library.reason.request_owner_unverified"] = {kind = "text"},
+    ["library.reason.request_queue_full"] = {kind = "text"},
+    ["library.reason.request_roles_known"] = {kind = "text"},
+    ["library.reason.roles_validation_unavailable"] = {kind = "text"},
+    ["library.reason.share_already_queued"] = {kind = "text"},
+    ["library.reason.share_duplicate_suppressed"] = {kind = "text"},
+    ["library.reason.share_explicit_reset"] = {kind = "text"},
+    ["library.reason.share_invalid_prepared"] = {kind = "text"},
+    ["library.reason.share_no_echoes"] = {kind = "text"},
+    ["library.reason.share_no_source"] = {kind = "text"},
+    ["library.reason.share_queue_full"] = {kind = "text"},
+    ["library.reason.share_queued"] = {kind = "text"},
+    ["library.reason.share_queued_after_retry"] = {kind = "text"},
+    ["library.reason.share_relay_unauthorized"] = {kind = "text"},
+    ["library.reason.share_retry_admitted"] = {kind = "text"},
+    ["library.reason.share_retry_exhausted"] = {kind = "text"},
+    ["library.reason.share_retry_expired"] = {kind = "text"},
+    ["library.reason.share_retry_stopped"] = {kind = "text"},
+    ["library.reason.share_send_attempt"] = {kind = "text"},
+    ["library.reason.share_source_changed"] = {kind = "text"},
+    ["library.reason.share_source_empty"] = {kind = "text"},
+    ["library.reason.share_stale_prepared"] = {kind = "text"},
+    ["library.reason.share_superseded"] = {kind = "text"},
+    ["library.reason.share_too_large"] = {kind = "text"},
+    ["library.reason.share_transport_admitted"] = {kind = "text"},
+    ["library.reason.sync_already_queued"] = {kind = "text"},
+    ["library.reason.sync_cooldown"] = {kind = "text"},
+    ["library.reason.sync_not_connected"] = {kind = "text"},
+    ["library.reason.sync_paused"] = {kind = "text"},
+    ["library.reason.sync_paused_resume"] = {kind = "text"},
+    ["library.reason.sync_prep_failed"] = {kind = "text"},
+    ["library.reason.sync_preparing"] = {kind = "text"},
+    ["library.reason.transport_bandwidth"] = {kind = "text"},
+    ["library.reason.transport_combat"] = {kind = "text"},
+    ["library.status.share_outcome_reason"] = {kind = "template", fields = {"outcome", "reason"}, slots = {"text", "text"}, resultLimit = 2048},
+    ["library.value.this_source"] = {kind = "text"},
     -- usertext (261)
     ["count.copies_progress"] = {kind = "template", fields = {"have", "want"}, slots = {"count", "count"}, resultLimit = 400},
     ["count.copies_unavailable"] = {kind = "text"},
@@ -4145,7 +4274,11 @@ end
 --           formats = {{format = fmt, key = key, fields = {name, ...}}, ...}}
 -- into a book; a format entry is kept only when its conversions are all %d
 -- or %s and their number equals #fields (a %d field is a count slot, a %s
--- field a text slot, in that order). At most MAX_PHRASE_ENTRIES entries.
+-- field a text slot, in that order). An entry may add nested = {field =
+-- {[exact value] = key}}: that text field's captured value, when it is
+-- exactly one of those code-owned values, is shown through its key; any
+-- other value (player data) stays verbatim. At most MAX_PHRASE_ENTRIES
+-- entries.
 -- L.Phrase(raw, book) -> shown, matched: the exact entry, else the first
 -- format whose anchored pattern matches, rendered with L.Text / L.Format.
 -- A %d capture is used only when it is a whole number >= 0 that tostring
@@ -4202,7 +4335,8 @@ function L.PhraseBook(spec)
                 local pattern, slots = CompileFormat(entry.format, #fields)
                 if pattern then
                     book.formats[#book.formats + 1] = {pattern = pattern, key = entry.key,
-                        fields = fields, slots = slots, format = entry.format}
+                        fields = fields, slots = slots, format = entry.format,
+                        nested = type(entry.nested) == "table" and entry.nested or nil}
                     book.size = book.size + 1
                 end
             end
@@ -4233,6 +4367,12 @@ function L.Phrase(raw, book)
                     end
                     args[name] = {known = true, value = n}
                 else
+                    local map = entry.nested and entry.nested[name]
+                    local nestedKey = type(map) == "table" and map[value] or nil
+                    if nestedKey and ValidKey(nestedKey) then
+                        local shown, source = L.Text(nestedKey)
+                        if source ~= "unavailable" then value = shown end
+                    end
                     args[name] = value
                 end
             end

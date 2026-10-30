@@ -21,6 +21,93 @@ local function check(v,m) assert(v,m);checks=checks+1 end
 -- ---------------------------------------------------------------- English
 -- Child process: plain English session (no pack). Exact bytes of
 -- representative keys at their real receivers.
+
+-- ---------------------------------------------------------------- v3 remainder
+-- The raw reasons other owners produce (CandidateEvidence, Sync, ShareRoles,
+-- catalog refusals) at the Library's real display boundary. `english` is
+-- true in the English child: every shown line equals the raw bytes; in the
+-- pseudo session every code-owned word is marked and data stays verbatim.
+local function ControllerOf()
+ for i=1,40 do
+  local n,v=debug.getupvalue(Nexus.CommunityBuilds.Select,i)
+  if not n then break end
+  if n=='ControllerInstance' then return v() end
+ end
+ error('SETUP controller upvalue missing')
+end
+local function RemainderChecks(H,english,own)
+ local internals=Nexus.CommunityInternals
+ local book=internals.ReasonBook()
+ check(book and book.size>=100,'v3 SETUP the Library reason book compiles: '..tostring(book and book.size))
+ local bad=S.BookFidelity(book,english and 'english' or 'pseudo','Plan Ä')
+ check(#bad==0,'v3 every reason book entry renders '..(english and 'its exact English' or 'marked text')..': '..table.concat(bad,' | '))
+ local C=ControllerOf()
+ -- A real ShareRoles refusal from the real Share entry point.
+ local source={name='Plan Ä',sourceKind='Wishlist',roleSourceValid=false,echoes={{spellId=200001,quality=1,stacks=1}}}
+ local ok,raw=C.PostCurrentWishlist('Title','Description',source,'MAGE')
+ local want='Plan Ä contains a server Echo row that cannot be read, so its copies are not complete. Nothing was shared.'
+ check(ok==false and raw==want,'v3 SETUP the real Share refusal keeps its raw English: '..tostring(raw))
+ local shown=internals.ShownReason(raw)
+ if english then check(shown==raw,'v3 English Share refusal shown byte for byte')
+ else check(S.IsPseudo(shown) and shown:find('Plan Ä',1,true) and S.LooksUntranslated(shown,function(w) return w=='Plan' end)==nil,
+  'v3 Share refusal shown marked with the source name verbatim: '..shown) end
+ -- A real CandidateEvidence refusal.
+ local cand,why=Nexus.CandidateEvidence.Validate({})
+ check(cand==nil and type(why)=='string','v3 SETUP a real CandidateEvidence refusal: '..tostring(why))
+ local shownWhy=internals.ShownReason(why)
+ if english then check(shownWhy==why,'v3 English Copy refusal reason shown byte for byte')
+ else check(S.IsPseudo(shownWhy),'v3 the CandidateEvidence reason is in the book and shown marked: '..tostring(why)..' -> '..tostring(shownWhy)) end
+ -- The real Sync Now button of the Library.
+ local frame=NexusCommunityBuildsFrame
+ if frame and frame._syncBtn and frame._syncBtn:IsEnabled() then
+  local lines=S.CaptureChat(function() frame._syncBtn:Click() end)
+  check(#lines>=1,'v3 SETUP Sync Now printed a line')
+  local last=lines[#lines]
+  if english then check(not S.IsPseudo(last),'v3 English Sync Now line: '..last)
+  else check(S.LooksUntranslated(last,function(w) return w=='Nexus' end)==nil,'v3 Sync Now chat line is reviewed text: '..last) end
+ end
+ -- Catalog refusal chat: the catalog dependency answers one edit with a
+ -- retained ticket and then a SEMANTIC_ENVELOPE refusal (injected outcome;
+ -- the real controller completion and notify run).
+ local function CatalogRefusalLine()
+  local cat=Nexus.BuildCatalog
+  local put,bind=cat.Put,cat.BindMutationCompletion
+  local callback,ticket
+  cat.Put=function() ticket={};return nil,'ROOT_MUTATION_PENDING',ticket end
+  cat.BindMutationCompletion=function(t,fn) callback=fn;return true end
+  C.EditBuild(own,'Edited title','Edited description')
+  cat.Put,cat.BindMutationCompletion=put,bind
+  check(type(callback)=='function','v3 SETUP the edit retained a catalog ticket')
+  ticket.committed=false;ticket.reason='SEMANTIC_ENVELOPE'
+  ticket.detail={representation='wire',ordinary=80,locked=1,total=81}
+  -- The controller bound its notify (print) when it was made; capture the
+  -- completion closure's own notify for this one call.
+  local lines,idx={},nil
+  for i=1,60 do local n=debug.getupvalue(callback,i);if not n then break end;if n=='notify' then idx=i end end
+  check(idx~=nil,'v3 SETUP the completion closure has its notify')
+  local realNotify=select(2,debug.getupvalue(callback,idx))
+  debug.setupvalue(callback,idx,function(m) lines[#lines+1]=tostring(m) end)
+  callback(ticket)
+  debug.setupvalue(callback,idx,realNotify)
+  local line
+  for _,l in ipairs(lines) do if l:find('SEMANTIC_ENVELOPE',1,true) then line=l end end
+  check(line~=nil,'v3 the catalog refusal reaches the chat: '..table.concat(lines,' | '))
+  return line
+ end
+ if own then
+  local line=CatalogRefusalLine()
+  check(S.IsPseudo(line) and line:find('build details edit',1,true) and line:find('80',1,true),'v3 catalog refusal chat is reviewed text with its codes and counts verbatim: '..tostring(line))
+  -- The same real path under a freshly loaded English seam (consumers look
+  -- the seam up at call time): the exact former English bytes.
+  local realL,packs=Nexus.Localization,Nexus.LocalizationPacks
+  Nexus.LocalizationPacks=nil;dofile('core/Localization.lua');Nexus.LocalizationPacks=packs
+  local enLine=CatalogRefusalLine()
+  Nexus.Localization=realL
+  check(enLine=='Catalog build details edit failed: SEMANTIC_ENVELOPE (wire record: 80 ordinary, 1 locked, 81 total Echo copies); at most 79 ordinary copies, and 120 copies in one locked row, are stored. Nothing was saved and the source is unchanged',
+   'v3 English catalog refusal chat byte for byte: '..tostring(enLine))
+ end
+end
+
 if MODE=='english' then
  local F=dofile('tests/prototype/format5_support.lua')
  local H=F.Boot(F.Database())
@@ -54,6 +141,7 @@ if MODE=='english' then
   'DisplayText equals the raw English reason under English')
  dlg:Hide()
  check(L.Format('library.status.showing_range',{first=L.Count(1),last=L.Count(0),total=L.Count(nil)})=='Showing 1-0 of ?','template: zero is 0, unknown is ?')
+ RemainderChecks(H,true,nil)
  print('PASS l10n_ui_library english checks='..checks)
  return
 end
@@ -359,6 +447,8 @@ check(Nexus.SyncModePolicy.Text('off')~=Nexus.SyncModePolicy.DisplayText('off') 
 check(Nexus.SyncModePolicy.DisplayReason(Nexus.SyncModePolicy.Text('manual'))==L.Text('sync.status.mode_manual'),'DisplayReason maps the raw manual reason')
 check(Nexus.CommunityInternals.ShownReason('not your build')==L.Text('library.error.not_your_build')
  and Nexus.CommunityInternals.ShownReason('an unknown raw reason')=='an unknown raw reason','controller reasons: known mapped, unknown shown as given')
+
+RemainderChecks(H,false,own)
 
 -- Child processes: English, long and missing-entry fallback.
 local exe=arg and arg[-1] or 'luajit'

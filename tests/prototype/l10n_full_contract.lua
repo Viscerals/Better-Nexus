@@ -201,6 +201,13 @@ do
  check(t=='It lists 7 occupied records, more than the 6 allowed. Extra','GUARD formats are anchored: trailing text is not dropped')
  local bad=m.PhraseBook({formats={{format='%q oops',key='orb.status.plain',fields={'x'}},{format='%d only',key='orb.status.counted',fields={'have','limit'}}}})
  check(bad.size==0,'GUARD unsupported conversions and field-count mismatches are left out')
+ -- A field may name its own exact lookup (a finite set of code-owned values):
+ -- only those exact values are shown through their keys; any other value
+ -- (a player-named source) stays verbatim.
+ local nb=m.PhraseBook({formats={{format='%s needs %d more copies.',key='orb.status.named',fields={'name','count'},
+  nested={name={['Session interrupted.']='orb.status.plain'}}}}})
+ check(m.Phrase('Session interrupted. needs 2 more copies.',nb)=='Session interrompue. : encore 2.','EXPECT a nested exact value is shown in the active language')
+ check(m.Phrase('Plan A needs 2 more copies.',nb)=='Plan A : encore 2.','GUARD a value outside the nested map stays verbatim')
 end
 
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')

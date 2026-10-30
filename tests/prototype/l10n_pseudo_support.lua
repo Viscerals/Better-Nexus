@@ -249,5 +249,31 @@ function S.Untranslated(texts,allow)
  return out
 end
 
+-- Phrasebook fidelity (L.PhraseBook / L.Phrase). For every entry of `book`
+-- the producer English is rebuilt (an exact text as is; a format with each %d
+-- filled by 7 and each %s by `name`) and passed through L.Phrase with the
+-- active seam. In an English session it must come back byte for byte and
+-- matched; in a pseudo session it must come back marked and matched.
+-- Returns the list of failing entries (empty when all hold).
+function S.BookFidelity(book,mode,name)
+ local L=Nexus.Localization
+ name=name or 'Ashbringer'
+ local failures={}
+ local function try(raw,label)
+  local shown,matched=L.Phrase(raw,book)
+  local ok
+  if mode=='pseudo' then ok=matched and S.LooksUntranslated(shown,function(w) return w==name end)==nil
+  else ok=matched and shown==raw end
+  if not ok then failures[#failures+1]=label..' -> '..tostring(shown) end
+ end
+ for raw in pairs(book.exact or {}) do try(raw,raw) end
+ for _,entry in ipairs(book.formats or {}) do
+  local args={}
+  for i,slot in ipairs(entry.slots) do args[i]=slot=='count' and 7 or name end
+  try(string.format(entry.format,unpack(args)),entry.format)
+ end
+ return failures
+end
+
 S.readFile=readFile
 return S
