@@ -249,6 +249,10 @@ do
   -- fallback (an intentional, counted English fallback), so a pack that is
   -- complete must hold it too.
   ['panel.button.options']='Options'}
+ -- Full visible-UI catalog: every other reviewed key the panel and its
+ -- helpers look up during these steps holds its exact English too, so the
+ -- pack stays complete as the catalog grows (the #165 rule for every key).
+ for key,text in pairs(Nexus.LocalizationEnglish)do if complete[key]==nil then complete[key]=text end end
  local function exact(text,label)
   local m,shown=Nexus.Panel._lastModel,texts()
   check(m.status==text and m.recommendation==text and shown:find(text,1,true)~=nil,label)
@@ -1162,6 +1166,11 @@ do
     -- records an (honest) missing_candidate fallback and the pack is not
     -- complete for the zero-fallback check below.
     packs.frFR.entries['panel.button.options']=OPTIONS_CAND
+    -- Full visible-UI catalog: every other reviewed key holds its exact
+    -- English, so the candidate pack stays complete as the catalog grows.
+    for key,text in pairs(Nexus.LocalizationEnglish)do
+     if packs.frFR.entries[key]==nil then packs.frFR.entries[key]=text end
+    end
    end
    Nexus.LocalizationPacks=packs
   end

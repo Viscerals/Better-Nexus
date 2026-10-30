@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 822,
+    "declaredKeys": 988,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -2679,6 +2679,2307 @@
       "consumer": "core/Updates.lua Status().channelLabel",
       "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (value); family coverage PENDING review",
       "cohort": "fullui:chat"
+    },
+    {
+      "key": "callboard.heading.rewards_by_difficulty",
+      "kind": "text",
+      "english": "Rewards by Difficulty",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Title of the rewards hover. Mirrors the game's own tooltip title; use the client's wording if it has one.",
+      "consumer": "CallboardStatus.ShowRewardsTooltip",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_hc1",
+      "kind": "text",
+      "english": "Hardcore I",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Hardcore tier 1. Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_hc2",
+      "kind": "text",
+      "english": "Hardcore II",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Hardcore tier 2. Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_hc3",
+      "kind": "text",
+      "english": "Hardcore III",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Hardcore tier 3. Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_hc4",
+      "kind": "text",
+      "english": "Hardcore IV",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Hardcore tier 4. Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_hc5",
+      "kind": "text",
+      "english": "Hardcore V",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Hardcore tier 5. Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.label.difficulty_normal",
+      "kind": "text",
+      "english": "Normal",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Game difficulty tier name: Normal (no Hardcore). Use the game client's own name for this Project Ebonhold difficulty; if the game shows it in English, keep English. Display only: the canonical English label stays internal.",
+      "consumer": "CallboardStatus rewards rows (left column)",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.status.failed",
+      "kind": "text",
+      "english": "Failed",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "The Callboard objective (quest) failed.",
+      "consumer": "CallboardStatus progress line",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.status.ready_turn_in",
+      "kind": "text",
+      "english": "Ready for turn-in",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "The Callboard objective is complete and can be handed in (quest turn-in).",
+      "consumer": "CallboardStatus progress line",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.tooltip.higher_difficulty_rewards",
+      "kind": "text",
+      "english": "Completing the objective on higher difficulties grants better rewards.",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "Explains the rewards table.",
+      "consumer": "CallboardStatus.ShowRewardsTooltip",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.tooltip.rewards_unavailable",
+      "kind": "text",
+      "english": "Reward details are not available for this objective yet.",
+      "placeholders": [],
+      "group": "callboard",
+      "meaning": "No reward data was read yet; not zero rewards.",
+      "consumer": "CallboardStatus.ShowRewardsTooltip",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.value.reward_ash",
+      "kind": "template",
+      "english": "{ash} Ash",
+      "placeholders": [
+        {
+          "name": "ash",
+          "type": "text",
+          "meaning": "amount formatted by code, e.g. 250, 12K, 1.5M"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "callboard",
+      "meaning": "Soul Ash reward (game currency, short form \"Ash\").",
+      "consumer": "CallboardStatus rewards rows",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "callboard.value.reward_xp",
+      "kind": "template",
+      "english": "{xp} XP",
+      "placeholders": [
+        {
+          "name": "xp",
+          "type": "text",
+          "meaning": "whole number of experience points formatted by code"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "callboard",
+      "meaning": "Experience reward. \"XP\" = experience points (use the game's abbreviation).",
+      "consumer": "CallboardStatus rewards rows",
+      "familySurface": "hud: Nexus HUD panel: Callboard row and its rewards hover (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "layout.button.orb_mini_panel",
+      "kind": "text",
+      "english": "Orb mini panel",
+      "placeholders": [],
+      "group": "layout",
+      "meaning": "Button that opens the small Orb panel. The width is reserved for about 14 Latin characters; a longer translation is shortened by the client.",
+      "consumer": "LayoutMetrics.Panel orbMiniButtonLabel",
+      "familySurface": "hud: Nexus HUD panel, Orb guidance row (button); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "layout.button.orb_mini_short",
+      "kind": "text",
+      "english": "Mini",
+      "placeholders": [],
+      "group": "layout",
+      "meaning": "Very short form of \"Orb mini panel\" for a narrow row.",
+      "consumer": "LayoutMetrics.Panel orbMiniButtonLabel",
+      "familySurface": "hud: Nexus HUD panel, Orb guidance row (button); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.recommendation_target",
+      "kind": "template",
+      "english": "{recommendation}: {target}",
+      "placeholders": [
+        {
+          "name": "recommendation",
+          "type": "text",
+          "meaning": "the shown recommendation sentence (translated by its owner)"
+        },
+        {
+          "name": "target",
+          "type": "text",
+          "meaning": "Echo name with its shown quality (readout.value.echo_with_quality)"
+        }
+      ],
+      "resultLimitBytes": 1614,
+      "group": "readout",
+      "meaning": "The recommendation sentence followed by the Echo card it names.",
+      "consumer": "Readout.RecommendationWithTarget",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, recommendation body (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_activate",
+      "kind": "template",
+      "english": "Activate a Saved Build: never. Nexus does not activate or load Saved Builds; the saved {setting} value ({value}) is not used by any action.",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 513,
+      "group": "readout",
+      "meaning": "Nexus never activates Saved Builds; an old saved setting exists but does nothing. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_auto_off",
+      "kind": "text",
+      "english": "Auto: OFF. Nexus only recommends; it takes, banishes, rerolls, freezes, saves and locks nothing.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto is OFF: Nexus performs no game action. The verbs are the board actions Take, Banish, Reroll, Freeze, plus saving and locking.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_auto_on",
+      "kind": "text",
+      "english": "Auto: ON for this session. The selection is OFF again after every login or reload.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto is ON now, for this session only; it resets to OFF at each login or UI reload.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_banish",
+      "kind": "template",
+      "english": "Banish ({setting}): {value}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Permission line: may Auto Banish (game board action). {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_freeze",
+      "kind": "template",
+      "english": "Freeze ({setting}): {value}; change with {command}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        },
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "slash command such as \"/nexus reroll on|off\", never translated"
+        }
+      ],
+      "resultLimitBytes": 278,
+      "group": "readout",
+      "meaning": "Permission line: may Auto Freeze; the slash command changes it. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_intro",
+      "kind": "text",
+      "english": "With Auto ON, Nexus may only do what these permissions allow:",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Introduces the list of permissions below (each line starts with a code-owned \"- \").",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_lock",
+      "kind": "template",
+      "english": "Lock Wishlist Echoes into locked slots ({setting}): {value}; its own option in the Wishlist editor",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 390,
+      "group": "readout",
+      "meaning": "Permission line: may Auto place Wishlist Echoes into locked Echo slots. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_orbs",
+      "kind": "text",
+      "english": "Orb runs: never by Auto; each one needs its own approval in the Orb window.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto never starts Orb runs; every run needs explicit approval.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_paused_because",
+      "kind": "template",
+      "english": "Paused because: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "shown hold reason (readout.status.hold_* or UserText wording)"
+        }
+      ],
+      "resultLimitBytes": 672,
+      "group": "readout",
+      "meaning": "Why the selected Auto is paused.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_read_only",
+      "kind": "text",
+      "english": "Saved data is read-only: a permission counts as on only when it was saved as on, and a change lasts this session only.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Saved data cannot be written in this session; changes are temporary.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_reroll",
+      "kind": "template",
+      "english": "Reroll ({setting}): {value}; change with {command}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        },
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "slash command such as \"/nexus reroll on|off\", never translated"
+        }
+      ],
+      "resultLimitBytes": 278,
+      "group": "readout",
+      "meaning": "Permission line: may Auto Reroll; the slash command changes it. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_save",
+      "kind": "template",
+      "english": "Save a better finished level-80 run over the active Saved Build ({setting}): {value}; no in-game control, and Auto OFF stops it",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 477,
+      "group": "readout",
+      "meaning": "Permission line: may Auto overwrite the active Saved Build with a better finished run. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_take",
+      "kind": "template",
+      "english": "Take needed Echoes ({setting}): {value}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Permission line: may Auto take needed Echoes. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.scope_tomes",
+      "kind": "template",
+      "english": "Echo availability controls (tomes) ({setting}): {value}; disables off-Wishlist and re-enables Wishlist controls",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 429,
+      "group": "readout",
+      "meaning": "Permission line: may Auto turn Echo tomes off (not on the Wishlist) and back on (on the Wishlist). {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.take_target",
+      "kind": "template",
+      "english": "Take: {target}",
+      "placeholders": [
+        {
+          "name": "target",
+          "type": "text",
+          "meaning": "Echo name with its shown quality (readout.value.echo_with_quality)"
+        }
+      ],
+      "resultLimitBytes": 554,
+      "group": "readout",
+      "meaning": "Recommendation with no reason text: take the named Echo card (game action Take).",
+      "consumer": "Readout.RecommendationWithTarget",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, recommendation body (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.body.tome_permission",
+      "kind": "block",
+      "english": "Tomes: with Auto ON and the tome permission (autoDisable) on, once the game's tome data is ready Nexus turns off Echo tomes your Wishlist does not use and turns back on tomes it needs, one change about every half second. It never turns off a tome you opted out of. Nexus does not turn tomes back on when you turn Auto OFF, log out or change the Wishlist: it turns back on only tomes a Wishlist needs (or that you opted out of), and only while Auto is ON. The tome list in the Echo Journal shows their state.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "What the tome permission does. Keep \"(autoDisable)\" unchanged (setting identifier). Consequence: tomes stay off after Auto stops. The Help page carries the same English paragraph under its own key (help family): translate both identically.",
+      "consumer": "Readout.TOME_PARAGRAPH (OverwriteWarning)",
+      "familySurface": "hud: Auto overwrite warning (consent window), tome paragraph (body); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.auto_on",
+      "kind": "text",
+      "english": "Auto ON",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Shortest heading form: Auto is ON. Same words as the Auto switch state \"Auto ON\".",
+      "consumer": "Readout.OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer",
+      "kind": "text",
+      "english": "Current offer",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Heading of the current Echo offer when the Auto state is unknown.",
+      "consumer": "Readout.OfferHeading",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer_auto_on",
+      "kind": "text",
+      "english": "Current offer - Auto ON",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Heading of the current Echo offer when Auto is ON. \"Auto ON\" is the Auto switch state; keep it recognisably the same words as the Auto button state.",
+      "consumer": "Readout.OfferHeading",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer_auto_on_short",
+      "kind": "text",
+      "english": "Offer - Auto ON",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Shorter form of \"Current offer - Auto ON\".",
+      "consumer": "Readout.OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer_short",
+      "kind": "text",
+      "english": "Offer",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Shortest form of \"Current offer\" (Auto state unknown).",
+      "consumer": "Readout.OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer_you_choose",
+      "kind": "text",
+      "english": "Current offer - you choose",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Heading of the current Echo offer when Auto is OFF: the player chooses in the game window. Longest form.",
+      "consumer": "Readout.OfferHeading / OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.offer_you_choose_short",
+      "kind": "text",
+      "english": "Offer - you choose",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Shorter form of \"Current offer - you choose\" for a narrow row.",
+      "consumer": "Readout.OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.waiting_offer_data",
+      "kind": "text",
+      "english": "Waiting for offer data",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Heading while the Echo offer has not been read yet; nothing is chosen. Code shows \"... \" before it. Never \"0 offers\".",
+      "consumer": "Readout.WAITING_OFFER_HEADING",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.heading.you_choose",
+      "kind": "text",
+      "english": "You choose",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Shortest form: the player chooses the offer (Auto OFF).",
+      "consumer": "Readout.OfferHeadingForms",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, offer heading row (heading); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.label.guaranteed_offer",
+      "kind": "text",
+      "english": "Guaranteed offer",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Marks an offer the server marked guaranteed. Code shows it inside square brackets \"[...]\". It describes this offer only; no future offer is promised.",
+      "consumer": "Readout.OFFER_GUARANTEED_TAG, Readout.CardLineShown",
+      "familySurface": "hud: Panel offer cards and card hover (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.label.offer_freeze",
+      "kind": "text",
+      "english": "Freeze",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Tag on the card the recommendation freezes (game board action Freeze, keep the card for later). Code shows \"> \" before it. Use the game's word for Freeze.",
+      "consumer": "Readout.OFFER_FREEZE_TAG",
+      "familySurface": "hud: Panel offer cards (Auto OFF) (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.label.offer_pick",
+      "kind": "text",
+      "english": "Wishlist pick",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Tag on the card that the Wishlist recommends taking while Auto is OFF (the player chooses). Code shows \"> \" before it. Display only: it chooses nothing.",
+      "consumer": "Readout.OFFER_PICK_TAG",
+      "familySurface": "hud: Panel offer cards (Auto OFF) (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.label.offer_recommended",
+      "kind": "text",
+      "english": "Recommended",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Tag on the card the recommendation takes while Auto is ON; whether Auto takes it depends on its permissions. Code shows \"> \" before it.",
+      "consumer": "Readout.OFFER_RECOMMENDED_TAG",
+      "familySurface": "hud: Panel offer cards (Auto ON) (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.activate_never",
+      "kind": "template",
+      "english": "Activate a Saved Build: never (the saved {setting} value is not used)",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name autoActivate, never translated"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Info row: Nexus never activates Saved Builds. {setting} is the identifier autoActivate, inserted unchanged.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.allow_freeze",
+      "kind": "template",
+      "english": "Allow Freeze ({setting}): {value}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Checkbox row: allow Auto to Freeze; clicking toggles it via the existing slash command. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.allow_reroll",
+      "kind": "template",
+      "english": "Allow Reroll ({setting}): {value}",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Checkbox row: allow Auto to Reroll; clicking toggles it via the existing slash command. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.auto_reference",
+      "kind": "text",
+      "english": "What Auto may do (Reference)...",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Row that opens the Reference (manual) page about Auto. \"Reference\" is the name of that Help section.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.auto_selected_off",
+      "kind": "text",
+      "english": "Auto: OFF (the Auto button turns it ON after its warning)",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Info row: Auto is OFF; the Auto button turns it on after its consent warning.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.auto_selected_on",
+      "kind": "text",
+      "english": "Auto: ON for this session (the Auto button turns it OFF)",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Info row: Auto is ON for this session.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.auto_settings_title",
+      "kind": "text",
+      "english": "Automation settings",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Title of the Automation settings submenu.",
+      "consumer": "Readout.AutomationSettingsRows title row",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.banish",
+      "kind": "template",
+      "english": "Banish ({setting}): {value}; no in-game switch",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Info row: the Banish permission. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.lock_echoes",
+      "kind": "template",
+      "english": "Lock Wishlist Echoes ({setting}): {value}; set in the Wishlist Editor...",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 312,
+      "group": "readout",
+      "meaning": "Row that opens the Wishlist Editor, where this permission is set. \"...\" means it opens another window. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.orb_never",
+      "kind": "text",
+      "english": "Orb runs: never by Auto; each needs its own approval in Orbs",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Info row: Auto never starts Orb runs. \"Orbs\" is the Orb window.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.read_only",
+      "kind": "text",
+      "english": "Saved data is read-only: a change lasts this session only",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Info row: changes are temporary because saved data is read-only.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.save_run",
+      "kind": "template",
+      "english": "Save a better finished run over the active Saved Build ({setting}): {value}; no in-game switch; Auto OFF stops it",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 435,
+      "group": "readout",
+      "meaning": "Info row: the save permission (overwrites the active Saved Build). {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.take_needed",
+      "kind": "template",
+      "english": "Take needed Echoes ({setting}): {value}; no in-game switch",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 270,
+      "group": "readout",
+      "meaning": "Info row: the Take permission; it has no in-game switch. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.tomes",
+      "kind": "template",
+      "english": "Turn tomes off and on ({setting}): {value}; no in-game switch",
+      "placeholders": [
+        {
+          "name": "setting",
+          "type": "text",
+          "meaning": "saved setting name such as autoPick, never translated"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
+        }
+      ],
+      "resultLimitBytes": 279,
+      "group": "readout",
+      "meaning": "Info row: the tome permission. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.note.auto_on_scope",
+      "kind": "text",
+      "english": "Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "What Auto may do while ON. Keep every limit: choosing offers; saving over the Saved Build only with its save permission; never loading a build or starting Orb runs.",
+      "consumer": "Readout.AUTO_ON_NOTE",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, Auto scope row (note); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.note.waiting_offer_data",
+      "kind": "text",
+      "english": "Waiting for current Echo data. Recommendations and automatic choices resume once the offer is read. Nothing is chosen meanwhile.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Explains the wait for offer data; code shows \"... \" before it. Must keep that nothing is chosen during the wait.",
+      "consumer": "Readout.WAITING_OFFER_NOTE",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, body note (note); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.auto_refused",
+      "kind": "text",
+      "english": "Auto stayed OFF. What helps: point at the Auto button for details.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto stayed OFF for a reason not shown here.",
+      "consumer": "Readout.AutoRefusalText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, inline note after an Auto click that left Auto OFF (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.auto_refused_orb",
+      "kind": "text",
+      "english": "Auto stayed OFF: an Orb run is active or unresolved. What helps: finish or stop it in Orbs (... menu, Orbs / Lost Memories).",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto could not be turned ON because an Orb run is active. \"Orbs / Lost Memories\" names the menu entry of the Orb window; keep it matching that entry.",
+      "consumer": "Readout.AutoRefusalText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, inline note after an Auto click that left Auto OFF (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.auto_refused_status",
+      "kind": "template",
+      "english": "Auto stayed OFF: {status}",
+      "placeholders": [
+        {
+          "name": "status",
+          "type": "text",
+          "meaning": "runtime status line as shown by its owner"
+        }
+      ],
+      "resultLimitBytes": 1099,
+      "group": "readout",
+      "meaning": "Auto stayed OFF, followed by the runtime's reason.",
+      "consumer": "Readout.AutoRefusalText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, inline note after an Auto click that left Auto OFF (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.auto_refused_warning",
+      "kind": "template",
+      "english": "Auto stayed OFF: its overwrite warning is unavailable, and Auto never turns ON without it. What helps: type {command} and report it.",
+      "placeholders": [
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "slash command \"/nexus report\", never translated"
+        }
+      ],
+      "resultLimitBytes": 428,
+      "group": "readout",
+      "meaning": "Auto could not be turned ON because its consent warning cannot be shown. {command} is a slash command and is inserted unchanged.",
+      "consumer": "Readout.AutoRefusalText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, inline note after an Auto click that left Auto OFF (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.charges_estimated",
+      "kind": "template",
+      "english": "{charges} (estimated)",
+      "placeholders": [
+        {
+          "name": "charges",
+          "type": "text",
+          "meaning": "the shown Banish/Reroll/Freeze charge text (readout.status.charges_full)"
+        }
+      ],
+      "resultLimitBytes": 319,
+      "group": "readout",
+      "meaning": "Marks the charge counts as estimated: the game sent placeholder counts that may be wrong.",
+      "consumer": "Readout.Status",
+      "familySurface": "hud: Panel status sentence (Readout.Status) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.charges_full",
+      "kind": "template",
+      "english": "Banish:{banish} Reroll:{reroll} Freeze:{freeze}",
+      "placeholders": [
+        {
+          "name": "banish",
+          "type": "text",
+          "meaning": "Banish charges left, a whole number formatted by code (0 when unreported, legacy)"
+        },
+        {
+          "name": "reroll",
+          "type": "text",
+          "meaning": "Reroll charges left, a whole number formatted by code (0 when unreported, legacy)"
+        },
+        {
+          "name": "freeze",
+          "type": "text",
+          "meaning": "Freeze charges left, a whole number formatted by code (0 when unreported, legacy)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Charges left this run for the three board actions (game terms Banish, Reroll, Freeze). LEGACY line: a count the game has not reported is shown as 0 here (unlike the compact B/R/F row, readout.charge_counts, which shows ?). No space after the colons in English.",
+      "consumer": "Readout.Status after \" | \"",
+      "familySurface": "hud: Panel status sentence (Readout.Status), second charge part (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_client_auto_accept",
+      "kind": "text",
+      "english": "What helps: turn off the game's option to accept loadout Echoes automatically.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Hint: turn off the client's own auto-accept option.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_continues",
+      "kind": "text",
+      "english": "What helps: nothing; it continues by itself.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Hint after a hold reason: no action is needed, it resumes by itself. \"What helps:\" introduces the hint in every hint key.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_disable_addon",
+      "kind": "text",
+      "english": "What helps: disable the other addon in the AddOns list at character selection.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Hint: disable the other automation addon in the client's AddOns list.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_orb",
+      "kind": "text",
+      "english": "What helps: finish, pause or stop the Orb run in Orbs (... menu), or wait until Nexus can read the Orb state.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Hint for an Orb-related hold. \"Orbs\" is the Orb window entry in the panel's \"...\" menu; \"Orb run\" is one Orb refining session.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_point_auto",
+      "kind": "text",
+      "english": "What helps: point at the Auto button for details.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Generic hint: hover the Auto button for the explanation.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.help_wait_without_choosing",
+      "kind": "text",
+      "english": "What helps: wait without choosing; it continues by itself.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Hint: wait and do not choose in the game window.",
+      "consumer": "Readout.AutoHelpHint",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_client_auto_accept",
+      "kind": "text",
+      "english": "The game's own option to accept loadout Echoes automatically is on; Nexus does not act while it is on. Turn it off in the game's options.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Why Auto does not act: the game client's own auto-accept option for loadout Echoes is on.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_loading_screen",
+      "kind": "text",
+      "english": "A loading screen is in progress; Nexus waits until you are in the world.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Why Auto waits: a loading screen is shown.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_manual",
+      "kind": "text",
+      "english": "Auto is OFF: Nexus only recommends.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Auto is switched OFF, so Nexus only recommends. \"Auto OFF\" is the switch state.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_other_addon",
+      "kind": "text",
+      "english": "Another Echo automation addon is loaded; Nexus does not act while it is enabled. Disable that addon to let Nexus act.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Why Auto does not act: another Echo automation addon is enabled.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_settling",
+      "kind": "text",
+      "english": "Nexus waits a few seconds after a loading screen before it acts.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Why Auto waits: a short settle time after a loading screen.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.hold_user_acting",
+      "kind": "text",
+      "english": "You made an Echo choice in the game's window; Nexus waits about 3 seconds before it acts again.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Why Auto waits: the player just chose in the game's Echo window.",
+      "consumer": "Readout.AutoHoldText",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.idle",
+      "kind": "text",
+      "english": "idle",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Lower-case state word: nothing to report and nothing waiting. Keep it short and lower-case if the language allows.",
+      "consumer": "Readout.Status main clause",
+      "familySurface": "hud: Panel status sentence (Readout.Status) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.level_prefixed",
+      "kind": "template",
+      "english": "Lv {level} - {status}",
+      "placeholders": [
+        {
+          "name": "level",
+          "type": "text",
+          "meaning": "character level, a whole number formatted by code"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "meaning": "the already shown status sentence (translated elsewhere)"
+        }
+      ],
+      "resultLimitBytes": 1099,
+      "group": "readout",
+      "meaning": "Character level abbreviation before the status sentence. \"Lv\" = character level (1-80). Keep it very short.",
+      "consumer": "Readout.Status",
+      "familySurface": "hud: Panel status sentence (Readout.Status) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.no_wishlist_advisor",
+      "kind": "text",
+      "english": "No Wishlist assigned - recommendations only",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status when no Wishlist is assigned: Nexus only recommends, it acts on nothing. \"Wishlist\" is the Nexus plan of target Echoes.",
+      "consumer": "Readout.Status main clause",
+      "familySurface": "hud: Panel status sentence (Readout.Status) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.paused_reason",
+      "kind": "template",
+      "english": "Paused: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "shown hold reason (readout.status.hold_* or the UserText wording)"
+        }
+      ],
+      "resultLimitBytes": 648,
+      "group": "readout",
+      "meaning": "Inline note for a selected Auto that is paused, without a hint.",
+      "consumer": "Readout.AutoHoldNote",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.paused_with_hint",
+      "kind": "template",
+      "english": "Paused: {reason} {hint}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "shown hold reason (readout.status.hold_* or the UserText wording)"
+        },
+        {
+          "name": "hint",
+          "type": "text",
+          "meaning": "shown hint (readout.status.help_*)"
+        }
+      ],
+      "resultLimitBytes": 925,
+      "group": "readout",
+      "meaning": "Inline note for a selected Auto that is paused: the reason, then what helps.",
+      "consumer": "Readout.AutoHoldNote",
+      "familySurface": "hud: Nexus HUD panel (main panel), roll area, why a selected Auto is not acting (inline note, Auto hover, Wishlist window) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_awaiting",
+      "kind": "text",
+      "english": "Awaiting result",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: waiting for the result of an action. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_choice",
+      "kind": "text",
+      "english": "Waiting for choice",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: waiting for a choice to be made. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_confirmed",
+      "kind": "text",
+      "english": "Confirmed",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: the result was confirmed (only this word claims a replacement happened). Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_estimated",
+      "kind": "text",
+      "english": "Estimated",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: an estimate, may be wrong. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_loading",
+      "kind": "text",
+      "english": "Loading",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: still loading. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_not_sent",
+      "kind": "text",
+      "english": "Not sent",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: nothing was sent. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_offer",
+      "kind": "text",
+      "english": "Waiting for offer",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: waiting for the next offer. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_paused",
+      "kind": "text",
+      "english": "Paused",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: paused. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_ready",
+      "kind": "text",
+      "english": "Ready",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: ready. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_refused",
+      "kind": "text",
+      "english": "Refused",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: refused. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_requested",
+      "kind": "text",
+      "english": "Request prepared",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: a request was prepared, not yet sent or confirmed. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_sent",
+      "kind": "text",
+      "english": "Sent, not confirmed",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: sent, but no confirmation yet. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_spend_unconfirmed",
+      "kind": "text",
+      "english": "Spend not confirmed",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: a spend (of Orbs/charges) is not confirmed. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_stale",
+      "kind": "text",
+      "english": "Stale",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: out of date. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_stored",
+      "kind": "text",
+      "english": "Stored on this client",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: kept only on this computer, not shared. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_unavailable",
+      "kind": "text",
+      "english": "Unavailable",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: the value cannot be read now. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_unconfirmed",
+      "kind": "text",
+      "english": "Unconfirmed",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: not confirmed; may or may not have happened. Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_unknown",
+      "kind": "text",
+      "english": "Unknown",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status word meaning: not known (never zero, never success). Shown after a code-owned ASCII glyph. The Orb history uses the same English word as its own label (ui/OrbHistory.lua RESULTS, orb family): keep both translations identical.",
+      "consumer": "Readout.StatusParts word, Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.state_with_detail",
+      "kind": "template",
+      "english": "{state}: {detail}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "shown status word (readout.status.state_*)"
+        },
+        {
+          "name": "detail",
+          "type": "text",
+          "meaning": "detail text supplied by the calling window"
+        }
+      ],
+      "resultLimitBytes": 1139,
+      "group": "readout",
+      "meaning": "A status word followed by its detail.",
+      "consumer": "Readout.StatusText",
+      "familySurface": "hud: Shared status vocabulary (panel, Orb history, Guided setup) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.status.waiting_echo_data",
+      "kind": "text",
+      "english": "Waiting for current Echo data - automatic choices paused",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Status while the server has not sent current Echo data; automatic choices are on hold. Not an error.",
+      "consumer": "Readout.Status main clause",
+      "familySurface": "hud: Panel status sentence (Readout.Status) (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.tooltip.charges_legend_auto",
+      "kind": "text",
+      "english": "Shown with Auto OFF, where you choose; with Auto ON Nexus uses these charges itself.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "When the row is shown: with Auto OFF the player chooses; with Auto ON Nexus spends the charges itself.",
+      "consumer": "Readout.ChargesLegend line 4",
+      "familySurface": "hud: Nexus HUD panel: hover over the compact charges row (B:n R:n F:n) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.tooltip.charges_legend_estimated",
+      "kind": "text",
+      "english": "estimated. The counts look like the placeholder the game sends without real counts, so they may be wrong.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Explains the \"~\" mark in the charge row; code shows \"~: \" before it.",
+      "consumer": "Readout.ChargesLegend line 3",
+      "familySurface": "hud: Nexus HUD panel: hover over the compact charges row (B:n R:n F:n) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.tooltip.charges_legend_letters",
+      "kind": "text",
+      "english": "B, R and F: the Banish, Reroll and Freeze charges left this run, as the game reported them when Nexus made its last decision.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "COUPLED with readout.charge_counts (\"B:{banish} R:{reroll} F:{freeze}\"): this line must name exactly the abbreviations the charge row shows and explain each one with its game action (Banish, Reroll, Freeze). If the row uses other letters in your language, use those same letters here, in the same order.",
+      "consumer": "Readout.ChargesLegend line 1",
+      "familySurface": "hud: Nexus HUD panel: hover over the compact charges row (B:n R:n F:n) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.tooltip.charges_legend_unknown",
+      "kind": "text",
+      "english": "the game has not reported that count yet. It is unknown, not zero.",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Explains the \"?\" mark in the charge row; code shows \"?: \" before it (lower-case start continues that). Unknown is not zero.",
+      "consumer": "Readout.ChargesLegend line 2",
+      "familySurface": "hud: Nexus HUD panel: hover over the compact charges row (B:n R:n F:n) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.echo_with_quality",
+      "kind": "template",
+      "english": "{name} ({quality})",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Echo name from game data, never translated"
+        },
+        {
+          "name": "quality",
+          "type": "text",
+          "meaning": "shown quality word (readout.value.quality_*)"
+        }
+      ],
+      "resultLimitBytes": 374,
+      "group": "readout",
+      "meaning": "An Echo name followed by its quality in parentheses, e.g. \"Cinder Lattice (Epic)\".",
+      "consumer": "Readout.CardLineShown, Readout.RecommendationWithTarget",
+      "familySurface": "hud: Panel offer card hover and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_common",
+      "kind": "text",
+      "english": "Common",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Echo quality (rarity) name, as the game names Echo qualities. Use the client's own wording for item/Echo quality Common. The English token stays the internal parse vocabulary; only this shown word changes.",
+      "consumer": "Readout.OfferCard quality, CardLineShown, RecommendationWithTarget target",
+      "familySurface": "hud: Panel offer cards and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_epic",
+      "kind": "text",
+      "english": "Epic",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Echo quality (rarity) name, as the game names Echo qualities. Use the client's own wording for item/Echo quality Epic. The English token stays the internal parse vocabulary; only this shown word changes.",
+      "consumer": "Readout.OfferCard quality, CardLineShown, RecommendationWithTarget target",
+      "familySurface": "hud: Panel offer cards and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_guaranteed",
+      "kind": "template",
+      "english": "{quality} - guaranteed",
+      "placeholders": [
+        {
+          "name": "quality",
+          "type": "text",
+          "meaning": "shown quality word (readout.value.quality_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "readout",
+      "meaning": "Quality of the marked (pick or freeze) card, plus that this offer is guaranteed.",
+      "consumer": "Readout.OfferCard quality",
+      "familySurface": "hud: Panel offer cards (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_legendary",
+      "kind": "text",
+      "english": "Legendary",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Echo quality (rarity) name, as the game names Echo qualities. Use the client's own wording for item/Echo quality Legendary. The English token stays the internal parse vocabulary; only this shown word changes.",
+      "consumer": "Readout.OfferCard quality, CardLineShown, RecommendationWithTarget target",
+      "familySurface": "hud: Panel offer cards and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_rare",
+      "kind": "text",
+      "english": "Rare",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Echo quality (rarity) name, as the game names Echo qualities. Use the client's own wording for item/Echo quality Rare. The English token stays the internal parse vocabulary; only this shown word changes.",
+      "consumer": "Readout.OfferCard quality, CardLineShown, RecommendationWithTarget target",
+      "familySurface": "hud: Panel offer cards and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_uncommon",
+      "kind": "text",
+      "english": "Uncommon",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Echo quality (rarity) name, as the game names Echo qualities. Use the client's own wording for item/Echo quality Uncommon. The English token stays the internal parse vocabulary; only this shown word changes.",
+      "consumer": "Readout.OfferCard quality, CardLineShown, RecommendationWithTarget target",
+      "familySurface": "hud: Panel offer cards and recommendation target (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.quality_unknown",
+      "kind": "text",
+      "english": "Quality unknown",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "The card's Echo quality is not known. Code shows \"? \" before it. Unknown, not a quality name.",
+      "consumer": "Readout.OfferCard quality",
+      "familySurface": "hud: Panel offer cards (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.queue_entry",
+      "kind": "template",
+      "english": "{index}. {name} (predicted)",
+      "placeholders": [
+        {
+          "name": "index",
+          "type": "text",
+          "meaning": "position number 1..n formatted by code"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Echo name from game data, never translated"
+        }
+      ],
+      "resultLimitBytes": 345,
+      "group": "readout",
+      "meaning": "One predicted upcoming guaranteed offer. \"predicted\" because the order is measured, not guaranteed. Two keys: code chooses the [wanted] form (readout.value.queue_wanted) exactly as English did.",
+      "consumer": "Readout.QueueLines",
+      "familySurface": "hud: Predicted guaranteed-offer queue lines (Readout.QueueLines) (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.queue_wanted",
+      "kind": "template",
+      "english": "{index}. {name} [wanted] (predicted)",
+      "placeholders": [
+        {
+          "name": "index",
+          "type": "text",
+          "meaning": "position number 1..n formatted by code"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Echo name from game data, never translated"
+        }
+      ],
+      "resultLimitBytes": 372,
+      "group": "readout",
+      "meaning": "As readout.value.queue_entry, for an Echo the Wishlist wants.",
+      "consumer": "Readout.QueueLines",
+      "familySurface": "hud: Predicted guaranteed-offer queue lines (Readout.QueueLines) (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.setting_not_set",
+      "kind": "text",
+      "english": "not set",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Current value of an Auto permission: the setting was never saved (no effect described). Lower case in English; inserted into permission lines.",
+      "consumer": "Readout OnOff (AutomationScopeLines, AutomationSettingsRows)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning; Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.setting_off",
+      "kind": "text",
+      "english": "off",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Current value of an Auto permission: the permission is saved as off. Lower case in English; inserted into permission lines.",
+      "consumer": "Readout OnOff (AutomationScopeLines, AutomationSettingsRows)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning; Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.setting_on",
+      "kind": "text",
+      "english": "on",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Current value of an Auto permission: the permission is saved as on. Lower case in English; inserted into permission lines.",
+      "consumer": "Readout OnOff (AutomationScopeLines, AutomationSettingsRows)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning; Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.setting_unset_acts_off",
+      "kind": "text",
+      "english": "not set (acts as off)",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Current value of an Auto permission: never saved; the gate treats it as off. Lower case in English; inserted into permission lines.",
+      "consumer": "Readout OnOff (AutomationScopeLines, AutomationSettingsRows)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning; Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.value.setting_unset_acts_on",
+      "kind": "text",
+      "english": "not set (acts as on)",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Current value of an Auto permission: never saved; the gate treats it as on. Lower case in English; inserted into permission lines.",
+      "consumer": "Readout OnOff (AutomationScopeLines, AutomationSettingsRows)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning; Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "server.chat.hardcore_menu_unavailable",
+      "kind": "text",
+      "english": "The Hardcore menu is not available yet. Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu and open it from the server HUD.",
+      "placeholders": [],
+      "group": "server",
+      "meaning": "Code adds the coloured \"Nexus:\" prefix. The quoted text is the name of a Nexus menu row (panel family): use exactly that row's translation. \"Hardcore menu\" is the game's difficulty window.",
+      "consumer": "ServerStatus.OpenHardcoreMenu",
+      "familySurface": "hud: Chat notice when the Hardcore (difficulty) window cannot be opened (chat); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.chat.appearance_applied",
+      "kind": "template",
+      "english": "Appearance: {summary}. {outcome}",
+      "placeholders": [
+        {
+          "name": "summary",
+          "type": "text",
+          "meaning": "shown style and colour (theme.value.summary)"
+        },
+        {
+          "name": "outcome",
+          "type": "text",
+          "meaning": "shown outcome sentence (theme.status.outcome_*)"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "theme",
+      "meaning": "Chat line (code adds \"Nexus: \" before it): the new appearance and whether it was saved.",
+      "consumer": "Theme.Notify",
+      "familySurface": "hud: Chat notice after choosing a style or colour (chat); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.chat.colour_unavailable",
+      "kind": "text",
+      "english": "That colour is not available in this build. Nothing changed.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Refusal: the chosen colour id is unknown in this version; nothing changed.",
+      "consumer": "Theme.SetPalette",
+      "familySurface": "hud: Chat notice (chat); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.chat.style_unavailable",
+      "kind": "text",
+      "english": "That style is not available in this build. Nothing changed.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Refusal: the chosen style id is unknown in this version; nothing changed.",
+      "consumer": "Theme.SetStyle",
+      "familySurface": "hud: Chat notice (chat); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_amethyst",
+      "kind": "text",
+      "english": "Nexus Amethyst",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"amethyst\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_auric",
+      "kind": "text",
+      "english": "Nexus Auric",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"auric\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_ember",
+      "kind": "text",
+      "english": "Nexus Ember",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"ember\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_emerald",
+      "kind": "text",
+      "english": "Nexus Emerald",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"emerald\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_graphite",
+      "kind": "text",
+      "english": "Nexus Graphite",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"graphite\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.palette_sapphire",
+      "kind": "text",
+      "english": "Nexus Sapphire",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus accent colour set. \"Nexus\" is the product name and stays. Saved id \"sapphire\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.style_slate",
+      "kind": "text",
+      "english": "Nexus Slate",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus window style (the earlier dark style). \"Nexus\" stays.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.label.style_vista",
+      "kind": "text",
+      "english": "Nexus Vista",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Name of a Nexus window style. \"Nexus\" is the product name and stays; \"Vista\" may be translated or kept as a name. Saved id \"vista\" is unchanged.",
+      "consumer": "Theme.MenuItems, Theme.Summary",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.colour_choice",
+      "kind": "template",
+      "english": "{palette} ({hue})",
+      "placeholders": [
+        {
+          "name": "palette",
+          "type": "text",
+          "meaning": "shown colour name (theme.label.palette_*)"
+        },
+        {
+          "name": "hue",
+          "type": "text",
+          "meaning": "shown colour word (theme.value.hue_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Row choosing one colour set.",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.colour_default",
+      "kind": "template",
+      "english": "Default ({palette}, {hue})",
+      "placeholders": [
+        {
+          "name": "palette",
+          "type": "text",
+          "meaning": "shown colour name (theme.label.palette_*)"
+        },
+        {
+          "name": "hue",
+          "type": "text",
+          "meaning": "shown colour word (theme.value.hue_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Row choosing the style's own colours (clears the saved colour).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.colour_title",
+      "kind": "text",
+      "english": "Appearance: colour",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Section title above the colour (accent palette) choices.",
+      "consumer": "Theme.MenuItems title",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.style_default",
+      "kind": "template",
+      "english": "{style} (default)",
+      "placeholders": [
+        {
+          "name": "style",
+          "type": "text",
+          "meaning": "shown style name (theme.label.style_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "The default style row.",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.style_title",
+      "kind": "text",
+      "english": "Appearance: style",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Section title above the style choices (\"style\" = structure of windows and buttons).",
+      "consumer": "Theme.MenuItems title",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.unknown_colour",
+      "kind": "template",
+      "english": "Saved colour \"{value}\" is not in this build; it stays saved.",
+      "placeholders": [
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the saved value, shown escaped and shortened, never translated"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Disabled row: the saved colour id is unknown in this version and is kept as saved.",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.menu.unknown_style",
+      "kind": "template",
+      "english": "Saved style \"{value}\" is not in this build; it stays saved.",
+      "placeholders": [
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the saved value, shown escaped and shortened, never translated"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Disabled row: the saved style id is unknown in this version and is kept as saved.",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.status.outcome_database_loading",
+      "kind": "text",
+      "english": "Applied for this session. Local saved data is still loading, so it is not saved yet.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Outcome of the appearance choice: applied now, not saved yet because saved data is loading. Must keep whether it was saved.",
+      "consumer": "Theme.SetStyle/SetPalette message, after theme.chat.appearance_applied",
+      "familySurface": "hud: Chat notice after choosing a style or colour (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.status.outcome_owner_unavailable",
+      "kind": "text",
+      "english": "Applied for this session only. The settings owner is not available, so nothing was saved.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Outcome of the appearance choice: applied for this session only; nothing saved. Must keep whether it was saved.",
+      "consumer": "Theme.SetStyle/SetPalette message, after theme.chat.appearance_applied",
+      "familySurface": "hud: Chat notice after choosing a style or colour (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.status.outcome_saved",
+      "kind": "text",
+      "english": "Saved.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Outcome of the appearance choice: the choice was saved. Must keep whether it was saved.",
+      "consumer": "Theme.SetStyle/SetPalette message, after theme.chat.appearance_applied",
+      "familySurface": "hud: Chat notice after choosing a style or colour (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.status.outcome_session_read_only",
+      "kind": "text",
+      "english": "Applied for this session only. Saved data is kept unchanged and read-only by this build.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Outcome of the appearance choice: applied for this session only; saved data is read-only. Must keep whether it was saved.",
+      "consumer": "Theme.SetStyle/SetPalette message, after theme.chat.appearance_applied",
+      "familySurface": "hud: Chat notice after choosing a style or colour (status); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.tooltip.appearance_help",
+      "kind": "block",
+      "english": "Appearance changes only how Nexus windows look. Style sets the structure (Nexus Vista is the default; Nexus Slate is the earlier shared dark style of the imported 1.19.3 source and test.9094, with the same colours and shapes; the Orb windows, plain in test.9094, now use it too). Colour sets the accents; Nexus Amethyst purple is the Vista default. The difficulty / Soul Ash card keeps its own look, and no choice changes automation or gameplay.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Explains Appearance. Use the same translations as theme.label.style_vista, theme.label.style_slate and theme.label.palette_amethyst. Keep \"1.19.3\" and \"test.9094\". \"Soul Ash\" is the game currency name.",
+      "consumer": "Theme.HELP",
+      "familySurface": "hud: Nexus Options menu, hover over the Appearance row (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.tooltip.style_slate",
+      "kind": "text",
+      "english": "The earlier shared dark style of the imported 1.19.3 source and test.9094, with the same colours and shapes. The Orb windows, plain in test.9094, now use it too.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Hover description of the Nexus Slate style. \"1.19.3\" and \"test.9094\" are version names: keep unchanged.",
+      "consumer": "Theme.MenuItems tooltipText",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.tooltip.style_vista",
+      "kind": "text",
+      "english": "Default. A deep, quiet backdrop with Nexus Amethyst purple accents and glow.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Hover description of the Nexus Vista style. \"Nexus Amethyst\" is a colour name (theme.label.palette_amethyst): use the same translation.",
+      "consumer": "Theme.MenuItems tooltipText",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (tooltip); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_blue",
+      "kind": "text",
+      "english": "blue",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: blue).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_gold",
+      "kind": "text",
+      "english": "gold",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: gold).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_gray",
+      "kind": "text",
+      "english": "gray",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: gray).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_green",
+      "kind": "text",
+      "english": "green",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: green).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_orange",
+      "kind": "text",
+      "english": "orange",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: orange).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.hue_purple",
+      "kind": "text",
+      "english": "purple",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Plain colour word shown in parentheses after a colour-set name, lower case in English (here: purple).",
+      "consumer": "Theme.MenuItems",
+      "familySurface": "hud: Appearance menu (Nexus Options > Appearance) and Settings window Appearance page (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "theme.value.summary",
+      "kind": "template",
+      "english": "{style}, {palette}",
+      "placeholders": [
+        {
+          "name": "style",
+          "type": "text",
+          "meaning": "shown style name (theme.label.style_*)"
+        },
+        {
+          "name": "palette",
+          "type": "text",
+          "meaning": "shown colour name (theme.label.palette_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "The current style and colour names, comma separated.",
+      "consumer": "Theme.Summary (Panel options row \"Appearance: <summary>\")",
+      "familySurface": "hud: Nexus Options menu \"Appearance: ...\" row and the Appearance chat notice (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.label.build_author",
+      "kind": "text",
+      "english": "Community build author",
+      "placeholders": [],
+      "group": "unit_tooltip",
+      "meaning": "This player shared a build in the Build Library.",
+      "consumer": "Nameplate",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.label.leaderboard_rank",
+      "kind": "template",
+      "english": "{rank} on leaderboard  {dps}  {category}",
+      "placeholders": [
+        {
+          "name": "rank",
+          "type": "text",
+          "meaning": "coloured ordinal rank (unit_tooltip.value.rank_*)"
+        },
+        {
+          "name": "dps",
+          "type": "text",
+          "meaning": "coloured DPS number such as 12k or 1.25M"
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "meaning": "record category (unit_tooltip.value.category_*)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "unit_tooltip",
+      "meaning": "The player's place on the local Nexus leaderboard, their DPS and the record category. Two spaces separate the parts in English. Code adds the build title before it.",
+      "consumer": "Nameplate rank line",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.label.network_peer",
+      "kind": "text",
+      "english": "Nexus user seen on the build-sharing network",
+      "placeholders": [],
+      "group": "unit_tooltip",
+      "meaning": "This player was seen using Nexus build sharing (Sync).",
+      "consumer": "Nameplate",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.label.nexus_user",
+      "kind": "text",
+      "english": "Nexus user",
+      "placeholders": [],
+      "group": "unit_tooltip",
+      "meaning": "Badge line: this player uses Nexus. Also the marker that prevents adding the lines twice (compared with itself in the same session).",
+      "consumer": "Nameplate badge",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (label); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.category_dummy",
+      "kind": "text",
+      "english": "Dummy",
+      "placeholders": [],
+      "group": "unit_tooltip",
+      "meaning": "Short label of the DPS record category: a target dummy record.",
+      "consumer": "Nameplate rank line",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.category_lk",
+      "kind": "text",
+      "english": "LK",
+      "placeholders": [],
+      "group": "unit_tooltip",
+      "meaning": "Short label of the DPS record category: a Lich King boss record. Very short abbreviation.",
+      "consumer": "Nameplate rank line",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.rank_nd",
+      "kind": "template",
+      "english": "{rank}nd",
+      "placeholders": [
+        {
+          "name": "rank",
+          "type": "text",
+          "meaning": "rank number formatted by code"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "unit_tooltip",
+      "meaning": "Leaderboard rank as an ordinal (\"1st\", \"2nd\", \"3rd\", \"4th\"). English picks among four suffixes by the number; code keeps that choice (no ordinal grammar). Translate each form; languages without suffixes may use the same form in all four keys (e.g. \"{rank}.\").",
+      "consumer": "Nameplate OrdinalSuffix",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.rank_rd",
+      "kind": "template",
+      "english": "{rank}rd",
+      "placeholders": [
+        {
+          "name": "rank",
+          "type": "text",
+          "meaning": "rank number formatted by code"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "unit_tooltip",
+      "meaning": "Leaderboard rank as an ordinal (\"1st\", \"2nd\", \"3rd\", \"4th\"). English picks among four suffixes by the number; code keeps that choice (no ordinal grammar). Translate each form; languages without suffixes may use the same form in all four keys (e.g. \"{rank}.\").",
+      "consumer": "Nameplate OrdinalSuffix",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.rank_st",
+      "kind": "template",
+      "english": "{rank}st",
+      "placeholders": [
+        {
+          "name": "rank",
+          "type": "text",
+          "meaning": "rank number formatted by code"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "unit_tooltip",
+      "meaning": "Leaderboard rank as an ordinal (\"1st\", \"2nd\", \"3rd\", \"4th\"). English picks among four suffixes by the number; code keeps that choice (no ordinal grammar). Translate each form; languages without suffixes may use the same form in all four keys (e.g. \"{rank}.\").",
+      "consumer": "Nameplate OrdinalSuffix",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
+    },
+    {
+      "key": "unit_tooltip.value.rank_th",
+      "kind": "template",
+      "english": "{rank}th",
+      "placeholders": [
+        {
+          "name": "rank",
+          "type": "text",
+          "meaning": "rank number formatted by code"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "unit_tooltip",
+      "meaning": "Leaderboard rank as an ordinal (\"1st\", \"2nd\", \"3rd\", \"4th\"). English picks among four suffixes by the number; code keeps that choice (no ordinal grammar). Translate each form; languages without suffixes may use the same form in all four keys (e.g. \"{rank}.\").",
+      "consumer": "Nameplate OrdinalSuffix",
+      "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
+      "cohort": "fullui:hud"
     },
     {
       "key": "library.body.detail_incomplete",
@@ -11070,7 +13371,173 @@
         "panel.heading.progress",
         "panel.heading.still_needed",
         "panel.heading.extra_copies",
-        "panel.button.options"
+        "panel.button.options",
+        "callboard.heading.rewards_by_difficulty",
+        "callboard.label.difficulty_hc1",
+        "callboard.label.difficulty_hc2",
+        "callboard.label.difficulty_hc3",
+        "callboard.label.difficulty_hc4",
+        "callboard.label.difficulty_hc5",
+        "callboard.label.difficulty_normal",
+        "callboard.status.failed",
+        "callboard.status.ready_turn_in",
+        "callboard.tooltip.higher_difficulty_rewards",
+        "callboard.tooltip.rewards_unavailable",
+        "callboard.value.reward_ash",
+        "callboard.value.reward_xp",
+        "layout.button.orb_mini_panel",
+        "layout.button.orb_mini_short",
+        "readout.body.recommendation_target",
+        "readout.body.scope_activate",
+        "readout.body.scope_auto_off",
+        "readout.body.scope_auto_on",
+        "readout.body.scope_banish",
+        "readout.body.scope_freeze",
+        "readout.body.scope_intro",
+        "readout.body.scope_lock",
+        "readout.body.scope_orbs",
+        "readout.body.scope_paused_because",
+        "readout.body.scope_read_only",
+        "readout.body.scope_reroll",
+        "readout.body.scope_save",
+        "readout.body.scope_take",
+        "readout.body.scope_tomes",
+        "readout.body.take_target",
+        "readout.body.tome_permission",
+        "readout.heading.auto_on",
+        "readout.heading.offer",
+        "readout.heading.offer_auto_on",
+        "readout.heading.offer_auto_on_short",
+        "readout.heading.offer_short",
+        "readout.heading.offer_you_choose",
+        "readout.heading.offer_you_choose_short",
+        "readout.heading.waiting_offer_data",
+        "readout.heading.you_choose",
+        "readout.label.guaranteed_offer",
+        "readout.label.offer_freeze",
+        "readout.label.offer_pick",
+        "readout.label.offer_recommended",
+        "readout.menu.activate_never",
+        "readout.menu.allow_freeze",
+        "readout.menu.allow_reroll",
+        "readout.menu.auto_reference",
+        "readout.menu.auto_selected_off",
+        "readout.menu.auto_selected_on",
+        "readout.menu.auto_settings_title",
+        "readout.menu.banish",
+        "readout.menu.lock_echoes",
+        "readout.menu.orb_never",
+        "readout.menu.read_only",
+        "readout.menu.save_run",
+        "readout.menu.take_needed",
+        "readout.menu.tomes",
+        "readout.note.auto_on_scope",
+        "readout.note.waiting_offer_data",
+        "readout.status.auto_refused",
+        "readout.status.auto_refused_orb",
+        "readout.status.auto_refused_status",
+        "readout.status.auto_refused_warning",
+        "readout.status.charges_estimated",
+        "readout.status.charges_full",
+        "readout.status.help_client_auto_accept",
+        "readout.status.help_continues",
+        "readout.status.help_disable_addon",
+        "readout.status.help_orb",
+        "readout.status.help_point_auto",
+        "readout.status.help_wait_without_choosing",
+        "readout.status.hold_client_auto_accept",
+        "readout.status.hold_loading_screen",
+        "readout.status.hold_manual",
+        "readout.status.hold_other_addon",
+        "readout.status.hold_settling",
+        "readout.status.hold_user_acting",
+        "readout.status.idle",
+        "readout.status.level_prefixed",
+        "readout.status.no_wishlist_advisor",
+        "readout.status.paused_reason",
+        "readout.status.paused_with_hint",
+        "readout.status.state_awaiting",
+        "readout.status.state_choice",
+        "readout.status.state_confirmed",
+        "readout.status.state_estimated",
+        "readout.status.state_loading",
+        "readout.status.state_not_sent",
+        "readout.status.state_offer",
+        "readout.status.state_paused",
+        "readout.status.state_ready",
+        "readout.status.state_refused",
+        "readout.status.state_requested",
+        "readout.status.state_sent",
+        "readout.status.state_spend_unconfirmed",
+        "readout.status.state_stale",
+        "readout.status.state_stored",
+        "readout.status.state_unavailable",
+        "readout.status.state_unconfirmed",
+        "readout.status.state_unknown",
+        "readout.status.state_with_detail",
+        "readout.status.waiting_echo_data",
+        "readout.tooltip.charges_legend_auto",
+        "readout.tooltip.charges_legend_estimated",
+        "readout.tooltip.charges_legend_letters",
+        "readout.tooltip.charges_legend_unknown",
+        "readout.value.echo_with_quality",
+        "readout.value.quality_common",
+        "readout.value.quality_epic",
+        "readout.value.quality_guaranteed",
+        "readout.value.quality_legendary",
+        "readout.value.quality_rare",
+        "readout.value.quality_uncommon",
+        "readout.value.quality_unknown",
+        "readout.value.queue_entry",
+        "readout.value.queue_wanted",
+        "readout.value.setting_not_set",
+        "readout.value.setting_off",
+        "readout.value.setting_on",
+        "readout.value.setting_unset_acts_off",
+        "readout.value.setting_unset_acts_on",
+        "server.chat.hardcore_menu_unavailable",
+        "theme.chat.appearance_applied",
+        "theme.chat.colour_unavailable",
+        "theme.chat.style_unavailable",
+        "theme.label.palette_amethyst",
+        "theme.label.palette_auric",
+        "theme.label.palette_ember",
+        "theme.label.palette_emerald",
+        "theme.label.palette_graphite",
+        "theme.label.palette_sapphire",
+        "theme.label.style_slate",
+        "theme.label.style_vista",
+        "theme.menu.colour_choice",
+        "theme.menu.colour_default",
+        "theme.menu.colour_title",
+        "theme.menu.style_default",
+        "theme.menu.style_title",
+        "theme.menu.unknown_colour",
+        "theme.menu.unknown_style",
+        "theme.status.outcome_database_loading",
+        "theme.status.outcome_owner_unavailable",
+        "theme.status.outcome_saved",
+        "theme.status.outcome_session_read_only",
+        "theme.tooltip.appearance_help",
+        "theme.tooltip.style_slate",
+        "theme.tooltip.style_vista",
+        "theme.value.hue_blue",
+        "theme.value.hue_gold",
+        "theme.value.hue_gray",
+        "theme.value.hue_green",
+        "theme.value.hue_orange",
+        "theme.value.hue_purple",
+        "theme.value.summary",
+        "unit_tooltip.label.build_author",
+        "unit_tooltip.label.leaderboard_rank",
+        "unit_tooltip.label.network_peer",
+        "unit_tooltip.label.nexus_user",
+        "unit_tooltip.value.category_dummy",
+        "unit_tooltip.value.category_lk",
+        "unit_tooltip.value.rank_nd",
+        "unit_tooltip.value.rank_rd",
+        "unit_tooltip.value.rank_st",
+        "unit_tooltip.value.rank_th"
       ]
     },
     {
@@ -11721,12 +14188,13 @@
       "format",
       "template"
     ],
-    "totalKeys": 822,
+    "totalKeys": 988,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
       "chat": 160,
-      "records": 276
+      "records": 276,
+      "hud": 166
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
