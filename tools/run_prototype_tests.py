@@ -436,6 +436,8 @@ NAMES += ['l10n_pseudo_support_guards']
 NAMES += ['l10n_ui_library']
 # Full-UI family chat (helper a35a4b3aaf9604e36): chat lines, ~40 slash commands, lifecycle/update notices and view-model labels through the seam under a pseudo pack; exact English via the UserText rewrite path; fallback, slots, passivity (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_chat']
+# Full-UI family records (helper ab3569b2cf0edc78d): Leaderboard, loading status, log viewer, support report window and release note through the seam under a pseudo pack; support payload bytes identical across languages; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_records']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

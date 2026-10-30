@@ -94,7 +94,8 @@ local all=table.concat(sources,'\n')
 -- consumer call that binds that key to the same widget (shedLabel, the
 -- extra-copies heading) plus the exact English the real seam gives the key
 -- in this English session. A data string alone, or a key no consumer binds,
--- never counts; every other label below stays a source literal.
+-- never counts; every other label below is a source literal or a key bound
+-- the same way (see the generic rule below).
 local KEYED={['EXTRA COPIES']={key='panel.heading.extra_copies',
  bind='shedLabel:SetText((Nexus.Localization.Text("panel.heading.extra_copies")))'}}
 local panelFile=assert(io.open('ui/Panel.lua','rb'));local panelSource=panelFile:read('*a');panelFile:close()
@@ -115,14 +116,38 @@ for _,label in ipairs({'Wishlist Editor','Create & assign','Create unassigned','
    and text==label and source=='base' and why==nil and english==label and base=='base' and reason==nil
    and panelSource:find(keyed.bind,1,true)~=nil,'real label: '..label..' (key '..keyed.key..' bound by ui/Panel.lua, exact English)')
  else
-  check(all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r'),'real label: '..label)
+  -- A source literal, or (full-UI localization) a reviewed static key whose
+  -- exact English in this English session is the label and that one of
+  -- these UI sources binds through a seam lookup. A data string alone, or a
+  -- key no consumer looks up, never counts.
+  local literal=all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r')
+  local bound
+  if not literal then
+   for _,key in ipairs(Nexus.Localization.Keys()) do
+    local english,base,reason=Nexus.Localization.Resolve(key)
+    if english==label and base=='base' and reason==nil and Nexus.Localization.Kind(key)=='text'
+     and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)) then bound=key;break end
+   end
+  end
+  check(literal or (Nexus.Localization.ActiveLanguage()=='enUS' and bound),'real label: '..label)
  end
 end
 
--- Quoted status lines exist as shown (colour codes aside).
+-- Quoted status lines exist as shown (colour codes aside): in a source
+-- literal, or (full-UI localization) inside the exact English of a reviewed
+-- key that one of these UI sources looks up through the seam.
+local function keyedShows(line)
+ for _,key in ipairs(Nexus.Localization.Keys()) do
+  local kind=Nexus.Localization.Kind(key)
+  local english,base,reason
+  if kind=='text' or kind=='block' then english,base,reason=Nexus.Localization.Resolve(key) end
+  if english and base=='base' and reason==nil and has(english,line)
+   and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)) then return key end
+ end
+end
 for _,line in ipairs({'Waiting for the game to confirm the last Echo action.','No Echo choice is showing.','Auto ON — paused',
  'Owner identity not established.','Not prepared','Updating results...','Status: '}) do
- check(has(all,line),'real status text: '..line)
+ check(has(all,line) or (Nexus.Localization.ActiveLanguage()=='enUS' and keyedShows(line)),'real status text: '..line)
 end
 
 -- 7. Conservative fit: no unbreakable token wider than the Help body
