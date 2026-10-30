@@ -20,6 +20,17 @@ local communityRenderer
 local startupFrame, startupTitle, startupText, startupResume, startupView
 local startupBar, startupProgress, startupLocal
 
+-- Full UI localization (library family): the startup frame's code-owned text
+-- resolves through the Nexus.Localization seam at display time.
+local function T(key) return (Nexus.Localization.Text(key)) end
+
+-- The view identity WaitForStartup receives ("Community", "Leaderboard") is
+-- also the window key compared below; only its shown name is looked up.
+local STARTUP_VIEW_KEYS = {
+    Community="library.title.startup_view_community",
+    Leaderboard="library.title.startup_view_leaderboard",
+}
+
 local function StartupStatus()
     if type(Nexus.StartupStatus)=="function" then return Nexus.StartupStatus() end
     return {state="ready"} -- standalone consumers/tests retain the old contract
@@ -28,13 +39,13 @@ end
 local function StartupMessage(status)
     if Nexus.LoadingStatus then return Nexus.LoadingStatus.Detail(status) end
     if not status.coreReady then
-        return status.state=="failed" and "Saved-data validation stopped. No readiness checks were bypassed. Use /nexus status for the reason."
-            or "Validating local saved data... Controls become available after validation completes."
+        return status.state=="failed" and T("library.status.startup_validation_stopped")
+            or T("library.status.startup_validating")
     end
     if status.state=="failed" then
-        return "Shared data preparation failed. Local Wishlist and Echo controls remain available. Use /nexus log errors for details."
+        return T("library.status.startup_shared_failed")
     end
-    return "Preparing shared build data in the background...\nLocal Wishlist and Echo controls are available. This view will open when ready."
+    return T("library.status.startup_preparing") .. "\n" .. T("library.status.startup_local_available")
 end
 
 -- Opening a shared-data view before its data is ready is a read-only UI action.
@@ -74,7 +85,7 @@ function M.WaitForStartup(view, resume)
         startupProgress:SetPoint("TOPLEFT",24,-162);startupProgress:SetSize(280,42);startupProgress:SetJustifyH("LEFT")
         startupLocal=CreateFrame("Button","NexusSharedLoadingWishlists",startupFrame,"UIPanelButtonTemplate")
         startupLocal:SetFrameStrata("DIALOG");startupLocal:SetFrameLevel(112)
-        startupLocal:SetPoint("BOTTOMRIGHT",-24,18);startupLocal:SetSize(154,25);startupLocal:SetText("Use local Wishlists")
+        startupLocal:SetPoint("BOTTOMRIGHT",-24,18);startupLocal:SetSize(154,25);startupLocal:SetText(T("library.button.startup_local_wishlists"))
         startupLocal:SetScript("OnClick",function()
             if StartupStatus().coreReady and Nexus.WishlistEditor then
                 startupFrame:Hide();Nexus.WishlistEditor.Show()
@@ -110,7 +121,9 @@ function M.WaitForStartup(view, resume)
         end)
     end
     startupView,startupResume=view,resume
-    startupTitle:SetText("Nexus - "..tostring(view).." |cff999999Loading|r")
+    local viewKey=STARTUP_VIEW_KEYS[view]
+    startupTitle:SetText(Nexus.Localization.Format("library.title.startup", {
+        view=viewKey and T(viewKey) or tostring(view)}).." |cff999999"..T("library.status.startup_loading").."|r")
     startupText:SetText(StartupMessage(status))
     if Nexus.LoadingStatus then
         local percent,text=Nexus.LoadingStatus.Progress(status)

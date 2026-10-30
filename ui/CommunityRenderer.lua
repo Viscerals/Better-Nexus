@@ -6,23 +6,48 @@ Nexus.CommunityInternals = Nexus.CommunityInternals or {}
 
 local Renderer = {}
 
+-- Full UI localization (library family): every code-owned visible text of the
+-- Build Library, its forms, popups and the Sync mode dialog resolves through
+-- the Nexus.Localization seam at display time (looked up per call, never
+-- cached at load). Build titles, descriptions, links, owner, player and Echo
+-- names, saved values, codes and raw reasons from other owners are data:
+-- they enter templates only through "text" slots and are never translated.
+-- Codes and identity tables (mode ids, scope "mine", class tokens, sort keys)
+-- keep their spelling; only the shown label is looked up.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+local function Count(value) return Nexus.Localization.Count(value) end
+
+-- A StaticPopup text with the client's own "%s" argument slot: a template
+-- renders its name slot as the byte 1, every literal "%" of the (possibly
+-- translated) text is escaped for the client's string.format, then the marker
+-- becomes "%s". A translation can never add a format directive.
+local POPUP_ARG = "\1"
+local function PopupText(text)
+    return (tostring(text):gsub("%%", "%%%%"):gsub(POPUP_ARG, "%%s"))
+end
+
 -- Shown in a detail view when the record's owner is not established (the
 -- name itself carries no provenance text). A statement about identity only:
 -- it says nothing about the record's Echoes, locked targets or DPS.
-local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
+local function OwnerNotEstablished()
+    return "|cff999999" .. T("library.status.owner_not_established") .. "|r"
+end
 
 -- The current Sync mode, in the words Help, the Welcome and the Leaderboard
--- use. Off and Manual are core/SyncModePolicy.lua's own text. Automatic names
--- what that mode may send without a click (traced in
+-- use. Off and Manual are core/SyncModePolicy.lua's own text (its display
+-- form, DisplayText; the raw reason Text stays the compared value). Automatic
+-- names what that mode may send without a click (traced in
 -- docs/9020_SYNC_AND_NO_GUARANTEE.md). Reading the mode writes nothing.
-local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
 local function SyncModeLine()
     local policy = Nexus and Nexus.SyncModePolicy
     if not (policy and type(policy.Mode) == "function") then return nil end
     local mode = policy.Mode()
-    if mode == "automatic" then return SYNC_AUTOMATIC_TEXT end
+    if mode == "automatic" then return T("sync.status.mode_automatic") end
+    if type(policy.DisplayText) == "function" then return policy.DisplayText(mode) end
     return type(policy.Text) == "function" and policy.Text(mode) or nil
 end
+
 
 -- The one optional Sync mode choice (beside Sync Now). Opening it makes an
 -- uncommitted draft of the current effective mode; selecting an option
@@ -31,46 +56,63 @@ end
 -- nothing. Only Apply calls SyncModePolicy.ApplyChoice, which saves through
 -- the Store owner and reports the result read back from the Store. Neither
 -- opening nor Apply starts, flushes or pumps any Sync work.
+-- MODES and the keys of LABEL are the saved mode identities; the shown words
+-- of each mode, its help and each refusal reason come from the seam (keys
+-- below), so a translated label never decides which mode is meant.
 local SyncModeDialog = {
     MODES = {"automatic", "manual", "off"},
-    LABEL = {automatic="Automatic", manual="Manual", off="Off"},
+    LABEL = {automatic="sync.label.mode_automatic", manual="sync.label.mode_manual",
+        off="sync.label.mode_off"},
     HELP = {
-        automatic="May send without a click: login requests, answers and newly eligible character-best DPS on Training Dummy or Lich King (Echoes, any locked Echoes, player info).",
-        manual="Sends only what you start: Sync Now, and a Share with the answers to players who fetch it.",
-        off="Sends nothing. Nexus still receives, and local records are kept.",
+        automatic="sync.body.mode_automatic_help",
+        manual="sync.body.mode_manual_help",
+        off="sync.body.mode_off_help",
     },
+    -- Status/result codes of SyncModePolicy (Store ChoiceStatus) to the key
+    -- of their shown reason. An unlisted result is shown as its owner gave it.
     REASON = {
-        database="no saved data is loaded",
-        ["saved-format"]="this saved data uses a format this version keeps read-only",
-        loading="saved data is still loading",
-        lifecycle="saved data is not usable right now",
-        settings="the saved settings are not usable",
-        stale="the saved data changed after this window opened; open Sync mode again",
-        replaced="saved data was replaced after loading; reload the interface first",
-        ["invalid-value"]="that is not a Sync mode",
-        unavailable="saving is not available",
-        ["not read back"]="the saved choice could not be read back",
+        database="sync.error.choice_no_database",
+        ["saved-format"]="sync.error.choice_saved_format",
+        loading="sync.error.choice_loading",
+        lifecycle="sync.error.choice_lifecycle",
+        settings="sync.error.choice_settings",
+        stale="sync.error.choice_stale",
+        replaced="sync.error.choice_replaced",
+        ["invalid-value"]="sync.error.choice_invalid_value",
+        unavailable="sync.error.choice_unavailable",
+        ["not read back"]="sync.error.choice_not_read_back",
     },
 }
 
+-- The shown word of a mode identity, or nil for an unknown one.
+function SyncModeDialog.Label(mode)
+    local key = SyncModeDialog.LABEL[mode]
+    return key and T(key) or nil
+end
+
+function SyncModeDialog.Reason(code)
+    local key = SyncModeDialog.REASON[code]
+    return key and T(key) or nil
+end
+
 function SyncModeDialog.Describe(status)
     if type(status) ~= "table" then
-        return "Current: unknown (the saved-data owner is not available)."
+        return T("sync.status.current_unknown")
     end
-    local label = SyncModeDialog.LABEL[status.effective] or "Automatic"
-    if status.explicit then return "Current: " .. label .. ", your saved choice." end
+    local label = SyncModeDialog.Label(status.effective) or SyncModeDialog.Label("automatic")
+    if status.explicit then return TF("sync.status.current_explicit", {mode=label}) end
     if status.storedChoiceState == "recognized" then
-        return "Current: " .. label .. ". Saved choice "
-            .. (SyncModeDialog.LABEL[status.storedChoice] or "unknown") .. " not applied."
+        return TF("sync.status.current_choice_not_applied", {mode=label,
+            choice=SyncModeDialog.Label(status.storedChoice) or T("sync.value.mode_unknown")})
     elseif status.storedChoiceState == "invalid" then
-        return "Current: " .. label .. ". Saved choice invalid; not applied."
+        return TF("sync.status.current_choice_invalid", {mode=label})
     elseif status.storedChoiceState ~= "absent" then
-        return "Current: " .. label .. ". Saved choice unknown."
+        return TF("sync.status.current_choice_unknown", {mode=label})
     end
     if status.inheritedSource == "legacy" then
-        return "Current: " .. label .. ", from accepted saved settings of another Nexus version (no choice of yours saved)."
+        return TF("sync.status.current_legacy", {mode=label})
     end
-    return "Current: " .. label .. ", the default (no choice saved)."
+    return TF("sync.status.current_default", {mode=label})
 end
 
 function SyncModeDialog.Select(mode)
@@ -98,7 +140,7 @@ function SyncModeDialog.Ensure()
     end)
     d.title = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     d.title:SetPoint("TOP", 0, -16)
-    d.title:SetText("Sync mode")
+    d.title:SetText(T("sync.title.mode_dialog"))
     local function Text(name, template, y, height)
         local fs = d:CreateFontString(nil, "OVERLAY", template)
         fs:SetPoint("TOPLEFT", 24, y)
@@ -120,28 +162,28 @@ function SyncModeDialog.Ensure()
         option.label:SetPoint("TOPLEFT", 50, top - 2)
         option.label:SetSize(386, 17)
         option.label:SetJustifyH("LEFT")
-        option.label:SetText(SyncModeDialog.LABEL[mode])
+        option.label:SetText(SyncModeDialog.Label(mode))
         option.help = d:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         option.help:SetPoint("TOPLEFT", 50, top - 20)
         option.help:SetSize(386, 51)
         option.help:SetJustifyH("LEFT")
         option.help:SetJustifyV("TOP")
-        option.help:SetText(SyncModeDialog.HELP[mode])
+        option.help:SetText(T(SyncModeDialog.HELP[mode]))
         option:SetScript("OnClick", function(self) SyncModeDialog.Select(self.mode) end)
         d.options[index] = option
     end
     Text("note", "GameFontDisableSmall", -312, 34):SetText(
-        "Apply saves only your choice. It sends nothing by itself, and messages already sent stay sent.")
+        T("sync.note.apply_saves_only"))
     Text("result", "GameFontHighlightSmall", -350, 34)
     d.apply = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     d.apply:SetSize(84, 22)
     d.apply:SetPoint("BOTTOMRIGHT", -112, 16)
-    d.apply:SetText("Apply")
+    d.apply:SetText(T("sync.button.apply"))
     d.apply:SetScript("OnClick", function() SyncModeDialog.Apply() end)
     d.cancel = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     d.cancel:SetSize(84, 22)
     d.cancel:SetPoint("BOTTOMRIGHT", -20, 16)
-    d.cancel:SetText("Cancel")
+    d.cancel:SetText(T("sync.button.cancel"))
     d.cancel:SetScript("OnClick", function() d:Hide() end)
     d.close = CreateFrame("Button", nil, d, "UIPanelCloseButton")
     d.close:SetSize(32, 32)
@@ -179,9 +221,9 @@ function SyncModeDialog.Open(owner, onApplied)
         d.result:SetText("")
     else
         d.apply:Disable()
-        d.result:SetText("Sync mode cannot be changed here: "
-            .. (SyncModeDialog.REASON[status and status.reason] or "saving is not available")
-            .. ". Nothing will be saved.")
+        d.result:SetText(TF("sync.status.choice_not_writable", {
+            reason=SyncModeDialog.Reason(status and status.reason)
+                or SyncModeDialog.Reason("unavailable")}))
     end
     SyncModeDialog.Select(d._draft.mode)
     d:Show()
@@ -194,32 +236,132 @@ function SyncModeDialog.Apply()
     if not draft then return false, "no-draft" end
     local policy = Nexus.SyncModePolicy
     if not (policy and type(policy.ApplyChoice) == "function") then
-        d.result:SetText("Not saved: saving is not available.")
+        d.result:SetText(T("sync.status.not_saved_unavailable"))
         return false, "unavailable"
     end
     local ok, result, status = policy.ApplyChoice(draft.mode, draft.token)
-    local chosen = SyncModeDialog.LABEL[draft.mode]
-    local now = type(status) == "table" and SyncModeDialog.LABEL[status.effective] or "unknown"
+    local chosen = SyncModeDialog.Label(draft.mode)
+    local now = type(status) == "table" and SyncModeDialog.Label(status.effective)
+        or T("sync.value.mode_unknown")
     local line
     if ok then
         line = result == "unchanged"
-            and ("Unchanged: " .. chosen .. " was already your saved choice. Nothing was written or sent.")
-            or ("Saved: your Sync mode is now " .. now .. ". Nothing was sent by this change.")
+            and TF("sync.status.choice_unchanged", {mode=chosen})
+            or TF("sync.status.choice_saved", {mode=now})
         d.current:SetText(SyncModeDialog.Describe(status))
         d._draft = {mode=status.effective, token=status.token}
         local applied = d._onApplied
         if type(applied) == "function" then pcall(applied, result, status) end
     else
-        line = "Not saved: " .. (SyncModeDialog.REASON[result] or tostring(result))
-            .. ". Your Sync mode is still " .. now .. "."
+        line = TF("sync.status.choice_not_saved", {
+            reason=SyncModeDialog.Reason(result) or tostring(result), mode=now})
         if result == "stale" then
             d._draft = nil
             d.apply:Disable()
         end
     end
     d.result:SetText(line)
-    print("|cff7fd5ffNexus:|r Sync mode: " .. line)
+    print("|cff7fd5ffNexus:|r " .. TF("sync.chat.mode_result", {result=line}))
     return ok, result, status
+end
+
+-- The three Library confirmations: question (a template whose {name} is the
+-- client's own %s argument, the build title), optional body sentence, and
+-- whether the client also substitutes a second argument (the Share note).
+-- The dialog's text and buttons are (re)set from the seam when it is defined
+-- and before each show; arguments and data are unchanged.
+local POPUP = {
+    NEXUS_LOCKIN_BUILD = {question="library.popup.lockin_question",
+        body="library.popup.lockin_overwrites", button1="library.button.lockin_confirm",
+        button2="library.button.popup_cancel"},
+    NEXUS_STOP_SHARING_BUILD = {question="library.popup.stop_sharing_question",
+        body="library.popup.stop_sharing_scope", button1="library.button.stop_sharing_confirm",
+        button2="library.button.popup_cancel"},
+    NEXUS_SHARE_SAVED_BUILD = {question="library.popup.share_saved_question",
+        note=true, button1="library.button.share_confirm",
+        button2="library.button.popup_cancel"},
+}
+local function LocalizePopup(which)
+    local dialog = type(StaticPopupDialogs) == "table" and StaticPopupDialogs[which] or nil
+    local spec = POPUP[which]
+    if not (type(dialog) == "table" and spec) then return end
+    local text = PopupText(TF(spec.question, {name=POPUP_ARG}))
+    if spec.body then text = text .. "\n" .. PopupText(T(spec.body)) end
+    if spec.note then text = text .. "\n%s" end
+    dialog.text, dialog.button1, dialog.button2 = text, T(spec.button1), T(spec.button2)
+end
+
+-- Class token -> key of its shown class name (one explicit table).
+local CLASS_KEYS = {
+    DEATHKNIGHT="library.label.class_death_knight", DRUID="library.label.class_druid",
+    HUNTER="library.label.class_hunter", MAGE="library.label.class_mage",
+    PALADIN="library.label.class_paladin", PRIEST="library.label.class_priest",
+    ROGUE="library.label.class_rogue", SHAMAN="library.label.class_shaman",
+    WARLOCK="library.label.class_warlock", WARRIOR="library.label.class_warrior",
+    UNKNOWN="library.label.class_unknown",
+}
+
+-- A Share source's kind (core/CommunityController.lua sourceKind) to the key
+-- of its shown label. The value itself is matched elsewhere and stays raw.
+local SOURCE_KIND_KEYS = {
+    ["Wishlist"]="library.label.source_kind_wishlist",
+    ["Saved Build"]="library.label.source_kind_saved_build",
+}
+
+-- Sync's outcome code of a stopped Share (Retry Share detail line) to the
+-- key of its shown word; an unlisted code is shown as given.
+local SHARE_OUTCOME_KEYS = {
+    stopped="library.value.share_outcome_stopped", expired="library.value.share_outcome_expired",
+    dropped="library.value.share_outcome_dropped", rejected="library.value.share_outcome_rejected",
+    reset="library.value.share_outcome_reset",
+    ["throttle-exhausted"]="library.value.share_outcome_throttle_exhausted",
+}
+
+-- The Sync Now button's three states, named by the code-owned English state
+-- constants RenderSyncStatus chooses between (never by shown text).
+local SYNC_BUTTON_KEYS = {
+    ["Preparing..."]="library.button.sync_preparing",
+    ["Listening..."]="library.button.sync_listening",
+    ["Sync Now"]="library.button.sync_now",
+}
+local function SyncButtonLabel(state)
+    local key = SYNC_BUTTON_KEYS[state]
+    return key and T(key) or state
+end
+
+-- The control labels the responsive layout measures (LayoutMetrics
+-- Community) are the shown labels. The English table given by the caller is
+-- the measured form it always had; a translated search hint (shown with its
+-- trailing "...") replaces the shorter English measure only when a
+-- translation is active.
+local MEASURED_LABELS = {
+    scope="library.button.scope_all", mine="library.button.scope_mine",
+    class="library.button.class_current", qualified="library.label.require_both_records",
+    sync="library.button.sync_listening", mode="library.button.sync_mode",
+    share="library.button.share_build",
+}
+local function MeasuredLabels(labels)
+    for field, key in pairs(MEASURED_LABELS) do labels[field] = T(key) end
+    labels.sort = TF("library.button.sort_label", {sort=T("library.label.sort_dps")})
+    local hint, source = Nexus.Localization.Text("library.placeholder.search")
+    if source == "candidate" then labels.search = hint end
+    return labels
+end
+
+-- A short reason from the Community controller (or this view) as shown:
+-- the controller's display map when present, else the raw reason. The raw
+-- reason is what code compares; this result is only printed or displayed.
+-- The saved Sync mode's own refusal is shown in its display words first.
+local function ShownReason(reason)
+    local policy = Nexus and Nexus.SyncModePolicy
+    if type(reason) == "string" and policy and type(policy.IsModeReason) == "function"
+        and type(policy.DisplayReason) == "function" and policy.IsModeReason(reason) then
+        return policy.DisplayReason(reason)
+    end
+    local internals = Nexus and Nexus.CommunityInternals
+    local map = internals and internals.ShownReason
+    if type(map) == "function" and type(reason) == "string" then return map(reason) end
+    return reason
 end
 
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
@@ -637,50 +779,51 @@ function Renderer.New(options)
     end
 
     StaticPopupDialogs["NEXUS_LOCKIN_BUILD"] = {
-        text = "Lock in '%s'?\nThis overwrites your current active wishlist.",
-        button1 = "Lock In", button2 = "Cancel",
+        text = "", button1 = "", button2 = "",
         OnAccept = function(_, data)
             local accepted = ControllerInstance().AcceptLockIn(data)
             if accepted then M.Refresh() end
         end,
         timeout=0, whileDead=true, hideOnEscape=true,
     }
+    LocalizePopup("NEXUS_LOCKIN_BUILD")
 
+    -- The raw catalog codes stay codes; only the shown clause is looked up.
     local function StopSharingReason(value)
         if value == "ROOT_MUTATION_PENDING" or value == "ROOT_ADMISSION_PENDING" then
-            return "the shared build catalog is still preparing"
+            return T("library.error.stop_sharing_catalog_preparing")
         elseif value == "REMOTE_TOMBSTONE_ORDER_UNPROVEN" then
-            return "remote withdrawal is not supported by the available Sync protocol"
+            return T("library.error.stop_sharing_remote_unsupported")
         end
-        return type(value) == "string" and value ~= "" and value
-            or "local removal was not confirmed"
+        return type(value) == "string" and value ~= "" and ShownReason(value)
+            or T("library.error.stop_sharing_not_confirmed")
     end
 
     local function ShowStopSharingResult(ok, result)
         local outcome = type(result) == "table" and result or {}
         if outcome.localRemoved == true then
             if outcome.queueAdmitted then
-                print("|cff4dff80Nexus:|r Build stopped sharing locally; withdrawal queued. Peer removal is not confirmed.")
+                print("|cff4dff80Nexus:|r " .. T("library.chat.stop_sharing_queued"))
             elseif outcome.retryPending then
-                print("|cffffc040Nexus:|r Build stopped sharing locally; the Sync queue is full. Withdrawal retry is pending. Peer removal is not confirmed.")
+                print("|cffffc040Nexus:|r " .. T("library.chat.stop_sharing_retry_pending"))
             else
-                print("|cffffc040Nexus:|r Build stopped sharing locally; withdrawal not queued: "
-                    .. StopSharingReason(outcome.queueReason or "Sync unavailable") .. ". Peer removal is not confirmed.")
+                print("|cffffc040Nexus:|r " .. TF("library.chat.stop_sharing_not_queued", {
+                    reason=StopSharingReason(outcome.queueReason or "Sync unavailable")}))
             end
         elseif ok and outcome.localPending == true then
-            print("|cffffc040Nexus:|r Stop Sharing accepted. Waiting for local removal; the shared record is still present. Peer removal is not confirmed.")
+            print("|cffffc040Nexus:|r " .. T("library.chat.stop_sharing_pending"))
         elseif not ok then
-            print("|cffff6060Nexus:|r Stop Sharing refused: "
-                .. StopSharingReason(outcome.storageReason or outcome.queueReason or result) .. ".")
+            print("|cffff6060Nexus:|r " .. TF("library.chat.stop_sharing_refused", {
+                reason=StopSharingReason(outcome.storageReason or outcome.queueReason or result)}))
         else
-            print("|cffffc040Nexus:|r Stop Sharing: local removal is not confirmed. Peer removal is not confirmed.")
+            print("|cffffc040Nexus:|r " .. T("library.chat.stop_sharing_unconfirmed"))
         end
     end
 
     local function FinishStopSharing(id)
         local build = LoadBuild(id)
         if not build or not IsOwnBuild(build) then
-            print("|cffff6060Nexus:|r Stop Sharing refused: this is not your shared build.")
+            print("|cffff6060Nexus:|r " .. T("library.chat.stop_sharing_not_yours"))
             M.Refresh()
             return
         end
@@ -761,8 +904,7 @@ function Renderer.New(options)
     end
 
     StaticPopupDialogs["NEXUS_STOP_SHARING_BUILD"] = {
-        text = "Stop sharing '%s'?\nThis removes only the shared Nexus record. Server Saved Builds and Wishlists are unchanged.",
-        button1 = "Stop Sharing", button2 = "Cancel",
+        text = "", button1 = "", button2 = "",
         OnShow = function(self)
             -- StaticPopup slots are shared. Raise only this confirmation above
             -- the DIALOG Library, and retain the slot's layer for later reuse.
@@ -785,12 +927,14 @@ function Renderer.New(options)
         end,
         timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     }
+    LocalizePopup("NEXUS_STOP_SHARING_BUILD")
 
     function M.LockInSelected()
         local payload = ControllerInstance().PrepareLockInSelected()
         if not payload then return end
         local displayTitle = DisplayRemoteText(payload.title, 1024, false)
-            or "this build"
+            or T("library.value.this_build")
+        LocalizePopup("NEXUS_LOCKIN_BUILD")
         return StaticPopup_Show(
             "NEXUS_LOCKIN_BUILD", displayTitle, nil, payload)
     end
@@ -807,12 +951,12 @@ function Renderer.New(options)
         ROGUE={1.00,0.96,0.41},SHAMAN={0.00,0.44,0.87},
         WARLOCK={0.53,0.53,0.93},WARRIOR={0.78,0.61,0.43},
     }
-    local CLASS_LABEL = {
-        DEATHKNIGHT="Death Knight",DRUID="Druid",HUNTER="Hunter",
-        MAGE="Mage",PALADIN="Paladin",PRIEST="Priest",ROGUE="Rogue",
-        SHAMAN="Shaman",WARLOCK="Warlock",WARRIOR="Warrior",
-        UNKNOWN="Unknown",
-    }
+    -- The shown class name of a class token, looked up when read; the token
+    -- itself (filters, colours, icons, saved records) is never translated.
+    local CLASS_LABEL = setmetatable({}, {__index=function(_, token)
+        local key = CLASS_KEYS[token]
+        return key and T(key) or nil
+    end})
     local CLASS_ICON = {
         DEATHKNIGHT="Interface\\Icons\\Spell_DeathKnight_IceboundFortitude",
         DRUID="Interface\\Icons\\Spell_Nature_NaturesBlessing",
@@ -1237,13 +1381,15 @@ function Renderer.New(options)
             results=virtualStats.results,
             statusRows=statusRows,
             viewportWidth=viewportWidth,viewportHeight=viewportHeight,
-            labels={
+            -- The measured labels are the shown ones (English fallback
+            -- below, as the layout owner has always measured it).
+            labels=MeasuredLabels({
                 search="Search title, author, or description",
                 scope="All Shared",mine="Mine",
                 class="Current Class Only",qualified="Require both DPS records",
                 sort="Sort: Highest DPS",sync="Listening...",
                 mode="Sync mode...",share="Share Build",
-            },
+            }),
         })
         if not layoutOk or type(layout) ~= "table" then return false end
         local previousLayout = frame._responsiveLayout
@@ -1326,10 +1472,14 @@ local function BuildWishlistCandidates()
 end
 
 local function WishlistLabel(wl)
-    local kind = DisplayRemoteText(
-        (wl and wl.sourceKind) or "Wishlist", 128, false) or "Wishlist"
+    -- sourceKind is the controller's value ("Wishlist" / "Saved Build"); only
+    -- its shown label is looked up, any other value is shown as given.
+    local sourceKind = (wl and wl.sourceKind) or "Wishlist"
+    local kindKey = SOURCE_KIND_KEYS[sourceKind]
+    local kind = kindKey and T(kindKey) or DisplayRemoteText(sourceKind, 128, false)
+        or T("library.label.source_kind_wishlist")
     local name = wl and DisplayRemoteText(wl.name, 1024, false) or nil
-    if not name then name = "Unnamed " .. kind end
+    if not name then name = TF("library.label.source_unnamed", {kind=kind}) end
     -- Stated permanent copies are not part of the 79 ordinary copies.
     local count,permanent=0,0
     for _,e in ipairs((wl and wl.echoes) or {}) do
@@ -1345,9 +1495,10 @@ local function WishlistLabel(wl)
     local roles=type(controller.ShareSourceRoles)=="function" and controller.ShareSourceRoles(wl) or nil
     if roles then count,permanent=roles.ordinary,roles.permanent end
     if permanent>0 then
-        return string.format("[%s] %s  —  %d / 79 + %d / 6 locked", kind, name, count, permanent)
+        return TF("library.menu.source_row_locked", {kind=kind, name=name,
+            count=Count(count), locked=Count(permanent)})
     end
-    return string.format("[%s] %s  —  %d / 79", kind, name, count)
+    return TF("library.menu.source_row", {kind=kind, name=name, count=Count(count)})
 end
 
 -- The controller's one sentence for the latest Share, coloured by its state.
@@ -1360,8 +1511,8 @@ local function ShareStatusLine()
     local okStatus, s = pcall(controller.ShareStatus)
     if state ~= "refused" and okStatus and type(s) == "table"
         and type(s.ordinaryCopies) == "number" and type(s.permanentCopies) == "number" then
-        text = text .. string.format(" Roles: %d ordinary + %d locked Echo copies.",
-            s.ordinaryCopies, s.permanentCopies)
+        text = text .. " " .. TF("library.status.share_roles", {
+            ordinary=Count(s.ordinaryCopies), locked=Count(s.permanentCopies)})
     end
     local colour = state == "refused" and "|cffff6060"
         or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
@@ -1376,17 +1527,21 @@ function M.RetryStateText(status, mode)
     status = type(status) == "table" and status or {}
     local policy = Nexus.SyncModePolicy
     local reason = type(status.reason) == "string" and status.reason or nil
-    local why = tostring(status.outcome or "stopped")
+    -- The raw outcome code and reason decide; only their shown words change.
+    local outcome = tostring(status.outcome or "stopped")
+    local outcomeKey = SHARE_OUTCOME_KEYS[outcome]
+    local why = outcomeKey and T(outcomeKey) or outcome
     if reason and policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(reason) then
-        why = why .. ", by the saved Sync mode"
-    elseif reason and reason ~= "" and reason ~= "none" and reason ~= why then
-        why = why .. ": " .. reason:gsub("%.+$", "")
+        why = TF("library.status.retry_why_mode", {outcome=why})
+    elseif reason and reason ~= "" and reason ~= "none" and reason ~= outcome then
+        why = TF("library.status.retry_why_reason", {outcome=why,
+            reason=ShownReason((reason:gsub("%.+$", "")))})
     end
-    local now = mode == "off" and "Sync is Off now: a Retry is refused and nothing is sent; Sync mode... changes that."
-        or mode == "manual" and "Sync is Manual now: Retry Share queues it again only when you click."
-        or mode == "automatic" and "Retry Share queues it again only when you click."
-        or "The current Sync mode could not be read."
-    return "Last Share was not sent (" .. why .. "). " .. now
+    local now = mode == "off" and T("library.status.retry_mode_off")
+        or mode == "manual" and T("library.status.retry_mode_manual")
+        or mode == "automatic" and T("library.status.retry_mode_automatic")
+        or T("library.status.retry_mode_unknown")
+    return TF("library.status.retry_last_share", {why=why, mode=now})
 end
 
 -- The result of the user's own last Share click belongs to the form. A refusal
@@ -1461,13 +1616,13 @@ local function RefreshPostWishlistMenu()
         AddMenuButton(menu._list, WishlistLabel(c), function()
             ControllerInstance().SetPostWishlist(c)
             SetPostRefusal(nil)                         -- another source: the refusal was about the earlier one
-            postWishlistBtn:SetText("Source: "
-                .. (DisplayRemoteText(c.name, 1024, false) or "Unnamed"))
+            postWishlistBtn:SetText(TF("library.button.source_named", {
+                name=DisplayRemoteText(c.name, 1024, false) or T("library.value.source_unnamed")}))
             RefreshPostPopupPreview()
         end, i, menu)
     end
     if #candidates == 0 then
-        AddMenuButton(menu._list, "No saved builds or wishlists found", function() end, 1, menu)
+        AddMenuButton(menu._list, T("library.menu.no_sources"), function() end, 1, menu)
         postWishlistMenu:SetHeight(40)
     end
 end
@@ -1481,7 +1636,7 @@ local function RefreshPostClassMenu()
             ControllerInstance().SetPostClass(token)
             SetPostRefusal(nil)
             local cc = CLASS_COLOR[token] or {1,1,1}
-            postClassBtn:SetText("Class: " .. CLASS_LABEL[token])
+            postClassBtn:SetText(TF("library.button.class_named", {class=CLASS_LABEL[token]}))
             postClassBtn:GetFontString():SetTextColor(cc[1],cc[2],cc[3])
             RefreshPostPopupPreview()
         end, i)
@@ -1499,18 +1654,18 @@ local function EnsurePostPopup()
     pcall(function() p:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}}) end)
 
     local titleBar = p:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
-    titleBar:SetPoint("TOP",0,-14); titleBar:SetText("Share a Nexus Build")
+    titleBar:SetPoint("TOP",0,-14); titleBar:SetText(T("library.title.share_form"))
     local close = CreateFrame("Button",nil,p,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function()
         HidePostMenus(); ClearPostDescriptionFocus(); p:Hide()
     end)
 
-    local tl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tl:SetPoint("TOPLEFT",16,-38); tl:SetText("Build Title:")
+    local tl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tl:SetPoint("TOPLEFT",16,-38); tl:SetText(T("library.label.share_build_title"))
     postTitleBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate"); postTitleBox:SetSize(330,20); postTitleBox:SetPoint("TOPLEFT",16,-54); postTitleBox:SetAutoFocus(false)
     ConfigureSafeEditableText(postTitleBox, 80, false)
     p._postTitleBox = postTitleBox
 
-    local dl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); dl:SetPoint("TOPLEFT",16,-88); dl:SetText("Description (what makes this build stand out):")
+    local dl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); dl:SetPoint("TOPLEFT",16,-88); dl:SetText(T("library.label.share_description"))
     local descBg = CreateFrame("Frame",nil,p); descBg:SetPoint("TOPLEFT",14,-104); descBg:SetSize(334,180)
     pcall(function() descBg:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=3,right=3,top=3,bottom=3}}); descBg:SetBackdropColor(0,0,0,0.5) end)
     local descScroll = CreateFrame("ScrollFrame","NexusPostDescriptionScroll",descBg,
@@ -1523,18 +1678,18 @@ local function EnsurePostPopup()
     p._postDescScroll = descScroll
     p._postDescBox = postDescBox
 
-    local chooseLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); chooseLabel:SetPoint("TOPLEFT",16,-302); chooseLabel:SetText("1. Choose the exact server loadout or wishlist to share:")
-    postWishlistBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postWishlistBtn:SetSize(334,26); postWishlistBtn:SetPoint("TOPLEFT",16,-320); postWishlistBtn:SetText("Source: Select a saved build or wishlist")
+    local chooseLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); chooseLabel:SetPoint("TOPLEFT",16,-302); chooseLabel:SetText(T("library.label.share_choose_source"))
+    postWishlistBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postWishlistBtn:SetSize(334,26); postWishlistBtn:SetPoint("TOPLEFT",16,-320); postWishlistBtn:SetText(TF("library.button.source_named", {name=T("library.value.source_select")}))
     p._postWishlistBtn = postWishlistBtn
     postWishlistMenu = MakeDropdownMenu(p,334); postWishlistMenu:SetPoint("TOPLEFT",16,-348)
     postWishlistBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostWishlistMenu(); postWishlistMenu:Show() end)
 
-    postClassBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postClassBtn:SetSize(334,26); postClassBtn:SetPoint("TOPLEFT",16,-360); postClassBtn:SetText("Class: Select a class")
+    postClassBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postClassBtn:SetSize(334,26); postClassBtn:SetPoint("TOPLEFT",16,-360); postClassBtn:SetText(TF("library.button.class_named", {class=T("library.value.class_select")}))
     p._postClassBtn = postClassBtn
     postClassMenu = MakeDropdownMenu(p,334); postClassMenu:SetPoint("TOPLEFT",16,-388)
     postClassBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostClassMenu(); postClassMenu:Show() end)
 
-    local previewLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); previewLabel:SetPoint("TOPLEFT",380,-38); previewLabel:SetText("Exact Echo Loadout Preview:")
+    local previewLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); previewLabel:SetPoint("TOPLEFT",380,-38); previewLabel:SetText(T("library.label.share_preview"))
     local previewWishlist = p:CreateFontString(nil,"OVERLAY","GameFontHighlight"); previewWishlist:SetPoint("TOPLEFT",380,-54); previewWishlist:SetSize(350,16); previewWishlist:SetJustifyH("LEFT"); p._previewWishlist=previewWishlist
     local previewClass = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); previewClass:SetPoint("TOPLEFT",380,-74); previewClass:SetSize(350,14); previewClass:SetJustifyH("LEFT"); p._previewClass=previewClass
     local previewSummary = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); previewSummary:SetPoint("TOPLEFT",380,-92); previewSummary:SetSize(350,14); previewSummary:SetJustifyH("LEFT"); p._previewSummary=previewSummary
@@ -1549,24 +1704,26 @@ local function EnsurePostPopup()
     end
     local noWishlistNote=p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); noWishlistNote:SetPoint("TOPLEFT",380,-112); noWishlistNote:SetSize(350,80); noWishlistNote:SetJustifyH("LEFT"); noWishlistNote:SetJustifyV("TOP"); p._noWishlistNote=noWishlistNote
 
-    local postGoBtn=CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postGoBtn:SetSize(150,28); postGoBtn:SetPoint("BOTTOM",0,16); postGoBtn:SetText("Share Build"); p._postGoBtn=postGoBtn
+    local postGoBtn=CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postGoBtn:SetSize(150,28); postGoBtn:SetPoint("BOTTOM",0,16); postGoBtn:SetText(T("library.button.share_form_submit")); p._postGoBtn=postGoBtn
     postGoBtn:SetScript("OnClick",function()
         local wishlist, class = ControllerInstance().PostDraft()
-        if not wishlist or not class then print("|cffff6060Nexus:|r Select a source loadout and class before sharing."); return end
+        if not wishlist or not class then print("|cffff6060Nexus:|r "..T("library.chat.share_needs_source_class")); return end
         local ok,value,outcome=ControllerInstance().PostCurrentWishlist(
             postTitleBox:_NexusRawText(), postDescBox:_NexusRawText(),
             wishlist, class)
         if not ok then
             -- The form, its draft and its source stay. A retained earlier
             -- Share keeps its own sentence; a refusal states its reason.
-            print("|cffff6060Nexus:|r "..tostring(value))
-            SetPostRefusal(not outcome and tostring(value) or nil)
+            -- The refusal is shown in its display words; the controller's
+            -- raw value is what it compares.
+            print("|cffff6060Nexus:|r "..tostring(ShownReason(value)))
+            SetPostRefusal(not outcome and tostring(ShownReason(value)) or nil)
             viewDiagnostic.pump.Status(true, true)
             return
         end
         SetPostRefusal(nil)
         -- One sentence, from the same owner that the status line reads.
-        print("Nexus: "..(ShareStatusLine() or "Share accepted."))
+        print("Nexus: "..(ShareStatusLine() or T("library.chat.share_accepted")))
         ClearPostDescriptionFocus(); p:Hide(); M.Refresh()
     end)
     -- The open form follows its Share by itself: queued -> sent, a retry, a
@@ -1606,12 +1763,12 @@ RefreshPostPopupPreview = function()
     local echoes = ControllerInstance().WishlistEchoes(wl)
     if not wl or not echoes or #echoes==0 then
         for _,row in ipairs(postPopup._previewRows or {}) do row:Hide() end
-        postPopup._noWishlistNote:SetText("|cffff6060No source selected.|r\n\nChoose a server Saved Build or Wishlist to share.")
+        postPopup._noWishlistNote:SetText("|cffff6060"..T("library.status.share_no_source").."|r\n\n"..T("library.body.share_choose_source"))
         postPopup._noWishlistNote:Show(); postPopup._previewWishlist:SetText(""); postPopup._previewSummary:SetText(""); postPopup._previewClass:SetText(""); postPopup._postGoBtn:Disable(); return
     end
     postPopup._noWishlistNote:Hide(); postPopup._postGoBtn:Enable()
     local wishlistName = DisplayRemoteText(wl.name, 1024, false)
-        or "Unnamed Echo Wishlist"
+        or T("library.value.unnamed_wishlist")
     local classToken=selectedClass or ControllerInstance().InferBuildClass(echoes) or ""
     postPopup._previewWishlist:SetText("|cffffd200"..wishlistName.."|r")
     -- The rows and role counts that a Share of this source carries. The
@@ -1621,8 +1778,8 @@ RefreshPostPopupPreview = function()
         roles, rolesWhy = ControllerInstance().ShareSourceRoles(wl)
     end
     if roles then
-        postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d locked Echo copies|r",
-            roles.ordinary, roles.permanent))
+        postPopup._previewSummary:SetText("|cff888888"..TF("library.status.share_preview_roles", {
+            ordinary=Count(roles.ordinary), locked=Count(roles.permanent)}).."|r")
         -- The settled lists, not the raw source rows: on the >79 path the
         -- source rows also contain the copies that become permanent.
         local shown = {}
@@ -1634,13 +1791,13 @@ RefreshPostPopupPreview = function()
         end
         echoes = shown
     else
-        postPopup._previewSummary:SetText("|cffff6060Roles not settled: Share Build states the reason|r")
+        postPopup._previewSummary:SetText("|cffff6060"..T("library.status.share_roles_unsettled").."|r")
     end
-    local cc=CLASS_COLOR[(classToken or ""):upper()] or {1,1,1}; postPopup._previewClass:SetTextColor(cc[1],cc[2],cc[3]); postPopup._previewClass:SetText("Posting as: "..(CLASS_LABEL[(classToken or ""):upper()] or classToken or "Select a class"))
+    local cc=CLASS_COLOR[(classToken or ""):upper()] or {1,1,1}; postPopup._previewClass:SetTextColor(cc[1],cc[2],cc[3]); postPopup._previewClass:SetText(TF("library.label.share_posting_as", {class=CLASS_LABEL[(classToken or ""):upper()] or classToken or T("library.value.class_select")}))
     local child=postPopup._previewChild
     for i,row in ipairs(postPopup._previewRows or {}) do
         local e=echoes[i]
-        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and "  (locked)" or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
+        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and ("  "..T("library.label.preview_locked_suffix")) or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
     end
     child:SetHeight(math.max(1,#echoes*22)); pcall(function() postPopup._previewScroll:SetVerticalScroll(0) end)
 end
@@ -1676,14 +1833,14 @@ function M.ShowPostBuild()
     postPopup._postDescScroll:SetVerticalScroll(0)
     local displayWishlistName = wl and DisplayRemoteText(
         wl.name, 1024, false) or nil
-    postWishlistBtn:SetText("Source: " .. (displayWishlistName
-        or "Select a saved build or wishlist"))
+    postWishlistBtn:SetText(TF("library.button.source_named", {name=displayWishlistName
+        or T("library.value.source_select")}))
     if selectedClass ~= "" then
         local cc = CLASS_COLOR[selectedClass:upper()] or {1,1,1}
-        postClassBtn:SetText("Class: "..(CLASS_LABEL[selectedClass:upper()] or selectedClass))
+        postClassBtn:SetText(TF("library.button.class_named", {class=CLASS_LABEL[selectedClass:upper()] or selectedClass}))
         pcall(function() postClassBtn:GetFontString():SetTextColor(cc[1],cc[2],cc[3]) end)
     else
-        postClassBtn:SetText("Class: Select a class")
+        postClassBtn:SetText(TF("library.button.class_named", {class=T("library.value.class_select")}))
     end
     postPopup:ClearAllPoints(); postPopup:SetPoint("CENTER"); postPopup:Show(); RefreshPostPopupPreview()
 end
@@ -1704,7 +1861,7 @@ local function EnsureEditPopup()
     p._dragHandle = InstallPopupDragHandle(p)
 
     local title = p:CreateFontString(nil,"OVERLAY","GameFontNormal")
-    title:SetPoint("TOP",0,-12); title:SetText("Edit Build")
+    title:SetPoint("TOP",0,-12); title:SetText(T("library.title.edit_form"))
 
     local close = CreateFrame("Button",nil,p,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function()
@@ -1714,14 +1871,14 @@ local function EnsureEditPopup()
     end)
 
     local tl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    tl:SetPoint("TOPLEFT",16,-36); tl:SetText("Title:")
+    tl:SetPoint("TOPLEFT",16,-36); tl:SetText(T("library.label.edit_title"))
     editTitleBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate")
     editTitleBox:SetSize(310,20); editTitleBox:SetPoint("TOPLEFT",20,-52); editTitleBox:SetAutoFocus(false)
     ConfigureSafeEditableText(editTitleBox, 80, false)
     p._editTitleBox = editTitleBox
 
     local dl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    dl:SetPoint("TOPLEFT",16,-80); dl:SetText("Description:")
+    dl:SetPoint("TOPLEFT",16,-80); dl:SetText(T("library.label.edit_description"))
     local descBg = CreateFrame("Frame",nil,p)
     descBg:SetPoint("TOPLEFT",18,-96); descBg:SetSize(324,86)
     pcall(function()
@@ -1752,23 +1909,23 @@ local function EnsureEditPopup()
     -- The two actions stay 10 px apart (they used to overlap by 4 px).
     editEchoBtn:SetSize(202,22)
     editEchoBtn:SetPoint("BOTTOMLEFT",18,16)
-    editEchoBtn:SetText("Use Active Wishlist Echoes")
+    editEchoBtn:SetText(T("library.button.edit_use_active_wishlist"))
     p._editEchoBtn = editEchoBtn
     editEchoBtn:SetScript("OnClick",function()
         local draft = ControllerInstance().EditDraft()
         if not draft then return end
         local ok, result = ControllerInstance().UpdateFromWishlist(draft.id)
         if ok then
-            print(string.format("|cff4dff80Nexus:|r Echo list replaced with the active wishlist (%d Echoes).", result))
+            print("|cff4dff80Nexus:|r "..TF("library.chat.edit_echoes_replaced", {count=Count(result)}))
             ControllerInstance().ClearEditDraft()
             ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
         else
-            print("|cffff6060Nexus:|r " .. tostring(result))
+            print("|cffff6060Nexus:|r " .. tostring(ShownReason(result)))
         end
     end)
 
     local saveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
-    saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
+    saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText(T("library.button.edit_save_details"))
     p._saveBtn = saveBtn
     saveBtn:SetScript("OnClick",function()
         local description = editDescBox:_NexusRawText()
@@ -1781,8 +1938,8 @@ local function EnsureEditPopup()
         if not ControllerInstance().UpdateEditDraft(
             editTitleBox:_NexusRawText(), description) then return end
         local ok, err, outcome = ControllerInstance().CommitEditDraft()
-        if ok then print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally.")); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
-        else print("|cffff6060Nexus:|r "..tostring(err)) end
+        if ok then print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or T("library.chat.edit_saved_locally"))); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
+        else print("|cffff6060Nexus:|r "..tostring(ShownReason(err))) end
     end)
     pcall(function()
         p:SetBackdrop({ bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -1810,10 +1967,10 @@ function M.ToggleEditPopup(id)
     editPopup._editingId = id
     if prepared.locked then
         editEchoBtn:Disable()
-        editLockText:SetText("|cffffd200Echo list is read-only: a DPS record is attached.|r Share a new build to use different Echoes.")
+        editLockText:SetText("|cffffd200"..T("library.status.echo_list_read_only").."|r "..T("library.note.edit_share_new_for_echoes"))
     else
         editEchoBtn:Enable()
-        editLockText:SetText("Change title/description, or replace the Echo list with your current active wishlist.")
+        editLockText:SetText(T("library.note.edit_can_replace_echoes"))
     end
     editTitleBox:_NexusSetRawText(prepared.title)
     editTitleBox:HighlightText(0, 0)
@@ -1825,7 +1982,7 @@ function M.ToggleEditPopup(id)
     editPopup:ClearAllPoints(); editPopup:SetPoint("CENTER")
     editPopup:Show()
     if editPopup._nexusDescriptionUnseeded then
-        print("|cffffd200Nexus:|r The stored description is not shown here: the Edit dialog holds 2000 bytes. Save Details keeps it unless you type a new description.")
+        print("|cffffd200Nexus:|r "..T("library.chat.edit_description_unseeded"))
     end
 end
 
@@ -1907,7 +2064,7 @@ local function EnsureDetailPanel(parent)
     -- can paste a URL (EbonBuilds page, video, sim link, etc.) and viewers
     -- get a box they can copy out in one click. Field is hidden when empty.
     local linkLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    linkLabel:SetText("|cff888888DISCORD BUILD LINK|r")
+    linkLabel:SetText("|cff888888"..T("library.label.discord_link").."|r")
     p.linkLabel = linkLabel
 
     local linkBox = CreateFrame("EditBox",nil,body,"InputBoxTemplate")
@@ -1933,7 +2090,7 @@ local function EnsureDetailPanel(parent)
     local linkSaveBtn = CreateFrame("Button",nil,body,"UIPanelButtonTemplate")
     linkSaveBtn:SetSize(72,18)
     linkSaveBtn:SetPoint("LEFT",linkBox,"RIGHT",8,0)
-    linkSaveBtn:SetText("Save Link")
+    linkSaveBtn:SetText(T("library.button.save_link"))
     linkSaveBtn:SetScript("OnClick", function()
         local link = linkBox:_NexusRawText():gsub("^%s+",""):gsub("%s+$","")
         local selected = SelectedId()
@@ -1943,28 +2100,28 @@ local function EnsureDetailPanel(parent)
         local ok, err, outcome = EditBuild(
             selected, build.title, build.description, link)
         if ok then
-            print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally."))
+            print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or T("library.chat.edit_saved_locally")))
             M.Refresh()
         else
-            print("|cffff6060Nexus:|r " .. tostring(err))
+            print("|cffff6060Nexus:|r " .. tostring(ShownReason(err)))
         end
     end)
     linkSaveBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Save this link to the build",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Viewers can click the field and press Ctrl+C to copy it.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.save_link_title"),0.9,0.9,0.9,true)
+        GameTooltip:AddLine(T("library.tooltip.save_link_copy_hint"),0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     linkSaveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     p.linkSaveBtn = linkSaveBtn
 
     p.echoLabel = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    p.echoLabel:SetText("Echoes:")
+    p.echoLabel:SetText(T("library.label.detail_echoes"))
 
     -- Locked echo row (permanent baseline): six icons; the label counts any
     -- further locked rows
     p.lockedLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.lockedLabel:SetText("LOCKED ECHOES")
+    p.lockedLabel:SetText(T("library.label.detail_locked_echoes"))
 
     p.lockedIcons = {}
     for i = 1, 6 do
@@ -1993,7 +2150,7 @@ local function EnsureDetailPanel(parent)
     -- Compact record summary. Full rankings live in the dedicated Leaderboard.
     p.recordsTitle = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     p.recordsTitle:SetJustifyH("LEFT")
-    p.recordsTitle:SetText("BEST RECORDS FOR THIS LOADOUT")
+    p.recordsTitle:SetText(T("library.heading.best_records"))
 
     p.dummyRecord = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.dummyRecord:SetSize(470,16)
@@ -2064,7 +2221,7 @@ local function EnsureDetailPanel(parent)
     p.detailsNote:SetSize(470,12)
     p.detailsNote:SetJustifyH("LEFT")
     p.detailsNote:SetJustifyV("TOP")
-    p.detailsNote:SetText("|cff666666Install Details! damage meter to enable DPS tracking.|r")
+    p.detailsNote:SetText("|cff666666"..T("library.note.install_details").."|r")
 
     p.editState = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.editState:SetSize(470,26)
@@ -2088,7 +2245,7 @@ local function EnsureDetailPanel(parent)
     p.lockBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.lockBtn:SetSize(130,22)
     p.lockBtn:SetPoint("BOTTOMLEFT",8,8)
-    p.lockBtn:SetText("Copy into Editor")
+    p.lockBtn:SetText(T("library.button.copy_into_editor"))
     p.lockBtn:SetScript("OnClick", function()
         local selected = SelectedId()
         local projection = EnsureCommunityProjection()
@@ -2096,28 +2253,28 @@ local function EnsureDetailPanel(parent)
             and projection.Detail(selected, ProjectionContext()) or nil
         local b = detail and detail.build or nil
         if not b then
-            print("|cffff6060Nexus:|r Copy unavailable: the full rolled Echo list is still arriving.")
+            print("|cffff6060Nexus:|r "..T("library.chat.copy_unavailable_arriving"))
             return
         end
         -- Copy never shares. A mirror's Share is p.shareBtn and its confirmation.
         if IsSavedMirror(b) then return end
         if type(b.echoes) ~= "table" or #b.echoes == 0 then
             ControllerInstance().RequestLoadout(selected)
-            print("|cff7fd5ffNexus:|r this build is still completing its background sync. Try again shortly.")
+            print("|cff7fd5ffNexus:|r "..T("library.chat.build_still_syncing"))
             return
         end
         if Nexus.WishlistEditor and Nexus.WishlistEditor.OpenForCandidate then
             local candidate, candidateReason = BuildCandidateEvidence(b)
             if not candidate then
-                print("|cffff6060Nexus:|r Copy unavailable: "
-                    .. tostring(candidateReason) .. ".")
+                print("|cffff6060Nexus:|r "..TF("library.chat.copy_unavailable_reason", {
+                    reason=tostring(ShownReason(candidateReason))}))
                 return
             end
             local validated, validationReason =
                 CandidateEvidence.Validate(candidate)
             if not validated then
-                print("|cffff6060Nexus:|r Copy unavailable: "
-                    .. tostring(validationReason) .. ".")
+                print("|cffff6060Nexus:|r "..TF("library.chat.copy_unavailable_reason", {
+                    reason=tostring(ShownReason(validationReason))}))
                 return
             end
             local opened = Nexus.WishlistEditor.OpenForCandidate(validated)
@@ -2126,10 +2283,11 @@ local function EnsureDetailPanel(parent)
     end)
     p.lockBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Review before applying",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Opens this build as a draft in the Wishlist Editor, name pre-filled. Any",0.7,0.7,0.7,true)
-        GameTooltip:AddLine("Echoes it had locked show up as designed locked slots you can adjust.",0.7,0.7,0.7,true)
-        GameTooltip:AddLine("A draft only: it does not activate, spend or share anything.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.copy_title"),0.9,0.9,0.9,true)
+        -- Two hover lines of one English sentence: one key each, as shown.
+        GameTooltip:AddLine(T("library.tooltip.copy_opens_draft"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.copy_locked_slots"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.copy_draft_only"),0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.lockBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2137,7 +2295,7 @@ local function EnsureDetailPanel(parent)
     p.editBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.editBtn:SetSize(96,22)
     p.editBtn:SetPoint("LEFT",p.lockBtn,"RIGHT",6,0)
-    p.editBtn:SetText("Edit Build")
+    p.editBtn:SetText(T("library.button.edit_build"))
     p.editBtn:SetScript("OnClick", function()
         local selected = SelectedId()
         if selected then M.ToggleEditPopup(selected) end
@@ -2146,7 +2304,7 @@ local function EnsureDetailPanel(parent)
     p.retryShareBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.retryShareBtn:SetSize(130,22)
     p.retryShareBtn:SetPoint("BOTTOMLEFT",8,8)
-    p.retryShareBtn:SetText("Retry Share")
+    p.retryShareBtn:SetText(T("library.button.retry_share"))
     p.retryShareBtn:Hide()
     p.retryShareBtn:SetScript("OnClick", function(self)
         if self._nexusRetryConsumed then return end
@@ -2167,22 +2325,21 @@ local function EnsureDetailPanel(parent)
         outcome = type(outcome) == "table" and outcome or {}
         local build = LoadBuild(selected)
         local name = "'" .. tostring(build and (build.displayTitle or DisplayRemoteText(
-            build.title or "this build", 1024, false)) or "this build") .. "'"
+            build.title or T("library.value.this_build"), 1024, false)) or T("library.value.this_build")) .. "'"
         local policy = Nexus.SyncModePolicy
         if ok and outcome.retryPending then
-            print("|cffffc040Nexus:|r Share retry of " .. name
-                .. " is waiting for one bounded Sync queue slot. Nothing is sent until it is admitted.")
+            print("|cffffc040Nexus:|r " .. TF("library.chat.retry_waiting", {name=name}))
         elseif ok then
-            print("|cff4dff80Nexus:|r Share retry of " .. name
-                .. " queued its summary. Queued is not sent: sending and receipt by other players are not confirmed.")
+            print("|cff4dff80Nexus:|r " .. TF("library.chat.retry_queued", {name=name}))
         else
             -- The saved mode's own refusal is stated as it is (the existing
             -- CanRetryShare/mode rules; showing it enables nothing).
             if policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(why) then
-                print("|cffffc040Nexus:|r Share retry of " .. name .. " not sent: " .. tostring(why))
+                print("|cffffc040Nexus:|r " .. TF("library.chat.retry_mode_refused", {name=name,
+                    reason=tostring(ShownReason(why))}))
             else
-                print("|cffff6060Nexus:|r Share retry of " .. name .. " failed: "
-                    .. tostring(why or "not retryable"):gsub("%.+$", "") .. ". Nothing was queued by this click.")
+                print("|cffff6060Nexus:|r " .. TF("library.chat.retry_failed", {name=name,
+                    reason=tostring(ShownReason((tostring(why or "not retryable"):gsub("%.+$", ""))))}))
             end
             self._nexusRetryConsumed = false
             M.Refresh()
@@ -2190,9 +2347,9 @@ local function EnsureDetailPanel(parent)
     end)
     p.retryShareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Retry this failed Share",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Resends the exact saved build only after you click; no automatic terminal retry occurs.",0.7,0.7,0.7,true)
-        GameTooltip:AddLine("Your saved Sync mode still decides: with Sync Off, a Retry is refused and nothing is sent.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.retry_title"),0.9,0.9,0.9,true)
+        GameTooltip:AddLine(T("library.tooltip.retry_click_only"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.retry_mode_decides"),0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.retryShareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2200,18 +2357,19 @@ local function EnsureDetailPanel(parent)
     p.deleteBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.deleteBtn:SetSize(104,22)
     p.deleteBtn:SetPoint("BOTTOMRIGHT",-8,8)
-    p.deleteBtn:SetText("Delete")
+    p.deleteBtn:SetText(T("library.button.delete"))
     p.deleteBtn:SetScript("OnClick", function()
         local selected = SelectedId()
         local build = selected and LoadBuild(selected)
         if build and IsOwnBuild(build) then
             local displayTitle = build.displayTitle or DisplayRemoteText(
-                build.title or "this build", 1024, false) or "this build"
+                build.title or T("library.value.this_build"), 1024, false) or T("library.value.this_build")
+            LocalizePopup("NEXUS_STOP_SHARING_BUILD")
             StaticPopup_Show("NEXUS_STOP_SHARING_BUILD",
                 displayTitle, nil, {id=selected})
         elseif selected then
             local ok, err = DeleteBuild(selected)
-            if not ok then print("|cffff6060Nexus:|r " .. tostring(err)) end
+            if not ok then print("|cffff6060Nexus:|r " .. tostring(ShownReason(err))) end
             M.Refresh()
         end
     end)
@@ -2255,17 +2413,15 @@ local function EnsureDetailPanel(parent)
         data.used = true
         local id = data.id
         if pendingUploads[id] then return end
-        local displayTitle = tostring(data.title or "Saved Build")
+        local displayTitle = tostring(data.title or T("library.value.saved_build"))
         if data.retired or p._nexusShareApproval ~= data then
-            print("|cffffc040Nexus:|r Share cancelled: the confirmation for '" .. displayTitle
-                .. "' was closed or replaced before it was accepted. Nothing was shared.")
+            print("|cffffc040Nexus:|r " .. TF("library.chat.share_cancelled_retired", {name=displayTitle}))
             viewDiagnostic.pump.Refresh(false, false)
             return
         end
         p._nexusShareApproval = nil
         if not parent:IsShown() or ShareIdentity(LoadBuild(id)) ~= data.identity then
-            print("|cffffc040Nexus:|r Share cancelled: '" .. displayTitle
-                .. "' changed, or the Build Library was closed, after the confirmation opened. Nothing was shared.")
+            print("|cffffc040Nexus:|r " .. TF("library.chat.share_cancelled_changed", {name=displayTitle}))
             -- The cancellation is final before display work. As the synchronous
             -- Finish, its explicit refresh keeps a display failure in the view
             -- ledger instead of rethrowing it through the confirmation.
@@ -2282,37 +2438,32 @@ local function EnsureDetailPanel(parent)
             operation.done = true
             if pendingUploads[id] == operation then pendingUploads[id] = nil end
             if ok then
-                local saved = "Saved '" .. displayTitle .. "' locally as your shared listing"
                 local policy = Nexus.SyncModePolicy
                 local reason = type(admission) == "table" and admission.queueReason or nil
                 -- The listing's DPS-best hand-off is admitted on its own; a
                 -- refusal of the summary says nothing about it.
                 local linked = type(admission) == "table" and admission.linkedDps or nil
                 local linkedText = linked == "queued"
-                    and " A DPS record linked to this build was queued separately; queued is not sent."
-                    or linked == "unknown" and " Whether a linked DPS record was queued was not reported."
+                    and " " .. T("library.chat.share_linked_dps_queued")
+                    or linked == "unknown" and " " .. T("library.chat.share_linked_dps_unknown")
                     or ""
                 if type(admission) ~= "table" then
                     -- A completion that reports no queue result claims none.
-                    print("|cff4dff80Nexus:|r " .. saved
-                        .. ". Whether Sync queued it was not reported. Sending and receipt by other players are not confirmed.")
+                    print("|cff4dff80Nexus:|r " .. TF("library.chat.share_saved_unreported", {name=displayTitle}))
                 elseif admission.queueAdmitted == true then
-                    print("|cff4dff80Nexus:|r " .. saved
-                        .. " and queued its summary. Queued is not sent: sending and receipt by other players are not confirmed."
+                    print("|cff4dff80Nexus:|r " .. TF("library.chat.share_saved_queued", {name=displayTitle})
                         .. linkedText)
                 elseif policy and type(policy.Text) == "function"
                     and reason ~= nil and reason == policy.Text("off") then
-                    print("|cffffc040Nexus:|r " .. saved
-                        .. " — not sent: your saved Sync mode is Off." .. linkedText)
+                    print("|cffffc040Nexus:|r " .. TF("library.chat.share_saved_mode_off", {name=displayTitle}) .. linkedText)
                 else
-                    print("|cffffc040Nexus:|r " .. saved
-                        .. " — its summary was not queued, so nothing was sent for it: "
-                        .. tostring(reason or "Sync unavailable"):gsub("%.+$", "") .. "." .. linkedText)
+                    print("|cffffc040Nexus:|r " .. TF("library.chat.share_saved_not_queued", {name=displayTitle,
+                        reason=tostring(ShownReason((tostring(reason or "Sync unavailable"):gsub("%.+$", ""))))})
+                        .. linkedText)
                 end
             else
-                print("|cffff6060Nexus:|r Not shared: '" .. displayTitle
-                    .. "' — " .. tostring(value):gsub("%.+$", "")
-                    .. ". Nothing was saved or sent.")
+                print("|cffff6060Nexus:|r " .. TF("library.chat.share_not_shared", {name=displayTitle,
+                    reason=tostring(ShownReason((tostring(value):gsub("%.+$", ""))))}))
             end
             -- The outcome above is final before any display work. A ticket
             -- completion runs inside catalog completion: it honors an existing
@@ -2330,19 +2481,17 @@ local function EnsureDetailPanel(parent)
             operation.ticket = ticket
             pendingUploads[id] = operation
             if SelectedId() == id then
-                p.shareBtn:SetText("Sharing...")
+                p.shareBtn:SetText(T("library.button.sharing_pending"))
                 p.shareBtn:Disable()
             end
-            print("|cff7fd5ffNexus:|r Preparing '" .. displayTitle
-                .. "' to share — not sent yet. The local catalog is finishing earlier work first.")
+            print("|cff7fd5ffNexus:|r " .. TF("library.chat.share_preparing", {name=displayTitle}))
         else
             Finish(ok == true, value, nil, admission)
         end
     end
 
     StaticPopupDialogs["NEXUS_SHARE_SAVED_BUILD"] = {
-        text = "Share '%s' with other Nexus users?\n%s",
-        button1 = "Share", button2 = "Cancel",
+        text = "", button1 = "", button2 = "",
         OnShow = function(self)
             -- Above the DIALOG Library, as Stop Sharing; the shared slot's
             -- own layer returns on hide.
@@ -2368,6 +2517,7 @@ local function EnsureDetailPanel(parent)
         OnAccept = function(_, data) ConfirmedShare(data) end,
         timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     }
+    LocalizePopup("NEXUS_SHARE_SAVED_BUILD")
     parent:HookScript("OnHide", function()
         p._nexusShareApproval = nil
         if type(StaticPopup_Visible) == "function"
@@ -2379,7 +2529,7 @@ local function EnsureDetailPanel(parent)
     p.shareBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.shareBtn:SetSize(130,22)
     p.shareBtn:SetPoint("BOTTOMRIGHT",-8,8)
-    p.shareBtn:SetText("Share Build...")
+    p.shareBtn:SetText(T("library.button.share_saved_build"))
     p.shareBtn:Hide()
     p.shareBtn:SetScript("OnClick", function()
         local selected = SelectedId()
@@ -2387,12 +2537,12 @@ local function EnsureDetailPanel(parent)
         local build = LoadBuild(selected)
         local identity = ShareIdentity(build)
         if not identity then
-            print("|cffff6060Nexus:|r Share unavailable: this is not your own Saved Build. Nothing was shared.")
+            print("|cffff6060Nexus:|r " .. T("library.chat.share_not_own_saved_build"))
             M.Refresh()
             return
         end
         local displayTitle = build.displayTitle or DisplayRemoteText(
-            build.title or "Saved Build", 1024, false) or "Saved Build"
+            build.title or T("library.value.saved_build"), 1024, false) or T("library.value.saved_build")
         local policy = Nexus.SyncModePolicy
         local off = policy and type(policy.Mode) == "function"
             and policy.Mode() == "off"
@@ -2418,24 +2568,27 @@ local function EnsureDetailPanel(parent)
         -- Its requester-only scoping of the listing's Echo list and its
         -- "DPS record you hold for this exact build" sentence are superseded
         -- by the D2/D3 paths stated above.
-        local note = (build.publishedBuildId and "This saves its current title, description and Echo list as an update of your shared listing on this client, "
-            or "This saves its title, description and Echo list as your shared listing on this client, ")
-            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow. The summary has no Echo list or description; the full listing can be sent in answers to other Nexus users' requests, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. "
-            .. "It is listed with your character name, realm and class. "
-            .. "In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and your player info (character name, realm, class, level) without an additional request, even if the summary is not queued. "
-            .. "A shared build cannot be recalled: players who receive it keep their copy, and Stop Sharing removes only the listing on this client. "
-            .. "Nexus cannot confirm who received it."
-            .. (off and " Your saved Sync mode is Off: the listing is saved on this client and not sent." or "")
+        -- One key per sentence, joined with the English single spaces. The
+        -- first sentence has two forms (update / new listing), chosen as before.
+        local note = T(build.publishedBuildId and "library.popup.share_note_saves_update"
+            or "library.popup.share_note_saves_new")
+            .. " " .. T("library.popup.share_note_summary")
+            .. " " .. T("library.popup.share_note_listed_with")
+            .. " " .. T("library.popup.share_note_automatic_dps")
+            .. " " .. T("library.popup.share_note_no_recall")
+            .. " " .. T("library.popup.share_note_no_receipt")
+            .. (off and " " .. T("library.popup.share_note_mode_off") or "")
         -- This confirmation becomes the only live approval (see ShareIdentity).
         local approval = {id=selected,identity=identity,title=displayTitle}
         p._nexusShareApproval = approval
+        LocalizePopup("NEXUS_SHARE_SAVED_BUILD")
         StaticPopup_Show("NEXUS_SHARE_SAVED_BUILD", displayTitle, note, approval)
     end)
     p.shareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Share this Saved Build",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Asks you to confirm first, then saves its title, description and Echo list as your shared listing on this client and queues a summary for other Nexus users if your Sync mode and its size allow; the summary has no Echo list or description. The full listing (title, description and Echo list) can be sent in answers, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and player info without an additional request, even if the summary is not queued. A shared build cannot be recalled.",0.7,0.7,0.7,true)
-        GameTooltip:AddLine("Not Copy into Editor, and not saving or activating a server Saved Build.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.share_saved_title"),0.9,0.9,0.9,true)
+        GameTooltip:AddLine(T("library.tooltip.share_saved_body"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.share_saved_not_copy"),0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2447,18 +2600,16 @@ end
 
 -- A selected build that cannot be shown gets an explicit state in place of
 -- the detail, never a blank panel: still loading, or why it is unavailable.
+-- Each status kind (a code: pending, unavailable, invalid, incomplete, none)
+-- names the keys of its heading and body; the shown words come from the seam
+-- when the status is shown. Not-in-library and invalid share one heading.
 local DETAIL_STATUS = {
-    pending={"Loading build details...",
-        "The build library is still being prepared. The selected build appears here when it is ready."},
-    unavailable={"Build not available",
-        "This build is not in your build library. It may have been removed, not received yet, or not accepted."},
-    invalid={"Build not available",
-        "The selected build record is invalid and cannot be shown."},
-    incomplete={"Build not available yet",
-        "The full Echo list for this build is still arriving."},
+    pending={"library.heading.detail_loading", "library.body.detail_loading"},
+    unavailable={"library.heading.detail_unavailable", "library.body.detail_not_in_library"},
+    invalid={"library.heading.detail_unavailable", "library.body.detail_invalid"},
+    incomplete={"library.heading.detail_incomplete", "library.body.detail_incomplete"},
     -- No build selected: what the area is for, in place of an empty space.
-    none={"No build selected",
-        "Select a build on the left to see its Echoes, DPS records and owner. Selecting a build only reads it; nothing is sent, saved or assigned."},
+    none={"library.heading.no_selection", "library.body.no_selection"},
 }
 
 local function ShowDetailStatus(kind)
@@ -2490,8 +2641,8 @@ local function ShowDetailStatus(kind)
     end
     local text = DETAIL_STATUS[kind] or DETAIL_STATUS.unavailable
     status.kind = DETAIL_STATUS[kind] and kind or "unavailable"
-    status.title:SetText(text[1])
-    status.text:SetText(text[2])
+    status.title:SetText(T(text[1]))
+    status.text:SetText(T(text[2]))
     p._nexusShownId = nil
     p:Hide()
     status:Show()
@@ -2539,20 +2690,20 @@ local function RefreshDetailPanel(buildId, listPending)
     local c = CLASS_COLOR[(build.class or ""):upper()] or {1,1,1}
     detailPanel.title:SetTextColor(c[1],c[2],c[3])
     detailPanel.title:SetText(build.displayTitle
-        or DisplayRemoteText(build.title or "", 1024, true) or "Invalid title")
+        or DisplayRemoteText(build.title or "", 1024, true) or T("library.value.invalid_title"))
     if detailPanel.classIcon then
         detailPanel.classIcon:SetTexture(CLASS_ICON[(build.class or ""):upper()] or "Interface\\Icons\\INV_Misc_QuestionMark")
     end
     local displayAuthor = build.displayAuthor or DisplayRemoteText(
-        build.author or "?", 1024, false) or "Unknown"
-    detailPanel.author:SetText("by " .. displayAuthor)
+        build.author or "?", 1024, false) or T("library.value.owner_unknown")
+    detailPanel.author:SetText(TF("library.label.by_owner", {name=displayAuthor}))
     local displayDescription = build.displayDescription
         or DisplayRemoteText(build.description or "", 4000, true, true)
     displayDescription = (displayDescription ~= "" and displayDescription)
-        or "|cff666666(no description)|r"
+        or "|cff666666" .. T("library.value.no_description") .. "|r"
     -- The byline carries no provenance text; the detail says it.
     if build.publicIdentityVerified == false then
-        displayDescription = OWNER_NOT_ESTABLISHED .. "\n" .. displayDescription
+        displayDescription = OwnerNotEstablished() .. "\n" .. displayDescription
     end
     detailPanel.desc:SetText(displayDescription)
 
@@ -2610,7 +2761,8 @@ local function RefreshDetailPanel(buildId, listPending)
             -- six icons; the label counts the ones not drawn.
             local more = #lockedEchoes - #detailPanel.lockedIcons
             detailPanel.lockedLabel:SetText(more > 0
-                and ("LOCKED ECHOES  +" .. more .. " more locked") or "LOCKED ECHOES")
+                and TF("library.label.detail_locked_echoes_more", {count=Count(more)})
+                or T("library.label.detail_locked_echoes"))
             detailPanel.lockedLabel:Show()
             detailPanel.echoLabel:Hide()
             for i, ic in ipairs(detailPanel.lockedIcons) do
@@ -2667,10 +2819,11 @@ local function RefreshDetailPanel(buildId, listPending)
                     + (tonumber(e.stacks or e.count) or 1)
             end
         end
-        detailPanel.missingText:SetText(string.format(
-            "|cff888888%d echoes|r  --  |cffff9040%d missing|r", totalSlots, missing))
+        detailPanel.missingText:SetText("|cff888888" .. TF("library.status.detail_echo_total",
+            {count=Count(totalSlots)}) .. "|r  --  |cffff9040" .. TF("library.status.detail_echo_missing",
+            {count=Count(missing)}) .. "|r")
     else
-        detailPanel.missingText:SetText("|cffffd200Receiving the full Echo list...|r")
+        detailPanel.missingText:SetText("|cffffd200" .. T("library.status.detail_receiving_echoes") .. "|r")
     end
 
     local mine, admin, loadoutLocked
@@ -2687,12 +2840,14 @@ local function RefreshDetailPanel(buildId, listPending)
             detailPanel.deleteBtn:Hide()
         else
             detailPanel.deleteBtn:Show()
+            -- Still a source literal: help_action_first lints this label in the
+            -- UI source (pending the owner's keyed-label decision).
             detailPanel.deleteBtn:SetText("Stop Sharing")
         end
     elseif admin then
         detailPanel.editBtn:Hide()
         detailPanel.deleteBtn:Show()
-        detailPanel.deleteBtn:SetText("Remove Shared Record")
+        detailPanel.deleteBtn:SetText(T("library.button.remove_shared_record"))
     else
         detailPanel.editBtn:Hide()
         detailPanel.deleteBtn:Hide()
@@ -2706,16 +2861,17 @@ local function RefreshDetailPanel(buildId, listPending)
             detailPanel.editState:Hide()
         end
     elseif IsSavedMirror(build) then
-        local state = PublishedBuildId(build)
-            and "Shared listing saved on this client. Update Shared Build... saves your edits after you confirm and queues a summary only if Sync mode and size allow; receipt by other players is not confirmed."
-            or "Your server Saved Build. Edit its title/description; Share Build... shares it after you confirm, queuing a summary only if Sync mode and size allow."
+        local state = T(PublishedBuildId(build)
+            and "library.status.edit_state_shared_listing"
+            or "library.status.edit_state_saved_build")
         detailPanel.editState:SetText(state)
         detailPanel.editState:Show()
     elseif mine and loadoutLocked then
-        detailPanel.editState:SetText("|cffffd200Echo list is read-only: a DPS record is attached.|r Title/description remain editable. Share a new build to use different Echoes.")
+        detailPanel.editState:SetText("|cffffd200" .. T("library.status.echo_list_read_only") .. "|r "
+            .. T("library.status.edit_state_title_editable"))
         detailPanel.editState:Show()
     elseif mine then
-        detailPanel.editState:SetText("You own this build. Edit can also replace its Echoes from your active wishlist.")
+        detailPanel.editState:SetText(T("library.status.edit_state_own_build"))
         detailPanel.editState:Show()
     else
         detailPanel.editState:Hide()
@@ -2765,14 +2921,14 @@ local function RefreshDetailPanel(buildId, listPending)
     end
     if IsSavedMirror(build) then
         local pending = pendingUploads[SelectedId()] ~= nil
-        detailPanel.shareBtn:SetText(pending and "Sharing..."
+        detailPanel.shareBtn:SetText(pending and T("library.button.sharing_pending")
             or detail and detail.shareText
-            or (PublishedBuildId(build) and "Update Shared Build..." or "Share Build..."))
+            or T(PublishedBuildId(build) and "library.button.update_shared_build" or "library.button.share_saved_build"))
         if pending then detailPanel.shareBtn:Disable() else detailPanel.shareBtn:Enable() end
     elseif detail then
         detailPanel.lockBtn:SetText(detail.actionText)
     else
-        detailPanel.lockBtn:SetText(not hasLoadout and "Request full Echo list" or "Copy into Editor")
+        detailPanel.lockBtn:SetText(T(not hasLoadout and "library.button.request_full_echo_list" or "library.button.copy_into_editor"))
     end
 
     -- DPS leaderboards
@@ -2785,11 +2941,11 @@ local function RefreshDetailPanel(buildId, listPending)
         local top = rows and rows[1]
         local best = top and DpsText(top.dps) or "—"
         local holder = top and (top.displayPlayer or DisplayRemoteText(
-            tostring(top.player or "Unknown"), 1024, false) or "Unknown")
-            or "No record yet"
+            tostring(top.player or T("library.value.player_unknown")), 1024, false) or T("library.value.player_unknown"))
+            or T("library.value.no_record_yet")
         local yours = personal and DpsText(personal.dps) or "—"
-        return string.format("|cffffffff%s|r  |cffffd200%s|r |cff888888%s|r   |cff66ff99Your best %s|r",
-            label, best, holder, yours)
+        return string.format("|cffffffff%s|r  |cffffd200%s|r |cff888888%s|r   |cff66ff99%s|r",
+            label, best, holder, TF("library.label.your_best", {dps=yours}))
     end
 
     if detail then
@@ -2804,8 +2960,8 @@ local function RefreshDetailPanel(buildId, listPending)
         local lkLb = ControllerInstance().Leaderboard(
             recordId, "lk") or {}
         local lkPB = ControllerInstance().PersonalBest(recordId, "lk")
-        detailPanel.dummyRecord:SetText(RecordText("Training Dummy", dummyLb, dummyPB))
-        detailPanel.lkRecord:SetText(RecordText("Lich King", lkLb, lkPB))
+        detailPanel.dummyRecord:SetText(RecordText(T("library.label.category_dummy"), dummyLb, dummyPB))
+        detailPanel.lkRecord:SetText(RecordText(T("library.label.category_lich_king"), lkLb, lkPB))
     end
 
     for _, row in ipairs(detailPanel.lbDummyRows) do row:Hide() end
@@ -2912,7 +3068,7 @@ local function GetCard(parent)
     card.addBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
     card.addBtn:SetSize(52, 22)
     card.addBtn:SetPoint("BOTTOMRIGHT", -8, 7)
-    card.addBtn:SetText("View")
+    card.addBtn:SetText(T("library.button.view_build"))
     card.addBtn:SetScript("OnClick", function(self)
         local parent = self:GetParent()
         if parent.buildId then
@@ -2922,8 +3078,8 @@ local function GetCard(parent)
     end)
     card.addBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Open build details", 1,1,1)
-        GameTooltip:AddLine("Inspect records, exact Echoes, and copy the loadout.", 0.8,0.8,0.8, true)
+        GameTooltip:AddLine(T("library.tooltip.view_build_title"), 1,1,1)
+        GameTooltip:AddLine(T("library.tooltip.view_build_body"), 0.8,0.8,0.8, true)
         GameTooltip:Show()
     end)
     card.addBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2949,7 +3105,7 @@ local function GetCard(parent)
             GameTooltip:AddLine(self._fullTitle or "",1,0.82,0,true)
             if cutOwner then GameTooltip:AddLine(owner,1,1,1,true) end
             GameTooltip:AddLine(
-                "Open build details for the complete title and records.",
+                T("library.tooltip.row_open_for_full"),
                 0.8,0.8,0.8,true)
             GameTooltip:Show()
         end
@@ -3306,7 +3462,7 @@ local function EnsureFrame()
     titleText:SetPoint("TOP",0,-12)
     titleText:SetJustifyH("CENTER")
     frame._titleText = titleText
-    titleText:SetText("Explore / Build Library")
+    titleText:SetText(T("library.title.window"))
 
     local closeBtn = CreateFrame("Button",nil,frame,"UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT",-6,-6)
@@ -3480,7 +3636,7 @@ local function EnsureFrame()
     frame._helpNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     frame._helpNav:SetSize(56,22)
     frame._helpNav:SetPoint("LEFT",wishlistBtn,"RIGHT",4,0)
-    frame._helpNav:SetText("Help")
+    frame._helpNav:SetText(T("library.button.help"))
     frame._helpNav:SetScript("OnClick",function()
         if Nexus.Help and Nexus.Help.OpenHelp then
             Nexus.Help.OpenHelp("sharing",function() CloseDropdowns(); frame:Hide() end)
@@ -3489,7 +3645,7 @@ local function EnsureFrame()
     frame._referenceNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     frame._referenceNav:SetSize(84,22)
     frame._referenceNav:SetPoint("LEFT",frame._helpNav,"RIGHT",4,0)
-    frame._referenceNav:SetText("Reference")
+    frame._referenceNav:SetText(T("library.button.reference"))
     frame._referenceNav:SetScript("OnClick",function()
         if Nexus.Help and Nexus.Help.OpenReference then
             Nexus.Help.OpenReference("sharing",function() CloseDropdowns(); frame:Hide() end)
@@ -3505,12 +3661,12 @@ local function EnsureFrame()
     local browseLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     browseLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -64)
     frame._browseLabel = browseLabel
-    browseLabel:SetText("BROWSE BUILDS")
+    browseLabel:SetText(T("library.heading.browse_builds"))
 
     local actionLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     actionLabel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -64)
     frame._actionLabel = actionLabel
-    actionLabel:SetText("ACTIONS")
+    actionLabel:SetText(T("library.heading.actions"))
 
     searchBox = CreateFrame("EditBox","NexusBuildsSearch",frame,"InputBoxTemplate")
     frame._searchBox = searchBox
@@ -3530,7 +3686,7 @@ local function EnsureFrame()
     local searchLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     frame._searchLabel = searchLabel
     searchLabel:SetPoint("LEFT",searchBox,"LEFT",6,0)
-    searchLabel:SetText("Search title, author, or description...")
+    searchLabel:SetText(T("library.placeholder.search"))
     searchBox:SetScript("OnEditFocusGained",function() searchLabel:Hide(); CloseDropdowns() end)
     searchBox:SetScript("OnEditFocusLost",function(self)
         if self:GetText() == "" then searchLabel:Show() end
@@ -3541,7 +3697,7 @@ local function EnsureFrame()
     frame._clearSearchBtn = clearSearchBtn
     clearSearchBtn:SetSize(82,18)
     clearSearchBtn:SetPoint("RIGHT",searchBox,"RIGHT",-2,0)
-    clearSearchBtn:SetText("Clear Search")
+    clearSearchBtn:SetText(T("library.button.clear_search"))
     pcall(function() searchBox:SetTextInsets(6,86,0,0) end)
     if (FilterSettings().search or "") == "" then clearSearchBtn:Hide() end
     clearSearchBtn:SetScript("OnClick",function()
@@ -3562,7 +3718,7 @@ local function EnsureFrame()
     frame._scopeBtn = scopeBtn
     scopeBtn:SetSize(84,22)
     scopeBtn:SetPoint("LEFT",searchBox,"RIGHT",8,0)
-    scopeBtn:SetText("All Shared")
+    scopeBtn:SetText(T("library.button.scope_all"))
     scopeBtn:SetScript("OnClick",function()
         ControllerInstance().SetFilter("scope", "all")
         ControllerInstance().ClearSelection()
@@ -3571,8 +3727,8 @@ local function EnsureFrame()
     end)
     scopeBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("All Shared",1,0.82,0.2)
-        GameTooltip:AddLine("Browse shared community builds.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.button.scope_all"),1,0.82,0.2)
+        GameTooltip:AddLine(T("library.tooltip.scope_all"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end)
     scopeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3583,7 +3739,7 @@ local function EnsureFrame()
     myBuildsBtn:SetPoint("LEFT",scopeBtn,"RIGHT",4,0)
     -- M4 (UX-15): the scope is Mine, so the words My Builds keep one meaning,
     -- the game's own page of Saved Builds. The internal scope key stays mine.
-    myBuildsBtn:SetText("Mine")
+    myBuildsBtn:SetText(T("library.button.scope_mine"))
     myBuildsBtn:SetScript("OnClick",function()
         ControllerInstance().SetFilter("scope", "mine")
         ControllerInstance().ClearSelection()
@@ -3592,9 +3748,9 @@ local function EnsureFrame()
     end)
     myBuildsBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Mine",1,0.82,0.2)
-        GameTooltip:AddLine("Browse your Saved Builds and shared listings.",0.8,0.8,0.8,true)
-        GameTooltip:AddLine("This is a Build Library scope. The game's own My Builds page (Nexus panel button) is where a Saved Build is chosen or assigned.",0.65,0.65,0.65,true)
+        GameTooltip:AddLine(T("library.button.scope_mine"),1,0.82,0.2)
+        GameTooltip:AddLine(T("library.tooltip.scope_mine"),0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.tooltip.scope_mine_not_my_builds"),0.65,0.65,0.65,true)
         GameTooltip:Show()
     end)
     myBuildsBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3614,8 +3770,8 @@ local function EnsureFrame()
     end)
     classDropBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Current Class Only",1,0.82,0.2)
-        GameTooltip:AddLine("Turn off to include every class; missing class data is shown as Unknown.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.button.class_current"),1,0.82,0.2)
+        GameTooltip:AddLine(T("library.tooltip.class_filter"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end)
     classDropBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3641,7 +3797,7 @@ local function EnsureFrame()
     local qualifiedLabel = qualifiedBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     qualifiedLabel:SetPoint("LEFT",qualifiedBtn,"RIGHT",2,0)
     qualifiedLabel:SetJustifyH("LEFT")
-    qualifiedLabel:SetText("Require both DPS records")
+    qualifiedLabel:SetText(T("library.label.require_both_records"))
     frame._qualifiedLabel = qualifiedLabel
     local function ToggleQualified()
         local filters = FilterSettings()
@@ -3653,9 +3809,9 @@ local function EnsureFrame()
     end
     local function QualifiedTip(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Require both DPS records",1,0.82,0.2)
-        GameTooltip:AddLine("Checked: show only builds with both a Training Dummy and a Lich King record that this client has. Unchecked: no DPS-record requirement.",0.8,0.8,0.8,true)
-        GameTooltip:AddLine("This is record availability, not proof of build quality, not verified outside the game, and not a sign that Sync has finished.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.label.require_both_records"),1,0.82,0.2)
+        GameTooltip:AddLine(T("library.tooltip.require_both_records"),0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.tooltip.require_both_records_scope"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end
     for _, control in ipairs({qualifiedBtn,qualifiedBox}) do
@@ -3664,7 +3820,9 @@ local function EnsureFrame()
         control:SetScript("OnLeave",function() GameTooltip:Hide() end)
     end
 
-    local sorts={{key="dps",label="Highest DPS"},{key="recent",label="Newest"},{key="title",label="Name"}}
+    -- key: the saved sort mode (a code); label: its shown name.
+    local sorts={{key="dps",label=T("library.label.sort_dps")},{key="recent",label=T("library.label.sort_recent")},
+        {key="title",label=T("library.label.sort_title")}}
     sortToggle = CreateFrame("Button",nil,frame)
     sortToggle:SetSize(126,22)
     sortToggle:SetPoint("LEFT",frame._qualifiedBox,"RIGHT",6,0)
@@ -3683,8 +3841,8 @@ local function EnsureFrame()
     sortToggle:SetScript("OnClick",function(self) OpenDropdown(sortPanel,self) end)
     sortToggle:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Sort builds",1,1,1)
-        GameTooltip:AddLine("Eligible builds use only the selected order.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.tooltip.sort_title"),1,1,1)
+        GameTooltip:AddLine(T("library.tooltip.sort_body"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end)
     sortToggle:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3693,25 +3851,25 @@ local function EnsureFrame()
     syncBtn:SetSize(88,22)
     syncBtn:SetPoint("TOPRIGHT",-132,-78)
     frame._syncBtn = syncBtn
-    syncBtn:SetText("Sync Now")
+    syncBtn:SetText(T("library.button.sync_now"))
     syncBtn:SetScript("OnClick",function()
         CloseDropdowns()
         local ok, err, available = ControllerInstance().RequestSync()
         if not available then return end
         if ok == nil then
-            syncBtn:SetText("Preparing...")
-            print("|cff7fd5ffNexus:|r " .. tostring(err or "preparing sync data"))
-        elseif ok then print("|cff7fd5ffNexus:|r asking other players for their builds...")
-        else print("|cffff6060Nexus:|r "..tostring(err)) end
+            syncBtn:SetText(T("library.button.sync_preparing"))
+            print("|cff7fd5ffNexus:|r " .. tostring(err and ShownReason(err) or T("library.chat.sync_preparing")))
+        elseif ok then print("|cff7fd5ffNexus:|r " .. T("library.chat.sync_asking"))
+        else print("|cffff6060Nexus:|r "..tostring(ShownReason(err))) end
     end)
     syncBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Sync Now",1,1,1)
-        GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.button.sync_now"),1,1,1)
+        GameTooltip:AddLine(T("library.tooltip.sync_now"),0.8,0.8,0.8,true)
         local modeText = M.SyncModeLine()
         if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
-        GameTooltip:AddLine("With Automatic, an eligible new character best for Training Dummy or Lich King may send a DPS record with Echoes, any locked Echoes and player info without a request. The Record Loadout summary is separate; even if it is refused, the DPS record may let receivers create that page. Each send needs this client's admission. Sending is not delivery.",0.7,0.7,0.7,true)
-        GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.sync_now_automatic_dps"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("library.tooltip.sync_now_terms"),0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3720,15 +3878,15 @@ local function EnsureFrame()
     frame._modeBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame._modeBtn:SetSize(96,22)
     frame._modeBtn:SetPoint("TOPRIGHT",-128,-104)
-    frame._modeBtn:SetText("Sync mode...")
+    frame._modeBtn:SetText(T("library.button.sync_mode"))
     frame._modeBtn:SetScript("OnClick",function()
         CloseDropdowns()
         M.OpenSyncModeChoice()
     end)
     frame._modeBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Sync mode",1,1,1)
-        GameTooltip:AddLine("Choose Automatic, Manual or Off. Opening it shows the current mode and changes nothing; only Apply saves your choice.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("sync.title.mode_dialog"),1,1,1)
+        GameTooltip:AddLine(T("library.tooltip.sync_mode"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end)
     frame._modeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3737,12 +3895,12 @@ local function EnsureFrame()
     postBtn:SetSize(110,22)
     postBtn:SetPoint("TOPRIGHT",-15,-78)
     frame._postBtn = postBtn
-    postBtn:SetText("Share Build")
+    postBtn:SetText(T("library.button.share_build"))
     postBtn:SetScript("OnClick",function() CloseDropdowns(); M.ShowPostBuild() end)
     postBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Share a build",1,1,1)
-        GameTooltip:AddLine("Choose a saved loadout or wishlist, then add its title and description.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine(T("library.tooltip.share_build_title"),1,1,1)
+        GameTooltip:AddLine(T("library.tooltip.share_build_body"),0.8,0.8,0.8,true)
         GameTooltip:Show()
     end)
     postBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -3756,7 +3914,7 @@ local function EnsureFrame()
     prevPageBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     prevPageBtn:SetSize(48,20)
     prevPageBtn:SetPoint("TOPLEFT",202,-104)
-    prevPageBtn:SetText("Prev")
+    prevPageBtn:SetText(T("library.button.page_prev"))
     frame._prevPageBtn = prevPageBtn
     prevPageBtn:SetScript("OnClick",function()
         local filters = FilterSettings()
@@ -3775,7 +3933,7 @@ local function EnsureFrame()
     nextPageBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     nextPageBtn:SetSize(48,20)
     nextPageBtn:SetPoint("TOPLEFT",320,-104)
-    nextPageBtn:SetText("Next")
+    nextPageBtn:SetText(T("library.button.page_next"))
     frame._nextPageBtn = nextPageBtn
     nextPageBtn:SetScript("OnClick",function()
         local filters = FilterSettings()
@@ -3973,10 +4131,19 @@ RenderSyncStatus = function(receiveCount)
         -- (a time, not evidence that anything arrives), so it is "listening
         -- for answers"; "new" is what this client stored. Reception in
         -- progress is the Leaderboard's "N receiving" (inbound transfers).
-        syncStatusText:SetText(string.format(
-            "|cff4dff80Listening for answers %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results|r",
-            math.ceil(math.max(0,remaining)),receiveCount,bundled,overlay,
-            available,shown,results))
+        local line, source = TF("library.status.sync_listening", {
+            seconds=Count(math.ceil(math.max(0,remaining))), new=Count(receiveCount),
+            bundled=Count(bundled), overlay=Count(overlay), available=Count(available),
+            shown=Count(shown), results=Count(results)})
+        if source == "unavailable" then
+            -- The code-owned English row when even the English template
+            -- cannot render (a count the seam refuses, such as a fraction).
+            line = string.format(
+                "Listening for answers %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results",
+                math.ceil(math.max(0,remaining)),receiveCount,bundled,overlay,
+                available,shown,results)
+        end
+        syncStatusText:SetText("|cff4dff80" .. line .. "|r")
     else
         local stats = type(sync.Stats) == "function" and sync.Stats() or {}
         local received = type(stats) == "table"
@@ -3985,19 +4152,18 @@ RenderSyncStatus = function(receiveCount)
             and (tonumber(sync.LastSyncNewCount()) or 0) or 0
         -- The catalog version is a diagnostic: it is on hover (below), not
         -- in the line.
+        local counts = {bundled=Count(bundled), overlay=Count(overlay), available=Count(available),
+            shown=Count(shown), results=Count(results)}
         if received > 0 then
-            syncStatusText:SetText(string.format(
-                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results. Last sync added %d.|r",
-                bundled,overlay,available,shown,results,added))
+            counts.added = Count(added)
+            syncStatusText:SetText("|cff888888" .. TF("library.status.sync_counts_added", counts) .. "|r")
         else
-            syncStatusText:SetText(string.format(
-                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results. Sync Now asks other Nexus users.|r",
-                bundled,overlay,available,shown,results))
+            syncStatusText:SetText("|cff888888" .. TF("library.status.sync_counts_idle", counts) .. "|r")
         end
     end
     local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
     local preparing = syncStats.preparingRequest == true
-    if preparing then syncStatusText:SetText("|cff7fd5ffPreparing sync data...|r") end
+    if preparing then syncStatusText:SetText("|cff7fd5ff" .. T("library.status.sync_preparing") .. "|r") end
     -- The latest Share of this session keeps its own line here, so its state
     -- is still stated after the form or this window is closed and reopened.
     local shareLine = ShareStatusLine()
@@ -4009,12 +4175,12 @@ RenderSyncStatus = function(receiveCount)
     if modeText then
         syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n|cffffd100" .. modeText .. "|r")
     end
-    if syncBtn then syncBtn:SetText(preparing and "Preparing..."
-        or receiving and "Listening..." or "Sync Now") end
+    if syncBtn then syncBtn:SetText(SyncButtonLabel(preparing and "Preparing..."
+        or receiving and "Listening..." or "Sync Now")) end
     -- On hover: the whole line and its diagnostics (LayoutMetrics
     -- FullTextTooltip reads _nexusFullText).
     syncStatusText._nexusFullText = (syncStatusText:GetText() or "")
-        .. "\n|cff888888Catalog version: " .. tostring(version) .. "|r"
+        .. "\n|cff888888" .. TF("library.tooltip.catalog_version", {version=tostring(version)}) .. "|r"
     -- The status region holds every row of this text. Its rows are measured
     -- against the width the layout gave it; only a change of rows re-lays
     -- the window (once), so ordinary refreshes reuse the current geometry.
@@ -4144,11 +4310,11 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     local fs = FilterSettings()
     if classDropBtn then
         if fs.currentClassOnly == false then
-            classDropBtn:SetText("All Classes")
+            classDropBtn:SetText(T("library.button.class_all"))
         elseif fs.classFilter then
-            classDropBtn:SetText("Current Class Only")
+            classDropBtn:SetText(T("library.button.class_current"))
         else
-            classDropBtn:SetText("Class Loading...")
+            classDropBtn:SetText(T("library.button.class_loading"))
         end
     end
     if qualifiedBtn then
@@ -4165,8 +4331,8 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     end
     if sortToggle then
         if fs.sortMode == "class" or not fs.sortMode then fs.sortMode = "dps" end
-        local labels={dps="Highest DPS",recent="Newest",title="Name"}
-        sortToggle:SetText("Sort: "..(labels[fs.sortMode] or "Highest DPS"))
+        local labels={dps="library.label.sort_dps",recent="library.label.sort_recent",title="library.label.sort_title"}
+        sortToggle:SetText(TF("library.button.sort_label", {sort=T(labels[fs.sortMode] or labels.dps)}))
         sortToggle:Show()
     end
     if frame._RefreshDropdown then
@@ -4204,6 +4370,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         refreshDirty = true
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
+        -- Still a source literal (help_action_first lints it; see Stop Sharing).
         if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
         if frame._emptyState then frame._emptyState:Hide() end
         frame._resultsStale = true
@@ -4295,8 +4462,8 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         local first = projectionSummary and projectionSummary.first or 0
         local last = projectionSummary and projectionSummary.last or #builds
         local total = projectionSummary and projectionSummary.filteredTotal or #builds
-        resultText:SetText(string.format("|cffd8c7a0Showing %d-%d of %d|r",
-            first, last, total))
+        resultText:SetText("|cffd8c7a0" .. TF("library.status.showing_range", {
+            first=Count(first), last=Count(last), total=Count(total)}) .. "|r")
     end
     -- #21 Stage A: what the last completed bind of THIS publication showed.
     -- A scroll whose window, rows, data revisions, selection, layout and
@@ -4417,7 +4584,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         local fullTitle = b.displayTitle
             or (Nexus.Identity and Nexus.Identity.DisplaySafeText
                 and Nexus.Identity.DisplaySafeText(rawTitle, 1024, true))
-            or "Invalid title"
+            or T("library.value.invalid_title")
         local titleChars = math.max(12,math.floor(cardLayout.titleWidth
             / (6 * ((frame._responsiveLayout and frame._responsiveLayout.scale)
                 or 1))))
@@ -4425,7 +4592,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             and Nexus.LayoutMetrics.Truncate(rawTitle,titleChars) or rawTitle
         local displayTitle = Nexus.Identity and Nexus.Identity.DisplaySafeText
             and Nexus.Identity.DisplaySafeText(truncatedTitle, 1024, true)
-            or "Invalid title"
+            or T("library.value.invalid_title")
         card._fullTitle,card._displayTitle = fullTitle,displayTitle
         card.title:SetText(displayTitle)
         -- The owner part of the author line (who, and whether the owner is
@@ -4433,29 +4600,29 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         local identityTag = ""
         do
             local ownerTag = ""
-            if IsSavedMirror(b) then ownerTag = "  |cff66ccffSaved Build|r"
-            elseif IsOwnBuild(b) then ownerTag = "  |cffffd200Your build|r" end
+            if IsSavedMirror(b) then ownerTag = "  |cff66ccff" .. T("library.label.row_saved_build") .. "|r"
+            elseif IsOwnBuild(b) then ownerTag = "  |cffffd200" .. T("library.label.row_your_build") .. "|r" end
             local qualityTag = ""
             if b._nexusQualified == false then
-                qualityTag = qualityTag .. "  |cffffa040Missing a DPS record|r"
+                qualityTag = qualityTag .. "  |cffffa040" .. T("library.label.row_missing_dps_record") .. "|r"
             end
             if bClass == "UNKNOWN" then
-                qualityTag = qualityTag .. "  |cffaaaaaaClass not supplied|r"
+                qualityTag = qualityTag .. "  |cffaaaaaa" .. T("library.label.row_class_not_supplied") .. "|r"
             end
             -- M4 (UX-14): a shared row whose owner the presentation layer did
             -- not establish says so on the row itself (the detail already
             -- carries the same note). Display only; no owner inference.
             identityTag = ownerTag
             if b.publicIdentityVerified == false and ownerTag == "" then
-                qualityTag = qualityTag .. "  |cff999999Owner not established|r"
-                identityTag = "  |cff999999Owner not established|r"
+                qualityTag = qualityTag .. "  |cff999999" .. T("library.label.row_owner_not_established") .. "|r"
+                identityTag = "  |cff999999" .. T("library.label.row_owner_not_established") .. "|r"
             end
             local displayAuthor = b.displayAuthor
                 or (Nexus.Identity and Nexus.Identity.DisplaySafeText
                     and Nexus.Identity.DisplaySafeText(
                         b.author or "?", 1024, false))
-                or "Unknown"
-            card.author:SetText("by "..displayAuthor..ownerTag..qualityTag)
+                or T("library.value.owner_unknown")
+            card.author:SetText(TF("library.label.by_owner", {name=displayAuthor})..ownerTag..qualityTag)
         end
         if IsSavedMirror(b) then
             if b.destinationWishlistName then
@@ -4463,7 +4630,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                     and Nexus.Identity.DisplaySafeText
                 local destinationName = displayText
                     and displayText(b.destinationWishlistName, 1024, false)
-                    or "Wishlist"
+                    or T("library.value.wishlist")
                 -- M4 (UX-13): the Wishlist's copies found in this Saved
                 -- Build (CommunityController EchoProgress), a different unit
                 -- from run or planned copies. An unknown total is said as
@@ -4471,10 +4638,11 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                 local userText = Nexus and Nexus.UserText
                 local count = userText and userText.CountText
                     and userText.CountText("savedBuild", b.destinationProgress, b.destinationTotal)
-                    or "Wishlist copies in this Saved Build: unavailable"
-                card.destination:SetText(string.format("|cffffd200Assigned Wishlist:|r %s  |cff66ff99%s|r", destinationName, count))
+                    or T("library.status.row_wishlist_copies_unavailable")
+                card.destination:SetText(string.format("|cffffd200%s|r %s  |cff66ff99%s|r",
+                    T("library.label.row_assigned_wishlist"), destinationName, count))
             else
-                card.destination:SetText("|cff999999No Wishlist assigned|r")
+                card.destination:SetText("|cff999999" .. T("library.label.row_no_wishlist_assigned") .. "|r")
             end
             card.destination:Show()
         else
@@ -4510,36 +4678,39 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                 if dps.count == 2 then
                     -- M4 (UX-14): the headline is one category's record, so it
                     -- names that category (the best single record decides it).
-                    local headline = dps.lk > dps.dummy and "Lich King"
-                        or dps.dummy > dps.lk and "Dummy" or "both records"
+                    local headline = T(dps.lk > dps.dummy and "library.label.category_lich_king"
+                        or dps.dummy > dps.lk and "library.label.row_category_dummy"
+                        or "library.label.row_both_records")
                     card.echoCount:SetText(string.format(
-                        "|cff4dff80Best %s DPS|r |cff999999(%s)|r", DpsText(dps.best), headline))
+                        "|cff4dff80%s|r |cff999999(%s)|r",
+                        TF("library.label.row_best_dps", {dps=DpsText(dps.best)}), headline))
                     card.dpsBreakdown:SetText(string.format(
-                        "Dummy %s  |cff777777•|r  LK %s  |cff777777•|r  Avg %s",
-                        DpsText(dps.dummy), DpsText(dps.lk),
-                        DpsText(dps.average)))
+                        "%s  |cff777777•|r  %s  |cff777777•|r  %s",
+                        TF("library.label.row_dps_dummy", {dps=DpsText(dps.dummy)}),
+                        TF("library.label.row_dps_lich_king", {dps=DpsText(dps.lk)}),
+                        TF("library.label.row_dps_average", {dps=DpsText(dps.average)})))
                 elseif dps.dummy > 0 then
-                    card.echoCount:SetText(string.format("|cff4dff80%s DPS|r", DpsText(dps.dummy)))
-                    card.dpsBreakdown:SetText("Training Dummy")
+                    card.echoCount:SetText("|cff4dff80" .. TF("library.label.row_dps", {dps=DpsText(dps.dummy)}) .. "|r")
+                    card.dpsBreakdown:SetText(T("library.label.category_dummy"))
                 elseif dps.lk > 0 then
-                    card.echoCount:SetText(string.format("|cff4dff80%s DPS|r", DpsText(dps.lk)))
-                    card.dpsBreakdown:SetText("Lich King")
+                    card.echoCount:SetText("|cff4dff80" .. TF("library.label.row_dps", {dps=DpsText(dps.lk)}) .. "|r")
+                    card.dpsBreakdown:SetText(T("library.label.category_lich_king"))
                 else
-                    card.echoCount:SetText("|cff777777No DPS record|r")
+                    card.echoCount:SetText("|cff777777" .. T("library.label.row_no_dps_record") .. "|r")
                     card.dpsBreakdown:SetText("")
                 end
             end
         else
-            card.echoCount:SetText("|cffffd200Syncing full loadout...|r")
+            card.echoCount:SetText("|cffffd200" .. T("library.status.row_syncing_loadout") .. "|r")
             card.dpsBreakdown:SetText("")
             card.title:SetTextColor(0.65,0.65,0.65)
             local displayAuthor = b.displayAuthor
                 or (Nexus.Identity and Nexus.Identity.DisplaySafeText
                     and Nexus.Identity.DisplaySafeText(
                         b.author or "?", 1024, false))
-                or "Unknown"
-            card.author:SetText("by "..displayAuthor..identityTag
-                .."  |cff777777- waiting for Echoes|r")
+                or T("library.value.owner_unknown")
+            card.author:SetText(TF("library.label.by_owner", {name=displayAuthor})..identityTag
+                .."  |cff777777" .. T("library.status.row_waiting_for_echoes") .. "|r")
         end
         -- The hover's full owner and status line is the line as finally
         -- shown (after every branch above), so a reused row never carries
@@ -4547,7 +4718,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         card._fullAuthor = card.author:GetText()
 
         card.mineBadge:Hide()
-        card.addBtn:SetText("View")
+        card.addBtn:SetText(T("library.button.view_build"))
         card.addBtn:SetSize(52,22)
         card.addBtn:Show()
         card.record = nil
@@ -4569,12 +4740,13 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             end
         end
         local msg
+        -- Unknown (incomplete read), empty catalog and no match stay distinct.
         if total == nil then
-            msg = "The build library could not be read completely. Try again shortly."
+            msg = T("library.status.list_unreadable")
         elseif total == 0 then
-            msg = "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
+            msg = T("library.heading.list_empty") .. "\n\n" .. T("library.body.list_empty")
         else
-            msg = "No builds match the current scope, class, DPS-record, or search filters."
+            msg = T("library.status.list_no_match")
         end
         if frame._emptyState and not frame._resultsStale then
             frame._emptyState:SetText(msg)

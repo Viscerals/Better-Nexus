@@ -11,6 +11,12 @@ end
 local Projection = {}
 Nexus.CommunityInternals.Projection = Projection
 
+-- Full UI localization (library family): the detail's code-owned labels
+-- resolve through the Nexus.Localization seam when the detail is built
+-- (looked up per call; the active language is fixed for the session, so the
+-- detail cache key needs no language part). Data stays data.
+local function T(key) return (Nexus.Localization.Text(key)) end
+
 local VALID_CLASS = {
     WARRIOR=true,PALADIN=true,HUNTER=true,ROGUE=true,PRIEST=true,
     DEATHKNIGHT=true,SHAMAN=true,MAGE=true,WARLOCK=true,DRUID=true,
@@ -116,12 +122,12 @@ local function RecordText(label, rows, personal)
     local best = top and DpsText(top.dps) or DASH
     local holder = top and (top.displayPlayer
         or Identity.DisplaySafeText(
-            tostring(top.player or "Unknown"), 1024, false)
-        or "Unknown") or "No record yet"
+            tostring(top.player or T("library.value.player_unknown")), 1024, false)
+        or T("library.value.player_unknown")) or T("library.value.no_record_yet")
     local yours = personal and DpsText(personal.dps) or DASH
     return string.format(
-        "|cffffffff%s|r  |cffffd200%s|r |cff888888%s|r   |cff66ff99Your best %s|r",
-        label, best, holder, yours)
+        "|cffffffff%s|r  |cffffd200%s|r |cff888888%s|r   |cff66ff99%s|r",
+        label, best, holder, (Nexus.Localization.Format("library.label.your_best", {dps=yours})))
 end
 
 local function RelevantOwnedKey(build, context)
@@ -374,13 +380,14 @@ function Projection.New(options)
             -- goes only in answers to players who ask. A linked DPS record,
             -- which carries its Echo list, may also be queued under the same
             -- mode (ui/CommunityRenderer.lua says both in the confirmation).
-            editState = validPublishedId
-                and "Shared listing saved on this client. Update Shared Build... saves your edits after you confirm and queues a summary only if Sync mode and size allow; receipt by other players is not confirmed."
-                or "Your server Saved Build. Edit its title/description; Share Build... shares it after you confirm, queuing a summary only if Sync mode and size allow."
+            editState = T(validPublishedId
+                and "library.status.edit_state_shared_listing"
+                or "library.status.edit_state_saved_build")
         elseif mine and loadoutLocked then
-            editState = "|cffffd200Echo list is read-only: a DPS record is attached.|r Title/description remain editable. Share a new build to use different Echoes."
+            editState = "|cffffd200" .. T("library.status.echo_list_read_only") .. "|r "
+                .. T("library.status.edit_state_title_editable")
         elseif mine then
-            editState = "You own this build. Edit can also replace its Echoes from your active wishlist."
+            editState = T("library.status.edit_state_own_build")
         end
 
         local hasLink = type(build.link) == "string" and build.link ~= ""
@@ -405,16 +412,16 @@ function Projection.New(options)
             -- Copy into Editor is draft-only. A Saved Build mirror offers no
             -- Copy; its Share is a separate action behind a confirmation.
             actionText=savedKind ~= "saved"
-                and (hasLoadout and "Copy into Editor" or "Request full Echo list")
+                and T(hasLoadout and "library.button.copy_into_editor" or "library.button.request_full_echo_list")
                 or nil,
             shareText=savedKind == "saved"
-                and (validPublishedId and "Update Shared Build..." or "Share Build...")
+                and T(validPublishedId and "library.button.update_shared_build" or "library.button.share_saved_build")
                 or nil,
             detailsAvailable=context.detailsAvailable == true,
             dummyRows=Copy(dummy),lkRows=Copy(lk),
             dummyPersonal=Copy(dummyPersonal),lkPersonal=Copy(lkPersonal),
-            dummyRecord=RecordText("Training Dummy", dummy, dummyPersonal),
-            lkRecord=RecordText("Lich King", lk, lkPersonal),
+            dummyRecord=RecordText(T("library.label.category_dummy"), dummy, dummyPersonal),
+            lkRecord=RecordText(T("library.label.category_lich_king"), lk, lkPersonal),
         }
     end
 
