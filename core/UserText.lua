@@ -21,6 +21,10 @@
 Nexus=Nexus or {}
 local T={};Nexus.UserText=T
 
+-- While T.EnglishMessage runs: an empty pack, so the seam answers with its
+-- English base whatever the active language is; nil otherwise (active pack).
+local englishPack
+local ENGLISH_ONLY={}
 -- The seam at call time (a test may swap Nexus.Localization), never cached.
 local function Seam()
     local localization=Nexus.Localization
@@ -31,7 +35,7 @@ end
 local function Say(key,english)
     local localization=Seam()
     if localization then
-        local text,source=localization.Text(key)
+        local text,source=localization.Text(key,englishPack)
         if type(text)=="string" and source~="unavailable" then return text end
     end
     return english
@@ -47,7 +51,7 @@ local function SayF(key,args,english)
         for name,value in pairs(args) do
             slots[name]=type(value)=="number" and localization.Count(value) or value
         end
-        local text,source=localization.Format(key,slots)
+        local text,source=localization.Format(key,slots,englishPack)
         if type(text)=="string" and source~="unavailable" then return text end
     end
     return english
@@ -182,7 +186,7 @@ end
 local function LocalizedReason(key,code)
     local localization=Nexus.Localization
     if type(localization)=="table" and type(localization.Text)=="function" then
-        local text,source=localization.Text(key)
+        local text,source=localization.Text(key,englishPack)
         if type(text)=="string" and text~="" then
             if source=="unavailable" then return text.." "..T.Details(code) end
             -- Only an actual validated base/candidate result carries this
@@ -202,7 +206,7 @@ end
 local function SeamReason(key,english)
     local localization=Seam()
     if localization then
-        local text,source=localization.Text(key)
+        local text,source=localization.Text(key,englishPack)
         if type(text)=="string" and text~="" and source~="unavailable" then
             return text, (source=="base" or source=="candidate")
                 and type(localization.IsText)=="function" and localization.IsText(text)==true
@@ -215,6 +219,37 @@ end
 local function CapturedCount(digits)
     local value=tonumber(digits)
     if value and tostring(value)==digits then return value end
+    return nil
+end
+-- Display phrasebooks of other owners (e.g. the Orb window's book for the
+-- Orb reasons a blocked action carries): fn(raw) returns the shown text and
+-- whether it recognized raw. Asked only after every rule below that names a
+-- text, so no text those rules show changes; a text no source recognizes
+-- keeps its existing presentation.
+local phraseSources={}
+function T.AddPhraseSource(fn)
+    if type(fn)~="function" then return end
+    for _,known in ipairs(phraseSources) do if known==fn then return end end
+    phraseSources[#phraseSources+1]=fn
+end
+-- The English text of a reason above, recognized as that reason: a runtime
+-- that keeps the English presentation (T.EnglishMessage) for its record has
+-- it said once, in the active language, at the display.
+local reasonKeysByEnglish={}
+for raw,english in pairs(reasons) do reasonKeysByEnglish[english]=reasonKeys[raw] end
+local function FromPhraseSources(s)
+    -- The English presentation is the one before these sources existed.
+    if englishPack then return nil end
+    local key=reasonKeysByEnglish[s]
+    if key then return SeamReason(key,s) end
+    for _,source in ipairs(phraseSources) do
+        local ok,shown,known=pcall(source,s)
+        if ok and known==true and type(shown)=="string" then
+            local localization=Seam()
+            return shown, localization~=nil and type(localization.IsText)=="function"
+                and localization.IsText(shown)==true
+        end
+    end
     return nil
 end
 function T.Message(value)
@@ -274,6 +309,8 @@ function T.Message(value)
     end
     if s:find("no net gain",1,true) then return Say("reason.not_saved_no_gain","Not saved: no additional matching Wishlist copies were confirmed.") end
     if s:find("coverage lost:",1,true) then return Say("reason.not_saved_coverage_lost","Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.") end
+    local phrased,phrasedText=FromPhraseSources(s)
+    if phrased then return phrased,phrasedText end
     if s:match("^[A-Z][A-Z0-9_]+$") then
         return SayF("reason.unknown_code",{code=s},"This action is not available yet. Check the status or diagnostics. Details: "..s)
     end
@@ -292,6 +329,17 @@ function T.Message(value)
         :gsub("before search","before searching for another target")
         :gsub("waiting for owned%-echo sync","waiting for current Echo data from the server")
     return s
+end
+-- T.Message's English presentation, whatever the active language: for a
+-- runtime that keeps it in a record (a support report line), so the record's
+-- bytes never depend on the language and the display says it once.
+function T.EnglishMessage(value)
+    local outer=englishPack
+    englishPack=ENGLISH_ONLY
+    local ok,text=pcall(T.Message,value)
+    englishPack=outer
+    if not ok then error(text,0) end
+    return text
 end
 -- A card annotation code -> its {key, English}; EchoWeaver's own words for the
 -- same states share the key of that state.

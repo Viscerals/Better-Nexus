@@ -83,9 +83,32 @@ do
   n=n+1
   check(english[key]==text,'fallback English equals the catalog for '..key)
  end
- local catalog=0
- for key in pairs(english) do if key:sub(1,4)=='orb.' then catalog=catalog+1;check(fallback[key]~=nil,'fallback holds '..key) end end
- check(n==catalog and n>300,'every orb.* key has exactly one fallback: '..n..'/'..catalog)
+ -- The v3 remainder keys are shown only through the display phrasebook,
+ -- which without the seam shows the producer's raw English itself: they
+ -- need no fallback, and the window never asks T/TF for them by name.
+ local remainder=assert(src:match('%-%- ORB%-REMAINDER BEGIN.-\nlocal ORB_REMAINDER=(%b{})'),'remainder book present')
+ remainder=assert(loadstring('return '..remainder))()
+ local bookKeys,bookN={},0
+ for _,key in pairs(remainder.exact) do if not bookKeys[key] then bookKeys[key]=true;bookN=bookN+1 end end
+ for _,entry in ipairs(remainder.formats) do
+  bookKeys[entry.key]=true;bookN=bookN+1
+  for _,map in pairs(entry.nested or {}) do
+   if type(map)=='table' then for _,key in pairs(map) do if not bookKeys[key] then bookKeys[key]=true;bookN=bookN+1 end end end
+  end
+ end
+ local catalog,remainderN=0,0
+ for key in pairs(english) do
+  if key:sub(1,4)=='orb.' then
+   if bookKeys[key] and not fallback[key] then
+    remainderN=remainderN+1
+    check(not src:find('T%("'..key:gsub('%p','%%%0')..'"')  and not src:find('TF%("'..key:gsub('%p','%%%0')..'"'),'remainder key is never asked by name: '..key)
+   else
+    catalog=catalog+1;check(fallback[key]~=nil,'fallback holds '..key)
+   end
+  end
+ end
+ check(n==catalog and n>300,'every other orb.* key has exactly one fallback: '..n..'/'..catalog)
+ check(remainderN==bookN and remainderN>280,'every remainder book key is an orb.* catalog key: '..remainderN..'/'..bookN)
  -- The display-boundary map of raw runtime texts: each raw text is a literal
  -- of the Orb core (the producer keeps it), and its key's English is that
  -- same text, so the English window shows exactly what it showed before.
@@ -101,6 +124,42 @@ do
   check(english[key]==raw,'runtime key English is the raw text: '..key)
  end
  check(mapped>80,'runtime texts mapped: '..mapped)
+end
+-- The Orb display phrasebook (v3 remainder): every exact entry and every
+-- producer format, rebuilt as the producer writes it, shows exactly the
+-- producer's bytes in English; texts made of several of its sentences too.
+local BOOK=assert(UI.PhraseBook(),'the Orb book is built')
+do
+ local failures=S.BookFidelity(BOOK,'english')
+ check(#failures==0,'English: every Orb book entry shows the producer bytes:\n'..table.concat(failures,'\n'))
+ local exactN=0
+ for _ in pairs(BOOK.exact) do exactN=exactN+1 end
+ check(exactN>340 and #BOOK.formats==26,'Orb book admitted whole: '..exactN..' exact, '..#BOOK.formats..' formats')
+end
+-- Raw text of a key in the book (the producer's bytes).
+local function RawOf(key)
+ for raw,k in pairs(BOOK.exact) do if k==key then return raw end end
+ error('no raw text for '..key)
+end
+local INTRO=RawOf('orb.continue.attribution_owned_gain')..RawOf('orb.continue.exit_consequences')..RawOf('orb.continue.check_explanation')
+local COMPOSED={
+ INTRO..RawOf('orb.continue.confirm_question'),
+ INTRO..RawOf('orb.continue.choose_check_confirm'),
+ RawOf('orb.recovery.unobservable')..RawOf('orb.runtime.receipt_exit_unreserved'),
+}
+for _,entry in ipairs(BOOK.formats) do
+ if entry.key=='orb.continue.confirm' then COMPOSED[#COMPOSED+1]=string.format(entry.format,2,5) end
+ if entry.key=='orb.runtime.cannot_start_yet' then
+  COMPOSED[#COMPOSED+1]=string.format(entry.format,RawOf('orb.runtime.no_assigned_wishlist')..' '..RawOf('orb.runtime.limit_reached'))
+ end
+ if entry.key=='orb.runtime.blocked_unattributable_next' then
+  COMPOSED[#COMPOSED+1]=string.format(entry.format,'A new Orb run','Stop this Orb run first, then open')
+ end
+end
+check(#COMPOSED==6,'composed producer texts built: '..#COMPOSED)
+for _,raw in ipairs(COMPOSED) do
+ local shown,known=L.Phrase(raw,BOOK)
+ check(known==true and shown==raw,'English: a composed producer text shows its exact bytes: '..raw:sub(1,60))
 end
 Plan(3)
 local f=UI.Show()
@@ -197,6 +256,19 @@ end
 
 Boot('wrap')
 check(Nexus.Localization.ActiveLanguage()=='frFR','pseudo pack active from session start')
+do
+ local failures=S.BookFidelity(UI.PhraseBook(),'pseudo')
+ check(#failures==0,'pseudo: every Orb book entry is said through the seam:\n'..table.concat(failures,'\n'))
+ for _,raw in ipairs(COMPOSED) do
+  local shown,known=Nexus.Localization.Phrase(raw,UI.PhraseBook())
+  check(known==true and S.LooksUntranslated(shown)==nil,'pseudo: a composed producer text is said whole: '..tostring(shown):sub(1,80))
+ end
+ -- The Orb block sentence other windows show (UserText): its subject too.
+ local block='A new Orb run is blocked: the observed gain cannot be attributed to this action. Open /nexus orbs for its explicit checked Continue exit. The record is kept until that check passes and you confirm; no spending restarts.'
+ local shown=Nexus.UserText.Message(block)
+ check(S.LooksUntranslated(shown)==nil and shown:find(S.OPEN..'A new Orb run'..S.CLOSE,1,true)~=nil
+  and shown:find(S.OPEN..'Open'..S.CLOSE,1,true)~=nil,'pseudo: an Orb block sentence in another window is said with its subject and step: '..shown)
+end
 -- Loading: local saved data is not restored yet (the display read only).
 do
  local real=Nexus.StartupStatus
@@ -292,17 +364,25 @@ do
  Scan('history baseline consent',With({historyCount=2,historyRisk='unconfirmed; Start accepts current Echoes baseline; late results may arrive.',
   state='IDLE',running=false,pending=false}))
 end
--- Continue window chrome (its body is runtime text: pending).
+-- Continue window: chrome, and the runtime's body text said through the
+-- Orb book at the display (the runtime keeps its English).
 do
- local c=UI.ShowContinue()
- if c then
-  local texts=S.VisibleTexts(c)
-  local chrome={}
-  for _,t in ipairs(texts) do if t.frame~=c.body then chrome[#chrome+1]=t end end
-  Scan('continue chrome',chrome)
-  Passive('Continue cancel',function() c.cancel:GetScript('OnClick')(c.cancel) end)
-  c:Hide()
+ local view=M.ContinueView
+ local c=assert(UI.ShowContinue(),'the Continue window opens')
+ local real=view().text
+ check(type(real)=='string' and real~='' and c.body:GetText()~=real and S.IsPseudo(c.body:GetText()),
+  'the real Continue body passes the seam: '..tostring(c.body:GetText()))
+ Scan('continue window',S.VisibleTexts(c))
+ for _,text in ipairs(COMPOSED) do
+  M.ContinueView=function() local v=view();v.text=text;return v end
+  UI.ShowContinue()
+  Scan('continue body '..text:sub(1,30),{{text=c.body:GetText(),frame=c.body}})
+  check(S.IsPseudo(c.body:GetText()),'a composed Continue body passes the seam: '..c.body:GetText():sub(1,80))
  end
+ M.ContinueView=view
+ UI.ShowContinue()
+ Passive('Continue cancel',function() c.cancel:GetScript('OnClick')(c.cancel) end)
+ c:Hide()
 end
 -- Stop, then the history page with its rows, details, hovers and copy view.
 UI.Refresh();f.stop:Click();UI.Refresh()

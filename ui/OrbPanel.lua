@@ -664,11 +664,369 @@ local RUNTIME_TEXT={
     ["Your approved replaceable counts changed. Review them again."]="orb.error.replaceable_changed",
 }
 -- ORB-RUNTIME END
+-- Full-UI remainder (v3): the other texts core/OrbRuntime.lua,
+-- core/OrbAdapter.lua and logic/OrbPolicy.lua produce and keep raw (state,
+-- reasons, Continue check, recovery), each English equal to the producer's
+-- bytes; and the producer's own formats (%d a count, %s a code-filled slot;
+-- nested: a slot value shown through its key or through this same book).
+-- ORB-REMAINDER BEGIN (generated from the fragment)
+local ORB_REMAINDER={exact={
+    ["Orb mode already owns an operation."]="orb.adapter.already_owns",
+    ["Assignment or source protection changed before submission. Resume only after reviewing the current assignment."]="orb.adapter.assignment_protection_changed",
+    ["Cannot verify the game's automatic Echo-choice setting."]="orb.adapter.auto_choice_unverifiable",
+    ["The live Echo catalog entry is unavailable or changed. Wait for verified catalog data."]="orb.adapter.catalog_entry_changed",
+    ["Another choice is pending or no Orbs remain."]="orb.adapter.choice_pending_or_empty",
+    ["The game refused the Orb choice. Resolve the offer manually."]="orb.adapter.choice_refused",
+    ["The current Echo choices are malformed. No Orb was sent."]="orb.adapter.choices_malformed",
+    ["The current Echo choices are unavailable."]="orb.adapter.choices_unavailable",
+    ["This Echo is unavailable to this class."]="orb.adapter.class_unavailable",
+    ["The character, loadout, or game service changed. Orb mode is paused."]="orb.adapter.context_changed_paused",
+    ["The current rolled/locked Echo counts exceed the supported limits."]="orb.adapter.counts_exceed",
+    ["Disable the other Echo automation addon before using Orb mode."]="orb.adapter.disable_rival",
+    ["Echo discovery data or GetDiscoveredEchoes is unavailable."]="orb.adapter.discovery_unavailable",
+    ["The Echo state check failed. No selection was sent."]="orb.adapter.echo_check_failed",
+    ["The server reports that this Echo is disabled."]="orb.adapter.echo_disabled",
+    ["The final Echo protection check failed. No selection was sent. Resolve the original pending operation manually."]="orb.adapter.echo_protection_failed",
+    ["Your Echo state changed. Review the plan again."]="orb.adapter.echo_state_changed",
+    ["The ID-only choice interface cannot distinguish the offered qualities. Resolve the offer manually."]="orb.adapter.id_only_interface",
+    ["Invalid source."]="orb.adapter.invalid_source",
+    ["Nexus rejected the current locked Echo data: a locked record is above the limit Nexus supports."]="orb.adapter.locked_record_over_limit",
+    ["This client cannot observe a manual Echo choice."]="orb.adapter.manual_choice_unobservable",
+    ["The client cannot create a frame."]="orb.adapter.no_create_frame",
+    ["Orb mode is unavailable: the client does not expose OrbService."]="orb.adapter.no_orbservice",
+    ["Orb mode is unavailable: the client does not expose PerkService."]="orb.adapter.no_perkservice",
+    ["This Echo has not been discovered or observed."]="orb.adapter.not_discovered",
+    ["The observer frame could not be created."]="orb.adapter.observer_frame_failed",
+    ["Orb offer active -- manual action required"]="orb.adapter.offer_active_manual",
+    ["The Orb offer changed or another action is pending."]="orb.adapter.offer_changed",
+    ["The current Echo offer is invalid."]="orb.adapter.offer_invalid",
+    ["The current Echo offer has unknown quality."]="orb.adapter.offer_quality_unknown",
+    ["Orb action ownership is unavailable."]="orb.adapter.ownership_lock_unavailable",
+    ["Echo ownership has an unsupported shape."]="orb.adapter.ownership_shape",
+    ["Echo ownership is unavailable."]="orb.adapter.ownership_unavailable",
+    ["Echo ownership could not be read."]="orb.adapter.ownership_unreadable",
+    ["Echo ownership could not be verified."]="orb.adapter.ownership_unverified",
+    ["Actions are blocked in passive diagnostics."]="orb.adapter.passive_diagnostics",
+    ["Nexus is paused for this session. No Orb action was sent."]="orb.adapter.paused_not_sent",
+    ["Cannot verify pending game actions."]="orb.adapter.pending_actions_unverifiable",
+    ["The final Orb protection check failed. No Orb was sent."]="orb.adapter.protection_failed",
+    ["Resolve the current Echo action first."]="orb.adapter.resolve_current_action",
+    ["The original owner or a pending action prevents resuming."]="orb.adapter.resume_prevented",
+    ["Another Echo picker may interfere. Orb mode is paused."]="orb.adapter.rival_may_interfere",
+    ["This run no longer owns Orb actions."]="orb.adapter.run_not_owner",
+    ["The selection outcome is unknown. No selection will be repeated."]="orb.adapter.selection_unknown",
+    ["Nexus is paused for this session."]="orb.adapter.session_paused",
+    ["The approved source or balance changed before spending."]="orb.adapter.source_or_balance_changed",
+    ["The spend call failed; its server outcome is unknown. No repeat will be sent."]="orb.adapter.spend_call_failed",
+    ["The game refused the Orb spend."]="orb.adapter.spend_refused",
+    ["orb state capability missing"]="orb.adapter.state_capability_missing",
+    ["The Orb state check failed. No Orb was sent."]="orb.adapter.state_check_failed",
+    ["orb state not yet known"]="orb.adapter.state_not_yet_known",
+    ["orb state unavailable"]="orb.adapter.state_unavailable",
+    ["The current game state is unavailable."]="orb.adapter.state_unavailable_sentence",
+    ["orb state unknown"]="orb.adapter.state_unknown",
+    ["The assigned target changed before selection. The original pending operation must be resolved."]="orb.adapter.target_changed",
+    ["PerkService.IsTomeEchoDisabled is unavailable."]="orb.adapter.tome_api_unavailable",
+    ["PerkService.IsTomeEchoDisabled did not provide a known answer."]="orb.adapter.tome_api_unknown",
+    ["Turn off the game's automatic Echo acceptance before starting Orb mode."]="orb.adapter.turn_off_auto_accept",
+    ["unreadable error"]="orb.adapter.unreadable_error",
+    ["Waiting for the complete three-choice offer."]="orb.adapter.waiting_three_choices",
+    ["Your fresh Echo ownership shows the distinct chosen gain, but an earlier unconfirmed action could have caused it. This action remains UNCONFIRMED. Explicit Continue ends this old run and archives its original receipt unchanged, with confidence NONE. "]="orb.continue.attribution_owned_gain",
+    ["The check asks read-only for the Orb count and Echoes twice and requires quiet unchanged state. Those arrivals do not prove that no older reply is still on its way. "]="orb.continue.check_explanation",
+    ["Checking the game's current state. Nexus asked the game for the Orb count (and for your Echoes) and waits for an answer observed after that request began; it asks a second time after the first. No spend and no choice is sent, only these read-only questions. Any change in the game, or a loading screen, cancels this check."]="orb.continue.checking",
+    ["Checking; wait for both observed answers."]="orb.continue.checking_wait",
+    ["Choose Check, then explicitly confirm, or cancel."]="orb.continue.choose_check_confirm",
+    ["Confirm this unconfirmed exit?"]="orb.continue.confirm_question",
+    ["Continued with an unconfirmed outcome. The earlier Orb action is saved unchanged in the archive. Observed spend stays counted and unknown spend exposure stays unknown. Nothing was refunded, repeated or chosen. A new Orb run needs its own approval and every normal check."]="orb.continue.done",
+    ["Observed spent Orbs stay counted; unknown spend exposure stays unknown, without a refund or another charge. No spend, choice or automatic Resume is sent. Ordinary rolling is released only after the checked archive saves. A new Orb run needs new approval. "]="orb.continue.exit_consequences",
+    ["An earlier Orb action has a spend observed by this client (one Orb fewer with its offer; the game reports no server confirmation of it) and no recorded outcome, and its offer is gone. Continue lets you go on without that outcome. First Nexus checks the game's current state read-only: it asks the game twice for the Orb count (and for your Echoes) and waits for each answer. No spend and no choice is sent, only those read-only questions. You then confirm, or cancel."]="orb.continue.intro",
+    ["The eight-entry recovery archive is full. Waiting or reload does not free space; retained records are not evicted."]="orb.continue.live_archive_full",
+    ["A newer recovery archive format is retained unchanged."]="orb.continue.live_archive_future",
+    ["The recovery archive is unreadable and retained unchanged."]="orb.continue.live_archive_malformed",
+    ["Automatic recovery history capacity is reserved: two of eight entries and their space remain for explicit recovery. Waiting or reload does not free this finite space."]="orb.continue.live_archive_reserved",
+    ["The game's automatic Echo acceptance is no longer known off."]="orb.continue.live_auto_accept",
+    ["The answer differs from the current Orb balance."]="orb.continue.live_balance_mismatch",
+    ["The Orb count refresh raised an error."]="orb.continue.live_charge_refresh_failed",
+    ["This client cannot request the current Echo choice."]="orb.continue.live_choice_query_unavailable",
+    ["The current Echo choice request raised an error."]="orb.continue.live_choice_request_failed",
+    ["The current Echo choice is unreadable."]="orb.continue.live_choice_unreadable",
+    ["The current game state could not be verified."]="orb.continue.live_default",
+    ["The unresolved record exceeds the finite archive entry limits."]="orb.continue.live_entry_too_large",
+    ["An Echo offer arrived; finish that offer in the game, or use Resume if it is offered for this unchosen action."]="orb.continue.live_late_choice",
+    ["A pick result arrived during the check."]="orb.continue.live_late_result",
+    ["A loading transition cancelled the check."]="orb.continue.live_loading_transition",
+    ["The outgoing choice request cannot be observed safely."]="orb.continue.live_no_choice_observer",
+    ["No usable empty-choice answer was observed; the choice remains unknown."]="orb.continue.live_no_empty_choice_reply",
+    ["The game reply observer is unavailable."]="orb.continue.live_no_observer",
+    ["No usable Echo ownership answer was observed in time."]="orb.continue.live_no_ownership",
+    ["No usable charge answer was observed in time."]="orb.continue.live_no_reply",
+    [" No automatic retry is available for this check. Wait for the actual result, resolve any native offer, or Stop. A reload keeps passive recovery; open Orbs to see whether explicit Continue is eligible."]="orb.continue.live_no_retry_tail",
+    ["An unusable game packet prevents a quiet check."]="orb.continue.live_observer_tainted",
+    ["An offer, native choice latch or other game action is active; finish it in the game."]="orb.continue.live_offer_or_action",
+    ["This client cannot distinguish its own choice request from an empty answer."]="orb.continue.live_own_choice_request",
+    ["The Echo refresh failed after the Orb count was requested."]="orb.continue.live_ownership_refresh_failed",
+    ["The game reports a pending Orb offer; finish it in the game."]="orb.continue.live_pending_positive",
+    ["The action record or its owner changed."]="orb.continue.live_receipt_changed",
+    ["The Orb count or Echo refresh is unavailable."]="orb.continue.live_refresh_unavailable",
+    ["An unusable game packet arrived during the check."]="orb.continue.live_rejected_packet",
+    ["The observed Orb answers changed or disagreed."]="orb.continue.live_reply_changed",
+    ["The Orb answer cannot establish that no offer is pending."]="orb.continue.live_reply_unqualified",
+    ["The required refresh could not complete."]="orb.continue.live_request_failed",
+    ["Another Echo picker is active."]="orb.continue.live_rival",
+    ["The Orb balance, Echoes or loadout changed during the check."]="orb.continue.live_state_changed",
+    ["The bounded reply history overflowed."]="orb.continue.live_transport_overflow",
+    ["The current game state cannot be read."]="orb.continue.live_unreadable",
+    ["The pending record cannot be saved durably."]="orb.continue.live_write_failed",
+    ["The saved list of continued Orb actions is full. Nothing was changed and nothing was deleted."]="orb.continue.refusal_archive_full",
+    ["The saved list of continued Orb actions was written by a newer version and is kept unchanged. Nothing was changed."]="orb.continue.refusal_archive_future",
+    ["The saved list of continued Orb actions is not readable and is kept unchanged. Nothing was changed."]="orb.continue.refusal_archive_malformed",
+    ["Automatic recovery history limit reached. Two entry slots and their space are reserved for explicit recovery; existing records are retained."]="orb.continue.refusal_archive_reserved",
+    ["The game automatic acceptance setting changed. Automatic recovery stopped with its pending record retained."]="orb.continue.refusal_auto_accept",
+    ["The answer about the Orb count does not match what the game shows, so the check was cancelled. Nothing was changed."]="orb.continue.refusal_balance_mismatch",
+    ["The Orb count refresh raised an error. The check stopped and the pending record is retained."]="orb.continue.refusal_charge_refresh_failed",
+    ["This client cannot request the current Echo choice; no recovery was authorized."]="orb.continue.refusal_choice_query_unavailable",
+    ["A choice is recorded for the earlier Orb action. Wait for its matching result. An attribution-ambiguous action has an explicit exit only when fresh ownership shows its exact distinct chosen gain; the flag alone supplies no exit."]="orb.continue.refusal_choice_recorded",
+    ["The Echo choice request raised an error; the pending record is retained."]="orb.continue.refusal_choice_request_failed",
+    ["The current Echo choice is unreadable. Automatic recovery stopped with its record retained."]="orb.continue.refusal_choice_unreadable",
+    ["The record of the earlier Orb action is too large to archive. Nothing was changed."]="orb.continue.refusal_entry_too_large",
+    ["The game sent an Echo offer during the check. Resolve it in the game. Nothing was changed."]="orb.continue.refusal_late_choice",
+    ["The game sent a pick result during the check, so it was cancelled. Nothing was changed. Check again."]="orb.continue.refusal_late_result",
+    ["A loading screen started or ended, so this check was cancelled. Nothing was changed. Start the check again once the game is ready."]="orb.continue.refusal_loading_transition",
+    ["The outgoing Echo choice request cannot be observed safely; no recovery was authorized."]="orb.continue.refusal_no_choice_observer",
+    ["No usable empty-choice answer was observed. The choice remains unknown; the pending record and exposure are retained."]="orb.continue.refusal_no_empty_choice_reply",
+    ["This client does not let Nexus observe the game's replies, so Continue is not available. Nothing was changed."]="orb.continue.refusal_no_observer",
+    ["No fresh answer about your Echoes was observed in time. Nothing was changed. Use Check in the Continue window to check again."]="orb.continue.refusal_no_ownership",
+    ["There is no unresolved Orb action."]="orb.continue.refusal_no_receipt",
+    ["No answer was observed in time. Nothing was changed. Use Check in the Continue window to check again."]="orb.continue.refusal_no_reply",
+    ["The check is not ready to confirm. Nothing was changed."]="orb.continue.refusal_not_ready",
+    ["This action belongs to this session. Explicit Continue requires either passive recovery after reload or a stopped attribution-ambiguous action with a fresh exact distinct chosen gain actually owned."]="orb.continue.refusal_not_restored",
+    ["A game packet that Nexus could not accept may have changed the game's cached offer or slot. A reload usually clears it. Nothing was changed."]="orb.continue.refusal_observer_tainted",
+    ["An Orb or Echo offer is open in the game. Finish it in the game first; Continue starts only when no offer is open."]="orb.continue.refusal_offer_open",
+    ["Something is open or in progress in the game (an offer, a choice or an action). Nothing was changed. Finish it, then check again."]="orb.continue.refusal_offer_or_action",
+    ["The earlier Orb action belongs to another character."]="orb.continue.refusal_other_character",
+    ["This client cannot distinguish its own choice request from an empty answer. Automatic recovery stopped with its record retained."]="orb.continue.refusal_own_choice_request",
+    ["The Echo ownership refresh failed after the Orb count was requested. That outstanding request is retained; no later query was sent."]="orb.continue.refusal_ownership_refresh_failed",
+    ["The game reports Orb offer(s) still pending. Resolve them in the game's offer window. No spend and no choice was sent."]="orb.continue.refusal_pending_positive",
+    ["The earlier Orb action's record changed, so this check was cancelled. Nothing was changed."]="orb.continue.refusal_receipt_changed",
+    ["This client cannot request the required Orb count and Echo ownership refresh."]="orb.continue.refusal_refresh_unavailable",
+    ["A game message that Nexus could not accept arrived during the check, so it was cancelled. Nothing was changed."]="orb.continue.refusal_rejected_packet",
+    ["An answer about the Orb count reported a change, or two answers disagree, so the check was cancelled. Nothing was changed. Check again."]="orb.continue.refusal_reply_changed",
+    ["An answer about the Orb count was missing a field, malformed or not accepted, so the check cannot show that no Orb offer is pending. Nothing was changed."]="orb.continue.refusal_reply_unqualified",
+    ["The required refresh requests did not all complete. Partial replies do not allow recovery; the pending record is retained."]="orb.continue.refusal_request_failed",
+    ["Another Echo picker is active. Automatic recovery stopped with its record retained."]="orb.continue.refusal_rival",
+    ["An Orb run is active. Pause or stop it first."]="orb.continue.refusal_running",
+    ["Nexus is paused for this session. No read-only check was sent; check again after Resume Nexus."]="orb.continue.refusal_session_paused",
+    ["Continue is not available for this record."]="orb.continue.refusal_spend_unconfirmed",
+    ["This confirmation is no longer current. Nothing was changed."]="orb.continue.refusal_stale_token",
+    ["Your Orb count, Echoes or loadout changed during the check, so it was cancelled. Nothing was changed. Check again when nothing is changing."]="orb.continue.refusal_state_changed",
+    ["Too many game messages arrived during the check. Nothing was changed. Check again."]="orb.continue.refusal_transport_overflow",
+    ["The game's current state cannot be read right now. Nothing was changed. Try again in a moment."]="orb.continue.refusal_unreadable",
+    ["The record could not be saved safely. Nothing was changed. Try again."]="orb.continue.refusal_write_failed",
+    ["Choose a resolved Wishlist first."]="orb.policy.choose_resolved_wishlist",
+    ["EchoWeaver Orb policy"]="orb.policy.name",
+    ["No safe target or approved recyclable offer. Resolve the offer manually."]="orb.policy.no_safe_target",
+    ["Targets exceed 79 rolled and 6 locked copies. Confirm the locked targets in the Wishlist editor."]="orb.policy.targets_exceed",
+    ["The target list is invalid."]="orb.policy.targets_invalid",
+    ["Your Echoes show the recorded gain, but an earlier unconfirmed attempt could have caused it. This action cannot be confirmed. Its record and exposure are kept. Stop, then open Orbs for the explicit checked Continue exit, or use that exit during passive recovery after reload. No spending restarts."]="orb.recovery.attribution",
+    ["A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open; Recheck cannot close it. Taking an Echo from that choice changes your Echoes, and Nexus then cannot confirm the earlier action."]="orb.recovery.board",
+    ["An earlier Orb action is unresolved. Another game action or an incomplete offer is visible. Nexus is waiting, read-only. Nothing will be sent."]="orb.recovery.checking",
+    ["A choice for the earlier Orb action is recorded. Another game action is still in flight. Nexus is waiting, read-only, until it ends. Nothing will be sent."]="orb.recovery.host",
+    ["The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."]="orb.recovery.loadout",
+    ["An earlier Orb action is unresolved. The game has not yet sent this character's build-slot data since it loaded, so Nexus cannot check the original loadout yet. Nexus is waiting, read-only, and records nothing until then: if an Orb offer is open, a choice made in it now cannot be recorded for the earlier action. Nothing will be sent."]="orb.recovery.loadout_unknown",
+    ["The earlier Orb offer is still open. Choose an Echo in the game's offer window. Nexus will record that choice and wait for the matching result. Nexus will not choose or spend."]="orb.recovery.offer_open",
+    ["The earlier Orb offer is still open, but this client cannot observe a manual choice. If you choose in the game, Nexus cannot confirm the earlier action afterwards."]="orb.recovery.offer_open_blind",
+    ["An Orb offer is open, but the Orb balance or rolled Echoes do not match the saved record of the earlier action. Nexus cannot confirm the earlier action from this offer. Resolve the offer in the game."]="orb.recovery.offer_unmatched",
+    ["A choice for the earlier Orb action is recorded. Echo ownership does not show the chosen Echo yet. Nexus is waiting for an ownership response that shows it. Recheck requests one. Nothing will be sent."]="orb.recovery.ownership",
+    ["Locked Echoes changed since the earlier Orb action. Nexus cannot confirm that action."]="orb.recovery.permanent_changed",
+    ["The earlier Orb action could not be linked to an observed result. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."]="orb.recovery.unobservable",
+    ["A choice for the earlier Orb action is recorded, and Echo ownership already shows the chosen Echo. Nexus needs an ownership response newer than its first read after the reload, and asked the game once for one. Recheck requests one more. No Orb and no choice will be sent."]="orb.recovery.wait_fresh_asked",
+    ["The earlier Orb action is unresolved and no Orb offer is open. If the game opens an offer that matches the saved record and you choose in the game's offer window, Nexus records that choice at the moment you make it, unless another game action is in flight at that moment. Nexus cannot tell whether the game refused the spend."]="orb.recovery.wait_offer",
+    ["The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."]="orb.recovery.wait_offer_blind",
+    ["A choice for the earlier Orb action is recorded. Nexus is waiting for a fresh ownership response that matches it exactly. Recheck requests one. Nothing will be sent."]="orb.recovery.wait_result",
+    ["Assign a Wishlist before starting Orb mode."]="orb.runtime.assign_before_start",
+    ["Could not disable ordinary automation."]="orb.runtime.automation_disable_failed",
+    ["The ordinary automation owner is not available; no Orb action will be sent."]="orb.runtime.automation_owner_missing",
+    ["Choose the open Echo choice in the game window first."]="orb.runtime.choose_echo_first",
+    ["The earlier Orb count request remains pending. Requested Echo ownership only; no duplicate Orb count request was sent. No Orb or choice was submitted."]="orb.runtime.count_request_pending",
+    ["A different choice was submitted during the pending Orb action. Nexus cannot confirm this action. The record and its spending exposure are kept."]="orb.runtime.different_choice_submitted",
+    ["A different Echo was chosen than the one Nexus had proposed for this Orb action. Nexus can confirm only the proposed Echo, so it cannot confirm this action. The record and its spending exposure are kept."]="orb.runtime.different_echo_chosen",
+    ["An earlier unconfirmed attempt may match this source and choice. The current result is not confirmed. Its record and exposure remain counted; no command will be repeated."]="orb.runtime.earlier_attempt_may_match",
+    ["An Echo choice is shown."]="orb.runtime.echo_choice_shown",
+    ["Finish the open Orb offer in the game window first."]="orb.runtime.finish_orb_offer_first",
+    ["Observed gain retained with attribution unconfirmed by explicit consent."]="orb.runtime.gain_retained_unconfirmed",
+    ["Retained Orb history changed. Review the new baseline before starting."]="orb.runtime.history_changed",
+    ["Retained Orb history has no reserved space for another unresolved outcome. No new Orb action was sent; ordinary rolling remains available."]="orb.runtime.history_no_reserved_space",
+    ["Review the displayed unconfirmed-history baseline before approving a new Orb run."]="orb.runtime.history_required",
+    ["unconfirmed; Start accepts current Echoes baseline; late results may arrive."]="orb.runtime.history_risk",
+    ["Retained Orb history cannot be verified. No new Orb action was sent."]="orb.runtime.history_unverified",
+    ["Retained Orb history cannot be verified. The receipt and its exposure are kept; no result can be attributed."]="orb.runtime.history_unverified_kept",
+    [" The record and its spending exposure are kept."]="orb.runtime.kept",
+    ["needed target"]="orb.runtime.kind_needed_target",
+    ["permitted fallback"]="orb.runtime.kind_permitted_fallback",
+    ["permitted recycle"]="orb.runtime.kind_permitted_recycle",
+    ["The last Echo action has no confirmed result yet."]="orb.runtime.last_action_unconfirmed",
+    ["Last replacement confirmed. This Orb run already ended; no spending restarted. Review current targets before approving a new run."]="orb.runtime.last_replacement_ended",
+    ["Limit increased by confirmation. Press Resume explicitly; usage was not reset."]="orb.runtime.limit_increased_resume",
+    ["The approved Orb limit was reached."]="orb.runtime.limit_reached",
+    ["The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment."]="orb.runtime.loadout_or_wishlist_changed",
+    ["The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed."]="orb.runtime.loadout_unverifiable",
+    [" Orbs cannot change the remaining locked targets."]="orb.runtime.locked_targets_unchangeable_tail",
+    ["unknown type"]="orb.runtime.marker_type_unknown",
+    ["Matching ownership observed under the acknowledged baseline; no server action correlation. Preparing the next approved Orb."]="orb.runtime.matched_preparing_next",
+    ["Matching ownership observed under the acknowledged baseline; no server action correlation. Review the new assigned Wishlist before any further approval; usage is unchanged."]="orb.runtime.matched_review_wishlist",
+    ["Matching ownership observed under the acknowledged baseline; no server action correlation. No next Orb will be spent until you explicitly continue."]="orb.runtime.matched_wait_continue",
+    ["Open"]="orb.runtime.next_step_open",
+    ["Stop this Orb run first, then open"]="orb.runtime.next_step_stop_open",
+    ["No assigned Wishlist"]="orb.runtime.no_assigned_wishlist",
+    ["No authoritative result arrived. Spending is paused; no action will be repeated."]="orb.runtime.no_authoritative_result",
+    [" For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself."]="orb.runtime.no_exit",
+    ["No Wishlist selected"]="orb.runtime.no_wishlist_selected",
+    ["Nothing was changed."]="orb.runtime.nothing_changed",
+    ["An Orb offer is shown."]="orb.runtime.orb_offer_shown",
+    ["Pause the active run first, then choose a higher whole-number limit. Stopped/completed runs require new approval."]="orb.runtime.pause_before_limit",
+    ["Could not preserve Orb preferences/recovery state durably. No new action was sent."]="orb.runtime.preferences_not_durable",
+    ["Could not preserve Orb preferences/recovery state. No new action was sent."]="orb.runtime.preferences_not_preserved",
+    ["Ownership shows progress, but an earlier unconfirmed attempt could have caused it."]="orb.runtime.progress_attribution_ambiguous",
+    ["This Orb receipt cannot reserve its complete bounded exit record. No new Orb action was sent."]="orb.runtime.receipt_exit_unreserved",
+    ["The earlier Orb action belongs to another character or an unsupported receipt format."]="orb.runtime.receipt_other_character",
+    ["The two automatic Orb recoveries for this approved run are used. The last outcome remains unresolved; its record and exposure are kept. Stop, then use explicit Continue if its observed-gain check is eligible, or reload for passive recovery."]="orb.runtime.recoveries_used",
+    ["Checking the current choice before a bounded Orb recovery. The last outcome is unconfirmed; no command is repeated."]="orb.runtime.recovery_checking_choice",
+    ["The approved recovery context, balance or locked Echoes changed before the next Orb. Stop and review a new run."]="orb.runtime.recovery_context_changed",
+    ["A newer loading epoch invalidated the recovery check."]="orb.runtime.recovery_epoch_invalidated",
+    ["Loading invalidated the recovery check before the next Orb. Stop and review a new run."]="orb.runtime.recovery_loading_invalidated",
+    ["Recovery needs a fresh empty-choice reply after newer activity. Resolve any open offer in the game, or Stop and approve a new run. No new Orb is sent."]="orb.runtime.recovery_needs_fresh_reply",
+    ["Recovery observations were lost before the next Orb. Stop and review a new run."]="orb.runtime.recovery_observations_lost",
+    ["Recovery observations are unavailable. Resolve any open offer in the game, or Stop and approve a new run. No new Orb is sent."]="orb.runtime.recovery_observations_unavailable",
+    ["A newer choice request or changed observer invalidated the recovery check. Stop and review a new run."]="orb.runtime.recovery_request_invalidated",
+    ["Retained without a confirmed result after a bounded recovery."]="orb.runtime.recovery_retained_unconfirmed",
+    ["New game state could not preserve the recovery check. Stop and review a new run."]="orb.runtime.recovery_state_unpreserved",
+    ["Recovery status unavailable"]="orb.runtime.recovery_status_unavailable",
+    ["Recovery observations cannot be classified. Resolve any open offer in the game, or Stop and approve a new run."]="orb.runtime.recovery_unclassified",
+    ["Requested an Orb/ownership refresh. No Orb or choice was submitted."]="orb.runtime.refresh_requested",
+    ["Matching ownership replacement observed under the acknowledged current-state baseline; no server action correlation."]="orb.runtime.replacement_matched_baseline",
+    ["Resuming the approved run without resetting its usage."]="orb.runtime.resuming_without_reset",
+    ["Review the increased limit again."]="orb.runtime.review_increased_limit",
+    ["Rolled targets are complete; Orbs cannot change the remaining locked targets."]="orb.runtime.rolled_complete_locked_remain",
+    ["The observed rolled targets are complete. The last Orb outcome is unresolved; its receipt and exposure are retained. Open Orbs to review whether its explicit checked Continue is eligible. No further Orb will be sent."]="orb.runtime.rolled_complete_unresolved",
+    ["An Orb run is already active or unresolved. Stop/settle it before starting another."]="orb.runtime.run_already_active",
+    ["The same-ID, same-quality result is indistinguishable from stale ownership data. The client supplies no correlated completion evidence. Pending exposure is retained; no retry is allowed."]="orb.runtime.same_id_indistinguishable",
+    ["Local saved data is not ready. No Orb action will be sent."]="orb.runtime.saved_data_not_ready",
+    ["Session interrupted. Orb spending will not restart automatically."]="orb.runtime.session_interrupted",
+    ["Stop and settle the current Orb operation before changing targets."]="orb.runtime.settle_before_target_change",
+    ["Stop and settle the current run first."]="orb.runtime.settle_run_first",
+    ["The game refused the Orb spend after the recovery permit was used. Stop and review a new run."]="orb.runtime.spend_refused_after_permit",
+    ["not sent"]="orb.runtime.state_not_sent",
+    ["A new Orb run"]="orb.runtime.subject_new_run",
+    ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling",
+    ["A change of Orb sources"]="orb.runtime.subject_source_change",
+    ["A change of Orb targets"]="orb.runtime.subject_target_change",
+    ["This action"]="orb.runtime.subject_this_action",
+    ["This change"]="orb.runtime.subject_this_change",
+    ["The submitted result is unresolved. Wait for its actual result or finish a native offer manually. Stop or reload for passive recovery and its explicit Continue eligibility; no repeat is allowed."]="orb.runtime.submitted_unresolved",
+    [" This record contains no retained observation of one Orb fewer with this action's offer. That does not prove that the server spent nothing. Continue does not apply to this record. Start, Resume and reload cannot reconstruct the missing history; Recheck can collect current facts but cannot promise to settle it. Preserve the record; do not repeat the spend or clear its exposure."]="orb.runtime.unobserved",
+    ["Waiting for a fresh server response confirming the selected replacement."]="orb.runtime.waiting_fresh_confirmation",
+    ["A loading screen is in progress. Wait until the world is ready before Orb spending."]="orb.runtime.world_loading",
+    ["The world just loaded. Wait a moment before Orb spending."]="orb.runtime.world_settling",
+    ["Local saved data is unavailable (no character container). /reload may restore it."]="orb.runtime.write_container",
+    ["Local saved data is unavailable. /reload may restore it."]="orb.runtime.write_database",
+    ["Your character identity is not known yet. Wait a moment, then try again."]="orb.runtime.write_identity",
+    ["Local saved data could not be verified. /reload may restore it."]="orb.runtime.write_lifecycle",
+    ["Local saved data is still loading. Wait a moment, then try again."]="orb.runtime.write_lifecycle_loading",
+    ["Saved data carries a storage migration marker this build does not support, so it is kept unchanged and read-only."]="orb.runtime.write_marker",
+    ["This character's saved data has an unsupported shape."]="orb.runtime.write_row",
+},formats={
+    {format="The saved data format marker is not a valid format number (%s%s). This build writes format %s. The data is kept unchanged and read-only.",
+        key="orb.runtime.format_marker_invalid", fields={"marker_type", "marker_text", "supported"}, nested={marker_type={["unknown type"]="orb.runtime.marker_type_unknown"}}},
+    {format="Saved data format %d did not pass this build's check for format %d data (field: %s). This build writes format %d. The data is kept unchanged and read-only.",
+        key="orb.runtime.format_unverified", fields={"saved", "saved_again", "field", "supported"}},
+    {format="Saved data format %d is not supported. This build writes format %d and reads formats %d to %d after a check. The data is kept unchanged and read-only.",
+        key="orb.runtime.format_unsupported", fields={"saved", "supported", "first", "last"}},
+    {format="Local character data is not ready: %s No Orb action will be sent.",
+        key="orb.runtime.character_data_not_ready", fields={"reason"}, nested={reason=true}},
+    {format="Finished - approved Orb exposure limit reached. %d Orb outcome(s) remain unconfirmed. Start a new run to continue.",
+        key="orb.runtime.finished_exposure_unconfirmed", fields={"count"}},
+    {format="Finished - limit reached. The approved maximum of %s Orb(s) was used. Start a new run to continue.",
+        key="orb.runtime.finished_limit_used", fields={"limit"}},
+    {format="A missing target is currently unavailable: %s. %s",
+        key="orb.runtime.missing_target_unavailable", fields={"echo", "reason"}, nested={reason=true}},
+    {format="Orb mode cannot start yet. %s",
+        key="orb.runtime.cannot_start_yet", fields={"causes"}, nested={causes=true}},
+    {format="Bounded Orb recovery stopped. %s The outcome is still unconfirmed; its record and exposure are kept. No spend or choice was repeated.",
+        key="orb.runtime.bounded_recovery_stopped", fields={"why"}, nested={why=true}},
+    {format="Continue with an unconfirmed Orb outcome? The earlier Orb action counts %d of its approved %d Orb(s) as spent. Nexus did not see which Echo, if any, you received, and the game gives no way to check. If you continue: the spent count stays; the original record is saved unchanged; nothing is refunded, repeated or chosen; Nexus stops blocking rolling; a new Orb run needs its own approval and every normal check. Risk you accept: Nexus cannot prove that the server is finished with the old action. Two answers that arrived after Nexus asked do not prove that no older answer is still on its way. A late result would show up as an ordinary change, and Nexus will not link it to the old record.",
+        key="orb.continue.confirm", fields={"spent", "limit"}},
+    {format="Recovered past %d unconfirmed Orb outcome(s). Earlier results may still arrive. All attempts remain within your approved maximum; completion uses your observed Echoes.",
+        key="orb.runtime.recovered_past", fields={"count"}},
+    {format="The earlier Orb offer is still open. Before the reload Nexus proposed %s for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action. The record and its spending exposure are kept. For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
+        key="orb.recovery.offer_open_proposed", fields={"echo"}},
+    {format="A choice for the earlier Orb action is recorded: %s. The game still reports its Orb offer as open. If you have not chosen in the game's offer window since the reload, choose %s there; a different Echo cannot confirm this action. Nexus then waits, read-only, for the matching result. Nexus will not choose or spend.",
+        key="orb.recovery.offer", fields={"echo", "echo_again"}},
+    {format="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action. The record and its spending exposure are kept.",
+        key="orb.recovery.charges", fields={"observed", "expected"}},
+    {format="Your Echoes show the recorded gain, but it cannot be attributed to this action. Continue is unavailable. %s The record and its spending exposure are kept. No spending restarts.",
+        key="orb.runtime.gain_unattributable_refusal", fields={"refusal"}, nested={refusal=true}},
+    {format="The game is still waiting for its reply to the earlier Orb choice (%s), so its offer window cannot take a choice now. /reload ends that wait. After /reload, if the offer is still open, choose %s in the game's offer window; Nexus then waits for the matching result. A different Echo cannot confirm this action. The record and its spending exposure are kept. Nexus will not choose or spend.",
+        key="orb.runtime.held_choice", fields={"echo", "echo_again"}},
+    {format="An earlier Orb action is unresolved. The current game state cannot be read yet: %s Nothing will be sent. The record and its spending exposure are kept.",
+        key="orb.runtime.earlier_unresolved_unreadable", fields={"error"}, nested={error=true}},
+    {format="A required target is no longer available. %s No next Orb will be spent.",
+        key="orb.runtime.required_target_unavailable", fields={"reason"}, nested={reason=true}},
+    {format="Nexus rejected the current locked Echo data: it lists %d occupied locked records, more than the %d locked slots the game reports.",
+        key="orb.adapter.locked_records_over_capacity", fields={"occupied", "capacity"}},
+    {format="%s is blocked: the observed gain cannot be attributed to this action. Continue is unavailable. %s The record and its spending exposure are kept.",
+        key="orb.runtime.blocked_unattributable_refusal", fields={"subject", "refusal"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}, refusal=true}},
+    {format="%s is blocked: the observed gain cannot be attributed to this action. %s /nexus orbs for its explicit checked Continue exit. The record is kept until that check passes and you confirm; no spending restarts.",
+        key="orb.runtime.blocked_unattributable_next", fields={"subject", "next_step"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}, next_step={["Stop this Orb run first, then open"]="orb.runtime.next_step_stop_open", ["Open"]="orb.runtime.next_step_open"}}},
+    {format="%s is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends when that action is confirmed or, if this record retains an observation of this spend and has no usable recorded choice, and no offer is open, when Continue's read-only check passes and you confirm it. Open /nexus orbs for the current instruction.",
+        key="orb.runtime.blocked_observes_after_reload", fields={"subject"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}}},
+    {format="%s is blocked: an earlier Orb action cannot be confirmed. If this record retains an observation of this spend and has no usable recorded choice, and no offer is open, Continue in /nexus orbs ends this block after its read-only check passes and your confirmation; Nexus does not clear it by itself. Open /nexus orbs for details.",
+        key="orb.runtime.blocked_cannot_confirm", fields={"subject"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}}},
+    {format="%s is paused: Orb refinement owns the current action.",
+        key="orb.runtime.paused_refinement_owns", fields={"subject"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}}},
+    {format="%s is blocked: a submitted Orb action is unresolved. Finish its offer in the game; Nexus confirms it only from the matching result. If it cannot be confirmed, reload the game: Continue in /nexus orbs may then apply.",
+        key="orb.runtime.blocked_submitted_unresolved", fields={"subject"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}}},
+    {format="%s is blocked: an Orb run is paused. Press Stop in /nexus orbs to end that run.",
+        key="orb.runtime.blocked_run_paused", fields={"subject"}, nested={subject={["A change of Orb targets"]="orb.runtime.subject_target_change", ["A change of Orb sources"]="orb.runtime.subject_source_change", ["A new Orb run"]="orb.runtime.subject_new_run", ["This action"]="orb.runtime.subject_this_action", ["Ordinary rolling"]="orb.runtime.subject_ordinary_rolling", ["This change"]="orb.runtime.subject_this_change"}}},
+}}
+-- ORB-REMAINDER END
 UI.RUNTIME_TEXT_KEYS=RUNTIME_TEXT
+-- A raw Orb text as this window shows it, and whether it was recognized: an
+-- exact text, a producer format, or a text made only of exact sentences
+-- (segments), through the seam's display phrasebook. Anything else (player or
+-- game data, an unknown text) is shown exactly as the producer wrote it.
+local orbBook
+local function orbPhrase(value)
+    if type(value)~="string" then return value,false end
+    local key=OBSOLETE_TEXT[value]
+    if key then return T(key),true end
+    local L=Nexus.Localization
+    if type(L)=="table" and type(L.PhraseBook)=="function" and type(L.Phrase)=="function" then
+        if not orbBook or orbBook.seam~=L then
+            local exact={}
+            for raw,k in pairs(RUNTIME_TEXT) do exact[raw]=k end
+            for raw,k in pairs(ORB_REMAINDER.exact) do exact[raw]=k end
+            orbBook=L.PhraseBook({segments=true,exact=exact,formats=ORB_REMAINDER.formats});orbBook.seam=L
+        end
+        return L.Phrase(value,orbBook)
+    end
+    key=RUNTIME_TEXT[value]
+    if key then return T(key),true end
+    return value,false
+end
+UI.Phrase=orbPhrase
+-- The book itself (tests read its entries back); nil without the seam.
+function UI.PhraseBook()
+    orbPhrase("")
+    return orbBook
+end
+-- Orb texts reach other windows through their reasons (a blocked roll or
+-- slot change): those windows show them through the same book.
+if Nexus.UserText and type(Nexus.UserText.AddPhraseSource)=="function" then
+    Nexus.UserText.AddPhraseSource(orbPhrase)
+end
 local function truthful(value)
     if value==nil then return nil end
-    local key=OBSOLETE_TEXT[value] or RUNTIME_TEXT[value]
-    return key and T(key) or value
+    return (orbPhrase(value))
 end
 -- Legacy EditBox has no Button Enable/Disable API. Lock both input routes and
 -- release focus so an approved maximum cannot remain editable during a run.
@@ -1592,8 +1950,8 @@ local function logDetailText(details,history)
     if details.note then
         -- A note the runtime recorded: its raw text says the meaning it maps to.
         local raw=details.technical and details.technical.reason
-        local key=type(raw)=="string" and RUNTIME_TEXT[raw]
-        add(T("orb.label.recorded_note").." "..(key and T(key) or details.note))
+        local shown,known=orbPhrase(raw)
+        add(T("orb.label.recorded_note").." "..(known and shown or details.note))
     end
     local t=details.technical
     add(TF("orb.body.history_technical",{serial=tostring(t.serial or details.serial),state=tostring(t.state),
@@ -1621,8 +1979,8 @@ local function logRowTip(model,history)
     lines[#lines+1]=TF("orb.tooltip.history_result",{result=resultText(model.result)})
     local note=model.entry and model.entry.reason
     if note then
-        local key=type(note)=="string" and RUNTIME_TEXT[note]
-        lines[#lines+1]=T("orb.label.recorded_note").." "..(key and T(key) or history.Display(note))
+        local shown,known=orbPhrase(note)
+        lines[#lines+1]=T("orb.label.recorded_note").." "..(known and shown or history.Display(note))
     end
     return lines
 end
@@ -1931,7 +2289,7 @@ local function contRefresh()
     contFrame.title:SetText(T((v.eligible==true or v.stage=="checking" or v.stage=="ready")
         and "orb.title.continue_unconfirmed" or "orb.title.unresolved_action"))
     contFrame.token=v.token
-    contFrame.body:SetText(v.text or "")
+    contFrame.body:SetText(truthful(v.text) or "")
     local idle=v.stage=="idle" or v.stage=="refused" or v.stage=="held"
     local active=v.stage=="checking" or v.stage=="ready"
     enable(contFrame.check,v.eligible==true and idle)
@@ -1969,13 +2327,13 @@ local function ensureContinue()
     end
     f.check=button(f,20,-282,150,T("orb.button.continue_check"),function()
         local ok,why=Nexus.OrbRuntime.ContinueBegin()
-        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        f.notice:SetText(ok and "" or truthful(Nexus.OrbRuntime.ContinueReason(why)))
         contRefresh()
     end)
     f.go=button(f,180,-282,130,T("orb.button.continue_confirm"),function()
         -- The token this window showed, never a newer one: a stale click is refused.
         local ok,why=Nexus.OrbRuntime.ContinueConfirm(f.token)
-        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        f.notice:SetText(ok and "" or truthful(Nexus.OrbRuntime.ContinueReason(why)))
         UI.Refresh();contRefresh()
     end)
     f.cancel=button(f,320,-282,90,T("orb.button.continue_cancel"),function()

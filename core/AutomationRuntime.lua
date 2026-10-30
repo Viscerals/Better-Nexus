@@ -4411,7 +4411,7 @@ end
 -- decision on the current board and ownership at the normal spacing, never a
 -- replay. The crossed intent and the world hold end in DispatchLevelStep.
 -- (2) While Auto is ON, outside a loading screen and its settle, it keeps
--- this poll's actionable pause in sel.blocked, in the player's wording: the
+-- this poll's actionable pause in sel.blocked, in its English wording: the
 -- game not ready, the player acting, a rival addon, client auto-accept, or
 -- the Orb gate (the key RunUpdate just read; no second gate call). Effective
 -- shows that pause first. (3) While an own Select is unresolved and nothing
@@ -4480,7 +4480,12 @@ actionHold.SelectPoll = function()
                 or "Orb state active or unknown")
         or nil
     if blocked then
-        sel.blocked = Nexus.UserText and Nexus.UserText.Message(blocked) or blocked
+        -- The English wording, whatever the language: Effective's reason is
+        -- also a support report line. Displays say it once, in the active
+        -- language (Readout.AutoHoldText -> UserText.Message).
+        local text = Nexus.UserText
+        local english = text and (text.EnglishMessage or text.Message)
+        sel.blocked = english and english(blocked) or blocked
         return
     end
     if not Adapter.RecheckSelect
