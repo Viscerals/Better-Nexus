@@ -602,6 +602,11 @@ def _entry_reviews(release, english, packs, product_ids, problems):
     try:
         if not isinstance(container, dict):
             raise _CATALOG.CatalogEvidenceError('evidence-contract', 'release.entryReview')
+        if type(container.get('declarations')) is not list:
+            # The original member, before any record is replaced or read: the catalog contract
+            # refuses a missing or non-list declarations value as evidence-contract.
+            _CATALOG._check_declarations(release, english, packs, list(product_ids))
+            raise _CATALOG.CatalogEvidenceError('evidence-contract', 'release.entryReview.declarations')
         check([])
     except errors as error:
         problems.append(_problem('entry-review-invalid', where + ' ' + (error.path or ''), detail=error.code))

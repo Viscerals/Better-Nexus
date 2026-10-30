@@ -841,6 +841,31 @@ class EntryReviewContract(unittest.TestCase):
                     self.assertEqual(product['counts']['legitimately_identical'], 0)
                 self.assertEqual(report['entryReview']['status'], 'REFUSED')
 
+    def test_original_declarations_container_must_be_a_list(self):
+        # A complete composition whose entries all differ from English needs no declaration, so a
+        # valid empty list passes; a missing or non-list original member is refused, never read.
+        packs = synthetic_packs()
+        for _, entries in packs.values():
+            for key, value in entries.items():
+                if value == REDUCED_MODEL['active'][key]:
+                    entries[key] = 'Z' + value
+        sources = dict(REDUCED, packs=packs_source(packs), release=synthetic_release(packs))
+        self.assertEqual(json.loads(sources['release'])['entryReview']['declarations'], [])
+        report = G.evaluate(sources)
+        self.assertEqual(report['problems'], [])
+        self.assertEqual((report['entryReview']['status'], report['entryReview']['records']), ('RECORDS_CHECKED', 0))
+        for name, value in (('missing', None), ('null', None), ('object', {}), ('string', ''), ('integer', 7)):
+            with self.subTest(declarations=name):
+                document = json.loads(sources['release'])
+                if name == 'missing':
+                    del document['entryReview']['declarations']
+                else:
+                    document['entryReview']['declarations'] = value
+                report = G.evaluate(dict(sources, release=json.dumps(document).encode('utf-8')))
+                self.assertEqual([(p['code'], p.get('detail')) for p in report['problems']],
+                                 [('entry-review-invalid', 'evidence-contract')])
+                self.assertEqual((report['entryReview']['status'], report['entryReview']['accepted']), ('REFUSED', 0))
+
     def test_duplicate_records_are_refused(self):
         report = declaration_mutant(lambda r, rel: rel['entryReview']['declarations'].append(dict(r)))
         self.assertEqual([p['code'] for p in report['problems'] if p['code'].startswith('entry-review-')],
