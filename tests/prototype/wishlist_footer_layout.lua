@@ -71,7 +71,9 @@ check(listX==674 and footerX==674 and saveX==674,'pane widths and left edges ali
 -- The footer's lines, in order. #173 item 4: the planned rolled copies
 -- total always leads line 1; the other parts follow on lines that fit the
 -- width (measured; this harness measures bytes at 6px, so the bullet counts
--- three glyphs here). Lines the 28px box cannot hold are on its hover.
+-- three glyphs here). The footer is at least 28px and as high as its
+-- lines (14px each here), growing up from its place above Save; the list
+-- keeps 8px above it with fewer whole rows, so no count is clipped.
 local function lines(...)
  local want={...};local got={}
  for line in (footer:GetText()..'\n'):gmatch('(.-)\n')do got[#got+1]=line end
@@ -82,16 +84,14 @@ local function lines(...)
   local ascii=line:gsub(' \226\128\162 ',' * ')
   check(#ascii*6<=footer:GetWidth(),'summary line fits fixed footer width')
  end
- if #got>2 then
-  local full=footer._nexusFullText or ''
-  for _,line in ipairs(want)do
-   for part in (line..'  \226\128\162  '):gmatch('(.-)  \226\128\162  ')do
-    check(full:find(part,1,true)~=nil,'the footer hover repeats '..part)
-   end
-  end
- else
-  check(footer._nexusFullText==nil,'a footer that fits has no forced hover')
- end
+ check(footer:GetHeight()==math.max(28,#got*14),'the footer is as high as its '..#got..' lines: '..footer:GetHeight())
+ local fTop,fBottom=rect(footer)
+ local lTop,lBottom=rect(area)
+ -- Whole rows only: at least 8px (exactly 8 at the 28px footer), less than
+ -- one more row.
+ check(lBottom-fTop>=8 and lBottom-fTop<8+24 and fBottom-saveTop==6,'list, footer and Save keep 8px+ and 6px gaps')
+ if footer:GetHeight()==28 then check(lBottom-fTop==8,'exactly 8px at the 28px footer') end
+ check(area:GetHeight()==math.floor((408+28-footer:GetHeight())/24)*24,'the list shows the whole rows left above it')
 end
 lines('Planned rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
 H.locked={{spellId=200080,stacks=5},{spellId=200081,stacks=1}}

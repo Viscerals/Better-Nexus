@@ -1777,8 +1777,9 @@ local function EnsureFrame()
     -- search box leaves. The whole caption is shown on one line, else on up
     -- to three measured lines (as many 14-unit-high lines as fit 42 units
     -- beside the strip), else "Auto-manage locked slots" the same way; each
-    -- shown form names locked slots. With no room for either it is hidden and
-    -- the checkbox's own hover explains it. The complete name stays on hover
+    -- shown form names locked slots. With no room for either beside the
+    -- strip (the largest text sizes), the box and caption take their own
+    -- line under it (see below). The complete name stays on hover
     -- over the label and the checkbox. Presentation only; the checkbox, its
     -- setting and its guards are unchanged.
     local autoLockHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
@@ -1867,11 +1868,30 @@ local function EnsureFrame()
             return lines
         end
         local lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+        local drop = 0
+        if not lines then
+            -- No room beside the strip (the largest text sizes): the box and
+            -- its caption take their own line under the strip, from the
+            -- strip's left edge, and the lists and their titles move down
+            -- by that line (frame._applyContentDrop). The caption still
+            -- follows its box and ends 8 units left of My Builds.
+            local top = 130 + math.max(22, lineHeight) + 4
+            room = math.floor(right - (origin + 22 + 2))
+            maxLines = 3
+            lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+            local lineBox = math.max(22, lineHeight * (lines and #lines or 1))
+            autoLockCheck:ClearAllPoints()
+            autoLockCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", origin, -(top + math.floor((lineBox - 22) / 2)))
+            frame._autoLockClear = origin + 22 <= right
+            drop = math.max(0, top + lineBox + 4 - 154)
+        end
         autoLockLabel:SetText(lines and table.concat(lines, "\n") or full)
         autoLockLabel:SetSize(math.max(1, room), lineHeight * (lines and #lines or 1))
         autoLockLabel._nexusFullText = full
         if lines then autoLockLabel:Show() else autoLockLabel:Hide() end
         if autoLockHit then if lines then autoLockHit:Show() else autoLockHit:Hide() end end
+        frame._contentDrop = drop
+        if frame._applyContentDrop then frame._applyContentDrop(drop) end
         return room
     end
     frame._fitAutoLock(6)
@@ -1956,6 +1976,7 @@ local function EnsureFrame()
     local pickArea = CreateFrame("Frame", nil, frame)
     pickArea:SetPoint("TOPLEFT", 674, -180)
     pickArea:SetSize(332, PICK_ROWS * ROW_HEIGHT)
+    frame._pickArea = pickArea
     pickArea:EnableMouseWheel(true)
     pickArea:SetScript("OnMouseWheel", function(_, delta)
         Controller.AdjustPick(delta)
@@ -2119,7 +2140,35 @@ local function EnsureFrame()
         divider:SetTexture(0.35, 0.35, 0.35, 0.65)
         divider:SetSize(1, 456)
         divider:SetPoint("TOPLEFT", 652, -180)
+        frame._divider = divider
     end)
+
+    -- The lists, their titles, Plan alternatives and the divider move down
+    -- by `drop` units while the locked-slot caption has its own line
+    -- (frame._fitAutoLock; 0 otherwise, the original places). The catalog
+    -- shows as many whole rows as fit above its former bottom edge; the
+    -- Selected Echoes list is sized at refresh, above its footer.
+    frame._applyContentDrop = function(drop)
+        drop = math.max(0, math.floor(tonumber(drop) or 0))
+        header:ClearAllPoints()
+        header:SetPoint("TOPLEFT", 34, -158 - drop)
+        pickTitle:ClearAllPoints()
+        pickTitle:SetPoint("TOPLEFT", 674, -158 - drop)
+        planBtn:ClearAllPoints()
+        planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154 - drop)
+        leftArea:ClearAllPoints()
+        leftArea:SetPoint("TOPLEFT", 34, -180 - drop)
+        frame._catalogVisible = math.max(1, math.min(MAX_ROWS, math.floor((MAX_ROWS * ROW_HEIGHT - drop) / ROW_HEIGHT)))
+        leftArea:SetHeight(frame._catalogVisible * ROW_HEIGHT)
+        pickArea:ClearAllPoints()
+        pickArea:SetPoint("TOPLEFT", 674, -180 - drop)
+        if frame._divider then
+            frame._divider:ClearAllPoints()
+            frame._divider:SetPoint("TOPLEFT", 652, -180 - drop)
+            frame._divider:SetHeight(MAX_ROWS * ROW_HEIGHT - drop)
+        end
+    end
+    frame._applyContentDrop(frame._contentDrop or 0)
 
     -- Background -- this was simply never added (not a crash, just an
     -- oversight, 2026-07-24). Separate pcall from the divider above so
@@ -2581,9 +2630,11 @@ local function RefreshView(catalogRevision)
     RefreshDisplayControls()
 
     local available = BuildAvailableList(catalog, catalogRevision)
-    scrollOffset = Controller.ClampScroll(#available, MAX_ROWS)
+    -- Fewer whole rows while the lists sit lower (frame._applyContentDrop).
+    local catalogVisible = frame._catalogVisible or MAX_ROWS
+    scrollOffset = Controller.ClampScroll(#available, catalogVisible)
     for i, row in ipairs(rows) do
-        local data = available[scrollOffset + i]
+        local data = i <= catalogVisible and available[scrollOffset + i] or nil
         row.data = data
         if data then
             row:Show()
@@ -2627,7 +2678,7 @@ local function RefreshView(catalogRevision)
     local uniqueAvailable = 0
     for _ in pairs(availableFamilies) do uniqueAvailable = uniqueAvailable + 1 end
     footerText:SetText(string.format("Showing %d-%d of %d Echo/quality entries  •  %d distinct Echo names",
-        math.min(scrollOffset + 1, #available), math.min(#available, scrollOffset + MAX_ROWS),
+        math.min(scrollOffset + 1, #available), math.min(#available, scrollOffset + catalogVisible),
         #available, uniqueAvailable))
 
     local list = {}
@@ -2700,9 +2751,31 @@ local function RefreshView(catalogRevision)
         end
         list = filtered
     end
-    pickOffset = Controller.ClampPick(#list, PICK_ROWS)
+    -- M4 (UX-13): the editor counts a plan, so its rolled copies are planned.
+    -- Displayed item 4 (#173): that total is what a player checks before
+    -- saving, so it leads the first line (M.PackFooterText).
+    local footerParts = { "Planned rolled copies: " .. PendingTotal() .. "/79" }
+    if lockedCount > 0 then
+        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
+            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
+    end
+    local totalDesigned = designedCount + toLockCount
+    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
+    -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
+    -- a display aid, not separate wishlist entries, and shouldn't inflate
+    -- this count.
+    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
+    -- The footer is packed first: when its counts need more lines than its
+    -- 28 units, it grows upward and the list above shows fewer whole rows
+    -- (at least 8 units above the footer; exactly 8 at 28), so no count is
+    -- under a row.
+    local footerHeight = M.PackFooterText(pickFooterText, footerParts, targetParts)
+    local pickVisible = math.max(1, math.min(PICK_ROWS, math.floor((
+        PICK_ROWS * ROW_HEIGHT + 28 - footerHeight - (frame._contentDrop or 0)) / ROW_HEIGHT)))
+    if frame._pickArea then frame._pickArea:SetHeight(pickVisible * ROW_HEIGHT) end
+    pickOffset = Controller.ClampPick(#list, pickVisible)
     for i, row in ipairs(pickRows) do
-        local data = list[pickOffset + i]
+        local data = i <= pickVisible and list[pickOffset + i] or nil
         row.data = data
         if data and data.ghost then
             -- Read-only pairing row for the real-locked Echo a design above
@@ -2714,7 +2787,7 @@ local function RefreshView(catalogRevision)
             row.icon:SetVertexColor(0.5, 0.5, 0.5)
             row.text:SetTextColor(0.6, 0.6, 0.6)
             M.SetPickRowText(row, "    |cff8a8a8a-> replaces|r " .. data.name,
-                "|cff8a8a8a(currently locked)|r")
+                "|cff8a8a8a(currently locked)|r", true)
             if row.minus then row.minus:Hide() end
             if row.plus then row.plus:Hide() end
             if row.remove then row.remove:Hide() end
@@ -2774,21 +2847,6 @@ local function RefreshView(catalogRevision)
             row:Hide()
         end
     end
-    -- M4 (UX-13): the editor counts a plan, so its rolled copies are planned.
-    -- Displayed item 4 (#173): that total is what a player checks before
-    -- saving, so it leads the first line (M.PackFooterText).
-    local footerParts = { "Planned rolled copies: " .. PendingTotal() .. "/79" }
-    if lockedCount > 0 then
-        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
-            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
-    end
-    local totalDesigned = designedCount + toLockCount
-    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
-    -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
-    -- a display aid, not separate wishlist entries, and shouldn't inflate
-    -- this count.
-    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
-    M.PackFooterText(pickFooterText, footerParts, targetParts)
 end
 
     local function RefreshKeyMatches(known,controllerRevision,slots,active,
@@ -2931,30 +2989,43 @@ end
     end
 
     -- A Selected Echoes row: the name, then its copies or locked-slot note
-    -- right-aligned at the end of the name's 224 units. The note is as wide
-    -- as its text; the name keeps the rest (the client shortens a long one,
-    -- whose whole name is on the row's Echo tooltip).
-    function M.SetPickRowText(row, name, note)
+    -- right-aligned on one line. On a normal row the note ends the name's
+    -- 224 units, left of the - / + / remove controls; on the read-only
+    -- pairing row (`controlsHidden`, which has none of them) it ends 4 units
+    -- inside the row, so "(currently locked)" fits whole at larger text. The
+    -- note is as wide as its text and at least one line high; the name keeps
+    -- the rest (the client shortens a long one, whose whole name is on the
+    -- row's Echo tooltip).
+    function M.SetPickRowText(row, name, note, controlsHidden)
         local count = row.count
         if not count then
             row.text:SetText(name .. "  " .. note)
             return
         end
+        local textRight = controlsHidden and ((tonumber(row:GetWidth()) or 332) - 4) or 250
+        count:ClearAllPoints()
+        count:SetPoint("RIGHT", row, "LEFT", textRight, 0)
+        if type(count.SetWordWrap) == "function" then pcall(count.SetWordWrap, count, false) end
         count:SetText(note)
         local ok, w = pcall(count.GetStringWidth, count)
-        w = math.min(180, math.ceil(ok and tonumber(w) or 40))
+        local room = textRight - 26 - 24 - 6
+        w = math.min(room, math.ceil(ok and tonumber(w) or 40))
         count:SetWidth(math.max(1, w + 2))
-        row.text:SetWidth(math.max(24, 224 - (w + 2) - 6))
+        local okH, h = pcall(count.GetStringHeight, count)
+        count:SetHeight(math.max(ROW_HEIGHT, math.ceil(okH and tonumber(h) or 0)))
+        row.text:SetWidth(math.max(24, textRight - 26 - (w + 2) - 6))
         row.text:SetText(name)
     end
 
-    -- The Selected Echoes footer (displayed item 4, #173). Its box stays
-    -- 332x28; the counts are unchanged. The parts are packed into lines that
-    -- fit the box's width, measured one line at a time: the first part of
-    -- `first` (the planned rolled copies total) always leads line 1, the rest
-    -- of `first` joins it while it fits, else starts the next lines with
-    -- `rest`. When the lines need more height than the box has, the hover
-    -- (FullTextTooltip) repeats every part.
+    -- The Selected Echoes footer (displayed item 4, #173). The counts are
+    -- unchanged. The parts are packed into lines that fit the 332-unit
+    -- width, measured one line at a time: the first part of `first` (the
+    -- planned rolled copies total) always leads line 1, the rest of `first`
+    -- joins it while it fits, else starts the next lines with `rest`. The box
+    -- (bottom-anchored above Save) is at least its former 28 units and as
+    -- high as all its lines, so every count is shown; the caller gives the
+    -- list above the remaining room, and the existing hover still repeats
+    -- the text if the client measures it taller. Returns the box height.
     function M.PackFooterText(fontString, first, rest)
         local sep = "  •  "
         local width = tonumber(fontString:GetWidth()) or 332
@@ -2986,12 +3057,17 @@ end
         if line then lines[#lines + 1] = line end
         fontString:SetText(lines[1])
         local ok, lineHeight = pcall(fontString.GetStringHeight, fontString)
-        lineHeight = ok and tonumber(lineHeight) or 14
-        local room = math.floor(((tonumber(fontString:GetHeight()) or 28) + 0.5) / math.max(1, lineHeight))
-        fontString._nexusFullText = #lines > room
-            and (table.concat(first, sep) .. "\n" .. table.concat(rest, sep)) or nil
+        lineHeight = math.max(1, ok and tonumber(lineHeight) or 14)
+        fontString._nexusFullText = nil
         fontString:SetText(table.concat(lines, "\n"))
-        return lines
+        -- The whole text's own measured height, or one measured line each,
+        -- whichever is more.
+        fontString:SetHeight(0)
+        local okAll, measured = pcall(fontString.GetStringHeight, fontString)
+        measured = okAll and tonumber(measured) or 0
+        local height = math.ceil(math.max(28, measured, lineHeight * #lines))
+        fontString:SetHeight(height)
+        return height
     end
 
     function M.SetApplySaved()

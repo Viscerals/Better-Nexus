@@ -99,7 +99,16 @@ local function Clear(a,b) return G.Apart(a,b) end
 -- box's actual width, so the geometry checks below hold for either.
 class:SetSize(32,32)
 
-for _,model in ipairs({G.MODELS.default,G.MODELS.px16}) do
+local header=Find(f.regions,function(r) return Plain(r:GetText()):find('^Choose up to 79')~=nil end)
+local leftArea0=Find(f.children,function(c) return c.scripts.OnMouseWheel and c:GetWidth()==600 end)
+local pickArea0=Find(f.children,function(c) return c.scripts.OnMouseWheel and c:GetWidth()==332 end)
+check(header and leftArea0 and pickArea0,'E3 fixture: the header line and both lists')
+-- Every supported model, the largest included: the caption is shown and
+-- names locked slots, every line fits, and the box and caption overlap no
+-- neighbour. The box sits after the last slot, or (when that leaves no room
+-- for the caption) on its own line under the strip, with the lists and
+-- their titles moved below it.
+for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
  for _,n in ipairs({6,8}) do
   local tag,lr,cr,mr=Fit(model,n)
   check(label:IsShown(),tag..': the caption is shown')
@@ -111,25 +120,25 @@ for _,model in ipairs({G.MODELS.default,G.MODELS.px16}) do
    check(G.Length(line)*model.char<=label:GetWidth()+0.5,tag..': a shown line fits its room: '..line)
   end
   check(#Lines(label:GetText())*model.line<=label:GetHeight()+0.5,tag..': every shown line has height room')
-  check(lr[1]>=cr[3] and lr[3]<=mr[1]-8+0.5,tag..': between its box and My Builds')
-  check(cr[3]<=mr[1]-8+0.5 and f._autoLockClear==true,tag..': the box ends 8 px left of My Builds')
-  check(cr[1]>=G.Rect(f._nexusLockedSlot(n),f)[3]+6-0.5,tag..': the box stays 6 px right of the last slot')
-  for name,other in pairs({plan=plan,pickTitle=pickTitle,myBuilds=myBuilds}) do
-   check(Clear(lr,G.Rect(other,f)),tag..': clear of '..name)
+  check(lr[1]>=cr[3] and lr[3]<=mr[1]-8+0.5,tag..': the caption follows its box, left of My Builds')
+  check(cr[3]<=mr[1]-8+0.5 and G.Apart(cr,mr) and f._autoLockClear==true,tag..': the box is clear of My Builds')
+  local neighbours={plan=plan,pickTitle=pickTitle,myBuilds=myBuilds,header=header,search=search,
+   class=class,lockedCaption=locked,catalog=leftArea0,selected=pickArea0}
+  for i=1,n do neighbours['slot'..i]=f._nexusLockedSlot(i) end
+  for name,other in pairs(neighbours) do
+   local r=G.Rect(other,f)
+   check(Clear(lr,r),tag..': the caption is clear of '..name..' '..G.Text(lr)..' / '..G.Text(r))
+   if name~='myBuilds' then check(Clear(cr,r),tag..': the box is clear of '..name..' '..G.Text(cr)..' / '..G.Text(r)) end
   end
   -- The strip starts after the class filter's caption.
   local tr=G.Rect(class.text,f)
   local captionRight=tr[1]+G.Length(Plain(class.text:GetText()))*model.char
   check(G.Rect(locked,f)[1]>=captionRight+6,tag..': the Locked caption starts after "Current class only"')
+  -- The lists keep at least ten rows and stay inside the editor.
+  local la,pa=G.Rect(leftArea0,f),G.Rect(pickArea0,f)
+  check(la[4]<=f:GetHeight()-40 and leftArea0:GetHeight()>=10*24,tag..': the catalog keeps 10+ rows inside the editor')
+  check(pickArea0:GetHeight()>=10*24,tag..': the Selected list keeps 10+ rows')
  end
-end
--- The largest scale: never a bare, ambiguous "Auto..." caption.
-for _,n in ipairs({6,8}) do
- local tag=Fit(G.MODELS.double,n)
- local words=Plain(label:GetText()):gsub('\n',' '):lower()
- check(not label:IsShown() or (words:find('locked',1,true) and words:find('slot',1,true)),
-  tag..': a shown caption still names locked slots: '..words)
- check(f._autoLockClear==true,tag..': the box stays clear of My Builds')
 end
 G.UseFont(G.MODELS.default)
 locked:SetText('Locked (0/6):');f._fitAutoLock(6)
@@ -147,32 +156,43 @@ local function FooterCase(model,lockedRecords)
  local footer=Footer()
  local tag='E4 footer, '..model.name..', '..#lockedRecords..' locked records'
  check(footer and footer:IsShown(),tag..': the footer is shown')
- check(footer:GetWidth()==332 and footer:GetHeight()==28,tag..': its box stays 332x28')
- local text=Plain(footer:GetText())
+ check(footer:GetWidth()==332 and footer:GetHeight()>=28,tag..': its box is 332 wide, at least 28 high')
  local rows=Lines(footer:GetText())
  check(rows[1]:find('^Planned rolled copies: %d+/79')~=nil,tag..': the planned total leads line 1: '..rows[1])
- local fitsInBox=math.floor((28+0.5)/model.line)
- check(fitsInBox>=1,tag..': line 1 has height room in the box')
  for _,line in ipairs(rows) do
   check(G.Length(line)*model.char<=332,tag..': each line fits the footer width: '..line)
  end
- -- Every count is still said, on a shown line or on the footer's hover.
- local full=Plain(footer._nexusFullText or footer:GetText())
+ -- Every line is inside the footer's own height: no count is clipped or
+ -- left to the hover.
+ check(#rows*model.line<=footer:GetHeight()+0.5,
+  tag..': all '..#rows..' lines fit the footer height '..footer:GetHeight())
+ local shown=Plain(footer:GetText())
  for _,part in ipairs({'Planned rolled copies: ','Locked targets: ',' Echo/quality entries'}) do
-  check(full:find(part,1,true)~=nil,tag..': still says '..part)
+  check(shown:find(part,1,true)~=nil,tag..': the shown footer says '..part)
  end
  if #lockedRecords>0 then
-  check(full:find('Currently locked: '..#lockedRecords..'/',1,true)~=nil,tag..': still counts the locked records')
+  check(shown:find('Currently locked: '..#lockedRecords..'/',1,true)~=nil,tag..': the shown footer counts the locked records')
  end
- if #rows>fitsInBox then
-  check(footer._nexusFullText~=nil,tag..': lines beyond the box are on its hover')
+ -- It stays between the list and Save, under neither; shown rows end above it.
+ local fr,lr=G.Rect(footer,f),G.Rect(pickArea0,f)
+ local save=Find(f.children,function(c) return c.kind=='Button' and c._nexusPrimary==true end)
+ check(lr[4]+8<=fr[2]+0.5,tag..': the list ends 8 px above the footer '..G.Text(lr)..' / '..G.Text(fr))
+ check(save==nil or G.Apart(fr,G.Rect(save,f)),tag..': the footer is clear of Save')
+ for _,row in ipairs(pickArea0.children) do
+  if row:IsShown() then check(G.Rect(row,f)[4]<=fr[2],tag..': a shown Selected row ends above the footer') end
  end
+ -- The complete hover still repeats everything when asked.
+ local hit=f._pickFooterHit
+ check(hit~=nil and hit:GetScript('OnEnter')~=nil,tag..': the footer keeps its full-text hover')
  return rows
 end
+-- The footer's caption-line move is exercised too: the largest model drops
+-- the lists for the locked-slot caption, and the footer still fits.
 for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
  FooterCase(model,{})
  FooterCase(model,{{spellId=200080,stacks=5},{spellId=200081,stacks=1}})
 end
+check(Footer():GetHeight()>28,'E4 footer: the largest model really needs and gets more than 28 px')
 G.UseFont(G.MODELS.default)
 H.locked={};Refresh()
 
@@ -293,6 +313,49 @@ for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
   check(tr[3]<=cr[1] and cr[3]<=mr[1],tag..': name, then copies, then the - button')
  end
  check(Plain(pick.text:GetText())==G.Visible(LONG_ECHO),tag..': the name text is the whole name')
+end
+G.UseFont(G.MODELS.default)
+
+------------------------------------------------------------------------
+-- E4d: the replacement route's "(currently locked)" note
+------------------------------------------------------------------------
+-- Real route: an occupied lock slot's right-click plans its replacement, a
+-- catalog click picks it, Refresh shows the read-only pairing row.
+H.locked={{spellId=200080,stacks=1}};search:SetText('');Refresh()
+local slot1=f._nexusLockedSlot(1)
+check(slot1.slotState=='locked' and slot1.spellId==200080,'E4d fixture: slot 1 holds a locked Echo')
+slot1:GetScript('OnClick')(slot1,'RightButton')
+search:SetText('Zyzzyva');Refresh()
+CatalogRow():Click();search:SetText('');Refresh()
+local function GhostRow()
+ return Find(pickArea.children,function(r) return r:IsShown() and r.data and r.data.ghost and r.data.spellId==200080 end)
+end
+check(GhostRow()~=nil,'E4d fixture: the pairing row for the replaced Echo is shown')
+for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
+ G.UseFont(model);search:SetText('x');search:SetText('');Refresh()
+ local ghost=GhostRow()
+ local tag='E4d replacement note, '..model.name
+ if ghost and ghost.count then
+  local note=Plain(ghost.count:GetText())
+  check(note=='(currently locked)',tag..': the whole note is shown: '..note)
+  check(G.Length(note)*model.char<=ghost.count:GetWidth(),tag..': it fits one line')
+  check(G.Rows(note,ghost.count:GetWidth(),model.char)==1 and ghost.count:GetHeight()>=model.line,
+   tag..': one line, with a line of height')
+  local tr,cr,rr=G.Rect(ghost.text,f),G.Rect(ghost.count,f),G.Rect(ghost,f)
+  check(tr[3]<=cr[1] and cr[3]<=rr[3],tag..': name, then the note, inside the row')
+  check(Plain(ghost.text:GetText()):find('-> replaces ',1,true)~=nil,tag..': the pairing name stays')
+  check(ghost.text:GetWidth()>=24,tag..': the name keeps room')
+  for _,b in ipairs({ghost.minus,ghost.plus,ghost.remove}) do
+   check(not b:IsShown(),tag..': the pairing row has no -, + or remove control')
+  end
+ else
+  check(false,tag..': the pairing row and its note place exist')
+ end
+ -- A normal row keeps its copies left of its - / + / remove controls.
+ local pick=PickRow()
+ if pick and pick.count then
+  check(G.Rect(pick.count,f)[3]<=G.Rect(pick.minus,f)[1],tag..': a normal row\'s copies stay left of -')
+ end
 end
 G.UseFont(G.MODELS.default)
 check(#H.actions==before.actions and #H.sent==before.sent,'editing the draft acted and sent nothing')
