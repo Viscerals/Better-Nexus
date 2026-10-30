@@ -2480,6 +2480,54 @@ class ConsumerBindingTests(unittest.TestCase):
         receipt = self.gate_fails(with_file(self.files, host, made))
         self.assertIn(key, [row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"])
 
+    def test_c20_table_write_and_receiver_origins_follow_the_actual_object(self):
+        # Review fix 3 (SPEC-147-S8-RF2-1..3): a table written through a
+        # parameter is the one the value's own call passed; a receiver field
+        # is bound to the object holding it; a widget factory and a client
+        # global need an evidenced client root.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        store = b'local function SpecStore(target,value) target.SpecUniqueField=value end; '
+        show = b'local function SpecShow(target,value) target:SetText(value) end; '
+        cases = (
+            ("same-call table write", True, store + b'local specLeft={}; SpecStore(specLeft,'
+             + text + b'); specLabel:SetText(specLeft.SpecUniqueField)'),
+            ("separate-call table write", False, store + b'local specLeft={}; local specRight={}; '
+             b'SpecStore(specLeft,' + text + b'); SpecStore(specRight,"fixed"); '
+             b'specLabel:SetText(specRight.SpecUniqueField)'),
+            ("same-object widget field", True, b'local specLeft={_SpecUniqueOutput=UIParent:'
+             b'CreateFontString()}; specLeft._SpecUniqueOutput:SetText(' + text + b')'),
+            ("unrelated-object widget field", False, b'local specLeft={_SpecUniqueOutput=UIParent:'
+             b'CreateFontString()}; local specRight={}; specRight._SpecUniqueOutput:SetText('
+             + text + b')'),
+            ("factory on an empty table", False, b'local specMaker={}; local specMade=specMaker:'
+             b'CreateFontString(); specMade:SetText(' + text + b')'),
+            ("unknown global receiver", False,
+             b'SpecUnknownNotAClientFrame:SetText(' + text + b')'),
+            ("widget passed to every call", True, show + b'SpecShow(specLabel,' + text + b')'),
+            ("value shown by the call passing the widget", True, show + b'SpecShow(specLabel,'
+             + text + b'); SpecShow({SetText=function() end},"fixed")'),
+            ("value given to the call passing a fake table", False, show
+             + b'SpecShow({SetText=function() end},' + text + b'); SpecShow(specLabel,"fixed")'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the
