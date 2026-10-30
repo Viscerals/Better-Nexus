@@ -7086,7 +7086,7 @@ function M.StatusTooltipText()
         and localization.IsText(status) == true then return status end
     local displayText = Nexus.Identity and Nexus.Identity.DisplaySafeText
     return displayText and displayText(tostring(status or ""), 2048, false, true)
-        or "status unavailable"
+        or LT("panel.value.status_unavailable")
 end
 function M.RenderStats() return DefensiveCopy(renderStats) end
 

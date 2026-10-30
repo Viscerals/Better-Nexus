@@ -179,13 +179,13 @@ for _,p in ipairs(fx.players) do
   end
  end
 end
--- Pending literals (see the fragment): Help quotes these four button labels
--- and help_action_first checks them as source literals; ux_status_composition
--- checks the receiving-count sentence. Allowed only as the whole shown text.
+-- Pending literals (see the fragment), allowed only as the whole shown text.
+-- v3: the receiving-count sentence passes the seam
+-- (leaderboard.status.syncing_receiving), so it is not allowed raw any more.
 local PENDING_EXACT={}
 local function allow(word,text)
  local whole=plain(text)
- if PENDING_EXACT[whole] or whole:find('^Syncing \226\128\162 %d+ receiving$') then return true end
+ if PENDING_EXACT[whole] then return true end
  for _,d in ipairs(DATA) do if text:find(d,1,true) and d:find(word,1,true) then return true end end
  for _,d in ipairs(PENDING) do if text:find(d,1,true) and d:find(word,1,true) then return true end end
  return false
@@ -293,7 +293,7 @@ for _,case in ipairs({{'throttled',12},{'syncing',0,{receiving=3}},{'syncing',0,
  LB.RefreshStatus()
  local shown=statusText and statusText:GetText() or ''
  if case[3] and case[3].receiving then
-  check(plain(shown)=='Syncing \226\128\162 3 receiving','PENDING the receiving-count status keeps its literal English: '..shown)
+  check(plain(shown)==S.OPEN..'Syncing \226\128\162 3 receiving'..S.CLOSE,'the receiving-count status is said through its key: '..shown)
  else
   check(S.IsPseudo(shown),'sync status '..case[1]..' is translated: '..shown)
  end

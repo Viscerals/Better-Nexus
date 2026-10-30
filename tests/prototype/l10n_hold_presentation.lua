@@ -171,4 +171,18 @@ do
  end
 end
 
+-- The Options hover's status when the Identity gate refuses the status text:
+-- its stand-in is said through its key (only the gate is stubbed).
+do
+ local identity=Nexus.Identity
+ local real=identity.DisplaySafeText
+ local model=Nexus.Panel._lastModel
+ local status=model.status
+ model.status='unreviewed status'
+ identity.DisplaySafeText=function() return nil end
+ local shown=Nexus.Panel.StatusTooltipText()
+ identity.DisplaySafeText=real
+ model.status=status
+ check(shown==S.OPEN..'status unavailable'..S.CLOSE,'pseudo: the status stand-in is said through its key: '..tostring(shown))
+end
 print('l10n_hold_presentation: '..checks..' checks')

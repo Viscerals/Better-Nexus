@@ -3179,6 +3179,17 @@ local DECLARATIONS = {
     ["library.reason.transport_combat"] = {kind = "text"},
     ["library.status.share_outcome_reason"] = {kind = "template", fields = {"outcome", "reason"}, slots = {"text", "text"}, resultLimit = 2048},
     ["library.value.this_source"] = {kind = "text"},
+    -- remainder_misc (10)
+    ["command.chat.status_owned_synced"] = {kind = "template", fields = {"count"}, slots = {"count"}, resultLimit = 512},
+    ["command.chat.status_owned_unsynced"] = {kind = "template", fields = {"count"}, slots = {"count"}, resultLimit = 512},
+    ["command.chat.status_target"] = {kind = "template", fields = {"name", "source", "count"}, slots = {"text", "text", "count"}, resultLimit = 2048},
+    ["command.chat.status_target_none"] = {kind = "text"},
+    ["command.chat.status_target_none_note"] = {kind = "template", fields = {"note"}, slots = {"text"}, resultLimit = 2048},
+    ["command.value.target_source_active"] = {kind = "text"},
+    ["command.value.target_source_designed"] = {kind = "text"},
+    ["command.value.target_source_wishlist"] = {kind = "text"},
+    ["leaderboard.status.syncing_receiving"] = {kind = "template", fields = {"count"}, slots = {"count"}, resultLimit = 256},
+    ["panel.value.status_unavailable"] = {kind = "text"},
     -- remainder_orb (307)
     ["orb.adapter.already_owns"] = {kind = "text"},
     ["orb.adapter.assignment_protection_changed"] = {kind = "text"},

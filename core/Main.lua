@@ -26,6 +26,42 @@ local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage(CHAT_PREFIX .. (Nexus.UserText and Nexus.UserText.Message(msg) or tostring(msg)))
 end
 
+-- Full-UI localization (v3): the /nexus status lines below that Print
+-- composes from raw English (TARGET: ..., OWNED this run: ...) are said
+-- through this UserText phrase source. Their English is the line UserText's
+-- legacy rewrite showed before (TARGET: -> WISHLIST:, synced -> server
+-- confirmed); the composition here is unchanged.
+local TARGET_SOURCES = {["Echo Wishlist build"] = "command.value.target_source_designed",
+    ["active loadout"] = "command.value.target_source_active", ["wishlist"] = "command.value.target_source_wishlist"}
+local ASSIGNMENT_NOTES = {["Restoring assigned Wishlist..."] = "orb.status.restoring_assignment",
+    ["Waiting for loadout data..."] = "orb.assignment.waiting_loadout",
+    ["Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."] = "orb.assignment.needs_locked_targets",
+    ["First-run wishlist target"] = "orb.assignment.first_run_target",
+    ["First-run wishlist data is temporarily unavailable; waiting for the server mirror."] = "orb.assignment.first_run_unavailable",
+    ["Choose or create a wishlist to begin your first run."] = "orb.assignment.choose_or_create"}
+local STATUS_PHRASES = {exact = {["TARGET: none -- advisor only"] = "command.chat.status_target_none"}, formats = {
+    {format = "TARGET: %s (your %s) -- %d echoes", key = "command.chat.status_target",
+        fields = {"name", "source", "count"}, nested = {source = TARGET_SOURCES}},
+    {format = "TARGET: none -- advisor only  (%s)", key = "command.chat.status_target_none_note",
+        fields = {"note"}, nested = {note = ASSIGNMENT_NOTES}},
+    {format = "OWNED this run: %d echoes (synced).", key = "command.chat.status_owned_synced", fields = {"count"}},
+    {format = "OWNED this run: %d echoes (not synced yet).", key = "command.chat.status_owned_unsynced", fields = {"count"}},
+}}
+local statusBook
+local function StatusPhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    if not statusBook or statusBook.seam ~= L then
+        statusBook = L.PhraseBook(STATUS_PHRASES)
+        statusBook.seam = L
+    end
+    return L.Phrase(text, statusBook)
+end
+Nexus.MainStatusPhrase = StatusPhrase
+if Nexus.UserText and type(Nexus.UserText.AddPhraseSource) == "function" then
+    Nexus.UserText.AddPhraseSource(StatusPhrase)
+end
+
 -- Full-UI localization, chat family. A reviewed chat line resolves through
 -- the Nexus.Localization seam, looked up at call time. Its English (base)
 -- text takes Print's path exactly as the former literal did, the

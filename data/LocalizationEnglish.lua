@@ -2887,6 +2887,17 @@ Nexus.LocalizationEnglish = {
     ["library.reason.transport_combat"] = "combat",
     ["library.status.share_outcome_reason"] = "{outcome} ({reason})",
     ["library.value.this_source"] = "This source",
+    -- remainder_misc (10)
+    ["command.chat.status_owned_synced"] = "Rolled Echoes this run: {count} echoes (server confirmed).",
+    ["command.chat.status_owned_unsynced"] = "Rolled Echoes this run: {count} echoes (waiting for current Echo data from the server).",
+    ["command.chat.status_target"] = "WISHLIST: {name} (your {source}) -- {count} echoes",
+    ["command.chat.status_target_none"] = "WISHLIST: none -- advisor only",
+    ["command.chat.status_target_none_note"] = "WISHLIST: none -- advisor only  ({note})",
+    ["command.value.target_source_active"] = "active loadout",
+    ["command.value.target_source_designed"] = "Echo Wishlist build",
+    ["command.value.target_source_wishlist"] = "wishlist",
+    ["leaderboard.status.syncing_receiving"] = "Syncing \226\128\162 {count} receiving",
+    ["panel.value.status_unavailable"] = "status unavailable",
     -- remainder_orb (307)
     ["orb.adapter.already_owns"] = "Orb mode already owns an operation.",
     ["orb.adapter.assignment_protection_changed"] = "Assignment or source protection changed before submission. Resume only after reviewing the current assignment.",

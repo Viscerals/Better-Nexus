@@ -65,6 +65,12 @@ check(Has(status,PREFIX..'v'..version..' build='..label..' -- level 40, auto OFF
 check(Has(status,PREFIX..'ACTIVE: no build activated right now.'),'status ACTIVE line exact')
 check(Has(status,PREFIX..'READABLE: 0 confirmed Saved Build(s), 0 desired Wishlist plan(s)'),'status READABLE line exact (count slots)')
 check(Has(status,PREFIX..'No confirmed Saved Build yet; complete and save your first run.'),'status Saved Build line exact')
+-- v3: the raw status lines show the English UserText's rewrite showed before.
+for _,raw in ipairs({'OWNED this run: 3 echoes (synced).','OWNED this run: 0 echoes (not synced yet).','TARGET: none -- advisor only',
+ "TARGET: |cff7fff7f'Plan'|r (your active loadout) -- 12 echoes",'TARGET: none -- advisor only  (Waiting for loadout data...)'}) do
+ check(Nexus.UserText.Message(raw)==Nexus.UserText.EnglishMessage(raw),'v3: English status line unchanged: '..Nexus.UserText.Message(raw))
+end
+check(Nexus.UserText.Message('OWNED this run: 3 echoes (synced).')=='Rolled Echoes this run: 3 echoes (server confirmed).','v3: the owned line keeps its exact English')
 check(Has(status,PREFIX..'rolling strategy: adaptive') and Has(status,PREFIX..'rolling strategy last decision: none'),'rolling lines exact')
 local recording
 for _,l in ipairs(status) do if l:find('roll recording: ',1,true) then recording=l end end
@@ -111,7 +117,9 @@ for key,text in pairs(catalog) do
   end
  end
 end
-check(familyKeys==160,'the 160 reviewed chat-family keys are in the English catalog: '..familyKeys)
+-- 160 reviewed (v2) keys plus the 8 of the v3 supplemental cohort
+-- (remainder_misc: the /nexus status WISHLIST: and Rolled Echoes lines).
+check(familyKeys==160+8,'the 168 chat-family keys (160 v2 + 8 v3 supplemental) are in the English catalog: '..familyKeys)
 
 ------------------------------------------------------------------------------
 -- 2. Pseudo pack: real commands
@@ -128,9 +136,8 @@ Assign()
 -- excluded: support payload, protocol, diagnostics, data lists).
 local KNOWN={
  {'^catalog capacity: ','excluded support_payload (SupportReport.CatalogCapacityLines)'},
- {'^WISHLIST: ','pending TARGET: rewrite coupling'},
- {'^Rolled Echoes this run: ','pending OWNED this run: rewrite coupling'},
- {'^Choose or create a wishlist','pending GameAdapter WishlistNote'},
+-- (v3: the WISHLIST:, Rolled Echoes and GameAdapter note lines pass the
+-- seam through the /nexus status and Orb phrase sources.)
  {'^/nexus reroll on|off | /nexus freeze','excluded protocol'},
  {'^Wire: ','excluded log_payload (SyncWire stats)'},
  {'^  ','data list of Echo names'},
@@ -164,7 +171,19 @@ for _,cmd in ipairs(COMMANDS) do
  check(#lines>0,'/nexus '..cmd..' answered in chat')
  Scan(lines,cmd)
 end
-check(seenKnown['pending TARGET: rewrite coupling'] and seenKnown['pending OWNED this run: rewrite coupling'],'the pending status lines were seen and kept their English')
+do
+ local target,owned
+ for _,line in ipairs(pseudo['status']) do
+  local body=line:sub(#PREFIX+1)
+  if body:find(S.OPEN..'WISHLIST: ',1,true)==1 then target=body end
+  if body:find(S.OPEN..'Rolled Echoes this run: ',1,true)==1 then owned=body end
+ end
+ check(target~=nil and owned~=nil,'v3: the /nexus status WISHLIST: and Rolled Echoes lines are said through their keys: '
+  ..tostring(target)..' / '..tostring(owned))
+ local raw='TARGET: none -- advisor only  (Choose or create a wishlist to begin your first run.)'
+ check(Nexus.UserText.Message(raw)==S.OPEN..'WISHLIST: none -- advisor only  ('..S.OPEN
+  ..'Choose or create a wishlist to begin your first run.'..S.CLOSE..')'..S.CLOSE,'v3: the advisor-only line says its note through its key')
+end
 -- Colour codes stay in code around the translated text.
 local dps=Joined(pseudo.dps)
 check(dps:find(PREFIX..'|cffff9040'..S.OPEN..'Details! damage meter is not installed.'..S.CLOSE..'|r',1,true),'orange DPS line keeps its colour outside the translation')

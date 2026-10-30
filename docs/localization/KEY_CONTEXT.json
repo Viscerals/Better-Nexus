@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3926,
+    "declaredKeys": 3936,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -36238,6 +36238,161 @@
       "cohort": "fullui:remainder_library"
     },
     {
+      "key": "command.chat.status_owned_synced",
+      "kind": "template",
+      "english": "Rolled Echoes this run: {count} echoes (server confirmed).",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "distinct Echoes rolled this run"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). ",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.chat.status_owned_unsynced",
+      "kind": "template",
+      "english": "Rolled Echoes this run: {count} echoes (waiting for current Echo data from the server).",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "distinct Echoes rolled this run"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). ",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.chat.status_target",
+      "kind": "template",
+      "english": "WISHLIST: {name} (your {source}) -- {count} echoes",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name in single quotes with its green colour code (player data and code formatting, verbatim)"
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "meaning": "what the target is: 'Echo Wishlist build', 'active loadout' or 'wishlist' (shown through their keys)"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "Echoes in the target"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). WISHLIST: is a line label.",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.chat.status_target_none",
+      "kind": "text",
+      "english": "WISHLIST: none -- advisor only",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). No Wishlist is targeted; Nexus only recommends.",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.chat.status_target_none_note",
+      "kind": "template",
+      "english": "WISHLIST: none -- advisor only  ({note})",
+      "placeholders": [
+        {
+          "name": "note",
+          "type": "text",
+          "meaning": "the adapter's assignment note (shown through its key when known; otherwise verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). Keep the two spaces before the bracket.",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.value.target_source_active",
+      "kind": "text",
+      "english": "active loadout",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). Fills {source} of the WISHLIST: line: the target is the active Saved Build.",
+      "consumer": "nested value",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.value.target_source_designed",
+      "kind": "text",
+      "english": "Echo Wishlist build",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). Fills {source} of the WISHLIST: line: the target is a designed Wishlist build.",
+      "consumer": "nested value",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "command.value.target_source_wishlist",
+      "kind": "text",
+      "english": "wishlist",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "A /nexus status chat line printed by core/Main.lua after the Nexus chat prefix. Main keeps the raw producer line; its English here is the line as shown before v3 (UserText's legacy rewrite: TARGET: -> WISHLIST:, OWNED this run: -> Rolled Echoes this run:, synced -> server confirmed). Fills {source} of the WISHLIST: line: any other Wishlist.",
+      "consumer": "nested value",
+      "familySurface": "remainder_misc: Chat (/nexus status) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "leaderboard.status.syncing_receiving",
+      "kind": "template",
+      "english": "Syncing • {count} receiving",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "inbound shared-record transfers in flight (1 or more)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "leaderboard",
+      "meaning": "Leaderboard sync status while records arrive. 'receiving' means reception in progress only (never the listening window).",
+      "consumer": "ui/Leaderboard.lua sync status",
+      "familySurface": "remainder_misc: Leaderboard status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
+      "key": "panel.value.status_unavailable",
+      "kind": "text",
+      "english": "status unavailable",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Stands in for the panel status when its text cannot be shown safely (follows 'Status: '). Lower-case.",
+      "consumer": "ui/Panel.lua M.StatusTooltipText",
+      "familySurface": "remainder_misc: Main panel Options button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:remainder_misc"
+    },
+    {
       "key": "orb.adapter.already_owns",
       "kind": "text",
       "english": "Orb mode already owns an operation.",
@@ -52418,7 +52573,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3926,
+    "totalKeys": 3936,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -52436,7 +52591,8 @@
       "remainder_library": 128,
       "remainder_orb": 307,
       "remainder_wishlist_chat": 81,
-      "remainder_wishlist_reasons": 44
+      "remainder_wishlist_reasons": 44,
+      "remainder_misc": 10
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

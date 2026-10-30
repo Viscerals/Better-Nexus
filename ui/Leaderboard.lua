@@ -1565,10 +1565,11 @@ function M.RefreshStatus()
         elseif preparing then
             syncBtn:SetText(T("leaderboard.button.preparing_shared_data"))
             statusText:SetText("|cff7fd5ff"..T("leaderboard.status.preparing_sync_data").."|r")
-        -- The receiving count stays a literal sentence: ux_status_composition
-        -- checks this source for it ("receiving" only from that count).
+        -- "receiving" only from the count of inbound transfers in flight
+        -- (ux_status_composition); its English line is also the fallback.
         elseif state=="syncing" then statusText:SetText("|cff4dff80"..(receiving>0
-                and ("Syncing • "..receiving.." receiving")
+                and TF("leaderboard.status.syncing_receiving",{count=Nexus.Localization.Count(receiving)},
+                    "Syncing • "..receiving.." receiving")
                 or T("leaderboard.status.syncing")).."|r")
         elseif state=="cleaning" then statusText:SetText("|cffffcc55"..T("leaderboard.status.removing_expired_requests").."|r")
         elseif state=="sending" then statusText:SetText("|cff4dff80"..T("leaderboard.status.sending_queued_work").."|r")
