@@ -325,6 +325,14 @@ Passive('running render, hovers and page switches',function()
  local shown,full=UI.PanelRunLine()
  Scan('panel line running',{{text=shown},{text=full}})
 end)
+-- The HUD's Orb hub line (ui/Panel.lua) names the run state through its
+-- key (OrbHistory.RUN_STATE_KEYS), not the English label table.
+do
+ local state=M.Status().state
+ local label=Nexus.OrbHistory.RUN_STATES[state]
+ local hub=Nexus.Panel.OrbHubLine()
+ check(label~=nil and hub:find(S.OPEN..label..S.CLOSE,1,true)~=nil,'the hub line says the run state through its key: '..tostring(hub))
+end
 -- Template slots: unknown "?" and zero "0" on the mini pending counts.
 do
  local real=M.CompactStatus
