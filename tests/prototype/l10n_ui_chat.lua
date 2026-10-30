@@ -435,4 +435,81 @@ for _,cmd in ipairs({'status','wishlist','progress','missing','paused','policy',
 local s1=Snapshot()
 for k,v in pairs(s0) do check(s1[k]==v,'read-only chat commands change nothing: '..k) end
 
+------------------------------------------------------------------------------
+-- 9. Source16 (Main identity-note lease): the adapter's identity-found note,
+-- from the real adapter after a real association, at /nexus status (inside
+-- the advisor-only line, whole, as that line showed it) and at /nexus
+-- wishlist (UserText: without its lead). Expected texts are written out here.
+------------------------------------------------------------------------------
+local O,C=S.OPEN,S.CLOSE
+local ID_SUFFIX=' Open the Wishlist Editor to choose and confirm its locked targets.'
+local REASON='active loadout is not verified; locked-Echo evidence is pending'
+local NOTE='Wishlist identity found; '..REASON..'.'..ID_SUFFIX
+local function IdentityWorld(entries)
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;EchoOptimizer=nil
+ if entries~=false then S.InstallBootHook(nil,entries) end
+ H=dofile('tests/prototype/harness.lua')
+ local locks={200690,200756,200882,201250,201262,201270};local q={2,3,2,3,3,3};local total={}
+ for i=1,79 do local id=210000+i;H.AddEcho(id,'Ordinary '..i,2,5);total[#total+1]={spellId=id,quality=2,stacks=1,locked=false} end
+ for i,id in ipairs(locks) do H.AddEcho(id,'Locked '..i,q[i],5);total[#total+1]={spellId=id,quality=q[i],stacks=1,locked=false};H.locked[#H.locked+1]={spellId=id,stacks=1} end
+ H.perks.serverBuildSlots={[1]={name='Synthetic active',verified=true,echoes=H.Clone(total)},[101]={name='Synthetic plan',verified=false,echoes=H.Clone(total)}}
+ H.perks.serverActiveSlot=1
+ H.Boot()
+ local A=Nexus.GameAdapter
+ local c;for _,row in ipairs(A.GetWishlistCandidates()) do if row.slot==101 then c=row end end
+ assert(c and A.SetLoadoutWishlist(1,101,c),'SETUP S16 Main identity: a real association')
+ H.perks.serverBuildSlots[101]=nil
+ H.perks.serverBuildSlots[1].verified=false
+ return A
+end
+-- The note lines of /nexus status and /nexus wishlist, read passively.
+local function NoteRoutes(A)
+ local before={db=Serialize(NexusDB),legacy=Serialize(WishlistRealizerDB),sent=#H.sent,actions=#H.actions}
+ local status,wish
+ for _,l in ipairs(Run('status')) do if l:find('advisor only',1,true) or l:find('Details: TARGET',1,true) then status=l end end
+ local lines=Run('wishlist');wish=lines[#lines]
+ local note=A.WishlistNote()
+ local after={db=Serialize(NexusDB),legacy=Serialize(WishlistRealizerDB),sent=#H.sent,actions=#H.actions}
+ local passive=true;for k,v in pairs(before) do if after[k]~=v then passive=false end end
+ return status,wish,note,passive
+end
+do
+ local A=IdentityWorld(nil)
+ local status,wish,note,passive=NoteRoutes(A)
+ check(note==NOTE,'S16 Main identity: the adapter keeps its raw note: '..tostring(note))
+ check(status==PREFIX..O..'WISHLIST: none -- advisor only  ('..O..'Wishlist identity found; '..O..REASON..C..'.'..ID_SUFFIX..C..')'..C,
+  'S16 Main identity: /nexus status says the whole note inside the advisor-only line, the reason through its key: '..tostring(status))
+ check(wish==PREFIX..O..O..REASON..C..'.'..ID_SUFFIX..C,'S16 Main identity: /nexus wishlist says the note without its lead: '..tostring(wish))
+ check(passive,'S16 Main identity: /nexus status and /nexus wishlist read passively')
+ -- Close controls: the keyed wait sentence keeps precedence over the whole
+ -- line; an unknown or other assignment note keeps its existing route.
+ H.perks.serverBuildSlots[1].verified=true;H.locked=nil
+ local syncStatus,_,syncNote=NoteRoutes(A)
+ check(syncStatus==PREFIX..O.."Waiting for the server's current locked Echo list. Details: TARGET: none -- advisor only  ("..syncNote..')'..C,
+  'S16 Main identity: close control, the keyed wait sentence keeps the whole status line as details: '..tostring(syncStatus))
+ local unknown='Wishlist identity found; an external; reason {x} 100%.'
+ check(Nexus.UserText.Message('TARGET: none -- advisor only  ('..unknown..')')==O..'WISHLIST: none -- advisor only  ('..unknown..')'..C,
+  'S16 Main identity: a note the adapter did not produce stays exactly as given inside the line')
+ check(Nexus.UserText.Message('TARGET: none -- advisor only  (Waiting for loadout data...)')==O..'WISHLIST: none -- advisor only  ('..O..'Waiting for loadout data...'..C..')'..C,
+  'S16 Main identity: close control, an exact assignment note keeps its own key')
+end
+do
+ local entries=S.PseudoEntries();entries['orb.assignment.identity_found_open_editor']=nil
+ local A=IdentityWorld(entries)
+ local status,wish=NoteRoutes(A)
+ check(status==PREFIX..O..'WISHLIST: none -- advisor only  ('..NOTE..')'..C,'S16 Main identity missing: a missing note candidate keeps the complete English note inside the line: '..tostring(status))
+ check(wish==PREFIX..O..O..REASON..C..'.'..ID_SUFFIX..C,'S16 Main identity missing: /nexus wishlist keeps its own form')
+ entries=S.PseudoEntries();entries['command.chat.status_target_none_note']='{note} {nope}'
+ A=IdentityWorld(entries)
+ status=NoteRoutes(A)
+ check(status==PREFIX..'WISHLIST: none -- advisor only  ('..NOTE..')','S16 Main identity invalid: an invalid line candidate shows the whole exact English line: '..tostring(status))
+end
+do
+ local A=IdentityWorld(false)
+ local status,wish,note,passive=NoteRoutes(A)
+ check(status==PREFIX..'WISHLIST: none -- advisor only  ('..NOTE..')','S16 Main identity English: /nexus status is the exact English line: '..tostring(status))
+ check(wish==PREFIX..REASON..'.'..ID_SUFFIX,'S16 Main identity English: /nexus wishlist is the exact English: '..tostring(wish))
+ check(note==NOTE and passive,'S16 Main identity English: raw note unchanged and passive')
+end
+
 print('l10n_ui_chat: '..checks..' checks')

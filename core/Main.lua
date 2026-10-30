@@ -48,12 +48,24 @@ local STATUS_PHRASES = {exact = {["TARGET: none -- advisor only"] = "command.cha
     {format = "OWNED this run: %d echoes (not synced yet).", key = "command.chat.status_owned_unsynced", fields = {"count"}},
 }}
 local statusBook
+local NOTE_HEAD = "TARGET: none -- advisor only  ("
 local function StatusPhrase(text)
     local L = Nexus.Localization
     if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
     if not statusBook or statusBook.seam ~= L then
         statusBook = L.PhraseBook(STATUS_PHRASES)
         statusBook.seam = L
+    end
+    -- The adapter's identity-found note inside the advisor-only line: said
+    -- from the adapter's own facts, whole, as this line always showed it
+    -- (UserText.IdentityNote). Any other note keeps the book's route below.
+    if #text > #NOTE_HEAD + 1 and text:sub(1, #NOTE_HEAD) == NOTE_HEAD and text:sub(-1) == ")" then
+        local user = Nexus.UserText
+        local note = user and type(user.IdentityNote) == "function" and user.IdentityNote(text:sub(#NOTE_HEAD + 1, -2), true)
+        if note then
+            local line, source = L.Format("command.chat.status_target_none_note", {note = note})
+            if source == "candidate" then return line, true end
+        end
     end
     return L.Phrase(text, statusBook)
 end
