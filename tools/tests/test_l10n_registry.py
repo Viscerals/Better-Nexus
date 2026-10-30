@@ -2604,6 +2604,63 @@ class ConsumerBindingTests(unittest.TestCase):
                                   in self.binding(receipt, key)["unprovenSites"]],
                                  ["output-not-reached"])
 
+    def test_c22_nested_calls_keep_every_enclosing_invocation(self):
+        # SPEC-147-S8-RF4-1: a field read through a parameter that a wrapper
+        # passes on from its own parameter returns only under the enclosing
+        # call whose argument holds the written table, so the wrapper's
+        # result reaches only that call. A resolved helper that receives the
+        # widget leaves it an output unless it replaces the output method.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecReadField end; '
+        wrap = read + b'local function SpecWrap(target) return SpecRead(target) end; '
+        outer = wrap + b'local function SpecOuter(target) return SpecWrap(target) end; '
+        left = b'local specLeft={SpecReadField=' + text + b'}; local specRight={}; '
+        fill = read + (b'local function SpecFill(target,value) target.SpecReadField=value; '
+                       b'return SpecRead(target) end; ')
+        cases = (
+            ("nested-field-read-same-call-positive", True, wrap + b'local specLeft={SpecReadField='
+             + text + b'}; specLabel:SetText(SpecWrap(specLeft))'),
+            ("nested-field-read-wrong-call-origin", False, wrap + left
+             + b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'),
+            ("nested read through an alias of the wrapper parameter", False, read
+             + b'local function SpecWrap(target) local held=target; return SpecRead(held) end; '
+             + left + b'local specDiscard=SpecWrap(specLeft); '
+             b'specLabel:SetText(SpecWrap(specRight))'),
+            ("two enclosing wrappers, same call", True, outer + left
+             + b'specLabel:SetText(SpecOuter(specLeft))'),
+            ("two enclosing wrappers, wrong call", False, outer + left
+             + b'local specDiscard=SpecOuter(specLeft); specLabel:SetText(SpecOuter(specRight))'),
+            ("table written and read in one enclosing call", True, fill
+             + b'specLabel:SetText(SpecFill({},' + text + b')); local specOther=SpecFill({},"x")'),
+            ("table written and read in a discarded enclosing call", False, fill
+             + b'local specDiscard=SpecFill({},' + text + b'); '
+             b'specLabel:SetText(SpecFill({},"fixed"))'),
+            ("method-helper-unmodified-positive", True,
+             b'local function SpecTouch(target) local same=target end; SpecTouch(specLabel); '
+             b'specLabel:SetText(' + text + b')'),
+            ("method-helper-overwrite-origin", False,
+             b'local function SpecTouch(target) target.SetText=function(self,value) return nil '
+             b'end end; SpecTouch(specLabel); specLabel:SetText(' + text + b')'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the
