@@ -771,6 +771,76 @@ do
  soft(chat==TAG..'active loadout is not verified; locked-Echo evidence is pending.'..ID_SUFFIX,'S16 identity English: /nexus wishlist shows the exact current English',chat)
  soft(passive,'S16 identity English: passive')
 end
+-- 7g. SOURCE18-9DE4-FINAL-SPEC-P2-01: an opaque identity reason stays
+-- literal at both receivers, with a valid, missing or invalid candidate,
+-- even when it reads like a refusal or contains a rewritten word. The real
+-- adapter composes the note; only the read-only evidence leaf's reason is
+-- controlled (defensive boundary; native production of these reasons is
+-- not claimed). Expected outputs are written out here.
+local function Leaf(A)
+ local function Up(fn,want)
+  for i=1,120 do local n,v=debug.getupvalue(fn,i);if not n then break end;if n==want then return i,v end end
+  error('SETUP S16 opaque: missing upvalue '..want)
+ end
+ local _,resolve=Up(A.Wishlist,'ResolveWishlistEvidence')
+ local index,original=Up(resolve,'ExactActiveWishlistRoles')
+ return function(reason) debug.setupvalue(resolve,index,function() return nil,reason end) end,
+  function() debug.setupvalue(resolve,index,original) end
+end
+local OPAQUE={
+ {name='plain',reason='an external; reason {x} 100%'},
+ {name='refusal-like',reason='an external no net gain; reason {x} 100%'},
+ {name='coverage-like',reason='coverage lost: 7 {x} 100%'},
+ {name='rewrite-like',reason='opaque TARGET: A {x} 100% UNARMED'},
+}
+for _,mode in ipairs({'candidate','missing','invalid'}) do
+ local entries=S.PseudoEntries()
+ if mode=='missing' then
+  entries['orb.assignment.identity_found_open_editor']=nil
+  entries['orb.assignment.identity_found_reason_open_editor']=nil
+ elseif mode=='invalid' then
+  entries['orb.assignment.identity_found_open_editor']='{reason} {nope}'
+  entries['orb.assignment.identity_found_reason_open_editor']='{reason} {nope}'
+ end
+ local h,A=IdentityWorld(entries)
+ local set,restore=Leaf(A)
+ for _,case in ipairs(OPAQUE) do
+  set(case.reason)
+  local wish,note,orb,chat,passive=IdRead(h,A)
+  local raw='Wishlist identity found; '..case.reason..'.'..ID_SUFFIX
+  local wantOrb,wantChat
+  if mode=='candidate' then
+   wantOrb=O..raw..C
+   wantChat=TAG..O..case.reason..'.'..ID_SUFFIX..C
+  else
+   wantOrb=raw
+   wantChat=TAG..case.reason..'.'..ID_SUFFIX
+  end
+  local tag='S16 opaque '..mode..' '..case.name
+  soft(wish==nil and note==raw,tag..': the adapter composes its raw note with the exact reason and instruction',note)
+  soft(orb==wantOrb,tag..': the Orb window shows the whole note with the exact reason',orb)
+  soft(chat==wantChat,tag..': /nexus wishlist shows the note with the exact reason, no legacy rewrite',chat)
+  soft(passive,tag..': passive read')
+ end
+ restore()
+end
+do
+ -- Close controls: a known reason keeps its keyed choose sentence; ordinary
+ -- non-identity legacy texts behave as before; an unknown text resembling
+ -- an identity note (not the adapter's note) keeps the legacy route.
+ local h,A=IdentityWorld(nil)
+ local set,restore=Leaf(A)
+ set('wishlist does not exactly match the verified active loadout; locked roles remain unknown')
+ local _,note,_,chat=IdRead(h,A)
+ restore()
+ soft(chat==TAG..O.."Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: "..note..C,
+  'S16 opaque control: a known reason keeps its keyed choose sentence with the whole note as details',chat)
+ soft((Nexus.UserText.Message('save refused: no net gain over the saved build'))==O..'Not saved: no additional matching Wishlist copies were confirmed.'..C,
+  'S16 opaque control: a non-identity refusal keeps its legacy meaning')
+ soft((Nexus.UserText.Message('opaque TARGET: A'))=='opaque WISHLIST: A','S16 opaque control: a non-identity text keeps the legacy rewrite')
+ soft((Nexus.UserText.Message('Wishlist identity found; an external no net gain; reason.'))==O..'Not saved: no additional matching Wishlist copies were confirmed.'..C,
+  'S16 opaque control: a text that only resembles an identity note keeps the legacy route')
+end
 check(#S16==0,'Source16 Orb receivers:\n'..table.concat(S16,'\n'))
 
 print('l10n_ui_orb: '..checks..' checks')

@@ -512,4 +512,37 @@ do
  check(note==NOTE and passive,'S16 Main identity English: raw note unchanged and passive')
 end
 
+-- SOURCE18-9DE4-FINAL-SPEC-P2-01 at /nexus status: an opaque identity reason
+-- inside the advisor line stays literal (valid, missing and invalid line
+-- candidates); the real adapter composes the note, only the evidence leaf's
+-- reason is controlled. Expected lines are written out here.
+do
+ local REASON='an external no net gain; reason {x} 100%'
+ local function Opaque(entries)
+  local A=IdentityWorld(entries)
+  local resolve
+  for i=1,120 do local n,v=debug.getupvalue(A.Wishlist,i);if not n then break end;if n=='ResolveWishlistEvidence' then resolve=v end end
+  local index,original
+  for i=1,120 do local n,v=debug.getupvalue(resolve,i);if not n then break end;if n=='ExactActiveWishlistRoles' then index,original=i,v end end
+  assert(index,'SETUP S16 opaque status: the evidence leaf')
+  debug.setupvalue(resolve,index,function() return nil,REASON end)
+  local status,wish,note,passive=NoteRoutes(A)
+  debug.setupvalue(resolve,index,original)
+  return status,wish,note,passive
+ end
+ local raw='Wishlist identity found; '..REASON..'.'..ID_SUFFIX
+ local status,wish,note,passive=Opaque(nil)
+ check(note==raw,'S16 opaque status: the adapter composes its raw note: '..tostring(note))
+ check(status==PREFIX..O..'WISHLIST: none -- advisor only  ('..O..raw..C..')'..C,'S16 opaque status: /nexus status keeps the opaque reason inside the translated line: '..tostring(status))
+ check(wish==PREFIX..O..REASON..'.'..ID_SUFFIX..C,'S16 opaque status: /nexus wishlist keeps the opaque reason: '..tostring(wish))
+ check(passive,'S16 opaque status: passive')
+ local entries=S.PseudoEntries();entries['orb.assignment.identity_found_open_editor']=nil;entries['orb.assignment.identity_found_reason_open_editor']=nil
+ status,wish=Opaque(entries)
+ check(status==PREFIX..O..'WISHLIST: none -- advisor only  ('..raw..')'..C,'S16 opaque status missing: the exact note inside the translated line: '..tostring(status))
+ check(wish==PREFIX..REASON..'.'..ID_SUFFIX,'S16 opaque status missing: /nexus wishlist shows the exact English note without its lead: '..tostring(wish))
+ status,wish=Opaque(false)
+ check(status==PREFIX..'WISHLIST: none -- advisor only  ('..raw..')','S16 opaque status English: the exact English line with the opaque reason: '..tostring(status))
+ check(wish==PREFIX..REASON..'.'..ID_SUFFIX,'S16 opaque status English: /nexus wishlist exact English: '..tostring(wish))
+end
+
 print('l10n_ui_chat: '..checks..' checks')

@@ -296,6 +296,35 @@ function T.IdentityNote(value,whole)
     return nil
 end
 
+-- The adapter's identity-found note, recognized only by its trusted facts for
+-- exactly the adapter's current note bytes, before T.Message's legacy
+-- substring rules and rewrites can change an opaque reason inside it. The
+-- note itself: said through its key, else its exact English without the
+-- lead (built from the facts). The note inside another owner's line (the
+-- /nexus status advisor line): that owner's phrase source says the line.
+-- The reasons below keep their own keyed wait/choose sentence instead.
+local IDENTITY_KEYED_ROUTE={
+    ["associated loadout is not active; locked roles remain unknown"]=true,
+    ["wishlist does not exactly match the verified active loadout; locked roles remain unknown"]=true,
+    ["waiting for authoritative locked-Echo evidence"]=true,
+    ["waiting for synchronized permanent locked-Echo evidence"]=true,
+}
+local function IdentityRoute(s)
+    local adapter=Nexus.GameAdapter
+    if type(adapter)~="table" or type(adapter.WishlistNote)~="function"
+        or type(adapter.WishlistNoteFacts)~="function" then return nil end
+    local note=adapter.WishlistNote()
+    local facts=type(note)=="string" and adapter.WishlistNoteFacts(note) or nil
+    if not facts or IDENTITY_KEYED_ROUTE[facts.reason] or not s:find(note,1,true) then return nil end
+    if s==note then
+        local shown=T.IdentityNote(s,false)
+        if shown then return shown,true end
+        return facts.reason.."."..(facts.pending
+            and " Open the Wishlist Editor to choose and confirm its locked targets." or ""),false
+    end
+    return FromPhraseSources(s)
+end
+
 -- A text another owner's display recognizes (an English reason wording or
 -- a phrase source), in the active language; any other text unchanged. Unlike
 -- T.Message it never rewrites an unknown text.
@@ -336,6 +365,8 @@ function T.Message(value)
         local shown=detail:gsub("non%-conformant data","unsupported availability data")
         return SayF("usertext.status.control_detail",{control=control,detail=shown},control..": "..shown)
     end
+    local identity,identityLocalized=IdentityRoute(s)
+    if identity then return identity,identityLocalized end
     if s:find("locked roles remain unknown",1,true) or s:find("awaiting authoritative lock evidence",1,true)
         or s:find("waiting for authoritative locked%-Echo evidence") then
         return SayF("reason.choose_locked_targets",{details=s},"Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: "..s)
