@@ -194,7 +194,8 @@ local function DpsRecordsItem()
 end
 local hideRecords = Nexus.Localization.Text('panel.menu.dps_records_hide')
 local dpsItem = assert(DpsRecordsItem(), 'fixture: the Options menu has the DPS records row')
-if dpsItem.text ~= hideRecords then dpsItem.func() end
+local showedRecords = false
+if dpsItem.text ~= hideRecords then dpsItem.func(); showedRecords = true end
 assert(DpsRecordsItem().text == hideRecords, 'fixture: the DPS records are shown')
 local function Scripts()
     local out = {}
@@ -223,6 +224,16 @@ assert(rebound == 0, 'C-03: a performance render rebinds no hover script (' .. r
 local record = Tooltip(dummyHover)
 assert(record:find('3.46M', 1, true) and not record:find('2.35M', 1, true),
     'C-03: the record hover shows the new record: ' .. record)
+-- Back to the display the viewport regression was written for: the same
+-- row hides the records again when this fixture showed them. Shown, they
+-- make the 2x-font panel taller, and a fit below native scale at the larger
+-- viewport would then be the intended FitToScreen result, not a regression.
+if showedRecords then
+    DpsRecordsItem().func()
+    assert(DpsRecordsItem().text == Nexus.Localization.Text('panel.menu.dps_records_show'),
+        'fixture: the DPS records are hidden again')
+    Render()
+end
 
 ---------------------------------------------------------------- C-02
 -- Soul Ash / multiplier / Intensity values alone take no layout pass; a
@@ -285,7 +296,9 @@ assert(select(2, bar:GetMinMaxValues()) == 600 and bar:GetValue() == 250,
 -- hovers and value-only card passes.
 UIParent:SetSize(1200, 900)
 Render()
-assert(panel:GetScale() == 1, 'a larger viewport still restores the native panel scale')
+assert(panel:GetScale() == 1, 'a larger viewport still restores the native panel scale (scale '
+    .. tostring(panel:GetScale()) .. ', panel ' .. tostring(panel:GetWidth()) .. 'x'
+    .. tostring(panel:GetHeight()) .. ')')
 UIParent:SetSize(800, 600)
 Render()
 Fits('settled render after header, hover and card value caching')
