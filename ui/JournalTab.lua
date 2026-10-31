@@ -2180,12 +2180,14 @@ function M.CanOpenBuilds()
 end
 
 -- The Echoes page as the player sees it, read-only. Ancestor-aware: an
--- embedded journal whose host window is closed is not visible.
+-- embedded journal whose host window is closed is not visible. The client
+-- answers 1 or nil (Theme.ClientBool); an open page must read as open, or
+-- the toggling menu-bar button would be clicked and close it.
 local function EchoesPageVisible()
     local journal = _G["ProjectEbonholdEchoJournal"]
     if not (journal and journal.IsVisible) then return false end
     local ok, visible = pcall(journal.IsVisible, journal)
-    return ok and visible == true
+    return ok and Nexus.Theme.ClientBool(visible) == true
 end
 
 -- My Builds as the player sees it, read-only: the Echoes page visible with the

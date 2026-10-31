@@ -42,13 +42,46 @@ function regionMethods:GetText() return self.text end
 function regionMethods:SetFormattedText(fmt,...) editBoxText(self,string.format(fmt,...),false) end
 function regionMethods:Show() local change=not self.shown; self.shown=true;if change and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function regionMethods:Hide() local change=self.shown;self.shown=false;if change and self.scripts.OnHide then self.scripts.OnHide(self) end end
-function regionMethods:IsShown() return self.shown end
-function regionMethods:IsVisible() return self.shown and (not self.parent or self.parent:IsVisible()) end
+-- Client widget booleans. By default the widget getters below answer Lua
+-- booleans. The 3.3.5a client convention answers 1 or nil from IsShown,
+-- IsVisible and GetChecked, and 1 or 0 from IsEnabled
+-- (docs/UI_NATIVE_THEME_CORRECTION.md); the exact Ebonhold build-12340
+-- returns are not verified here. A fixture selects that convention with
+-- NEXUS_TEST_CLIENT_BOOLEANS='native' before loading this file, or at any
+-- time with H.SetClientBooleans('native') / H.SetClientBooleans('lua'),
+-- which applies to every existing and later frame. Mouse state is not
+-- modelled here; a fixture that models IsMouseEnabled answers through
+-- H.ClientBoolean so it follows the same convention.
+local nativeBooleans=NEXUS_TEST_CLIENT_BOOLEANS=='native'
+function H.SetClientBooleans(mode)
+ assert(mode=='lua' or mode=='native','client boolean convention is lua or native')
+ nativeBooleans=mode=='native'
+end
+function H.ClientBooleans() return nativeBooleans and 'native' or 'lua' end
+function H.ClientBoolean(v)
+ if nativeBooleans then if v then return 1 end return nil end
+ return v and true or false
+end
+function regionMethods:IsShown()
+ if nativeBooleans then return H.ClientBoolean(self.shown) end
+ return self.shown
+end
+function regionMethods:IsVisible()
+ local visible=self.shown and (not self.parent or self.parent:IsVisible())
+ if nativeBooleans then return H.ClientBoolean(visible) end
+ return visible
+end
 function regionMethods:Enable() self.enabled=true end
 function regionMethods:Disable() self.enabled=false end
-function regionMethods:IsEnabled() return self.enabled end
+function regionMethods:IsEnabled()
+ if nativeBooleans then if self.enabled then return 1 end return 0 end
+ return self.enabled
+end
 function regionMethods:SetChecked(v) self.checked=v==true end
-function regionMethods:GetChecked() return self.checked end
+function regionMethods:GetChecked()
+ if nativeBooleans then return H.ClientBoolean(self.checked) end
+ return self.checked
+end
 function regionMethods:SetSize(w,h) self.width,self.height=w,h end
 function regionMethods:SetWidth(v) self.width=v end
 function regionMethods:SetHeight(v) self.height=v end

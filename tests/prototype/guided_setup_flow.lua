@@ -1146,8 +1146,13 @@ end)
 -- My Builds is seen; otherwise it stays and says so. The Wishlist chooser
 -- route keeps an open page too. The real client's page, hub navigation and
 -- timing are NOT RUN: native visual validation remains necessary.
-C.scenario('F15 the real My Builds route never clicks an open page closed; the coach steps aside only once My Builds is seen',function()
+-- F15 runs twice: with the harness's Lua-boolean widget getters, and with
+-- the 3.3.5a client convention (IsShown/IsVisible answer 1 or nil;
+-- H.SetClientBooleans), under which an open page must still be seen as open.
+local function F15(convention) return function()
  Boot()
+ if convention=='native' then H.SetClientBooleans('native') end
+ local F='F15'..(convention=='native' and ' (1/nil)' or '')
  local T=Nexus.UserText.Guide
  local journal,button=_G.ProjectEbonholdEchoJournal,_G.EchoJournalMicroButton
  local loadouts=CreateFrame('Frame',nil,journal)
@@ -1165,33 +1170,33 @@ C.scenario('F15 the real My Builds route never clicks an open page closed; the c
  end)
  local keepTimer,queue=C_Timer,{}
  local ok,err=pcall(function()
-  if not Open('F15') then return end
+  if not Open(F) then return end
   Start('I already have');Press(Opt('W-Free'));Press(Btn('Continue'));Press(Opt('Slot 1 - One'))
-  if not C.setup(Btn('Open My Builds')~=nil and not journal:IsShown(),'F15: fixture: a Saved Build that is not active; the page is closed') then return end
+  if not C.setup(Btn('Open My Builds')~=nil and not journal:IsShown(),F..': fixture: a Saved Build that is not active; the page is closed') then return end
   local quiet=Quiet()
   local function Aside() return not Shown() and Guide().waiting==true and Guide().waitingKind=='builds' end
   -- 1. Closed: the game's button opens it once; My Builds is seen.
   Press(Btn('Open My Builds'))
   C.expect(clicks==1 and journal:IsVisible() and loadouts:IsVisible() and Aside(),
-   'F15 closed: one click opens the page; the coach steps aside once My Builds is seen',clicks)
+   F..' closed: one click opens the page; the coach steps aside once My Builds is seen',clicks)
   -- 2. Already open: no click, so the page is not toggled closed.
   Nexus.GuidedSetupUI.Show()
   Press(Btn('Open My Builds'))
   C.expect(clicks==1 and journal:IsVisible() and loadouts:IsVisible() and Aside(),
-   'F15 open: an open My Builds is not clicked; it stays open and the coach steps aside',clicks)
+   F..' open: an open My Builds is not clicked; it stays open and the coach steps aside',clicks)
   -- 3. Open on another page: its own Loadouts tab, not the toggle.
   other:Show();loadouts:Hide()
   Nexus.GuidedSetupUI.Show()
   Press(Btn('Open My Builds'))
   C.expect(clicks==1 and tabClicks==1 and journal:IsVisible() and loadouts:IsVisible() and Aside(),
-   'F15 other page: the Loadouts tab is chosen, the window is not toggled, and the coach steps aside',clicks..'/'..tabClicks)
+   F..' other page: the Loadouts tab is chosen, the window is not toggled, and the coach steps aside',clicks..'/'..tabClicks)
   -- 4. The click does not bring the page: the coach stays and claims nothing.
   journal:Hide();opens='never'
   Nexus.GuidedSetupUI.Show()
   Press(Btn('Open My Builds'))
   C.expect(clicks==2 and not journal:IsShown() and Shown() and not Guide().waiting
    and Text():find(T.notes.buildsUnconfirmed,1,true)~=nil and Btn('Open My Builds')~=nil,
-   'F15 not seen: the coach stays with the unconfirmed note and its route still offered',Text())
+   F..' not seen: the coach stays with the unconfirmed note and its route still offered',Text())
   -- 5. The page arrives after the click, before the first settle.
   C_Timer={After=function(delay,fn) queue[#queue+1]={delay,fn} end}
   opens='later'
@@ -1202,24 +1207,26 @@ C.scenario('F15 the real My Builds route never clicks an open page closed; the c
   for _,q in ipairs(queue) do
    if q[1]==0.10 and not first then first=q[2] elseif q[1]==0.35 and not last then last=q[2] else rest=rest or {};rest[#rest+1]=q[2] end
   end
-  if not C.setup(first~=nil and last~=nil,'F15: fixture: the Journal queued its two settles',#queue) then return end
-  C.expect(clicks==3 and Shown() and not Guide().waiting,'F15 settle: the coach does not step aside before the page is seen',clicks)
+  if not C.setup(first~=nil and last~=nil,F..': fixture: the Journal queued its two settles',#queue) then return end
+  C.expect(clicks==3 and Shown() and not Guide().waiting,F..' settle: the coach does not step aside before the page is seen',clicks)
   journal:Show()
   first()
-  C.expect(Aside(),'F15 settle: seen at the first settle, the coach steps aside')
+  C.expect(Aside(),F..' settle: seen at the first settle, the coach steps aside')
   last()
   for _,fn in ipairs(rest or {}) do fn() end
-  C.expect(Aside() and clicks==3,'F15 settle: the last settle changes nothing more',clicks)
+  C.expect(Aside() and clicks==3,F..' settle: the last settle changes nothing more',clicks)
   -- 6. The Wishlist chooser keeps an open page and still opens.
   C.expect(Nexus.JournalTab.OpenBuilds(true)==true and clicks==3 and journal:IsVisible()
    and _G.NexusWishlistOnlyPicker~=nil and NexusWishlistOnlyPicker:IsShown(),
-   'F15 chooser: an open page is not clicked; the Wishlist chooser opens there',clicks)
+   F..' chooser: an open page is not clicked; the Wishlist chooser opens there',clicks)
   NexusWishlistOnlyPicker:Hide()
-  C.guard(Quiet()==quiet,'F15: every route wrote, assigned, acted, spent and toggled nothing',Quiet())
+  C.guard(Quiet()==quiet,F..': every route wrote, assigned, acted, spent and toggled nothing',Quiet())
  end)
  C_Timer=keepTimer
- C.setup(ok,'F15: fixture: the scenario ran',err)
-end)
+ C.setup(ok,F..': fixture: the scenario ran',err)
+end end
+C.scenario('F15 the real My Builds route never clicks an open page closed; the coach steps aside only once My Builds is seen',F15('lua'))
+C.scenario('F15 (1/nil) the same route under the client widget convention: an open page answering 1 is kept open and My Builds is seen',F15('native'))
 
 -- F16: the close/reopen race on the same real route as F15 (the real
 -- JournalTab.OpenBuilds(false), its two queued settles at 0.10 and 0.35 s

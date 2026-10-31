@@ -45,6 +45,20 @@ local function SayF(key, args, english)
     return english
 end
 
+-- One reading of a client widget boolean (IsShown, IsVisible, GetChecked,
+-- IsEnabled, IsMouseEnabled). The 3.3.5a client answers 1 and nil, or 1
+-- and 0 (IsEnabled, docs/UI_NATIVE_THEME_CORRECTION.md), where the offline
+-- harness answers Lua booleans; both are read the same. True for true or 1,
+-- false for false, nil or 0, and nil for any other answer (a string, a
+-- table, another number), which is no client boolean and is not guessed.
+-- A caller that needs only yes or no compares the result with true. For
+-- client widget answers only: Nexus-owned Lua booleans are read as they are.
+function T.ClientBool(value)
+    if value == true or value == 1 then return true end
+    if value == false or value == nil or value == 0 then return false end
+    return nil
+end
+
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
 T.STYLE_KEY, T.PALETTE_KEY = "uiStyle", "uiPalette"
