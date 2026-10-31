@@ -703,5 +703,36 @@ C.scenario('M9 Pause and Resume through the stock row click: the list hides, the
   'M9: one Pause, one Resume; Auto stays OFF; no saved data, action or send',Effects())
 end)
 
+-- M10 (review COORD-06, issue #165): M7's toggle under the client widget
+-- convention, in which DropDownList1:IsShown() answers 1 or nil
+-- (H.SetClientBooleans). A second click on Options while its menu shows
+-- still leaves it closed, and the next click opens it again. Offline model
+-- of the stock list only; the build-12340 return convention is NOT_RUN.
+C.scenario('M10 under 1/nil widget answers a second Options click still closes its shown menu (issue #165)',function()
+ local before=Effects()
+ local btn=NexusPanel._menuBtn
+ local click=btn:GetScript('OnClick')
+ H.SetClientBooleans('native')
+ local ok,err=pcall(function()
+  CloseDropDownMenus()
+  click(btn)
+  if not C.setup(List(1):IsShown() and UIDROPDOWNMENU_OPEN_MENU==_G.NexusPanelMoreMenu,
+   'M10: fixture: the first click opens Options') then return end
+  C.expect(P.MenuShownFrom(_G.NexusPanelMoreMenu,btn)==true,'M10: the shown Options menu reads as shown from its button')
+  local opened=#D.easy
+  click(btn)
+  C.expect(not List(1):IsShown() and not FillShown(1) and #D.easy==opened,
+   'M10: a second click while it shows leaves it closed, with no new EasyMenu call',#D.easy-opened)
+  click(btn)
+  C.expect(List(1):IsShown() and UIDROPDOWNMENU_OPEN_MENU==_G.NexusPanelMoreMenu and FillShown(1) and #D.easy==opened+1,
+   'M10: the next click opens it again')
+  CloseDropDownMenus()
+  C.expect(P.MenuShownFrom(_G.NexusPanelMoreMenu,btn)==false,'M10: closed, it no longer reads as shown')
+ end)
+ H.SetClientBooleans('lua')
+ C.setup(ok,'M10: fixture: the scenario ran',err)
+ C.guard(Effects()==before,'M10: the clicks changed no saved data, Auto, action or send',Effects())
+end)
+
 Nexus.DisableOrdinaryAutomation()
 C.finish('(Nexus-owned native menu surfaces over a synthetic FrameXML dropdown; native opacity, order and hit testing NOT RUN)')

@@ -3628,11 +3628,13 @@ end
 -- True only while `menuFrame`'s menu is on screen now, opened from `anchor`:
 -- its root list is shown and the stock open-menu global names it. That global
 -- outlives a close, so the list's own visibility decides (contract item 6).
+-- The client answers 1 or nil (Theme.ClientBool).
 function M.MenuShownFrom(menuFrame, anchor)
     local list = _G.DropDownList1
     return menuFrame ~= nil and menuFrame._nexusOpener == anchor
         and _G.UIDROPDOWNMENU_OPEN_MENU == menuFrame
-        and list ~= nil and list.IsShown ~= nil and list:IsShown() == true
+        and list ~= nil and list.IsShown ~= nil
+        and Nexus.Theme.ClientBool(list:IsShown()) == true
 end
 
 -- Every Panel menu opens through Theme.OpenMenu: the same EasyMenu call, with
