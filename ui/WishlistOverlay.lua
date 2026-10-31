@@ -480,8 +480,10 @@ function M.Toggle()
     if frame:IsShown() then M.Hide() else M.Show() end
 end
 
+-- A Lua boolean: the client answers 1 or nil (Theme.ClientBool), and the
+-- Display Settings box is set from this.
 function M.IsShown()
-    return frame ~= nil and frame:IsShown()
+    return frame ~= nil and Nexus.Theme.ClientBool(frame:IsShown()) == true
 end
 
 -- Public lock accessors, so the Wishlist Editor's own Lock/Unlock button

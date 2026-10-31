@@ -473,5 +473,53 @@ C.scenario('N4.1 the popup placement at scaled and edge layouts stays on screen 
  end
 end)
 
+-- N4.2 (review F-WISHLIST-PLANS-02): the popup's Show overlay box reads the
+-- On-Screen Wishlist's own state and one click changes it, with the
+-- harness's Lua-boolean widget getters and under the client convention in
+-- which IsShown and GetChecked answer 1 or nil (H.SetClientBooleans). The
+-- client toggles a CheckButton before its OnClick runs; that is modelled
+-- here. Offline model only; native NOT_RUN.
+C.scenario('N4.2 Display Settings shows the overlay box checked over a shown overlay and one click hides it, in both widget conventions',function()
+ Close()
+ local O=Nexus.WishlistOverlay
+ local keep=O.IsShown()
+ -- The box writes the overlay's own saved shown state; nothing else.
+ local function Acted() return table.concat({'actions='..#H.actions,'sent='..#H.sent,
+  'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ') end
+ local before=Acted()
+ local ok,err=pcall(function()
+  for _,convention in ipairs({'lua','native'}) do
+   H.SetClientBooleans(convention)
+   local tag='N4.2 ('..convention..')'
+   Nexus.WishlistEditor.Show()
+   local f=NexusEditorFrame
+   local display=f and V.Button(H,f,'Display Settings')
+   if not C.setup(display~=nil,tag..': fixture: the editor and its Display Settings button') then return end
+   if _G.NexusDisplayPopup and NexusDisplayPopup:IsShown() then NexusDisplayPopup:Hide() end
+   O.Show()
+   display:Click()
+   local p=_G.NexusDisplayPopup
+   local box
+   for _,c in ipairs(p and p.children or {}) do if c.kind=='CheckButton' then box=c;break end end
+   if not C.setup(p~=nil and p:IsShown() and box~=nil,tag..': fixture: the popup and its Show overlay box') then return end
+   local function Toggle() box:SetChecked(not box:GetChecked());box:Click() end
+   C.expect(O.IsShown()==true and box:GetChecked(),tag..': over a shown overlay the box is checked')
+   Toggle()
+   C.expect(O.IsShown()==false and not box:GetChecked(),tag..': the first click hides the overlay')
+   H.Advance(1)
+   C.expect(O.IsShown()==false and not box:GetChecked(),tag..': the editor\'s refresh keeps the box unchecked over a hidden overlay')
+   Toggle()
+   C.expect(O.IsShown()==true and box:GetChecked(),tag..': the next click shows it again')
+   H.Advance(1)
+   C.expect(O.IsShown()==true and box:GetChecked(),tag..': the editor\'s refresh keeps the box checked over a shown overlay')
+   p:Hide();f:Hide()
+  end
+ end)
+ H.SetClientBooleans('lua')
+ if keep then O.Show() else O.Hide() end
+ C.setup(ok,'N4.2: fixture: the scenario ran',err)
+ C.guard(Acted()==before,'N4.2: the box acted, sent and changed Auto in nothing',Acted())
+end)
+
 C.guard(#H.actions==0,'no game action anywhere in this test',#H.actions)
 C.finish('(window Help opens the coach, Reference the manual; direct Options; collapsible details; popup clear of the band; offline model only, native NOT_RUN)')
