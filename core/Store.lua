@@ -1487,8 +1487,26 @@ end
 --   SOE=9 fields, SON=6 (the table plus five numeric scalar nodes),
 --   SOK=117 exact field-name bytes, SOB=18*9+8*5=202, SOP=18.
 -- "Its settings, chars, and account-character child graphs are the already
--- charged admitted candidates and are referenced, not rebuilt", so this wrapper
--- carries references and rebuilds nothing.
+-- charged admitted candidates and are referenced, not rebuilt". That reference
+-- was the durable defect A-STATE-01: the wrapper is saved inside the bundle, so
+-- a serializer that does not share references wrote db.settings, db.chars and
+-- db.accountCharacters twice, and after the next load the bundle's copies were
+-- detached duplicates that were never refreshed. The three graph fields
+-- therefore carry fresh EMPTY plain tables, never the live graphs: the saved
+-- graphs stay authoritative at their own top-level keys only, and the wrapper
+-- keeps its nine fields, its scalar receipt (schema, revisions, settings
+-- version) and its marker. The admission check below still requires each
+-- graph field to be a plain table, so a wrapper of either shape is admitted by
+-- this build and by every earlier build that runs that same check. The three
+-- empty tables are constant extra nodes; the referenced graphs they replace
+-- were never part of the SON/SOB derivation above.
+--
+-- An existing wrapper written by an earlier build may still hold such stale
+-- copies. It is validated exactly as before and then offered onwards in the
+-- same detached form (StoreData.Detached): its stale graphs are not read, not
+-- written and not carried into the next bundle replacement, which the bundle
+-- owner performs at its own ordinary commit. Nothing here writes the saved
+-- bundle.
 --
 -- The three-field migration-marker candidate is charged separately as SMOE=3,
 -- SMON=4, SMOK=24, SMOB=81, SMOP=6. It is a CANDIDATE: `completed` stays false
@@ -1499,6 +1517,29 @@ end
 -- as a Store facade export: architecture line 1912 fixes the public Store
 -- inventory at exactly nine (MASTER-RC-013).
 local StoreData = {current=nil, revision=0}
+
+-- A-STATE-01. The wrapper this session offers to the bundle owner for an
+-- admitted saved wrapper: the same validated scalar fields and a fresh copy of
+-- its three-field marker, with empty detached graph fields. The saved wrapper
+-- and any stale graph copies it holds are left exactly as found.
+function StoreData.Detached(saved)
+    local marker = rawget(saved, "migrationMarker")
+    return {
+        schemaVersion = rawget(saved, "schemaVersion"),
+        storeRevision = rawget(saved, "storeRevision"),
+        settingsRevision = rawget(saved, "settingsRevision"),
+        accountRevision = rawget(saved, "accountRevision"),
+        settingsVersion = rawget(saved, "settingsVersion"),
+        settings = {},
+        chars = {},
+        accountCharacters = {},
+        migrationMarker = {
+            version = rawget(marker, "version"),
+            completed = rawget(marker, "completed"),
+            decision = rawget(marker, "decision"),
+        },
+    }
+end
 
 function StoreData.Build(db, token)
     local counters = Nexus and Nexus.MainInternals
@@ -1560,8 +1601,11 @@ function StoreData.Build(db, token)
             highest = math.max(highest, probe.value)
         end
         StoreData.revision = highest
-        StoreData.current = {db=db, value=wrapper}
-        return wrapper
+        -- A-STATE-01: offered onwards detached; a stale graph copy an earlier
+        -- build left in the saved wrapper is never served or carried on.
+        local detached = StoreData.Detached(wrapper)
+        StoreData.current = {db=db, value=detached}
+        return detached
     end
     local revision, why = counters.Advance(StoreData, "revision", 1)
     if not revision then return nil, why end
@@ -1571,10 +1615,11 @@ function StoreData.Build(db, token)
         settingsRevision = revision,
         accountRevision = revision,
         settingsVersion = NormalizeVersion(db.settingsVersion),
-        settings = db.settings,
-        chars = db.chars,
-        accountCharacters = type(db.accountCharacters) == "table"
-            and db.accountCharacters or {},
+        -- A-STATE-01: empty detached tables, never db.settings, db.chars or
+        -- db.accountCharacters (see the block comment above).
+        settings = {},
+        chars = {},
+        accountCharacters = {},
         migrationMarker = {
             version = 1,
             completed = false,
@@ -1826,8 +1871,8 @@ local function BootstrapSlice(C)
         -- The account map is NOT created here: a read-only catalog verdict must
         -- withhold the account owner entirely, and the only authorized creation
         -- site is the guarded one in STORE_COMPACTION_PENDING. The wrapper
-        -- references the map when it exists and a detached empty table when it
-        -- does not, so building the candidate never writes to the database.
+        -- holds a detached empty table in place of every graph (A-STATE-01),
+        -- so building the candidate never writes to the database.
         local storeData, storeDataWhy, storeDataCause = StoreData.Build(db, C.token)
         if not storeData then
             C.state = SS.INVALID
@@ -2431,7 +2476,9 @@ end
 -- Read-only. Can StoreAuthorityOwner.UpdateStateV1 write the current
 -- character's row DURABLY right now? UpdateStateV1 creates an absent row, but
 -- falls back to a transient, never-persisted row (and still returns true) when
--- identity, the database, its chars container or the schema is not usable, so
+-- identity, the database, its chars container or the schema is not usable, or
+-- while the bound coordinator is not serving (mode "loading"/"unavailable"
+-- with reason "lifecycle" or "migration-marker" below), so
 -- a caller that must persist (for example an Orb recovery receipt) checks this
 -- first and verifies the row afterwards. Nothing is created or changed here.
 -- Returns {mode="durable", ownerKey=, rowPresent=, carriedFrom=} or
@@ -2854,6 +2901,26 @@ function StoreAuthorityOwner.ResolveStateRowV1()
         -- row while identity or the store is not yet usable.
         transientState = EnsureStateShape(transientState)
         return transientState, false
+    end
+    -- A-STATE-02: the lifecycle verdict Store.StateWriteStatus gives. While
+    -- the bound coordinator has not reached STORE_READY or a post-ready
+    -- MUTATION_* state, or its state cannot be read, the durable row is
+    -- neither created nor written and the transient session row is used, on a
+    -- supported format 2 as on every other format. A call before admission
+    -- therefore inserts no key into db.chars while the bounded admission walk
+    -- resumes over it with next() (Lua 5.1 leaves that insertion undefined),
+    -- and no row escapes that walk's charge. A true return is still not
+    -- readiness: callers that must persist check StateWriteStatus or
+    -- IsDurableStateRowV1. Without a bound coordinator both answers are
+    -- unchanged.
+    local bound = boundCoordinator
+    if type(bound) == "table" and type(bound.State) == "function" then
+        local okState, phase = pcall(bound.State, bound)
+        if not okState or (phase ~= SS.READY and phase ~= SS.MUTATION_BUILD
+            and phase ~= SS.MUTATION_FINAL) then
+            transientState = EnsureStateShape(transientState)
+            return transientState, false
+        end
     end
     local state = db.chars[ownerKey]
     local created = state == nil

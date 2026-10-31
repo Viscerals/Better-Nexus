@@ -301,13 +301,17 @@ The chooser fixture covers:
 
 The Store fixture also binds a real coordinator, through `Store.Init`, to a literal clone of the saved root in the same module generation. The same facade then reads both roots durably, with the same owner key, class and bytes but different root tokens; a Save with the earlier receipt refuses `ROOT_CHANGED` and writes nothing. A forwarding fault on the nested read inside the write alone refuses `SAVED_CHANGED`.
 
+The Store fixture's byte oracle asserts that the owned row is serialized exactly once and that the bundle wrapper holds no settings, character or ledger graph. Across three module reboots it checks that the row and the settings are each serialized once, that later writes survive, and that the wrapper stays empty. A profile given the earlier build's stale copies starts and serves its live values. Its stale copies are never written or merged, and they are not offered to the next bundle replacement.
+
 Check counts, pass results, the full suite, the package check and the independent Spec and Standards reviews belong to the PR evidence for the exact source pin; this contract records none of them.
 
 ## Limits
 
 - Native frames, StaticPopup pooling, return handling, timing, fonts, pixels and server behavior are NOT_RUN. No exact versioned client/export reference was supplied.
-- In a session, a character row can share a table with a copy in the saved bundle, and serialization can separate them.
-  - The sequence Save A, reload, Save B, reload, Clear, reload reads correctly for the active row.
-  - Earlier copies held elsewhere in saved data are not promised to be erased.
+- The character row, and the pool key on it, is saved once, at `chars[ownerKey]`. The durable bundle's Store-data wrapper (`authorityBundle.storeData`) keeps its schema, revisions, settings version and marker, and holds empty tables in place of the settings, character and account-ledger graphs. It holds no reference to the live tables and no copy of them.
+  - Earlier builds stored the live graphs in that wrapper by reference. Serialization then wrote them twice, and after a reload the wrapper held detached copies that were never refreshed. Nothing reads those copies as the row or as settings.
+  - A profile that still holds such copies starts normally. The copies are not read, written or merged. The wrapper this build offers for the next bundle replacement keeps the saved scalar fields and leaves the copies out. They therefore stay in saved data, unchanged, until the bundle owner's next ordinary replacement. No start-up pass removes them.
+  - Earlier builds accept the new shape, because their wrapper check requires only plain tables in those fields. This is a source reading; an earlier build was not run against the new shape.
+  - The sequence Save A, reload, Save B, reload, Clear, reload reads correctly for the active row. Pool copies held elsewhere in saved data by an earlier build are not promised to be erased.
 - Future and unreadable records block Save until they are removed outside this build. Nothing deletes them.
 - Readers of the `Store.State` snapshot, including diagnostics, do not see the pool. This is intended.

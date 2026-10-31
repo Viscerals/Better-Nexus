@@ -137,3 +137,78 @@ holder=Nexus.StartupStatus();holder.reason=nil;holder.state='ready';holder.coreR
 st=Nexus.StartupStatus()
 assert(st.state=='failed' and not st.coreReady,'status writes cannot grant readiness')
 print('PASS a failing required owner latches a terminal failed start-up without retries')
+
+-- 4. B-03: an adapter call of the world entry that follows initialization
+-- raises an error. The shared entry is still owned and settles once: Sync and
+-- DPS start exactly once, the error is recorded once under its owner and named
+-- in the start-up status, no error escapes into a frame or event, and a later
+-- world entry starts nothing twice. Each site, and the ordinary entry as the
+-- control. The throw is armed only for the lifecycle's own world-entry calls:
+-- Adapter.OnEvent('PLAYER_ENTERING_WORLD') once the core is initialized, and
+-- the next Adapter.RequestSlots call after it returns (or raises), so a call
+-- the adapter makes inside its own OnEvent is never the one counted.
+local function WorldEntry(site)
+ local c={sync=0,dps=0,entries=0,slots=0}
+ local armed=false
+ local errors=Boot(function()
+  local adapter=Nexus.GameAdapter
+  local onEvent,slots=adapter.OnEvent,adapter.RequestSlots
+  assert(type(onEvent)=='function' and type(slots)=='function','fixture: the adapter has both world-entry calls')
+  adapter.OnEvent=function(event,...)
+   local entry=event=='PLAYER_ENTERING_WORLD' and Nexus.StartupStatus().coreReady
+   if entry then
+    c.entries=c.entries+1
+    if site=='OnEvent' then armed=true;error('synthetic world entry failure OnEvent') end
+   end
+   local function pass(...) if entry then armed=true end return ... end
+   return pass(onEvent(event,...))
+  end
+  adapter.RequestSlots=function(...)
+   if armed then
+    armed=false;c.slots=c.slots+1
+    if site=='RequestSlots' then error('synthetic world entry failure RequestSlots') end
+   end
+   return slots(...)
+  end
+  local sync,dps=Nexus.Sync.Init,Nexus.DpsCapture.Init
+  Nexus.Sync.Init=function(...)c.sync=c.sync+1;return sync(...)end
+  Nexus.DpsCapture.Init=function(...)c.dps=c.dps+1;return dps(...)end
+ end)
+ errors=errors+Drive(20000,function()return Nexus.StartupStatus().state~='pending' end)
+ errors=errors+Drive(200)
+ return c,errors,Nexus.StartupStatus()
+end
+for _,site in ipairs({false,'OnEvent','RequestSlots'})do
+ local label=site and ('Adapter.'..site) or 'control'
+ local c,errors,s=WorldEntry(site)
+ assert(errors==0,label..': no error escapes start-up or a later turn: '..errors)
+ assert(c.entries==1 and c.slots==1,label..': the world entry ran once with both adapter calls: '..c.entries..'/'..c.slots)
+ assert(s.coreReady and s.state=='ready',label..': start-up is ready: '..tostring(s.state)..' '..tostring(s.reason))
+ assert(s.syncReady and s.dpsReady and c.sync==1 and c.dps==1,
+  label..': the shared entry is not stranded; Sync and DPS start once: '..tostring(s.syncReady)..'/'..tostring(s.dpsReady)..' '..c.sync..'/'..c.dps)
+ local recorded=site and Recorded('synthetic world entry failure '..site) or {}
+ if site then
+  assert(type(s.worldEntryFailure)=='table' and s.worldEntryFailure.owner==label and type(s.worldEntryFailure.error)=='string'
+   and s.worldEntryFailure.error:find('synthetic world entry failure '..site,1,true),
+   label..': the status names the failed world-entry call: '..tostring(s.worldEntryFailure and s.worldEntryFailure.owner))
+  assert(#recorded==1 and recorded[1].source:find(label,1,true),label..': one error recorded under its owner: '..#recorded)
+  s.worldEntryFailure.owner='edited'
+  assert(Nexus.StartupStatus().worldEntryFailure.owner==label,label..': a status write cannot change the report')
+ else
+  assert(s.worldEntryFailure==nil,'control: an ordinary world entry reports no failure')
+ end
+ -- A later loading screen: the same entry again, with the same call failing.
+ local again=0
+ if not pcall(H.Fire,'PLAYER_ENTERING_WORLD') then again=again+1 end
+ again=again+Drive(200)
+ s=Nexus.StartupStatus()
+ assert(again==0 and c.entries==2 and c.slots==2,label..': a later world entry raises nothing and runs once: '..again..' '..c.entries..'/'..c.slots)
+ assert(c.sync==1 and c.dps==1 and s.syncReady and s.dpsReady,label..': a later world entry starts nothing twice: '..c.sync..'/'..c.dps)
+ if site then
+  assert(#Recorded('synthetic world entry failure '..site)==1,label..': the same error is not recorded again')
+  assert(s.worldEntryFailure and s.worldEntryFailure.owner==label,label..': the later entry reports its own failure')
+ else
+  assert(s.worldEntryFailure==nil,'control: a later ordinary world entry reports no failure')
+ end
+end
+print('PASS a world-entry adapter error is isolated, reported and cannot strand the shared entry')

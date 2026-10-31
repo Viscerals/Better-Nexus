@@ -36,10 +36,11 @@ local function Session()
 end
 local function Session2() return {ids={A}, rows={[A]={spellId=A, quality=1, maxStack=5}}, chosen={[A]=4}} end
 -- The serialized saved root with exactly the current owned row's pool key left
--- out. The owned row is one physical table that the saved root reaches through
--- more than one path (NexusDB.chars[owner] and the durable bundle's
--- authorityBundle.storeData.chars[owner]), so the exclusion is by row IDENTITY,
--- wherever that row appears. Everything else is copied and compared: other
+-- out. Before A-STATE-01 the owned row was one physical table that the saved
+-- root reached through two paths (NexusDB.chars[owner] and the durable bundle's
+-- authorityBundle.storeData.chars[owner]); the bundle now carries no copy and
+-- control 0 asserts that the row is reached once. The exclusion stays by row
+-- IDENTITY, wherever that row appears. Everything else is copied and compared: other
 -- characters' rows including their pool keys, the same name nested in any
 -- table, and every other part of the bundle. Test-owned, bounded, memoized
 -- plain copy; serializable synthetic data only.
@@ -109,13 +110,25 @@ local P = codec.New({store=N.Store})
 local row = NexusDB.chars[F.OWNER]
 local held, snap
 
-do -- 0. the byte oracle itself: exclusion by owned-row identity through every alias, negative controls
+do -- 0. the byte oracle itself: exclusion by owned-row identity, the row reached once, negative controls
     local bundle = rawget(NexusDB, 'authorityBundle')
     local storeData = type(bundle) == 'table' and rawget(bundle, 'storeData') or nil
     local bundleChars = type(storeData) == 'table' and rawget(storeData, 'chars') or nil
     local aliased = type(bundleChars) == 'table' and rawequal(rawget(bundleChars, F.OWNER), row)
     print('ORACLE owned row also reached as authorityBundle.storeData.chars[owner]='..tostring(aliased))
-    check(aliased, 'oracle control: the owned row is aliased through the durable bundle, the case the helper must cover')
+    -- A-STATE-01: the bundle's Store-data wrapper holds empty detached tables
+    -- in place of the settings, character and ledger graphs.
+    check(type(bundleChars) == 'table' and not aliased and next(bundleChars) == nil
+        and not rawequal(bundleChars, NexusDB.chars), 'oracle control: the durable bundle carries no character rows')
+    for _, field in ipairs({'settings', 'accountCharacters'}) do
+        local copy = rawget(storeData, field)
+        check(type(copy) == 'table' and next(copy) == nil and not rawequal(copy, rawget(NexusDB, field)),
+            'oracle control: the durable bundle carries no '..field..' graph')
+    end
+    local whole, rowText = F.Serialize(NexusDB), F.Serialize(row)
+    local first = whole:find(rowText, 1, true)
+    check(first ~= nil and whole:find(rowText, first + 1, true) == nil,
+        'oracle control: the owned row is serialized exactly once')
     local peer = 'oraclepeer@ebonhold'
     check(rawget(NexusDB.chars, peer) == nil and rawget(row, KEY) == nil and rawget(row, 'oracleProbe151') == nil
         and rawget(bundle, 'oracleProbe151') == nil, 'oracle control: clean start')
@@ -142,6 +155,8 @@ do -- 0. the byte oracle itself: exclusion by owned-row identity through every a
         function() rawset(row, 'oracleProbe151', nil) end)
     changes('an unrelated durable bundle field', function() rawset(bundle, 'oracleProbe151', 1) end,
         function() rawset(bundle, 'oracleProbe151', nil) end)
+    changes('the bundle Store-data character field', function() rawset(bundleChars, F.OWNER, {[KEY]=Record()}) end,
+        function() rawset(bundleChars, F.OWNER, nil) end)
     NexusDB.chars[peer] = nil
     check(Without(NexusDB) == clean, 'oracle controls restored every value')
 end
@@ -478,6 +493,85 @@ do -- 9. Review A2 guard proofs in one module generation. Each fault and binding
     local back = Q.Read()
     check(back.mode == 'durable' and back.root == old.root and back.bytes == BYTES and F.Serialize(root) == rootText,
         'A2 the booted root and its real coordinator binding are restored')
+end
+
+do -- 10. A-STATE-01: settings and character rows are saved once; later sessions and an old-shape profile
+    local function Count(text, part)
+        local n, at = 0, 1
+        while true do
+            local s, e = text:find(part, at, true)
+            if not s then return n end
+            n, at = n + 1, e + 1
+        end
+    end
+    local function Wrapper(sd, label)
+        check(type(sd) == 'table' and rawget(sd, 'schemaVersion') == 1 and type(rawget(sd, 'migrationMarker')) == 'table',
+            label..': a Store-data wrapper')
+        for _, field in ipairs({'settings', 'chars', 'accountCharacters'}) do
+            local v = rawget(sd, field)
+            check(type(v) == 'table' and getmetatable(v) == nil and next(v) == nil
+                and not rawequal(v, rawget(NexusDB, field)), label..': storeData.'..field..' is an empty detached table')
+        end
+    end
+    -- oldShape: the saved bundle may still hold the earlier build's copies
+    -- until its next ordinary replacement, so only the owner seam is checked.
+    local function Session(label, want, oldShape)
+        local s = Nexus.StartupStatus()
+        check(s.coreReady and s.state ~= 'failed' and Nexus.Store.StateWriteStatus().mode == 'durable',
+            label..': start-up ready and durable: '..tostring(s.state)..' '..tostring(s.reason))
+        if not oldShape then
+            Wrapper(rawget(rawget(NexusDB, 'authorityBundle'), 'storeData'), label..' saved bundle')
+        end
+        Wrapper(Nexus.MainInternals.AuthorityBootstrap.DurableStoreData(NexusDB), label..' owner seam')
+        local text = F.Serialize(NexusDB)
+        check(Count(text, F.Serialize(NexusDB.chars[F.OWNER])) == 1 and Count(text, F.Serialize(NexusDB.settings)) == 1,
+            label..': the owned row and the settings are serialized exactly once')
+        check(NexusDB.chars[F.OWNER].stateProbe151 == want and NexusDB.settings.settingsProbe151 == want
+            and Nexus.Store.State().stateProbe151 == want and Nexus.Store.Settings().settingsProbe151 == want,
+            label..': the authoritative row and settings carry '..want)
+    end
+    local function Write(value)
+        local W = Nexus.MainInternals.StoreAuthorityOwner
+        check(W.UpdateStateV1(function(r) r.stateProbe151 = value end) == true
+            and W.UpdateSettingsV1('settingsProbe151', value).mode == 'durable', 'durable writes of '..value)
+    end
+    F.Boot(F.Database({version=2, mutate=function(db)
+        db.chars = {[F.OWNER]=F.Row({stateProbe151='s1'})}; db.settings.settingsProbe151 = 's1' end}))
+    Session('session 1', 's1')
+    Write('s2'); F.Reload(); Session('session 2', 's2')
+    Write('s3'); F.Reload(); Session('session 3', 's3')
+    -- The shape an earlier build left after a reload: the bundle wrapper holds
+    -- detached copies of the graphs, older than the live ones.
+    local old = assert(loadstring('return '..F.Serialize(NexusDB)))()
+    local function Copy(v) return assert(loadstring('return '..F.Serialize(v)))() end
+    local osd = old.authorityBundle.storeData
+    local staleSettings, staleChars, staleLedger = Copy(old.settings), Copy(old.chars), Copy(old.accountCharacters)
+    staleSettings.settingsProbe151, staleChars[F.OWNER].stateProbe151 = 'stale', 'stale'
+    osd.settings, osd.chars, osd.accountCharacters = staleSettings, staleChars, staleLedger
+    local revisions = {osd.storeRevision, osd.settingsRevision, osd.accountRevision, osd.migrationMarker.decision}
+    local staleText = F.Serialize({staleSettings, staleChars, staleLedger})
+    F.Boot(old)
+    Session('old-shape profile', 's3', true)
+    local seam = Nexus.MainInternals.AuthorityBootstrap.DurableStoreData(NexusDB)
+    check(seam.storeRevision == revisions[1] and seam.settingsRevision == revisions[2]
+        and seam.accountRevision == revisions[3] and seam.migrationMarker.decision == revisions[4],
+        'old-shape profile: the validated revisions and marker decision are kept')
+    for _, stale in ipairs({staleSettings, staleChars, staleLedger}) do
+        for _, field in ipairs({'settings', 'chars', 'accountCharacters'}) do
+            check(not rawequal(rawget(seam, field), stale), 'old-shape profile: a stale copy is not offered to the next bundle')
+        end
+    end
+    Write('s4')
+    check(F.Serialize({staleSettings, staleChars, staleLedger}) == staleText,
+        'old-shape profile: the stale copies are never written, served or merged')
+    print('OBSERVE old-shape profile: saved bundle still holds the stale character copy after start-up='
+        ..tostring(rawequal(rawget(rawget(NexusDB.authorityBundle, 'storeData'), 'chars'), staleChars)))
+    F.Reload()
+    local sd = rawget(rawget(NexusDB, 'authorityBundle'), 'storeData')
+    check(NexusDB.chars[F.OWNER].stateProbe151 == 's4' and NexusDB.settings.settingsProbe151 == 's4'
+        and type(rawget(sd, 'chars')) == 'table' and (rawget(rawget(sd, 'chars'), F.OWNER) == nil
+            or rawget(rawget(sd, 'chars'), F.OWNER).stateProbe151 == 'stale'),
+        'old-shape profile reload: the live values win; a kept stale copy is still only the old one')
 end
 
 print('REMAINING Stage A retention is measured in flexible_plan_persistence_retention (no fixed'
