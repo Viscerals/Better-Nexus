@@ -35,7 +35,9 @@
 -- U1  item 12: plain version and update words keep the exact installed build;
 --     unknown is "no verified update information", never latest; the popup
 --     keeps the full Releases address in its box and starts nothing.
--- F1  items 15 and 14: the footer "?" opens Help.Show('faq') once, fits the
+-- U2  review C-06: that box is found by the popup's editBox key or, for a
+--     template without it, by the named child "<popup name>EditBox".
+-- F1 items 15 and 14: the footer "?" opens Help.Show('faq') once, fits the
 --     420 px footer beside the hubs, leaves header line 1 to Auto, Options and
 --     Close, and its hover says where the numbers are explained.
 -- A1  item 10 excluded: the Auto button still reads "Auto OFF" / "Auto ON",
@@ -554,6 +556,62 @@ C.scenario('U1 plain version and update words; full Releases address in its box'
  C.expect(U.Status().menu=='Version and updates: notices off','U1: with notices off the row says so',U.Status().menu)
  U.SetEnabled(true)
  C.guard(Acts()==acts,'U1: reading and the notice setter take no action and send nothing',Acts())
+end)
+
+-- U2 (review C-06): the Releases box under three popup templates. A
+-- template that gives the popup no editBox key exposes its box only as the
+-- named child "<popup name>EditBox"; the address is put there, highlighted
+-- and focused. A popup with the key keeps using it and a same-named child is
+-- untouched; a named child without the EditBox methods, or no box at all,
+-- raises nothing. Synthetic popup frames
+-- only: which form the build-12340 StaticPopup template provides is NOT_RUN,
+-- and no clipboard or desktop action is taken.
+C.scenario('U2 the Releases address reaches the popup box with or without its editBox key',function()
+ local U=Nexus.Updates
+ local keep=H.popupPool[1]
+ local acts,saved=Acts(),F.Serialize(NexusDB)
+ local function Box(name,parent)
+  local box=CreateFrame('EditBox',name,parent)
+  box.highlights=0
+  box.HighlightText=function(self) self.highlights=self.highlights+1 end
+  return box
+ end
+ local ok,err=pcall(function()
+  -- Legacy: no editBox key, only the named child.
+  local legacy=CreateFrame('Frame','NexusTestLegacyPopup1',UIParent)
+  local named=Box('NexusTestLegacyPopup1EditBox',legacy)
+  H.popupPool[1]=legacy
+  P.ShowUpdateStatus()
+  C.setup(legacy.editBox==nil and H.popup~=nil and H.popup.frame==legacy,'U2: fixture: the legacy popup has no editBox key')
+  C.expect(named:GetText()==U.ReleaseUrl() and named:GetText()=='https://github.com/Viscerals/Better-Nexus/releases'
+   and named.highlights==1 and named:HasFocus(),
+   'U2: legacy: the named child holds the full address, highlighted and focused',named:GetText())
+  -- Modern: the key wins over a same-named child.
+  local modern=CreateFrame('Frame','NexusTestModernPopup1',UIParent)
+  modern.editBox=Box(nil,modern)
+  local other=Box('NexusTestModernPopup1EditBox',modern)
+  H.popupPool[1]=modern
+  P.ShowUpdateStatus()
+  C.expect(modern.editBox:GetText()==U.ReleaseUrl() and modern.editBox.highlights==1 and modern.editBox:HasFocus()
+   and other:GetText()=='' and other.highlights==0 and not other:HasFocus(),
+   'U2: modern: the editBox key gets the address; a named child is not touched',other:GetText())
+  -- Malformed: a named child without the EditBox methods is not used, and
+  -- the show does not raise.
+  local malformed=CreateFrame('Frame','NexusTestMalformedPopup1',UIParent)
+  _G.NexusTestMalformedPopup1EditBox={}
+  H.popupPool[1]=malformed
+  local okMalformed,shownMalformed=pcall(P.ShowUpdateStatus)
+  C.expect(okMalformed and shownMalformed==true and next(_G.NexusTestMalformedPopup1EditBox)==nil,
+   'U2: a named child without SetText, HighlightText and SetFocus is left alone and nothing raises',tostring(shownMalformed))
+  _G.NexusTestMalformedPopup1EditBox=nil
+  -- Neither: nothing to fill, and the show does not raise.
+  H.popupPool[1]=CreateFrame('Frame',nil,UIParent)
+  local shown=P.ShowUpdateStatus()
+  C.expect(shown==true and H.popup~=nil,'U2: without any box the popup still opens and nothing raises')
+ end)
+ H.popupPool[1]=keep
+ C.setup(ok,'U2: fixture: the scenario ran',err)
+ C.guard(Acts()==acts and F.Serialize(NexusDB)==saved,'U2: opening it takes no action, sends and writes nothing',Acts())
 end)
 
 C.scenario('F1 footer FAQ shortcut and number explanations',function()

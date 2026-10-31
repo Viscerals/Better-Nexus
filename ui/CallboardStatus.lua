@@ -414,19 +414,37 @@ local function TrackerFrame()
 end
 
 -- Stock state Nexus changed, one record per exact object and property:
--- { frame, prop = "alpha" or "mouse", original }. A record goes only once a
--- getter confirms the original again, so a restore that raised or changed
--- nothing is retried by a later publish, with or without a replacement.
+-- { frame, prop = "alpha" or "mouse", original, written }. A record goes
+-- only once a getter confirms the original again, or shows that another
+-- owner has since set a different usable value (RestoreStock), so a restore
+-- that raised or changed nothing is retried by a later publish, with or
+-- without a replacement.
 -- Alpha and mouse are separate records. The bound only stops new holds (the
 -- stock state then stays as it is); no record is dropped to make room.
 local heldStock = {}
 local MAX_HELD_STOCK = 32
 
+-- The mouse is a client widget boolean: IsMouseEnabled answers 1 or nil on
+-- the 3.3.5a client where the offline harness answers true or false.
 local STOCK_PROPS = {
     alpha = { get = "GetAlpha", set = "SetAlpha", kind = "number", suppressed = 0 },
-    mouse = { get = "IsMouseEnabled", set = "EnableMouse", kind = "boolean",
+    mouse = { get = "IsMouseEnabled", set = "EnableMouse", kind = "clientBoolean",
         suppressed = false },
 }
+
+-- Theme.ClientBool, the shared reading of a client widget boolean: true for
+-- true or 1, false for false, nil or 0, nil for any other answer. This
+-- module is also loaded without Theme (its own fixtures); the same reading
+-- stands in then.
+local function ClientBool(value)
+    local theme = Nexus.Theme
+    if type(theme) == "table" and type(theme.ClientBool) == "function" then
+        return theme.ClientBool(value)
+    end
+    if value == true or value == 1 then return true end
+    if value == false or value == nil or value == 0 then return false end
+    return nil
+end
 
 local function IndexStock(frame, key)
     return frame[key]
@@ -440,13 +458,16 @@ end
 
 -- The current value, or nil when the getter is missing, raises or answers
 -- something that is not a usable value of that property. Nothing is guessed
--- in its place.
+-- in its place. A mouse answer is read as a Lua boolean (1 is on, nil or 0
+-- is off); a string, a table or another number is no answer.
 local function ReadStock(frame, prop)
     local spec = STOCK_PROPS[prop]
     local getter = StockMethod(frame, spec.get)
     if not getter then return nil end
     local ok, value = pcall(getter, frame)
-    if not ok or type(value) ~= spec.kind or value ~= value then return nil end
+    if not ok then return nil end
+    if spec.kind == "clientBoolean" then return ClientBool(value) end
+    if type(value) ~= spec.kind or value ~= value then return nil end
     return value
 end
 
@@ -471,15 +492,28 @@ local function HoldStock(frame, prop)
     local setter = StockMethod(frame, spec.set)
     if not setter then return end
     pcall(setter, frame, spec.suppressed)
-    if ReadStock(frame, prop) ~= original then
-        heldStock[#heldStock + 1] = { frame = frame, prop = prop, original = original }
+    local after = ReadStock(frame, prop)
+    if after ~= original then
+        -- What Nexus's write reads back as; the value written when the
+        -- readback fails.
+        local written = after
+        if written == nil then written = spec.suppressed end
+        heldStock[#heldStock + 1] = { frame = frame, prop = prop, original = original,
+            written = written }
     end
 end
 
--- True once a getter confirms the exact original. A property that already
--- reads as its original is not written again.
+-- True once the property is no longer Nexus's: a getter confirms the exact
+-- original, or reads a usable value that is neither the original nor what
+-- Nexus wrote (another owner changed it since; that value is kept, not
+-- overwritten). Only a property that still reads as Nexus's own write, or
+-- that cannot be read now, is restored or retried. A property that already
+-- reads as its original is not written again. A foreign write of the very
+-- value Nexus wrote cannot be told apart and is restored.
 local function RestoreStock(item)
-    if ReadStock(item.frame, item.prop) == item.original then return true end
+    local current = ReadStock(item.frame, item.prop)
+    if current == item.original then return true end
+    if current ~= nil and current ~= item.written then return true end
     local setter = StockMethod(item.frame, STOCK_PROPS[item.prop].set)
     if setter then pcall(setter, item.frame, item.original) end
     return ReadStock(item.frame, item.prop) == item.original

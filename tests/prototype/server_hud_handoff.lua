@@ -924,7 +924,11 @@ do
   function f:Hide() self.showHides=self.showHides+1 end
   return f
  end
- -- A stock object whose alpha and mouse originals cannot be read.
+ -- A stock object whose alpha and mouse originals cannot be read. A nil
+ -- mouse is the client's "off" answer (1/nil convention): known, and
+ -- already the suppressed value, so it is not written either. A wrong type
+ -- is a string or a number that is no client boolean; a numeric 1 is the
+ -- client's "on" and is a usable original (the 'client 1/nil' case below).
  local function Unreadable(kind,parent)
   local f=StockObject(nil,nil,parent)
   if kind=='nil' then
@@ -935,10 +939,21 @@ do
    f.IsMouseEnabled=function() error('mouse getter raises') end
   elseif kind=='missing' then
    f.GetAlpha=nil;f.IsMouseEnabled=nil
+  elseif kind=='other number' then
+   f.GetAlpha=function() return {} end
+   f.IsMouseEnabled=function() return 2 end
   else
    f.GetAlpha=function() return '1' end
-   f.IsMouseEnabled=function() return 1 end
+   f.IsMouseEnabled=function() return '1' end
   end
+  return f
+ end
+ -- The client widget convention for the mouse: IsMouseEnabled answers 1 or
+ -- nil; EnableMouse takes a Lua boolean. Exact build-12340 returns NOT_RUN.
+ local function ClientMouse(f)
+  f.mouse=f.mouse and 1 or nil
+  function f:IsMouseEnabled() return self.mouse end
+  function f:EnableMouse(v) self.mouseSets=self.mouseSets+1;if v then self.mouse=1 else self.mouse=nil end end
   return f
  end
  local function Objective(rewards)
@@ -1006,7 +1021,7 @@ do
   if not ok then failures[#failures+1]=name..': '..tostring(err) end
  end
 
- for _,kind in ipairs({'nil','throws','missing','wrong type'}) do
+ for _,kind in ipairs({'nil','throws','missing','wrong type','other number'}) do
   Case('unreadable originals ('..kind..')',function()
    local root=Unreadable(kind)
    local bag=Unreadable(kind,root)
@@ -1031,6 +1046,131 @@ do
     'and no guessed default is written in their place on restore: '..kind)
   end)
  end
+
+ Case('client 1/nil mouse originals',function()
+  -- Review C-01: a mouse that answers 1 is on. The objective root, its
+  -- reward bag and the tracker collapse control lose the mouse while the
+  -- covered row shows and are given exactly 1 back; a stock mouse that
+  -- already answers nil stays the game's and is never written.
+  local root=ClientMouse(StockObject(0.35,true))
+  local bag=ClientMouse(StockObject(1,true,root))
+  root.rewardBagFrame=bag
+  local tracker=ClientMouse(StockObject(0.8,false))
+  local collapse=ClientMouse(StockObject(1,true,tracker))
+  tracker.collapse=collapse
+  local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker})
+  host.Scan()
+  check(root.alpha==0 and bag.alpha==0 and tracker.alpha==0,'fixture: the covered row replaces the stock alpha')
+  check(root.mouse==nil and bag.mouse==nil and collapse.mouse==nil
+   and root.mouseSets==1 and bag.mouseSets==1 and collapse.mouseSets==1,
+   'a numeric 1 mouse original is taken over once on each mouse role')
+  check(tracker.mouse==nil and tracker.mouseSets==0,'a mouse already off (nil) is not written')
+  host.Scan()
+  check(root.mouseSets==1 and bag.mouseSets==1 and collapse.mouseSets==1,'an unchanged pass writes no mouse again')
+  host.Cover(false)
+  check(root.mouse==1 and bag.mouse==1 and collapse.mouse==1
+   and root.mouseSets==2 and bag.mouseSets==2 and collapse.mouseSets==2,
+   'hiding the row gives each its exact mouse back, once')
+  check(tracker.mouse==nil and tracker.mouseSets==0 and root.alpha==0.35 and tracker.alpha==0.8,
+   'the game-owned off mouse and every alpha are as they were')
+  host.Scan()
+  check(root.mouseSets==2 and bag.mouseSets==2 and collapse.mouseSets==2,'a restored mouse is not written again')
+  -- Shown again: the same roles are held again, once each.
+  host.Cover(true)
+  check(root.mouse==nil and bag.mouse==nil and collapse.mouse==nil
+   and root.mouseSets==3 and bag.mouseSets==3 and collapse.mouseSets==3,
+   'a reshown row takes each mouse over again, once')
+  -- Another addon turns the bag mouse back on while Nexus holds it.
+  bag.mouse=1
+  host.Scan()
+  check(bag.mouse==1 and bag.mouseSets==3,'a held mouse another addon turned on is not taken again by a later pass')
+  host.Cover(false)
+  check(bag.mouse==1 and bag.mouseSets==3,'nor written on restore: it already reads as its original')
+  check(root.mouse==1 and collapse.mouse==1 and root.mouseSets==4 and collapse.mouseSets==4,
+   'the other roles are given exactly 1 back')
+  check(tracker.mouse==nil and tracker.mouseSets==0,'the game-owned off mouse is still never written')
+ end)
+
+ Case('client 0 mouse original is off',function()
+  -- IsMouseEnabled answering 0 is read as off, like nil: not written.
+  local root=StockObject(0.35,true)
+  root.IsMouseEnabled=function() return 0 end
+  local host=CallboardHost({objective=Objective(true),root=root})
+  host.Scan()
+  check(root.alpha==0 and root.mouseSets==0,'an off (0) mouse is not taken over; the alpha still is')
+  host.Cover(false)
+  check(root.alpha==0.35 and root.mouseSets==0,'and nothing is written for it on restore')
+ end)
+
+ -- Another owner changes a held property: its value is kept. Only what still
+ -- reads as Nexus's own write (alpha 0, mouse off) is given back. Run with
+ -- Lua-boolean and client 1/nil mouse answers.
+ for _,convention in ipairs({'lua','native'}) do
+  Case('foreign change while held ('..convention..')',function()
+   local function Stock(alpha,mouse,parent)
+    local f=StockObject(alpha,mouse,parent)
+    if convention=='native' then ClientMouse(f) end
+    return f
+   end
+   local ON=convention=='native' and 1 or true
+   local OFF=nil
+   if convention=='lua' then OFF=false end
+   local root=Stock(0.35,true)
+   local bag=Stock(1,true,root)
+   root.rewardBagFrame=bag
+   local tracker=Stock(0.8,true)
+   local collapse=Stock(1,true,tracker)
+   tracker.collapse=collapse
+   local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker})
+   host.Scan()
+   check(root.alpha==0 and bag.alpha==0 and tracker.alpha==0 and root.mouse==OFF and bag.mouse==OFF
+    and collapse.mouse==OFF,'fixture: every role is held')
+   -- Another addon sets the root and bag alpha and turns the bag mouse back on.
+   root.alpha=0.6;bag.alpha=0.7;bag.mouse=ON
+   local sets={root.alphaSets,bag.alphaSets,bag.mouseSets,collapse.mouseSets,tracker.alphaSets,root.mouseSets}
+   host.Scan()
+   check(root.alpha==0.6 and bag.alpha==0.7 and bag.mouse==ON and root.alphaSets==sets[1]
+    and bag.alphaSets==sets[2] and bag.mouseSets==sets[3],
+    'a later pass keeps the foreign values and writes nothing over them')
+   host.Cover(false)
+   check(root.alpha==0.6 and bag.alpha==0.7 and bag.mouse==ON and root.alphaSets==sets[1]
+    and bag.alphaSets==sets[2] and bag.mouseSets==sets[3],
+    'the restore keeps the foreign values: 0.35 and 1 are not written over them')
+   check(tracker.alpha==0.8 and collapse.mouse==ON and root.mouse==ON
+    and tracker.alphaSets==sets[5]+1 and collapse.mouseSets==sets[4]+1 and root.mouseSets==sets[6]+1,
+    'what still read as Nexus\'s write is given its exact original back, once each')
+   -- A later handoff takes the values as they now are and gives those back.
+   host.Cover(true)
+   check(root.alpha==0 and bag.alpha==0 and bag.mouse==OFF and collapse.mouse==OFF,
+    'covered again, every role is held again')
+   host.Cover(false)
+   check(root.alpha==0.6 and bag.alpha==0.7 and bag.mouse==ON and collapse.mouse==ON and tracker.alpha==0.8,
+    'and released, each gets the value it had at that later hold')
+   local writes=root.alphaSets+bag.alphaSets+bag.mouseSets+collapse.mouseSets+tracker.alphaSets
+   host.Scan()
+   check(root.alphaSets+bag.alphaSets+bag.mouseSets+collapse.mouseSets+tracker.alphaSets==writes,
+    'nothing given back is written again')
+  end)
+ end
+
+ Case('unreadable while held, then readable again',function()
+  -- A getter that fails at release time is no sign of another owner: the
+  -- original is written as before, and the record stays until a getter
+  -- confirms it; that later pass writes nothing more.
+  local root=StockObject(0.35,true)
+  local host=CallboardHost({objective=Objective(true),root=root})
+  host.Scan()
+  check(root.alpha==0,'fixture: the root alpha is held')
+  local getAlpha=root.GetAlpha
+  root.GetAlpha=function() error('alpha getter raises') end
+  local writes=root.alphaSets
+  host.Cover(false)
+  check(root.mouse==true,'fixture: the readable mouse is given back')
+  check(root.alpha==0.35 and root.alphaSets==writes+1,'an unreadable held alpha still gets its original written')
+  root.GetAlpha=getAlpha
+  host.status.PublishCoverage()
+  check(root.alpha==0.35 and root.alphaSets==writes+1,'a later pass confirms it and writes nothing more')
+ end)
 
  Case('one-shot throwing setters',function()
   local root=StockObject(0.35,true)

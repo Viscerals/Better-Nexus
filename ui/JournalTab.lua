@@ -2265,6 +2265,43 @@ local function OpenChooserNow()
     return wishlistPicker ~= nil and wishlistPicker:IsShown()
 end
 
+-- OpenBuilds' delayed settles when the client offers no C_Timer.After: one
+-- parentless frame whose OnUpdate counts each queued settle down by the
+-- elapsed time it is given. Each settle is taken off the queue before it
+-- runs, so it runs once; the frame hides itself when nothing is queued, so
+-- it does no per-frame work while idle. A full queue refuses, and the caller
+-- then settles at once as before.
+local settleFrame
+local settleQueue = {}
+local MAX_QUEUED_SETTLES = 32
+
+local function RunDueSettles(_, elapsed)
+    local step = tonumber(elapsed) or 0
+    local due, kept = {}, {}
+    for i = 1, #settleQueue do
+        local entry = settleQueue[i]
+        entry.remaining = entry.remaining - step
+        if entry.remaining <= 1e-6 then due[#due + 1] = entry else kept[#kept + 1] = entry end
+    end
+    settleQueue = kept
+    if #settleQueue == 0 and settleFrame then settleFrame:Hide() end
+    for i = 1, #due do pcall(due[i].fn) end
+end
+
+local function AfterFrames(delay, fn)
+    if #settleQueue >= MAX_QUEUED_SETTLES then return false end
+    if not settleFrame then
+        local ok, f = pcall(CreateFrame, "Frame", "NexusJournalSettleDriver")
+        if not ok or type(f) ~= "table" then return false end
+        f:Hide()
+        f:SetScript("OnUpdate", RunDueSettles)
+        settleFrame = f
+    end
+    settleQueue[#settleQueue + 1] = { remaining = delay, fn = fn }
+    settleFrame:Show()
+    return true
+end
+
 -- `openChooser`: also open the Wishlist chooser once the strip is attached
 -- (Assign Wishlist, Set up current build, Help and the editor's Assign now);
 -- when the strip cannot be shown, say what to click instead. Without it the
@@ -2343,11 +2380,25 @@ function M.OpenBuilds(openChooser, beforeOpen, onSettled)
         -- A failed read is not a sighting.
         if last then report(false) end
     end
+    -- A pass now, then, only while this request still waits for My Builds
+    -- or the chooser, two later ones at 0.10 s and the last at 0.35 s, with
+    -- or without C_Timer (without it the settle frame above drives them; if
+    -- it cannot, the pass now is the last, as before). A later pass of a
+    -- request that has settled does nothing, so it never changes a page or
+    -- tab the player chose since (with or without `onSettled`).
+    local function pending() return buildsPending or chooserPending end
     local timers = C_Timer and C_Timer.After
-    finish(not timers)
-    if timers then
-        C_Timer.After(0.10, function() finish(false) end)
-        C_Timer.After(0.35, function() finish(true) end)
+    local function later(delay, fn)
+        if timers then
+            C_Timer.After(delay, fn)
+            return true
+        end
+        return AfterFrames(delay, fn)
+    end
+    finish(false)
+    if pending() then
+        later(0.10, function() if pending() then finish(false) end end)
+        if not later(0.35, function() if pending() then finish(true) end end) then finish(true) end
     end
     return true
 end

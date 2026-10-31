@@ -160,6 +160,36 @@ check(otf.alpha==0.35 and otf.mouse==true,'hiding the panel restores the exact t
 check(tracker.alpha==0.8 and tracker.mouse==true and collapse.mouse==true,
  'hiding the panel restores the exact quest tracker and collapse control')
 
+-- Review C-01: the same hold and restore under the client convention, in
+-- which IsMouseEnabled answers 1 or nil (H.SetClientBooleans,
+-- H.ClientBoolean). A numeric 1 is a usable original: the hidden stock
+-- tracker and its collapse control lose the mouse while the covered Nexus
+-- row shows and answer 1 again after the restore. Offline model; the
+-- build-12340 return convention is NOT_RUN.
+H.SetClientBooleans('native')
+local mouseWrites=0
+local function NativeMouse(frame)
+ function frame:IsMouseEnabled() return H.ClientBoolean(self.mouse) end
+ function frame:EnableMouse(v) mouseWrites=mouseWrites+1;self.mouse=v and true or false end
+end
+NativeMouse(otf);NativeMouse(tracker);NativeMouse(collapse)
+check(otf:IsMouseEnabled()==1 and tracker:IsMouseEnabled()==1 and collapse:IsMouseEnabled()==1,
+ 'fixture: the stock mouse answers 1 under the client convention')
+Nexus.Panel.Show()
+Nexus.Panel.Refresh()
+H.Advance(0.25)
+check(otf.alpha==0 and tracker.alpha==0,'1/nil: the covered replacement suppresses the stock trackers')
+check(otf:IsMouseEnabled()==nil and collapse:IsMouseEnabled()==nil and tracker:IsMouseEnabled()==1,
+ '1/nil: a numeric 1 mouse original is taken over on the same controls as before')
+Nexus.Panel.Hide()
+check(otf.alpha==0.35 and otf:IsMouseEnabled()==1 and tracker:IsMouseEnabled()==1
+ and collapse:IsMouseEnabled()==1,'1/nil: hiding the panel gives the stock mouse back')
+local restoredWrites=mouseWrites
+AdvanceScan()
+check(mouseWrites==restoredWrites and otf:IsMouseEnabled()==1,'1/nil: a restored mouse is not written again')
+H.SetClientBooleans('lua')
+Track(otf,otf.alpha,otf.mouse);Track(tracker,tracker.alpha,tracker.mouse);Track(collapse,collapse.alpha,collapse.mouse)
+
 GetNumQuestLogEntries=function() return 1 end
 GetQuestLogTitle=function() error('optional quest log getter') end
 local survived=pcall(function()

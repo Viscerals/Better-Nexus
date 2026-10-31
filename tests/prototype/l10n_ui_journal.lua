@@ -411,12 +411,15 @@ do
  local unlinked=NexusLoadoutAssociationPanel.design:GetScript('OnClick')
  Chat('pseudo associate first',function() unlinked() end)
  H.perks.serverActiveSlot=1;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+ -- Both chooser lines are said at the Journal's last settle (0.35 s; with
+ -- no C_Timer its settle frame drives it), so each capture lets that settle
+ -- run while the state it needs is still in place.
  NexusActiveWishlistSelector:Hide()
- local coach=Chat('pseudo coach',function() J.OpenBuilds(true) end)
+ local coach=Chat('pseudo coach',function() J.OpenBuilds(true);H.Advance(0.4) end)
  NexusActiveWishlistSelector:Show()
  check(#coach==1,'PSEUDO chat: the Echoes page coach is printed once',#coach)
  local slots=Nexus.GameAdapter.Slots;Nexus.GameAdapter.Slots=function() return nil end
- local unconfirmed=Chat('pseudo unconfirmed',function() J.OpenBuilds(true) end)
+ local unconfirmed=Chat('pseudo unconfirmed',function() J.OpenBuilds(true);H.Advance(0.4) end)
  Nexus.GameAdapter.Slots=slots
  check(#unconfirmed==1,'PSEUDO chat: the unconfirmed page message is printed once',#unconfirmed)
  ProjectEbonholdEchoJournal:Hide()

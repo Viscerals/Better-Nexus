@@ -75,10 +75,25 @@ StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
     OnShow = function(self)
         local url = Nexus.Updates and Nexus.Updates.ReleaseUrl
             and Nexus.Updates.ReleaseUrl() or "https://github.com/Viscerals/Better-Nexus/releases"
-        if self.editBox then
-            self.editBox:SetText(url)
-            self.editBox:HighlightText()
-            self.editBox:SetFocus()
+        -- The popup's edit box: its editBox key, or else the named child
+        -- "<popup name>EditBox" that a template without that key provides.
+        -- Only a box with the three EditBox methods used here is filled.
+        local function Usable(candidate)
+            return type(candidate) == "table" and type(candidate.SetText) == "function"
+                and type(candidate.HighlightText) == "function"
+                and type(candidate.SetFocus) == "function"
+        end
+        local box = self.editBox
+        if not box and type(self.GetName) == "function" then
+            local okName, name = pcall(self.GetName, self)
+            if okName and type(name) == "string" and name ~= "" then
+                box = _G[name .. "EditBox"]
+            end
+        end
+        if Usable(box) then
+            box:SetText(url)
+            box:HighlightText()
+            box:SetFocus()
         end
     end,
     EditBoxOnEnterPressed = function(self) self:HighlightText() end,

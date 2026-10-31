@@ -28,7 +28,9 @@ local WRITERS={'SetLoadoutWishlist','SetFirstRunWishlist','SetLoadoutWishlistIde
  'UpdateWishlistAssociationAfterSave','ClearLoadoutWishlist','ClearFirstRunWishlist','SetFirstRunWishlistIdentity'}
 local NAMES={'ProjectEbonholdEchoJournal','EchoJournalMicroButton','NexusEditorFrame','NexusWishlistNameInput',
  'NexusActiveWishlistSelector','NexusWishlistOnlyPicker','NexusLoadoutAssociationPanel','NexusGuidedSetup',
- 'NexusGuidedSetupEscape','NexusQuickStart','NexusQuickStartEscape','NexusHelpWindow','NexusPanel'}
+ 'NexusGuidedSetupEscape','NexusQuickStart','NexusQuickStartEscape','NexusHelpWindow','NexusPanel',
+ 'NexusJournalSettleDriver','ProjectEbonholdEchoJournalScroll','ProjectEbonholdEchoJournalTab1',
+ 'NexusJournalTab','NexusJournalPanel','NexusJournalScroll'}
 local LONG='Wunschliste \195\156ber-Gr\195\182\195\159e \226\128\148 \240\159\148\165 sehr lange Namen f\195\188r den F\195\188hrer und noch mehr Text'
 local CONSENT='NEXUS_ASSIGN_WISHLIST_AUTO_ON'
 
@@ -1191,9 +1193,12 @@ local function F15(convention) return function()
   C.expect(clicks==1 and tabClicks==1 and journal:IsVisible() and loadouts:IsVisible() and Aside(),
    F..' other page: the Loadouts tab is chosen, the window is not toggled, and the coach steps aside',clicks..'/'..tabClicks)
   -- 4. The click does not bring the page: the coach stays and claims nothing.
+  -- Without C_Timer the Journal's later settles run on its settle frame;
+  -- "not seen" is reported only at the last one (0.35 s).
   journal:Hide();opens='never'
   Nexus.GuidedSetupUI.Show()
   Press(Btn('Open My Builds'))
+  H.Advance(0.4)
   C.expect(clicks==2 and not journal:IsShown() and Shown() and not Guide().waiting
    and Text():find(T.notes.buildsUnconfirmed,1,true)~=nil and Btn('Open My Builds')~=nil,
    F..' not seen: the coach stays with the unconfirmed note and its route still offered',Text())
@@ -1227,6 +1232,144 @@ local function F15(convention) return function()
 end end
 C.scenario('F15 the real My Builds route never clicks an open page closed; the coach steps aside only once My Builds is seen',F15('lua'))
 C.scenario('F15 (1/nil) the same route under the client widget convention: an open page answering 1 is kept open and My Builds is seen',F15('native'))
+
+-- F15.1 (review F-WISHLIST-PLANS-03): the real JournalTab.OpenBuilds with no
+-- C_Timer (the harness has none) against a page the game builds one frame
+-- after its button's click, as on a first open in a session. The two later
+-- settles (0.10 and 0.35 s) run on the Journal's own settle frame: My Builds
+-- and the chooser are reached once the page exists; "not seen" and the
+-- chooser's unconfirmed line come only at the last settle, once; two
+-- requests each answer once; an open page is still not clicked; the settle
+-- frame is hidden (no per-frame work) once nothing is queued. Whether the
+-- build-12340 client offers C_Timer, and how fast it builds the page, are
+-- NOT RUN.
+C.scenario('F15.1 without C_Timer the later settles run on a frame: a page built a frame after the click is still seen, once',function()
+ Boot()
+ local journal,button=_G.ProjectEbonholdEchoJournal,_G.EchoJournalMicroButton
+ local loadouts=CreateFrame('Frame',nil,journal)
+ loadouts:CreateFontString():SetText('Your loadouts')
+ -- The game's button toggles the page; a closed page is built and shown on
+ -- the next frame ('later') or never ('never').
+ local clicks,opens,showNext=0,'later',false
+ button:SetScript('OnClick',function()
+  clicks=clicks+1
+  if journal:IsShown() then journal:Hide() elseif opens=='later' then showNext=true end
+ end)
+ local builder=CreateFrame('Frame',nil,UIParent)
+ builder:SetScript('OnUpdate',function() if showNext then showNext=false;journal:Show() end end)
+ local said,keepPrint={},print
+ print=function(...)
+  local t={} for i=1,select('#',...) do t[#t+1]=tostring((select(i,...))) end
+  said[#said+1]=table.concat(t,' ')
+ end
+ local function Unconfirmed()
+  local n=0
+  for _,l in ipairs(said) do if l:find('could not confirm that the Echoes page',1,true) then n=n+1 end end
+  return n
+ end
+ local function Idle() local d=_G.NexusJournalSettleDriver;return d~=nil and not d:IsShown() end
+ local ok,err=pcall(function()
+  if not C.setup(C_Timer==nil and not journal:IsShown(),'F15.1: fixture: no C_Timer; the page is closed') then return end
+  local quiet=Quiet()
+  local J=Nexus.JournalTab
+  -- 1. The page arrives one frame after the click.
+  local got={}
+  C.expect(J.OpenBuilds(false,nil,function(seen) got[#got+1]=seen end)==true and clicks==1 and #got==0
+   and not journal:IsShown(),'F15.1 late page: one click; nothing is reported before the page exists',#got)
+  H.Advance(0.05)
+  C.setup(journal:IsShown(),'F15.1: fixture: the page is built on the next frame')
+  H.Advance(0.1)
+  C.expect(#got==1 and got[1]==true and clicks==1 and journal:IsVisible() and loadouts:IsVisible(),
+   'F15.1 late page: My Builds is seen at a later settle and reported once, true',#got)
+  H.Advance(1)
+  C.expect(#got==1 and clicks==1 and journal:IsVisible(),'F15.1 late page: the last settle reports nothing more and clicks nothing',#got)
+  C.expect(Idle(),'F15.1: with nothing queued the settle frame is hidden')
+  -- 2. Already open: not clicked, seen at once.
+  got={}
+  J.OpenBuilds(false,nil,function(seen) got[#got+1]=seen end)
+  C.expect(clicks==1 and #got==1 and got[1]==true and journal:IsVisible(),'F15.1 open page: not clicked; My Builds is seen at once',clicks)
+  H.Advance(1)
+  C.expect(#got==1 and clicks==1,'F15.1 open page: the later settles report nothing more',#got)
+  -- 3. The chooser on a page built a frame after the click.
+  journal:Hide()
+  C.expect(J.OpenBuilds(true)==true and clicks==2,'F15.1 chooser: one click opens the page',clicks)
+  H.Advance(0.4)
+  C.expect(journal:IsVisible() and _G.NexusWishlistOnlyPicker~=nil and NexusWishlistOnlyPicker:IsShown() and Unconfirmed()==0,
+   'F15.1 chooser: the chooser opens once the page exists, and no unconfirmed line is said',Unconfirmed())
+  if _G.NexusWishlistOnlyPicker then NexusWishlistOnlyPicker:Hide() end
+  -- 4. Never built; a second request while the first is pending.
+  journal:Hide();opens='never'
+  local a,b={},{}
+  J.OpenBuilds(false,nil,function(seen) a[#a+1]=seen end)
+  H.Advance(0.15)
+  J.OpenBuilds(false,nil,function(seen) b[#b+1]=seen end)
+  C.expect(clicks==4 and #a==0 and #b==0,'F15.1 never: "not seen" is not reported before the last settle',#a..'/'..#b)
+  H.Advance(0.25)
+  C.expect(#a==1 and a[1]==false and #b==0,'F15.1 never: the first request answers false once, at its own last settle',#a..'/'..#b)
+  H.Advance(1)
+  C.expect(#a==1 and #b==1 and b[1]==false and clicks==4 and not journal:IsShown(),
+   'F15.1 never: each request answers once; the settles click nothing',#a..'/'..#b..' '..clicks)
+  -- 5. The chooser's unconfirmed line: once, at the last settle.
+  J.OpenBuilds(true)
+  C.expect(clicks==5 and Unconfirmed()==0,'F15.1 chooser never: nothing is said before the last settle',Unconfirmed())
+  H.Advance(1)
+  C.expect(Unconfirmed()==1 and clicks==5,'F15.1 chooser never: the unconfirmed line is said once',Unconfirmed())
+  C.expect(Idle(),'F15.1: idle again, the settle frame is hidden')
+  C.guard(Quiet()==quiet,'F15.1: every route wrote, assigned, acted, spent and toggled nothing',Quiet())
+ end)
+ print=keepPrint
+ C.setup(ok,'F15.1: fixture: the scenario ran',err)
+end)
+
+-- F15.2 (review of F15.1's settles): a request that has settled leaves the
+-- player's later choice alone. The Journal is installed on a synthetic page
+-- (its scroll and numbered Loadouts tab exist) that is open on My Builds;
+-- the real OpenBuilds reports seen at once, then the player clicks the real
+-- Nexus Progress tab (NexusJournalTab). No later pass of that request may
+-- close it again (checked at 0.15 and 0.55 s), with and without onSettled,
+-- with no C_Timer and with a synthetic one (which then queues nothing). A
+-- request that is still pending keeps its later passes (F15.1, F16).
+C.scenario('F15.2 a settled My Builds request leaves the Nexus Progress tab the player chose open',function()
+ Boot()
+ local journal,button=_G.ProjectEbonholdEchoJournal,_G.EchoJournalMicroButton
+ CreateFrame('ScrollFrame','ProjectEbonholdEchoJournalScroll',journal)
+ local tab1=CreateFrame('Button','ProjectEbonholdEchoJournalTab1',journal)
+ tab1:SetText('Loadouts')
+ local loadouts=CreateFrame('Frame',nil,journal)
+ loadouts:CreateFontString():SetText('Your loadouts')
+ local clicks=0
+ button:SetScript('OnClick',function() clicks=clicks+1;if journal:IsShown() then journal:Hide() else journal:Show() end end)
+ local keepTimer=C_Timer
+ local ok,err=pcall(function()
+  journal:Show()
+  local quiet=Quiet()
+  local J=Nexus.JournalTab
+  for _,variant in ipairs({{'callback, no C_Timer',true,false},{'no callback, no C_Timer',false,false},{'callback, C_Timer',true,true}}) do
+   local tag='F15.2 '..variant[1]
+   local got,queue={},{}
+   if variant[3] then C_Timer={After=function(delay,fn) queue[#queue+1]={delay,fn} end} end
+   J.OpenBuilds(false,nil,variant[2] and function(seen) got[#got+1]=seen end or nil)
+   C_Timer=keepTimer
+   local tab,progress=_G.NexusJournalTab,_G.NexusJournalPanel
+   if not C.setup(tab~=nil and progress~=nil and not progress:IsShown() and journal:IsVisible() and clicks==0,
+    tag..': fixture: the Journal is installed; the open page shows My Builds and was not clicked') then return end
+   if variant[2] then C.expect(#got==1 and got[1]==true,tag..': My Builds is reported seen at once',#got) end
+   if variant[3] then C.expect(#queue==0,tag..': a request settled at once queues no later pass',#queue) end
+   tab:Click()
+   C.setup(progress:IsShown(),tag..': fixture: the player\'s click on Nexus Progress shows it')
+   H.Advance(0.15)
+   C.expect(progress:IsShown(),tag..': at 0.15 s the Nexus Progress page the player chose is still shown')
+   H.Advance(0.4)
+   C.expect(progress:IsShown() and journal:IsVisible() and clicks==0,tag..': at 0.55 s it is still shown, and nothing was clicked')
+   if variant[2] then C.expect(#got==1,tag..': the callback ran exactly once',#got) end
+   tab:Click()
+   C.setup(not progress:IsShown(),tag..': fixture: a second click on the tab closes Nexus Progress again')
+  end
+  C.guard(Quiet()==quiet,'F15.2: the routes and tab clicks wrote, assigned, acted, spent and toggled nothing',Quiet())
+ end)
+ C_Timer=keepTimer
+ C.setup(ok,'F15.2: fixture: the scenario ran',err)
+end)
 
 -- F16: the close/reopen race on the same real route as F15 (the real
 -- JournalTab.OpenBuilds(false), its two queued settles at 0.10 and 0.35 s
