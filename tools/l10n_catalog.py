@@ -3076,7 +3076,8 @@ _CONSUMER_LIMITS = (
     'every conversion has a value proved present (a last call gives only the results proved '
     'for a seam key method or an unassigned local function, none for any other callee; a value '
     'cut to one, by position or parentheses, keeps what is known of it, or nil for a call path '
-    'giving none, and a never-assigned local is followed to its declared value; any other '
+    'giving none, and a never-assigned local is followed to its declared value, at most 16 '
+    'links, a longer chain giving an unproved value; any other '
     'local, parameter or global is of unknown type) and no value is refused for its '
     'conversion: nil, booleans, tables and functions for any conversion (for %s by the Lua 5.1 rule; LuaJIT shows an explicit nil or '
     'boolean, so that refusal is conservative), non-numeric strings and unproved call values '
@@ -4583,6 +4584,16 @@ def _return_values(stmt, depth):
     return values, True, values[0]
 
 
+def _immutable_value(expr):
+    """The declared expression of a name of an immutable local (see
+    _adjusted), else None."""
+    binding = expr.binding if expr.kind == 'name' else None
+    if binding is None or binding.kind not in ('local', 'localfunction') \
+            or binding.assigned or binding.value is None:
+        return None
+    return binding.value
+
+
 def _adjusted(expr, depth=0):
     """The descriptors of the one value Lua makes of an expression where it
     is cut to one value: an argument that is not the last, a return
@@ -4601,17 +4612,22 @@ def _adjusted(expr, depth=0):
     respected. A local assigned anywhere (closures included), declared
     without its own expression (local v, or a later name of local a, b =
     f()), a parameter, a for variable or a global is not followed: its value
-    stays of unknown type. At most _ALIAS_STEPS links are followed."""
+    stays of unknown type. At most _ALIAS_STEPS links are followed; a chain
+    of immutable locals still longer than that is not promoted to an
+    unknown-type value: it gives an unproved value (_UNPROVED), refused for
+    a numeric conversion (review fix of cf01), since what it holds was not
+    established within the bound."""
     for _ in range(_ALIAS_STEPS):
         while expr.kind == 'paren':
             expr = expr.expr
-        binding = expr.binding if expr.kind == 'name' else None
-        if binding is None or binding.kind not in ('local', 'localfunction') \
-                or binding.assigned or binding.value is None:
+        value = _immutable_value(expr)
+        if value is None:
             break
-        expr = binding.value
+        expr = value
     while expr.kind == 'paren':
         expr = expr.expr
+    if _immutable_value(expr) is not None:
+        return (_UNPROVED,)     # the bounded walk ended inside the chain
     if expr.kind in ('call', 'method'):
         return _call_values(expr, depth)[2]
     if expr.kind == 'constant' and expr.value == '...':
@@ -4622,7 +4638,8 @@ def _adjusted(expr, depth=0):
 def _value_fails(descriptors, option):
     """True when a value described so is refused for its conversion: it may
     be nil (_MAY_BE_NIL), or, for a numeric conversion, it may be a source
-    name or an unproved call value, or one of its expressions is refused
+    name or an unproved value (an unresolved call, or an immutable alias
+    chain longer than the walk bound), or one of its expressions is refused
     (_format_argument_fails)."""
     for part in descriptors:
         if part is _MAY_BE_NIL:

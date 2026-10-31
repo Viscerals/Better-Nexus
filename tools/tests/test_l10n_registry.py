@@ -3357,6 +3357,16 @@ class ConsumerBindingTests(unittest.TestCase):
         # discard the whole text, so they are no transforms at all.
         text = b'Nexus.Localization.Text("panel.heading.progress")'
         shown = lambda call: b'specLabel:SetText(' + call + b')'
+
+        def chain(first, count):
+            """A chain of count immutable locals a1..a<count> starting from
+            first, in the form of the cf01 review witness, then a %d of the
+            last one."""
+            links = b''.join(b'local a%d=a%d;' % (index, index - 1)
+                             for index in range(2, count + 1))
+            return (b'local a1=' + first + b';' + links
+                    + shown(b'string.format("%s %d", ' + text + b', a'
+                            + str(count).encode() + b')'))
         # Each case acts only on its own site, so one receipt judges them
         # all, site by site (per_site).
         self.per_site((
@@ -3503,6 +3513,20 @@ class ConsumerBindingTests(unittest.TestCase):
             # itself is (conservative: its result is not known).
             ("an alias of an unresolved call for %d", b'local n = specLabel:GetCount() '
              + shown(b'string.format("%s %d", ' + text + b', n)'), False),
+            # The alias walk is bounded (16 links). Within it the declared
+            # value decides; a chain still unfinished at the bound is an
+            # unproved value, refused for %d, never an unknown-type value that
+            # passes (review fix of cf01). The 17-boolean and the 33 bad-string
+            # chains are the review witnesses (LuaJIT raises "number expected"
+            # for every bad chain here); the 17-number chain is a valid
+            # program the bound refuses conservatively.
+            ("a 16-link boolean chain for %d", chain(b'false', 16), False),
+            ("a 17-link boolean chain for %d", chain(b'false', 17), False),
+            ("a 32-link bad-string chain for %d", chain(b'"not-a-number"', 32), False),
+            ("a 33-link bad-string chain for %d", chain(b'"not-a-number"', 33), False),
+            ("a 16-link number chain for %d", chain(b'12', 16), True),
+            ("a 16-link numeric-string chain for %d", chain(b'" 0x1F "', 16), True),
+            ("a 17-link number chain for %d (conservative)", chain(b'12', 17), False),
             ("... as the last argument", b'local function f(...) '
              + shown(b'string.format("%s %s", ' + text + b', ...)') + b' end f("x")', False),
             ("no conversion", shown(b'string.format("fixed", ' + text + b')'), False),
