@@ -80,6 +80,13 @@ function Lifecycle.New(options)
     -- startup sequencing owner, created here before Store.Init (line 1202).
     local bootstrapCoordinator = nil
     local bootstrapFailureRecorded = false
+    -- A required owner raised an error during the one-time initialization
+    -- below: {owner=, error=} (bounded one-line text). Latched for the
+    -- session: Initialize is never attempted again, the start-up status is a
+    -- terminal failure naming that owner, and every gate that waits for
+    -- initialization stays closed. Session-only; never saved.
+    local initFailure = nil
+    local INIT_FAILURE_REASON = "CORE_INIT_FAILED"
     -- World entry can legitimately arrive while authority is still pending,
     -- because bootstrap advances bounded work across scheduler turns.
     local worldEntryPending = false
@@ -134,6 +141,11 @@ function Lifecycle.New(options)
     -- row, and the settings-format verdict. Reads the retained result and a
     -- pure classification only; never binds, pumps or retries.
     local function FailureFacts()
+        -- A required initialization owner failed after Store readiness: the
+        -- owner and its bounded error, recorded once when it failed.
+        if initFailure then
+            return {owner=initFailure.owner, error=initFailure.error}
+        end
         local r = bootstrapTerminal
         if type(r) ~= "table" or r.state ~= "failed" then
             -- The catalog refused its root after the Store finished: the
@@ -197,7 +209,8 @@ function Lifecycle.New(options)
     end
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
-        local failure=startupTiming.coreFailure or communityFailure
+        local failure=initFailure and INIT_FAILURE_REASON
+            or startupTiming.coreFailure or communityFailure
             or (bootstrapTerminal and bootstrapTerminal.state=="failed"
                 and (bootstrapTerminal.detail or bootstrapTerminal.reason or "STORE_INVALID"))
         local step,stepDone,stepTotal=CurrentStep()
@@ -698,11 +711,46 @@ function Lifecycle.New(options)
         return {state="refused", reason=type(why) == "string" and why or "refused"}
     end
 
+    -- Initialization ownership. Each dependent Init below runs inside one
+    -- protected call, so a raised error is recorded once under its owner and
+    -- can never escape into the per-frame caller (which would retry the whole
+    -- block every frame). Only a raised error counts: return values keep
+    -- their existing meanings and are not inspected here.
+    --
+    -- OPTIONAL owners are views and notices the core never depends on
+    -- (Updates, LogViewer, WishlistEditor, WishlistOverlay, Leaderboard,
+    -- Nameplate, ServerStatus, CallboardStatus). Their failure is recorded and
+    -- initialization continues, so a broken view cannot hold the core back.
+    local function InitOptionalOwner(source, callback, ...)
+        local ok, err = pcall(callback, ...)
+        if not ok then RecordError(source, err) end
+        return ok
+    end
+    -- REQUIRED owners are the bound dependencies the core runs on every frame
+    -- and every action passes through: automation (Initialize; OnUpdate per
+    -- frame), the game adapter (Init; Ready per frame) and the panel (Init;
+    -- the Auto toggle, HUD refresh and language callbacks). A raised error
+    -- latches a terminal failure naming the owner: initialization is not
+    -- marked done, never attempted again, and the gates stay closed.
+    local function InitRequiredOwner(source, callback, ...)
+        local ok, err = pcall(callback, ...)
+        if ok then return true end
+        local okText, text = pcall(ErrorText, err)
+        if not okText or type(text) ~= "string" then text = "<unprintable>" end
+        text = (text:gsub("[%c|]", " "))
+        if #text > 160 then text = text:sub(1, 160) .. "..." end
+        initFailure = {owner=source, error=text}
+        RecordError(source, err)
+        return false
+    end
+
     local function Initialize(updateStarted)
         if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
             pcall(Nexus.OrbRuntime.ObserveLifecycle)
         end
         if initialized then return true end
+        -- A required owner already failed: terminal for this session.
+        if initFailure then return false end
         dependencies = BindDependencies()
         if not dependencies then return false end
 
@@ -769,7 +817,7 @@ function Lifecycle.New(options)
                 end
             end
             if Nexus.Updates and Nexus.Updates.Init then
-                Nexus.Updates.Init({
+                InitOptionalOwner("Updates.Init", Nexus.Updates.Init, {
                     -- A capacity-refused start-up leaves every saved key as it
                     -- found it, so the update module reads its stored notice
                     -- without rewriting, quarantining or removing it.
@@ -789,23 +837,33 @@ function Lifecycle.New(options)
                 })
             end
 
-            automation.Initialize()
-            Adapter.Init({OnStatus=Print}, Store)
+            if not InitRequiredOwner("AutomationRuntime.Initialize",
+                automation.Initialize) then
+                return false
+            end
+            if not InitRequiredOwner("Adapter.Init", Adapter.Init,
+                {OnStatus=Print}, Store) then
+                return false
+            end
             if Nexus.LogViewer and Nexus.LogViewer.Init then
-                Nexus.LogViewer.Init(options.logViewerProvider,
-                    options.clearDiagnosticLogs)
+                InitOptionalOwner("LogViewer.Init", Nexus.LogViewer.Init,
+                    options.logViewerProvider, options.clearDiagnosticLogs)
             end
             if Nexus.WishlistEditor and Nexus.WishlistEditor.Init then
-                Nexus.WishlistEditor.Init(Adapter, Model)
+                InitOptionalOwner("WishlistEditor.Init", Nexus.WishlistEditor.Init,
+                    Adapter, Model)
             end
             if Nexus.WishlistOverlay and Nexus.WishlistOverlay.Init then
-                Nexus.WishlistOverlay.Init(Adapter, Model)
-                if db.overlayShown then Nexus.WishlistOverlay.Show() end
+                InitOptionalOwner("WishlistOverlay.Init", function()
+                    Nexus.WishlistOverlay.Init(Adapter, Model)
+                    if db.overlayShown then Nexus.WishlistOverlay.Show() end
+                end)
             end
             preparedDatabase=db
         end
         if Nexus.Leaderboard and Nexus.Leaderboard.Init then
-            Nexus.Leaderboard.Init(Adapter, Model)
+            InitOptionalOwner("Leaderboard.Init", Nexus.Leaderboard.Init,
+                Adapter, Model)
         end
         if Nexus.Performance
             and type(Nexus.Performance.InstallDefaults) == "function" then
@@ -822,14 +880,16 @@ function Lifecycle.New(options)
                     okRefresh and "initialization failed" or refreshReady)
             end
         end
-        if Nexus.Nameplate and Nexus.Nameplate.Init then Nexus.Nameplate.Init() end
+        if Nexus.Nameplate and Nexus.Nameplate.Init then
+            InitOptionalOwner("Nameplate.Init", Nexus.Nameplate.Init)
+        end
         if Nexus.ServerStatus and Nexus.ServerStatus.Init then
-            Nexus.ServerStatus.Init()
+            InitOptionalOwner("ServerStatus.Init", Nexus.ServerStatus.Init)
         end
         if Nexus.CallboardStatus and Nexus.CallboardStatus.Init then
-            Nexus.CallboardStatus.Init()
+            InitOptionalOwner("CallboardStatus.Init", Nexus.CallboardStatus.Init)
         end
-        Panel.Init({
+        if not InitRequiredOwner("Panel.Init", Panel.Init, {
             ToggleAuto=function()
                 local enabled = automation.ToggleAuto()
                 Notice(enabled and "main.chat.auto_on" or "main.chat.auto_off")
@@ -840,7 +900,9 @@ function Lifecycle.New(options)
             -- Issue #123: the language chooser's two explicit callbacks.
             LanguageStatus=function() return LanguageStatus() end,
             ChooseLanguage=function(id) return ChooseLanguage(id) end,
-        })
+        }) then
+            return false
+        end
         initialized = true
         RegisterStutterAlertProvider()
         RequestRecompute()
@@ -1429,8 +1491,9 @@ function Lifecycle.New(options)
                             startupTiming.readySeconds = startupTiming.readyAt
                                 - startupTiming.worldEnteredAt
                         end
-                    elseif failed then
-                        -- Terminal authority failure. Initialize recorded the
+                    elseif failed or initFailure then
+                        -- Terminal authority failure, or a required
+                        -- initialization owner failed. Initialize recorded the
                         -- attributed reason once; dependents stay withheld and
                         -- the coordinator never retries (line 1519).
                         worldEntryPending = false
