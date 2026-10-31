@@ -475,7 +475,11 @@ local function Whole(value)
 end
 
 -- Cut at a character boundary (UTF-8 lead bytes), never inside a letter.
-local function Utf8Cut(text, maxChars)
+-- pairedPipes: the text is display-safe (Identity.DisplaySafeText), so each
+-- literal pipe is the escaped pair "||". A cut that would keep only the first
+-- pipe of a pair keeps neither, so no lone pipe reaches the "..." (I-01). The
+-- kept text is then one character shorter, never longer, than maxChars.
+local function Utf8Cut(text, maxChars, pairedPipes)
     maxChars = tonumber(maxChars)
     if not maxChars or maxChars < 1 then return text end
     local count, index, length = 0, 1, #text
@@ -483,14 +487,26 @@ local function Utf8Cut(text, maxChars)
         local byte = text:byte(index)
         local width = (byte < 0xC0 and 1) or (byte < 0xE0 and 2) or (byte < 0xF0 and 3) or 4
         count = count + 1
-        if count > maxChars then return text:sub(1, index - 1) .. "..." end
+        if count > maxChars then
+            local keep = index - 1
+            if pairedPipes then
+                -- Pipes are single bytes: an odd run of them ending the kept
+                -- text ends in the first pipe of a split pair; dropping that
+                -- pipe leaves whole pairs only.
+                local pipes, at = 0, keep
+                while at >= 1 and text:byte(at) == 0x7C do pipes, at = pipes + 1, at - 1 end
+                if pipes % 2 == 1 then keep = keep - 1 end
+            end
+            return text:sub(1, keep) .. "..."
+        end
         index = index + width
     end
     return text
 end
 
 -- A name as it may be shown (the existing display sanitizer), optionally
--- shortened at a character boundary; nil when there is nothing to show.
+-- shortened at a character boundary that does not split an escaped pipe
+-- pair; nil when there is nothing to show. The caller's value is not changed.
 function T.SafeName(value, maxChars)
     if value == nil then return nil end
     local text = tostring(value)
@@ -500,7 +516,7 @@ function T.SafeName(value, maxChars)
         text = ok and shown or nil
     end
     if type(text) ~= "string" or text == "" then return nil end
-    return Utf8Cut(text, maxChars)
+    return Utf8Cut(text, maxChars, true)
 end
 
 -- "Saved Build 'Fire PvE' (slot 2)", "Saved Build 2" or nil.

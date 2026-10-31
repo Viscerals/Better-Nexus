@@ -104,4 +104,165 @@ assert(H.Count('orb-spend')==0 and H.Count('take')==0,'diagnostics send no gamep
 -- an observation independently of the harness's normal startup reads.
 assert(loadfile('core/GameAdapter.lua'))('Nexus',{})
 assert(Nexus.GameAdapter.ChoicePresenceView().observed==false,'no sample is invented on owner load')
+
+-- D-ROLL-01: a Banish or Freeze names the client choice slot of the card Nexus
+-- decided on. A.Board() projects only entries with a spellId, so a malformed
+-- entry before a card in a dense choice array shifts that card's projected
+-- position. These shapes are synthetic: whether the client ever returns such
+-- an entry is not known (a native boundary), and nothing here claims it does.
+-- Real TOC boots, adapter, planner and runtime; the harness's synthetic
+-- services, which address P.currentChoice by the 0-based index they receive,
+-- and its action log are the wire oracle. No native claim.
+local slotFailures={}
+local function slotFact(ok,message,detail)
+ if not ok then
+  local line=message..(detail~=nil and (' ['..tostring(detail)..']') or '')
+  slotFailures[#slotFailures+1]=line;print('FAIL '..line)
+ end
+end
+-- A fresh profile and owners, as a new session: the checks above leave a
+-- reloaded, unstarted adapter behind.
+local function FreshBoot(prepare)
+ local stale={}
+ for key in pairs(_G)do
+  if type(key)=='string' and (key:find('^Nexus') or key:find('^ProjectEbonhold') or key:find('^SLASH_NEXUS'))then
+   stale[#stale+1]=key
+  end
+ end
+ for _,key in ipairs(stale)do _G[key]=nil end
+ WishlistRealizerDB=nil;SlashCmdList=nil
+ local fresh=dofile('tests/prototype/harness.lua')
+ if prepare then prepare(fresh) end
+ fresh.Boot()
+ return fresh,Nexus.GameAdapter
+end
+-- The game actions the synthetic services accepted after `from`.
+local function GameActions(h,from)
+ local out={}
+ for i=from+1,#h.actions do
+  local kind=h.actions[i][1]
+  if kind=='banish' or kind=='freeze' or kind=='take' or kind=='reroll' then out[#out+1]=h.actions[i] end
+ end
+ return out
+end
+
+do
+ local h,adapter=FreshBoot()
+ local nextId=200001
+ local function Card(id) return {spellId=id,quality=1} end
+ -- Dense arrays only: an ordinary three-card board, and four entries with a
+ -- malformed (spellId-less) one leading or between cards. Every case has
+ -- its own spell IDs, so no earlier board, freeze overlay or latch carries over.
+ local function Shape(shape)
+  local a,b,c=nextId,nextId+1,nextId+2
+  nextId=nextId+3
+  if shape=='ordinary' then return {Card(a),Card(b),Card(c)}
+  elseif shape=='leading' then return {{quality=1},Card(a),Card(b),Card(c)}
+  elseif shape=='interior' then return {Card(a),{quality=1},Card(b),Card(c)} end
+  error('unknown dense shape '..tostring(shape))
+ end
+ -- No latch, a new run-data push (the charge ledger's own reset) and the
+ -- adapter's poll releasing its own in-flight action.
+ local function Settle()
+  h.perks.pendingBanishIndex=nil;h.perks.pendingFreezeIndex=nil
+  h.run=h.Clone(h.run)
+  adapter.Poll()
+  return not adapter.InFlight()
+ end
+ for _,shape in ipairs({'ordinary','leading','interior'})do
+  for _,action in ipairs({'Banish','Freeze'})do
+   for position=0,2 do
+    local tag='D-ROLL-01 '..action..' '..shape..' projected card '..position
+    slotFact(Settle(),tag..': SETUP nothing is in flight')
+    local raw=Shape(shape)
+    h.Board(raw)
+    local board=adapter.Board()
+    local rawCount=shape=='ordinary' and 3 or 4
+    slotFact(board~=nil and #board.cards==3 and #raw==rawCount,
+     tag..': SETUP '..rawCount..' raw entries project three cards',board and #board.cards)
+    local chosen=board and board.cards[position+1]
+    if chosen then
+     local rawIndex0
+     for i,c in ipairs(raw)do if c.spellId==chosen.spellId then rawIndex0=i-1 end end
+     local from=#h.actions
+     local ok,why=adapter[action](position)
+     local sent=GameActions(h,from)
+     local wire=sent[1] and sent[1][2]
+     local target=type(wire)=='number' and raw[wire+1] or nil
+     print('OBSERVED',tag..': rawCount='..#raw..' projectedCount='..#board.cards..' chosen='..tostring(chosen.spellId)
+      ..' chosenRawIndex0='..tostring(rawIndex0)..' wireIndex0='..tostring(wire)..' wireSpellId='..tostring(target and target.spellId))
+     slotFact(ok==true and #sent==1 and sent[1][1]==action:lower(),tag..': exactly one '..action..' reaches the synthetic service',why)
+     slotFact(wire==rawIndex0 and target~=nil and target.spellId==chosen.spellId,
+      tag..': the wire index names the client slot of the decided card, never a skipped or neighbouring entry',
+      'wire='..tostring(wire)..' expected='..tostring(rawIndex0))
+    end
+   end
+  end
+ end
+ -- The real planner still waits on an exactly-three-entry board with one
+ -- malformed entry: only two cards project (unchanged three-card guard).
+ h.Board({{quality=1},Card(200001),Card(200002)})
+ local two=adapter.Board()
+ local decision=Nexus.EchoWeaver.DecideNexus({plan={requestedCounts={[200001]=1}},
+  owned={synced=true,bySpell={}},board=two,level=40,horizon=2})
+ slotFact(two~=nil and #two.cards==2 and decision.type=='wait' and decision.reason=='waiting for three-card board',
+  'D-ROLL-01: a three-entry board with a malformed entry waits at the planner three-card guard',decision.reason)
+ -- The existing refusals still hold on a malformed board, with no service call:
+ -- a client latch, a guaranteed decided card, a session pause and an Orb
+ -- service whose state is unavailable. Pause stays set for the Orb case,
+ -- whose gate is checked first.
+ local function Refused(label,expected,arrange,restore)
+  slotFact(Settle(),'D-ROLL-01 '..label..': SETUP nothing is in flight')
+  local raw=Shape('leading')
+  if arrange then arrange(raw) end
+  h.Board(raw)
+  for _,action in ipairs({'Banish','Freeze'})do
+   local from=#h.actions
+   local ok,why=adapter[action](0)
+   slotFact(ok==false and why==expected and #GameActions(h,from)==0,
+    'D-ROLL-01 '..label..': '..action..' is refused ('..expected..') and sends nothing',why)
+  end
+  if restore then restore() end
+ end
+ Refused('pending latch','in flight',function() h.perks.pendingBanishIndex=0 end,function() h.perks.pendingBanishIndex=nil end)
+ Refused('guaranteed card','blocked card',function(raw) raw[2].isGuaranteed=true end)
+ Refused('session pause','Nexus paused for this session',function() Nexus.SessionPause.Pause() end)
+ Refused('unknown Orb state','orb state unavailable',function() ProjectEbonhold.OrbService={} end)
+end
+
+-- The ordinary automatic route (Auto ON, real planner, intent preauthorization
+-- and adapter), as the characterization fixture drove it: two picks left, no
+-- Reroll charges, so the planner Banishes three unwanted cards or Freezes one
+-- of two wanted copies. A matched ordinary board is the positive control.
+for _,kind in ipairs({'banish','freeze'})do
+ for _,shape in ipairs({'ordinary','leading'})do
+  local tag='D-ROLL-01 automatic '..kind..' '..shape
+  local h,adapter=FreshBoot(function(fresh) fresh.pendingRolls=2;fresh.run.totalRerolls=0 end)
+  local planned=adapter.SetFirstLoadoutWishlistIdentity('Synthetic client slot control',
+   {{spellId=200001,quality=1,stacks=kind=='freeze' and 2 or 1}})
+  slotFact(planned,tag..': SETUP the plan is set')
+  local raw=kind=='freeze' and {{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200021,quality=1}}
+   or {{spellId=200020,quality=1},{spellId=200021,quality=1},{spellId=200022,quality=1}}
+  local chosen=raw[1].spellId
+  if shape=='leading' then table.insert(raw,1,{quality=1}) end
+  h.Board(raw);h.Notify();h.Advance(.5)
+  local board=adapter.Board()
+  slotFact(board~=nil and #board.cards==3 and #raw==(shape=='leading' and 4 or 3),
+   tag..': SETUP the raw board projects three cards',board and #board.cards)
+  local from=#h.actions
+  SlashCmdList.NEXUS('auto');h.Advance(1.2)
+  local stats=Nexus.RecomputeStats()
+  local sent=GameActions(h,from)
+  local wire=sent[1] and sent[1][2]
+  local target=type(wire)=='number' and raw[wire+1] or nil
+  print('OBSERVED',tag..': rawCount='..#raw..' actions='..#sent..' kind='..tostring(sent[1] and sent[1][1])
+   ..' wireIndex0='..tostring(wire)..' wireSpellId='..tostring(target and target.spellId)
+   ..' preauthFailed='..tostring(stats.actionLifecycle and stats.actionLifecycle.preauthFailed))
+  slotFact(#sent==1 and sent[1][1]==kind,tag..': the automatic route submits exactly one '..kind,#sent)
+  slotFact(target~=nil and target.spellId==chosen,
+   tag..': the submitted client slot holds the decided Echo, never the malformed entry',
+   'wire='..tostring(wire)..' spell='..tostring(target and target.spellId))
+ end
+end
+assert(#slotFailures==0,'D-ROLL-01 client slot: '..#slotFailures..' failed; first: '..tostring(slotFailures[1]))
 print('PASS choice_presence_diagnostics')
