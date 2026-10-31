@@ -3074,9 +3074,13 @@ _CONSUMER_LIMITS = (
     'an unknown object reaches through a metatable __index is not modelled)',
     'format follows only the arguments a static Lua 5.1 format shows with %s, and only when '
     'every conversion has a value proved present (a last call gives only the results proved '
-    'for a seam key method or an unassigned local function, none for any other callee) and no '
-    'value is statically known to fail its conversion; a value of unknown type is not checked; '
-    'gsub and sub are not followed',
+    'for a seam key method or an unassigned local function, none for any other callee; a value '
+    'cut to one, by position or parentheses, keeps what is known of it, or nil for a call path '
+    'giving none) and no value is refused for its conversion: nil, booleans, tables and '
+    'functions for any conversion (for %s by the Lua 5.1 rule; LuaJIT shows an explicit nil or '
+    'boolean, so that refusal is conservative), non-numeric strings and unproved call values '
+    'for numeric ones; other values of unknown type are not checked; gsub and sub are not '
+    'followed',
     'a module function or export counts only when the file chunk, or an initializer it calls '
     'as a statement, runs it at load; a call in chunk code before that point never reaches it, '
     'and a call inside a function is assumed to run after the files have loaded',
@@ -4475,12 +4479,20 @@ _FORMAT_NUMERIC = frozenset('cdiouxXeEfgG')
 
 
 def _format_argument_fails(arg, option):
-    """True when a format argument is statically known to raise for its
-    conversion (lstrlib.c: luaL_checklstring for s and q, luaL_checknumber
-    for the others): nil, a boolean, a table or a function for any of them,
-    and a static string that strtod can never read for a numeric one. Any
-    other argument is not known to fail (a data-dependent failure is
-    outside this static check)."""
+    """True when a format argument (through parentheses, which keep its one
+    value) is statically refused for its conversion: nil, a boolean, a table
+    or a function for any conversion, and a static string that strtod can
+    never read for a numeric one. For a numeric conversion each of these
+    raises (luaL_checknumber) in Lua 5.1 and in LuaJIT alike. For s and q
+    the rule follows the Lua 5.1 target (lstrlib.c str_format:
+    luaL_checklstring raises for anything but a string or number); the
+    commissioned LuaJIT runtime instead shows an explicitly given nil or
+    boolean ("nil", "false") and may convert other values the same way, so
+    there the refusal is conservative: it proves no output and is not a
+    claim that LuaJIT raises. Any other argument is not known to fail (a
+    data-dependent failure is outside this static check)."""
+    while arg.kind == 'paren':
+        arg = arg.expr
     if arg.kind == 'constant' and arg.value in ('nil', 'true', 'false'):
         return True
     if arg.kind in ('table', 'function'):
@@ -4491,84 +4503,110 @@ def _format_argument_fails(arg, option):
     return _MAYBE_NUMBER.fullmatch(text.strip(' \t\n\v\f\r')) is None
 
 
-# Descriptors of a value a call gives (_call_values), besides an expression
-# node: one that may be nil (it fails every conversion), and one of the seam's
-# source names ("base", "candidate", "unavailable": a string that is never a
-# number, so it fails every numeric conversion).
+# Descriptors of a value (_call_values, _adjusted), besides an expression
+# node: one that may be nil (refused for every conversion, see
+# _format_argument_fails); one of the seam's source names ("base",
+# "candidate", "unavailable": a string that is never a number, so it fails
+# every numeric conversion); and the one value Lua makes of a call whose
+# results are not proved (an unresolved callee, ... or a call deeper than
+# _CALL_DEPTH): it may be the nil of a call that gave none, so it is refused
+# for a numeric conversion; for s and q it is a value of unknown type, not
+# checked (a documented limit).
 _MAY_BE_NIL = object()
 _SOURCE_NAME = object()
+_UNPROVED = object()
 _CALL_DEPTH = 8
 
 
 def _call_values(call, depth=0):
-    """(values, exact) for the results of a call (review fix of 7594): a
-    tuple with one entry per value the call is proved to give, each a tuple
-    of descriptors of what that value may be (expression nodes, _MAY_BE_NIL
-    or _SOURCE_NAME; () when nothing is known of it), and True when the call
-    gives exactly that many values. Proved only for two kinds of callee:
+    """(values, exact, first) for the results of a call (review fixes of
+    7594 and bcf7): values is a tuple with one entry per value the call is
+    proved to give, each a tuple of descriptors of what that value may be
+    (adjusted expression nodes, _MAY_BE_NIL, _SOURCE_NAME or _UNPROVED; ()
+    when nothing is known of it); exact is True when the call gives exactly
+    that many values on every path; first describes the one value Lua makes
+    of the call where it is cut to one (an argument that is not the last, a
+    return expression that is not the last, or a parenthesized call): its
+    first result, or nil on a path that gives none. Proved only for two kinds
+    of callee:
 
     - Nexus.Localization.Text, Resolve or Format (a seam key method): by the
       contract of core/Localization.lua each returns exactly text, source,
       reason; text is a string, source one of the source names and reason a
       string or nil.
     - an unassigned local function (_local_function): the meet of its
-      return statements (outside nested functions), and of no value at all
-      unless its body ends with a return, since a path may run off its end.
+      return statements (outside nested functions), and of a path giving no
+      value at all unless its body ends with a return, since a path may run
+      off its end. A path that gives fewer values keeps its nil in first.
 
-    Any other call (a global, a module or method function, a call deeper
-    than _CALL_DEPTH) gives no proved value and no exact count."""
+    Any other call (a global, a module or method function, a reassigned
+    local, a call deeper than _CALL_DEPTH) gives no proved value, no exact
+    count and an _UNPROVED first value."""
+    unknown = ((), False, (_UNPROVED,))
     if depth > _CALL_DEPTH or call.kind != 'call':
-        return (), False
+        return unknown
     if _seam_method(_path(call.func)) in _KEY_METHODS:
-        return ((), (_SOURCE_NAME,), (_MAY_BE_NIL,)), True
+        return ((), (_SOURCE_NAME,), (_MAY_BE_NIL,)), True, ()
     target = _local_function(call.func)
     if target is None:
-        return (), False
+        return unknown
     shapes = [_return_values(stmt, depth + 1) for stmt in _descendants(target.body)
               if stmt.kind == 'return']
     if not target.body or target.body[-1].kind != 'return':
-        shapes.append(((), True))
-    length = min(len(values) for values, _ in shapes)
-    values = tuple(tuple(part for found, _ in shapes for part in found[index])
+        shapes.append(((), True, (_MAY_BE_NIL,)))
+    length = min(len(values) for values, _, _ in shapes)
+    values = tuple(tuple(part for found, _, _ in shapes for part in found[index])
                    for index in range(length))
-    return values, all(exact and len(found) == length for found, exact in shapes)
+    exact = all(whole and len(found) == length for found, whole, _ in shapes)
+    first = tuple(part for _, _, one in shapes for part in one)
+    return values, exact, first
 
 
 def _return_values(stmt, depth):
-    """(values, exact) of one return statement (see _call_values): each
-    expression but the last gives one value; a last call gives its own
-    results, a last ... an unknown number, and anything else one value."""
+    """(values, exact, first) of one return statement (see _call_values):
+    each expression but the last is cut to one value (_adjusted); a last call
+    gives its own results, a last ... an unknown number, and anything else,
+    parenthesized calls included, one adjusted value. An empty return gives
+    no value, so its first value is nil."""
     if not stmt.exprs:
-        return (), True
-    head = tuple((expr,) for expr in stmt.exprs[:-1])
+        return (), True, (_MAY_BE_NIL,)
+    head = tuple(_adjusted(expr, depth) for expr in stmt.exprs[:-1])
     last = stmt.exprs[-1]
     if last.kind in ('call', 'method'):
-        values, exact = _call_values(last, depth)
-        return head + values, exact
+        values, exact, first = _call_values(last, depth)
+        return head + values, exact, head[0] if head else first
     if last.kind == 'constant' and last.value == '...':
-        return head, False
-    return head + ((last,),), True
+        return head, False, head[0] if head else (_UNPROVED,)
+    values = head + (_adjusted(last, depth),)
+    return values, True, values[0]
 
 
-def _single_value(arg):
-    """The descriptors of the one value an argument that is not the last
-    gives: a call is cut to its first result, which is nil when it is proved
-    to give none."""
-    if arg.kind not in ('call', 'method'):
-        return (arg,)
-    values, exact = _call_values(arg)
-    if values:
-        return values[0]
-    return (_MAY_BE_NIL,) if exact else ()
+def _adjusted(expr, depth=0):
+    """The descriptors of the one value Lua makes of an expression where it
+    is cut to one value: an argument that is not the last, a return
+    expression that is not the last, or any parenthesized expression.
+    Parentheses keep the value of what they hold (a nil, boolean, table or
+    static string stays known); a call or method gives its first result, or
+    nil when a path gives none (_call_values first); ... gives an unknown
+    value that may be nil (_UNPROVED)."""
+    while expr.kind == 'paren':
+        expr = expr.expr
+    if expr.kind in ('call', 'method'):
+        return _call_values(expr, depth)[2]
+    if expr.kind == 'constant' and expr.value == '...':
+        return (_UNPROVED,)
+    return (expr,)
 
 
 def _value_fails(descriptors, option):
-    """True when a value described so may be statically known to raise for
-    its conversion (_format_argument_fails)."""
+    """True when a value described so is refused for its conversion: it may
+    be nil (_MAY_BE_NIL), or, for a numeric conversion, it may be a source
+    name or an unproved call value, or one of its expressions is refused
+    (_format_argument_fails)."""
     for part in descriptors:
         if part is _MAY_BE_NIL:
             return True
-        if part is _SOURCE_NAME:
+        if part is _SOURCE_NAME or part is _UNPROVED:
             if option in _FORMAT_NUMERIC:
                 return True
         elif _format_argument_fails(part, option):
@@ -4585,22 +4623,24 @@ def _format_consumed(fmt, args):
     (lstrlib.c str_format: an unknown option, more than five flags, a width
     or precision above two digits), a value may be statically known to fail
     its conversion (_value_fails), or a conversion has no value proved
-    present. Each argument but the last gives one value (_single_value);
-    the last one, when it is a call or method, gives exactly the values
-    _call_values proves (none at all for a callee it cannot resolve, never
-    an assumed one), and ... gives none for certain. A position after the
-    last argument is a further result of that last call: it is checked and
-    counted, but it is not an argument, so it never flows."""
+    present. Each argument but the last gives one adjusted value
+    (_adjusted); the last one, when it is a call or method, gives exactly
+    the values _call_values proves (none at all for a callee it cannot
+    resolve, never an assumed one), ... gives none for certain, and any
+    other last argument, a parenthesized call included, one adjusted value.
+    A position after the last argument is a further result of that last
+    call: it is checked and counted, but it is not an argument, so it never
+    flows."""
     text = _static_string(fmt)
     if text is None:
         return None
-    values = [_single_value(arg) for arg in args[:-1]]
+    values = [_adjusted(arg) for arg in args[:-1]]
     if args:
         last = args[-1]
         if last.kind in ('call', 'method'):
             values.extend(_call_values(last)[0])
         elif not (last.kind == 'constant' and last.value == '...'):
-            values.append((last,))
+            values.append(_adjusted(last))
     present = len(values)
     index, position, consumed = 0, 0, set()
     while True:

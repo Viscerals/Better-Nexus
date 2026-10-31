@@ -3381,10 +3381,9 @@ class ConsumerBindingTests(unittest.TestCase):
              + shown(b'string.format("%s %s %d", ' + text + b', two())'), True),
             ("method, a one-result local function last", b'local one = function() return "x" end '
              + shown(b'("%s %s"):format(' + text + b', one())'), True),
+            # A missing argument raises in every runtime.
             ("four conversions for Text", shown(b'string.format("%s %s %s %s", ' + text + b')'),
              False),
-            ("three conversions for Text: its reason may be nil",
-             shown(b'string.format("%s %s %s", ' + text + b')'), False),
             ("Text's source for %d", shown(b'string.format("%s %d", ' + text + b')'), False),
             ("a no-result local function last", b'local function none() end '
              + shown(b'string.format("%s %s", ' + text + b', none())'), False),
@@ -3396,19 +3395,68 @@ class ConsumerBindingTests(unittest.TestCase):
             ("a local function that may run off its end", b'local function maybe(x) '
              b'if x then return "x" end end '
              + shown(b'string.format("%s %s", ' + text + b', maybe(specLabel.flag))'), False),
-            ("a no-result call before the text", b'local function none() end '
-             + shown(b'string.format("%s %s", none(), ' + text + b')'), False),
             ("a last method call of unresolved results", b'local o = {} function o:none() end '
              + shown(b'string.format("%s %s", ' + text + b', o:none())'), False),
-            ("a nil returned last", b'local function gone() return nil end '
-             + shown(b'string.format("%s %s", ' + text + b', gone())'), False),
             ("a one-result last call", b'local function one() return "x" end '
              + shown(b'string.format("%s %s %s", ' + text + b', one())'), False),
             ("a non-number for %d",
              shown(b'string.format("%s %d", ' + text + b', "not-a-number")'), False),
             ("method, a non-number for %d",
              shown(b'("%s %d"):format(' + text + b', "not-a-number")'), False),
+            # A nil (or boolean) given to %s: the Lua 5.1 target raises for it
+            # (lstrlib.c str_format, luaL_checklstring), so the binder refuses
+            # these sites. The commissioned LuaJIT runtime shows such a value
+            # instead ("nil", "false"; Text's reason is nil in the checked
+            # seams), so for it these four refusals are conservative, not
+            # observed errors; the expectations predate the bcf7 review and
+            # are unchanged.
+            ("three conversions for Text: its reason may be nil",
+             shown(b'string.format("%s %s %s", ' + text + b')'), False),
+            ("a no-result call before the text", b'local function none() end '
+             + shown(b'string.format("%s %s", none(), ' + text + b')'), False),
+            ("a nil returned last", b'local function gone() return nil end '
+             + shown(b'string.format("%s %s", ' + text + b', gone())'), False),
             ("nil for %s", shown(b'string.format("%s %s", ' + text + b', nil)'), False),
+            # Lua cuts a value to one, by position or by parentheses, and the
+            # cut value keeps what is known of it (review fix of bcf7). Each
+            # refusal below raises before SetText in the commissioned LuaJIT
+            # runtime with the real English and Localization: a numeric
+            # conversion of nil, a boolean, a table or a non-numeric string.
+            # The valid counterparts still bind.
+            ("parenthesized zero results for %d", b'local function none() end '
+             + shown(b'string.format("%s %d", ' + text + b', (none()))'), False),
+            ("method, parenthesized empty return for %d", b'local function none() return end '
+             + shown(b'("%s %d"):format(' + text + b', (none()))'), False),
+            ("parenthesized nil for %d", shown(b'string.format("%s %d", ' + text + b', (nil))'),
+             False),
+            ("parenthesized boolean for %d",
+             shown(b'string.format("%s %d", ' + text + b', (false))'), False),
+            ("parenthesized table for %d", shown(b'string.format("%s %d", ' + text + b', ({}))'),
+             False),
+            ("a cut zero-result return for %d", b'local function none() end '
+             b'local function pair() return none(), "x" end '
+             + shown(b'string.format("%s %d %s", ' + text + b', pair())'), False),
+            ("a cut nil return for %d", b'local function gone() return nil end '
+             b'local function pair() return gone(), "x" end '
+             + shown(b'string.format("%s %d %s", ' + text + b', pair())'), False),
+            ("a cut non-numeric return for %d", b'local function bad() return "not-a-number" end '
+             b'local function pair() return bad(), "x" end '
+             + shown(b'string.format("%s %d %s", ' + text + b', pair())'), False),
+            ("a last parenthesized zero-result return for %d", b'local function none() end '
+             b'local function one() return (none()) end '
+             + shown(b'string.format("%s %d", ' + text + b', one())'), False),
+            ("a parenthesized call of a reassigned local for %d",
+             b'local function one() return 12 end one = function() end '
+             + shown(b'string.format("%s %d", ' + text + b', (one()))'), False),
+            ("a cut conditional zero result for %d",
+             b'local function maybe(x) if not x then return end return 12 end '
+             + shown(b'string.format("%d %s", maybe(), ' + text + b')'), False),
+            ("parenthesized number for %d", shown(b'string.format("%s %d", ' + text + b', (12))'),
+             True),
+            ("a parenthesized one-number call for %d", b'local function one() return 12 end '
+             + shown(b'string.format("%s %d", ' + text + b', (one()))'), True),
+            ("a cut numeric return for %d", b'local function pair() return 12, "x" end '
+             + shown(b'string.format("%s %d %s", ' + text + b', pair())'), True),
             ("... as the last argument", b'local function f(...) '
              + shown(b'string.format("%s %s", ' + text + b', ...)') + b' end f("x")', False),
             ("no conversion", shown(b'string.format("fixed", ' + text + b')'), False),
