@@ -409,4 +409,53 @@ do
  check(P.DetailNameLines({'a','b','c'})[3]=='+1 more','MISSING: a template without an entry renders the English template')
 end
 
+---------------------------------------------------------------- PENDING (C-04)
+-- While shared data is not ready, Explore's real final OnEnter (after the
+-- real creation and script order of the TOC boot) gives LoadingStatus's own
+-- explanation beside the hub hover. The expected lines are LoadingStatus's
+-- own hook output on a probe button it binds. Ready, the hover is the hub
+-- hover alone. The greying registry still greys and restores the label.
+-- Passive: no saved table changes, no action and no send.
+do
+ local H,P=Boot(nil,nil,true)
+ P.Init({RefreshDisplay=function() return true end,ToggleAuto=function() return false end,RequestFirstDisplay=function() return true end})
+ P.Show();P.Render(Model{})
+ local LS=Nexus.LoadingStatus
+ check(LS~=nil and type(LS.BindSharedButton)=='function','PENDING: LoadingStatus is loaded')
+ local explore=NexusPanel._footerButtons.explore
+ local label=Nexus.Localization.Text('panel.button.explore')
+ local realStatus=Nexus.StartupStatus
+ local saved,saved2,acts,sent=F.Serialize(NexusDB),F.Serialize(WishlistRealizerDB),#H.actions,#H.sent
+ local probe=CreateFrame('Button',nil,UIParent)
+ LS.BindSharedButton(probe,label)
+ local function Has(lines,want) for _,l in ipairs(lines) do if l==want then return true end end return false end
+ for _,status in ipairs({{state='pending',coreReady=false,phase='store-validation'},
+  {state='pending',coreReady=true,phase='scan',step='scan',recordsSeen=12},
+  {state='failed',coreReady=true,reason='fixture'}}) do
+  Nexus.StartupStatus=function() return status end
+  local want=S.CaptureTooltip(probe:GetScript('OnEnter'),probe)
+  check(#want==3,'PENDING: LoadingStatus explains a '..status.state..' shared view ('..#want..' lines)')
+  local got=S.CaptureTooltip(explore:GetScript('OnEnter'),explore)
+  for _,line in ipairs(want) do
+   check(Has(got,line),'PENDING: the Explore hover gives the loading explanation "'..tostring(line)..'" in: '..table.concat(got,' | '))
+  end
+  local hub=P.HubTooltipLines('explore')
+  check(got[1]==hub[1],'PENDING: the hub title stays first')
+  for _,line in ipairs(hub) do check(Has(got,line),'PENDING: the hub hover keeps "'..tostring(line)..'"') end
+  LS.Update(status,true)
+  check(explore._nexusDataLoading==true and explore:GetText()=='|cff888888'..label..'|r','PENDING: the greying registry greys Explore')
+ end
+ local ready={state='ready',coreReady=true,phase='complete'}
+ Nexus.StartupStatus=function() return ready end
+ local got=S.CaptureTooltip(explore:GetScript('OnEnter'),explore)
+ local hub=P.HubTooltipLines('explore')
+ check(#got==#hub,'READY: the Explore hover is the hub hover alone ('..#got..' lines)')
+ for i,line in ipairs(hub) do check(got[i]==line,'READY: hub hover line '..i..' exact') end
+ LS.Update(ready,true)
+ check(explore._nexusDataLoading==false and explore:GetText()==label,'READY: the greying registry restores the Explore label')
+ Nexus.StartupStatus=realStatus
+ check(F.Serialize(NexusDB)==saved and F.Serialize(WishlistRealizerDB)==saved2,'PENDING PASSIVE: no saved table changed')
+ check(#H.actions==acts and #H.sent==sent,'PENDING PASSIVE: no action and no send')
+end
+
 print('PASS l10n_ui_panel checks='..checks..' (synthetic pseudo-locale; native NOT_RUN)')
