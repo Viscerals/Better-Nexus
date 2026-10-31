@@ -3353,8 +3353,8 @@ class ConsumerBindingTests(unittest.TestCase):
         # the call is not known to raise; an ignored, non-text,
         # empty-precision, missing or unknown position never does, nor does
         # any argument of a call with too few proved values or a known
-        # incompatible argument, in either call form. gsub and sub can discard the whole text, so
-        # they are no transforms at all.
+        # incompatible argument, in either call form. gsub and sub can
+        # discard the whole text, so they are no transforms at all.
         text = b'Nexus.Localization.Text("panel.heading.progress")'
         shown = lambda call: b'specLabel:SetText(' + call + b')'
         # Each case acts only on its own site, so one receipt judges them
@@ -3368,13 +3368,40 @@ class ConsumerBindingTests(unittest.TestCase):
             ("a number for %d", shown(b'string.format("%s %d", ' + text + b', 12)'), True),
             ("a numeric string for %d", shown(b'string.format("%s %d", ' + text + b', " 0x1F ")'),
              True),
-            # STD-8849-1: a call as the last argument is counted as one value,
-            # never as many as the format wants (Text gives three), and a
-            # known incompatible argument always raises.
+            # A last call gives exactly the results proved for it, never as
+            # many as the format wants and never an assumed one (STD-8849-1,
+            # review fix of 7594). Text returns exactly text, source and
+            # reason (core/Localization.lua): two strings, then a reason that
+            # may be nil; its source is never a number.
             ("an open-ended last argument", shown(b'string.format("%s %s", ' + text + b')'),
-             False),
+             True),
+            ("a one-result local function last", b'local function one() return "x" end '
+             + shown(b'string.format("%s %s", ' + text + b', one())'), True),
+            ("a two-result local function last", b'local function two() return "a", 2 end '
+             + shown(b'string.format("%s %s %d", ' + text + b', two())'), True),
+            ("method, a one-result local function last", b'local one = function() return "x" end '
+             + shown(b'("%s %s"):format(' + text + b', one())'), True),
             ("four conversions for Text", shown(b'string.format("%s %s %s %s", ' + text + b')'),
              False),
+            ("three conversions for Text: its reason may be nil",
+             shown(b'string.format("%s %s %s", ' + text + b')'), False),
+            ("Text's source for %d", shown(b'string.format("%s %d", ' + text + b')'), False),
+            ("a no-result local function last", b'local function none() end '
+             + shown(b'string.format("%s %s", ' + text + b', none())'), False),
+            ("an empty return last", b'local function none() return end '
+             + shown(b'string.format("%s %s", ' + text + b', none())'), False),
+            ("method, a no-result local function last", b'local none = function() end '
+             + shown(b'("%s %s"):format(' + text + b', none())'), False),
+            # Whether it returns depends on a field no static rule knows.
+            ("a local function that may run off its end", b'local function maybe(x) '
+             b'if x then return "x" end end '
+             + shown(b'string.format("%s %s", ' + text + b', maybe(specLabel.flag))'), False),
+            ("a no-result call before the text", b'local function none() end '
+             + shown(b'string.format("%s %s", none(), ' + text + b')'), False),
+            ("a last method call of unresolved results", b'local o = {} function o:none() end '
+             + shown(b'string.format("%s %s", ' + text + b', o:none())'), False),
+            ("a nil returned last", b'local function gone() return nil end '
+             + shown(b'string.format("%s %s", ' + text + b', gone())'), False),
             ("a one-result last call", b'local function one() return "x" end '
              + shown(b'string.format("%s %s %s", ' + text + b', one())'), False),
             ("a non-number for %d",

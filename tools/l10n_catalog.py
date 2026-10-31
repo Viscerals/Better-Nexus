@@ -3073,9 +3073,10 @@ _CONSUMER_LIMITS = (
     'compared, typed, field-tested or called as a method no loaded source defines (a method '
     'an unknown object reaches through a metatable __index is not modelled)',
     'format follows only the arguments a static Lua 5.1 format shows with %s, and only when '
-    'every conversion has an argument proved present (an open-ended last call counts as one '
-    'value) and no argument is statically known to fail its conversion; an argument of unknown '
-    'type is not checked; gsub and sub are not followed',
+    'every conversion has a value proved present (a last call gives only the results proved '
+    'for a seam key method or an unassigned local function, none for any other callee) and no '
+    'value is statically known to fail its conversion; a value of unknown type is not checked; '
+    'gsub and sub are not followed',
     'a module function or export counts only when the file chunk, or an initializer it calls '
     'as a statement, runs it at load; a call in chunk code before that point never reaches it, '
     'and a call inside a function is assumed to run after the files have loaded',
@@ -4490,25 +4491,117 @@ def _format_argument_fails(arg, option):
     return _MAYBE_NUMBER.fullmatch(text.strip(' \t\n\v\f\r')) is None
 
 
+# Descriptors of a value a call gives (_call_values), besides an expression
+# node: one that may be nil (it fails every conversion), and one of the seam's
+# source names ("base", "candidate", "unavailable": a string that is never a
+# number, so it fails every numeric conversion).
+_MAY_BE_NIL = object()
+_SOURCE_NAME = object()
+_CALL_DEPTH = 8
+
+
+def _call_values(call, depth=0):
+    """(values, exact) for the results of a call (review fix of 7594): a
+    tuple with one entry per value the call is proved to give, each a tuple
+    of descriptors of what that value may be (expression nodes, _MAY_BE_NIL
+    or _SOURCE_NAME; () when nothing is known of it), and True when the call
+    gives exactly that many values. Proved only for two kinds of callee:
+
+    - Nexus.Localization.Text, Resolve or Format (a seam key method): by the
+      contract of core/Localization.lua each returns exactly text, source,
+      reason; text is a string, source one of the source names and reason a
+      string or nil.
+    - an unassigned local function (_local_function): the meet of its
+      return statements (outside nested functions), and of no value at all
+      unless its body ends with a return, since a path may run off its end.
+
+    Any other call (a global, a module or method function, a call deeper
+    than _CALL_DEPTH) gives no proved value and no exact count."""
+    if depth > _CALL_DEPTH or call.kind != 'call':
+        return (), False
+    if _seam_method(_path(call.func)) in _KEY_METHODS:
+        return ((), (_SOURCE_NAME,), (_MAY_BE_NIL,)), True
+    target = _local_function(call.func)
+    if target is None:
+        return (), False
+    shapes = [_return_values(stmt, depth + 1) for stmt in _descendants(target.body)
+              if stmt.kind == 'return']
+    if not target.body or target.body[-1].kind != 'return':
+        shapes.append(((), True))
+    length = min(len(values) for values, _ in shapes)
+    values = tuple(tuple(part for found, _ in shapes for part in found[index])
+                   for index in range(length))
+    return values, all(exact and len(found) == length for found, exact in shapes)
+
+
+def _return_values(stmt, depth):
+    """(values, exact) of one return statement (see _call_values): each
+    expression but the last gives one value; a last call gives its own
+    results, a last ... an unknown number, and anything else one value."""
+    if not stmt.exprs:
+        return (), True
+    head = tuple((expr,) for expr in stmt.exprs[:-1])
+    last = stmt.exprs[-1]
+    if last.kind in ('call', 'method'):
+        values, exact = _call_values(last, depth)
+        return head + values, exact
+    if last.kind == 'constant' and last.value == '...':
+        return head, False
+    return head + ((last,),), True
+
+
+def _single_value(arg):
+    """The descriptors of the one value an argument that is not the last
+    gives: a call is cut to its first result, which is nil when it is proved
+    to give none."""
+    if arg.kind not in ('call', 'method'):
+        return (arg,)
+    values, exact = _call_values(arg)
+    if values:
+        return values[0]
+    return (_MAY_BE_NIL,) if exact else ()
+
+
+def _value_fails(descriptors, option):
+    """True when a value described so may be statically known to raise for
+    its conversion (_format_argument_fails)."""
+    for part in descriptors:
+        if part is _MAY_BE_NIL:
+            return True
+        if part is _SOURCE_NAME:
+            if option in _FORMAT_NUMERIC:
+                return True
+        elif _format_argument_fails(part, option):
+            return True
+    return False
+
+
 def _format_consumed(fmt, args):
     """The 1-based positions of the arguments after the format that a
     static (_static_string) Lua 5.1 format string shows as text (a %s
     conversion, with no precision or a precision of at least 1), or None
-    when that call is not proved to return (STD-V15-1, STD-8849-1): the
-    format is not static, Lua 5.1 refuses it (lstrlib.c str_format: an
-    unknown option, more than five flags, a width or precision above two
-    digits), an argument is statically known to fail its conversion
-    (_format_argument_fails), or a conversion has no argument proved
-    present. Each argument gives one value, except the last one when it is
-    open-ended: a call or method gives at least one value only by
-    assumption, so exactly one is counted (never as many as the format
-    wants), and ... gives none for certain."""
+    when that call is not proved to return (STD-V15-1, STD-8849-1 and the
+    review fix of 7594): the format is not static, Lua 5.1 refuses it
+    (lstrlib.c str_format: an unknown option, more than five flags, a width
+    or precision above two digits), a value may be statically known to fail
+    its conversion (_value_fails), or a conversion has no value proved
+    present. Each argument but the last gives one value (_single_value);
+    the last one, when it is a call or method, gives exactly the values
+    _call_values proves (none at all for a callee it cannot resolve, never
+    an assumed one), and ... gives none for certain. A position after the
+    last argument is a further result of that last call: it is checked and
+    counted, but it is not an argument, so it never flows."""
     text = _static_string(fmt)
     if text is None:
         return None
-    present = len(args)
-    if args and args[-1].kind == 'constant' and args[-1].value == '...':
-        present -= 1
+    values = [_single_value(arg) for arg in args[:-1]]
+    if args:
+        last = args[-1]
+        if last.kind in ('call', 'method'):
+            values.extend(_call_values(last)[0])
+        elif not (last.kind == 'constant' and last.value == '...'):
+            values.append((last,))
+    present = len(values)
     index, position, consumed = 0, 0, set()
     while True:
         index = text.find('%', index)
@@ -4524,7 +4617,7 @@ def _format_consumed(fmt, args):
         if len(flags) > 5:          # sizeof(FLAGS) - 1: "invalid format (repeated flags)"
             return None
         position += 1
-        if position > present or _format_argument_fails(args[position - 1], option):
+        if position > present or _value_fails(values[position - 1], option):
             return None
         if option == 's' and (precision is None or (precision != '' and int(precision) > 0)):
             consumed.add(position)
