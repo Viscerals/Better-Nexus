@@ -3,6 +3,18 @@
 This is the terminology/help and Orb-refinement successor to the exact supplied
 P1.4 source. It is not a new merge of the user's separate T3 branch.
 
+> **Current qualification (2026-10-31, source commit
+> `41cd955826a8671853488b975ad1d1900eebca2e`).** The table below is the P1.5
+> status as recorded at that time. It is kept as historical evidence and is not
+> a current test result. Its runtime row describes the P1.5 checks only. The
+> current supported offline route is LuaJIT (Lua 5.1):
+> `.github/workflows/ci.yml` installs `luajit`, `tools/ci_check.py` documents
+> it as required, and `tools/run_prototype_tests.py` uses it whenever it is on
+> PATH. The runner's Lua 5.4 route with test-only compatibility shims is a
+> fallback that the runner labels "NOT LuaJIT/Lua 5.1/WoW". It is not WoW
+> equivalence and does not replace LuaJIT validation (`README.md`). No offline
+> route is native WoW 3.3.5a verification. This note records no new test run.
+
 | Feature | Status |
 |---|---|
 | Ordinary EchoWeaver rolling, Snapshot distinctions, resource guards | Retained; real-action and engine tests retained. The earlier offline comparison with an outside addon is retired (2026-09-24). |

@@ -5,6 +5,25 @@ lists the adopted source, the path map, every older branch and pull request with
 its exact SHA and disposition, and where each tip is preserved. It does not
 declare the beta stable, and it does not claim that any open bug is fixed.
 
+> **Frozen record; current-source amendment (2026-10-31).** Sections 1 to 6
+> describe the repository as it was at consolidation on 2026-09-21. They are
+> kept unchanged as history and are not current status. Checked against source
+> commit `41cd955826a8671853488b975ad1d1900eebca2e`, two of their statements
+> no longer describe the current source:
+>
+> - Section 2 says `CONTRACTS.md` describes the 1.19/stack-era contracts and is
+>   kept as a historical reference. `CONTRACTS.md` now opens with the
+>   authoritative current rolling and Orb contract; only its later v1.19.4
+>   module sections are historical (see its status section).
+> - Sections 4 and 5 say that `core/MainViewModel.lua` has no
+>   `[4]="Legendary"` and that #38 is not fixed in `main`. The current file
+>   names quality 4 `"Legendary"` and maps it to the localized key
+>   `main.value.quality_legendary`. This amendment records only that source
+>   fact. It does not close #38, and it claims no native confirmation; the
+>   issue's state is kept in the tracker.
+>
+> No other statement of this record was re-checked for this amendment.
+
 ## 1. Source selection
 
 | Item | Value |
