@@ -334,12 +334,158 @@ function H.AcknowledgeOverwriteWarnings()
  f=NexusOverwriteWarning
  if f and f:IsShown() and f.yes:IsEnabled()then f.suppress:SetChecked(true);f.yes:Click()end
 end
+-- Test-support module loader for H.Boot (fresh boots repeat the whole TOC).
+-- Every boot still runs every TOC file as a NEW function with fresh module
+-- locals, a fresh private table and the current global environment, and the
+-- first time a file's exact bytes are seen it is compiled by the real
+-- loadfile. What is reused across boots is only immutable text: the file's
+-- exact bytes and the bytecode the real compiler produced from them, which the
+-- real loader turns into a new function each time. No live chunk, function
+-- environment, module table, validation result or other result of running a
+-- file is kept. A file whose bytes changed, or that cannot be read, is loaded
+-- by loadfile itself, so its compile or read error is the real one.
+--
+-- Trusted footprint. The reuse path calls exactly these: the global loadfile
+-- (a miss), loadstring (a hit), string.dump (a store), io.open, getmetatable
+-- and the FILE methods read and close reached through the FILE metatable's
+-- __index (reading the bytes). Their identities are captured once per process,
+-- the first time this file runs, and only if each is a C builtin, each role is
+-- a different function, loadfile and io.open answer an absent file with nil
+-- and a message, and loadstring/string.dump round-trip a chunk; otherwise
+-- nothing is ever reused in this process. On every load, reuse applies only
+-- while every one of them, and the FILE metatable and its __index table, is
+-- still that exact captured object, so a test or probe that replaces or wraps
+-- any of them -- including with another C builtin, or by changing FILE read --
+-- gets the plain loadfile(path) call, before any byte read is trusted. The
+-- reader used is the captured read on a file whose metatable is the captured
+-- one. Premise, not proven here: pcall, type, rawget and debug.getinfo
+-- themselves are the runtime's own, and the first run of this file in a
+-- process sees the runtime's own loader and reader. Bounded; process-wide so
+-- that it survives this file being run again for each fresh harness.
+local function Builtin(fn)
+ if type(fn)~='function' or type(debug)~='table' or type(debug.getinfo)~='function' then return false end
+ local ok,info=pcall(debug.getinfo,fn,'S')
+ return ok and type(info)=='table' and info.what=='C'
+end
+local FOOTPRINT_FUNCTIONS={'loadfile','loadstring','dump','open','getmetatable','read','close'}
+local FOOTPRINT={'loadfile','loadstring','dump','open','getmetatable','read','close','meta','index'}
+-- The current objects in each footprint role, looked up the way the reuse path reaches them.
+local function Footprint()
+ local f={loadfile=loadfile,loadstring=loadstring,getmetatable=getmetatable,
+  dump=type(string)=='table' and rawget(string,'dump') or nil,
+  open=type(io)=='table' and rawget(io,'open') or nil}
+ local stdout=type(io)=='table' and rawget(io,'stdout') or nil
+ if type(getmetatable)=='function' and stdout~=nil then
+  local ok,meta=pcall(getmetatable,stdout)
+  if ok and type(meta)=='table' then
+   f.meta=meta;f.index=rawget(meta,'__index')
+   if type(f.index)=='table' then f.read=rawget(f.index,'read');f.close=rawget(f.index,'close') end
+  end
+ end
+ return f
+end
+local function Capture()
+ local f=Footprint()
+ if type(f.meta)~='table' or type(f.index)~='table' then return false end
+ local roles={}
+ for _,k in ipairs(FOOTPRINT_FUNCTIONS) do
+  if not Builtin(f[k]) or roles[f[k]] then return false end
+  roles[f[k]]=true
+ end
+ local absent='tests/prototype/.nexus-harness-loader-absent-'..(tostring({}):gsub('%W',''))
+ local okL,chunk,why=pcall(f.loadfile,absent)
+ if not okL or chunk~=nil or type(why)~='string' then return false end
+ local okO,handle,whyOpen=pcall(f.open,absent,'rb')
+ if not okO or handle~=nil or type(whyOpen)~='string' then return false end
+ local okS,probe=pcall(f.loadstring,'return 7')
+ if not okS or type(probe)~='function' then return false end
+ local okD,code=pcall(f.dump,probe)
+ if not okD or type(code)~='string' then return false end
+ local okR,again=pcall(f.loadstring,code)
+ if not okR or type(again)~='function' then return false end
+ local okRun,seven=pcall(again)
+ if not okRun or seven~=7 then return false end
+ return f
+end
+local LOADER_KEY,LOADER_MAX_ENTRIES,LOADER_MAX_BYTES='nexus.tests.prototype.harness_loader.v2',512,64*1024*1024
+local loaderCache=nil
+if type(package)=='table' and type(package.loaded)=='table' then
+ loaderCache=package.loaded[LOADER_KEY]
+ if type(loaderCache)~='table' then
+  loaderCache={entries={},count=0,bytes=0,hits=0,misses=0,cold=0,trusted=Capture()}
+  package.loaded[LOADER_KEY]=loaderCache
+ end
+end
+-- The captured footprint while every role still holds its captured object, else nil.
+local function Trusted()
+ local t=loaderCache and loaderCache.trusted
+ if type(t)~='table' then return nil end
+ local now=Footprint()
+ for _,k in ipairs(FOOTPRINT) do if now[k]~=t[k] then return nil end end
+ return t
+end
+-- The exact bytes through the captured opener and reader, or nil.
+local function ReadBytes(t,path)
+ local ok,file=pcall(t.open,path,'rb')
+ if not ok or file==nil then return nil end
+ local okMeta,meta=pcall(t.getmetatable,file)
+ if not okMeta or meta~=t.meta then return nil end
+ local okRead,bytes=pcall(t.read,file,'*a')
+ pcall(t.close,file)
+ if okRead and type(bytes)=='string' then return bytes end
+ return nil
+end
+local function Reusable() return Trusted()~=nil end
+local function Forget(path)
+ local old=loaderCache.entries[path]
+ if old then
+  loaderCache.entries[path]=nil
+  loaderCache.count=loaderCache.count-1;loaderCache.bytes=loaderCache.bytes-old.size
+ end
+end
+-- Returns exactly what loadfile(path) would: a new function, or nil and the error.
+local function LoadModule(path)
+ local t=Trusted()
+ if not t then
+  if loaderCache then loaderCache.cold=loaderCache.cold+1 end
+  return loadfile(path)
+ end
+ local bytes=ReadBytes(t,path)
+ local entry=bytes and loaderCache.entries[path]
+ if entry and entry.source==bytes then
+  local chunk=t.loadstring(entry.code,'@'..path)
+  if type(chunk)=='function' then loaderCache.hits=loaderCache.hits+1;return chunk end
+ end
+ loaderCache.misses=loaderCache.misses+1
+ Forget(path)
+ local chunk,err=loadfile(path)
+ if not chunk then return chunk,err end
+ -- Kept only while the footprint is still the captured one and the bytes read
+ -- before and after the real compile agree.
+ if bytes and Trusted()==t and ReadBytes(t,path)==bytes then
+  local okDump,code=pcall(t.dump,chunk)
+  if okDump and type(code)=='string' then
+   local size=#bytes+#code
+   if loaderCache.count<LOADER_MAX_ENTRIES and loaderCache.bytes+size<=LOADER_MAX_BYTES then
+    loaderCache.entries[path]={source=bytes,code=code,size=size}
+    loaderCache.count=loaderCache.count+1;loaderCache.bytes=loaderCache.bytes+size
+   end
+  end
+ end
+ return chunk
+end
+H.LoadModule=LoadModule
+function H.LoaderStats()
+ local c=loaderCache or {}
+ return {hits=c.hits or 0,misses=c.misses or 0,cold=c.cold or 0,entries=c.count or 0,bytes=c.bytes or 0,
+  reusable=Reusable(),captured=type(c.trusted)=='table'}
+end
 function H.Boot()
  for line in io.lines('Nexus.toc') do
   line=line:gsub('\r','')
   if line~='' and not line:match('^#') then
    local path=line:gsub('\\','/')
-   local chunk,err=loadfile(path);assert(chunk,err);chunk('Nexus',{})
+   local chunk,err=LoadModule(path);assert(chunk,err);chunk('Nexus',{})
   end
  end
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')

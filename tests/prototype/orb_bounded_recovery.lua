@@ -1085,6 +1085,51 @@ for _,kind in ipairs({'missing_query','missing_hook','throwing_hook','replaced_s
   check(report:find('choiceQuery=',1,true) and report:find('outgoingObserver=',1,true) and report:find('ownBare=',1,true) and report:find('ownFramed=',1,true),'EXPECT support copy exposes bounded capability and outgoing framing facts')
  end)
 end
+-- E-ORB-01 limitation, kept fail-closed: another addon post-hooks
+-- SendAddonMessage after Confirm. Nexus's own observer is still in that chain
+-- and still counts a bare '16' sent through the new global, but without a
+-- query it cannot be told from the replaced send above, which must get none.
+-- Recovery stays refused, no second hook is installed, and a foreign send
+-- through the chain manufactures no query, admission, spend, choice, archive
+-- or receipt release. Synthetic hook chain only; native hook order UNKNOWN.
+r2case('D capability foreign post-hook after Confirm',function()
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ local rawHook=hooksecurefunc;local attempts,queries,foreign=0,0,0
+ hooksecurefunc=function(first,...)
+  if first=='SendAddonMessage' then attempts=attempts+1 end
+  return rawHook(first,...)
+ end
+ H.service.RequestChoice=function()queries=queries+1;bareRequest()end
+ local server=R.Server(H);assert(M.Start(6))
+ local started=A.Orbs.TransportStatus();local nexusHooks=attempts
+ assert(started.outgoingAttempted and started.choiceObserver and H.Count('orb-spend')==1,
+  'SETUP the confirmed run spent once and its own outgoing observer is available')
+ -- The foreign post-hook, installed as another addon would, not through Nexus.
+ rawHook('SendAddonMessage',function()foreign=foreign+1 end)
+ check(A.Orbs.TransportStatus().choiceObserver==false and A.Orbs.RecoveryAvailable()==false,
+  'GUARD a changed global is not reported as an available observer')
+ H.Advance(35);M.Recheck();H.Advance(1)
+ check(M.Status().reason:find('cannot be observed',1,true)~=nil,
+  'EXPECT the refusal names the unobservable choice query: '..tostring(M.Status().reason))
+ check(attempts==nexusHooks,'GUARD Nexus installs no second outgoing hook on the changed global')
+ check(M.Status().recoveries==0 and queries==0 and R.Saved() and not R.SavedRow('orbRecoveryArchive')
+  and H.Count('orb-spend')==1 and H.Count('take')==0,
+  'GUARD the foreign post-hook consumes no admission or query and keeps the receipt without archive or replay')
+ local kept=H.Clone(R.Saved());local bare=A.Orbs.TransportStatus().ownBare
+ SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME) -- a foreign bare send through the chain
+ check(A.Orbs.TransportStatus().ownBare==bare+1 and foreign>0,
+  'SETUP limitation: the Nexus observer is still in the chain and counts the send')
+ M.Pump();H.Advance(1)
+ local now=R.Saved()
+ check(M.Status().recoveries==0 and queries==0 and A.Orbs.RecoveryAvailable()==false
+  and H.Count('orb-spend')==1 and H.Count('take')==0 and not R.SavedRow('orbRecoveryArchive'),
+  'GUARD a counted foreign send grants no recovery, query, spend, choice or archive')
+ check(now and now.removed==kept.removed and now.selectedKey==kept.selectedKey and now.logSerial==kept.logSerial
+  and now.chargesBefore==kept.chargesBefore and R.Same(now.before,kept.before),
+  'GUARD the retained receipt is still the original one')
+ print('OBSERVED foreign post-hook ownBare='..A.Orbs.TransportStatus().ownBare..' queries='..queries
+  ..' admissions='..M.Status().recoveries..' hostCalls='..H.Count('orb-spend'))
+end)
 for _,cancel in ipairs({'Pause','Stop'}) do
  r2case('F finite pre-admission query '..cancel,function()
   local H,M,A,O=fresh();local server=R.Server(H);local queries=0
@@ -1397,4 +1442,161 @@ r2case('new Confirm carries the remaining classified loading window',function()
  check(H.Count('orb-spend')==spends+1 and H.Count('take')==takes,'GUARD the single eligible Start submits no further spend')
 end)
 if #r2fail>0 then error(table.concat(r2fail,'\n'),0) end
+-- Test-support loader controls (tests/prototype/harness.lua, H.Boot). They state
+-- what any module loader must preserve for these fresh boots, and show which
+-- path the boots above used. Synthetic files only; no game action.
+do
+ local reusable=type(loadstring)=='function' and type(string.dump)=='function' and type(setfenv)=='function'
+ -- 1. A later boot starts with new module tables and fresh module-private state.
+ local H1,M1,A1=R.S.Fresh()
+ assert(A1.Orbs.StartChoiceObserver(),'SETUP the first boot starts its outgoing observer')
+ SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+ check(A1.Orbs.TransportStatus().ownBare==1,'SETUP the first boot counts its own bare query in module-private state')
+ local nexus1,orbs1,before=Nexus,A1.Orbs,H1.LoaderStats()
+ local H2,M2,A2=R.S.Fresh()
+ local after=H2.LoaderStats()
+ check(Nexus~=nexus1 and A2.Orbs~=orbs1 and M2~=M1 and A2.Orbs.TransportStatus~=orbs1.TransportStatus,
+  'EXPECT a later boot builds new module tables and functions')
+ check(A2.Orbs.TransportStatus().ownBare==0 and A2.Orbs.TransportStatus().requests==0,
+  'EXPECT module-private Orb transport state starts fresh on the next boot')
+ if reusable then
+  check(after.reusable and after.hits>before.hits and after.misses==before.misses and after.cold==before.cold,
+   'EXPECT the later boot ran every TOC file from reused bytecode: hits '..before.hits..'->'..after.hits)
+ end
+ -- 2. A wrapped loadfile still sees every TOC file once per boot (the cold path).
+ local toc={}
+ for line in io.lines('Nexus.toc') do
+  line=line:gsub('\r','')
+  if line~='' and not line:match('^#') then toc[#toc+1]=(line:gsub('\\','/')) end
+ end
+ local rawLoad,seen,calls=loadfile,{},0
+ loadfile=function(p,...) calls=calls+1;seen[p]=(seen[p] or 0)+1;return rawLoad(p,...) end
+ local coldBefore=H2.LoaderStats()
+ local okCold,H3,M3=pcall(R.S.Fresh)
+ loadfile=rawLoad
+ check(okCold and M3~=nil and M3~=M2,'EXPECT a boot under a wrapped loadfile completes: '..tostring(H3))
+ local each=true;for _,p in ipairs(toc) do if seen[p]~=1 then each=false end end
+ check(each and calls==#toc,'EXPECT a wrapped loadfile sees every TOC file exactly once per boot: '..calls..'/'..#toc)
+ local coldAfter=H3.LoaderStats()
+ if reusable then
+  check(coldAfter.hits==coldBefore.hits and coldAfter.cold==coldBefore.cold+#toc,
+   'EXPECT nothing is reused while loadfile is wrapped')
+ end
+ -- 3. Real compile, read and run behavior through the loader H.Boot uses, on a
+ -- temporary file outside the checkout: exact-byte invalidation, new functions
+ -- and environments, and the real error text and locations on every path.
+ local dir=os.getenv('TEMP') or os.getenv('TMP') or os.getenv('TMPDIR') or '/tmp'
+ local path=dir..'/nexus_harness_loader_control_'..tostring(os.time())..'_'
+  ..tostring(math.floor(os.clock()*1000000))..'.lua'
+ local viaHarness=H3.LoadModule
+ local function write(text)
+  local f=assert(io.open(path,'wb'),'SETUP the temporary control file can be written: '..path)
+  f:write(text);f:close()
+ end
+ local okFile,why=pcall(function()
+  local body="local n=0\nn=n+1\nreturn %q,n,(...),select(2,...),function() end\n"
+  write(string.format(body,'A'))
+  local first,second=assert(viaHarness(path)),assert(viaHarness(path))
+  check(first~=second,'EXPECT each load returns a new function object')
+  local p1,p2={},{}
+  local a1,n1,name1,priv1,f1=first('Nexus',p1)
+  local a2,n2,name2,priv2,f2=second('Nexus',p2)
+  check(a1=='A' and a2=='A' and n1==1 and n2==1 and name1=='Nexus' and name2=='Nexus'
+   and priv1==p1 and priv2==p2 and f1~=f2,'EXPECT every run has fresh locals, its own private arguments and new closures')
+  local coldInfo=debug.getinfo(select(5,assert(loadfile(path))('Nexus',{})),'S')
+  local info=debug.getinfo(f2,'S')
+  check(info.source=='@'..path and info.source==coldInfo.source and info.linedefined==coldInfo.linedefined,
+   'EXPECT reused code keeps the original source name and lines: '..tostring(info.source))
+  if type(setfenv)=='function' then
+   setfenv(second,{})
+   local third=assert(viaHarness(path))
+   check(getfenv(third)==getfenv(assert(loadfile(path))) and getfenv(first)==getfenv(third),
+    'EXPECT an environment set on one loaded function never reaches another')
+  end
+  -- The same length with different bytes, then the original bytes again.
+  write(string.format(body,'B'))
+  check(assert(viaHarness(path))('Nexus',{})=='B' and assert(viaHarness(path))('Nexus',{})=='B',
+   'EXPECT a same-length source change is seen at once and on later loads')
+  write(string.format(body,'A'))
+  check(assert(viaHarness(path))('Nexus',{})=='A','EXPECT changing the source back is seen as well')
+  -- A runtime error keeps the original text and line.
+  write("local x=1\nerror('loader control '..x)\n")
+  local okC,errC=pcall(assert(loadfile(path)))
+  local okM,errM=pcall(assert(viaHarness(path)))
+  local okH,errH=pcall(assert(viaHarness(path)))
+  check(not okC and not okM and not okH and errM==errC and errH==errC
+   and tostring(errC):find(':2: loader control 1',1,true)~=nil,
+   'EXPECT a runtime error has the same text and line on every path: '..tostring(errH))
+  -- A syntax error is the real compiler's, every time, and nothing is reused for it.
+  write("return (\n")
+  local c0,e0=loadfile(path);local c1,e1=viaHarness(path);local c2,e2=viaHarness(path)
+  check(c0==nil and c1==nil and c2==nil and type(e0)=='string' and e1==e0 and e2==e0,
+   'EXPECT the real syntax error on every load: '..tostring(e1))
+  write(string.format(body,'A'))
+  check(assert(viaHarness(path))('Nexus',{})=='A','EXPECT a repaired file loads again')
+  -- A replaced loadfile is called, and its failure returned, for a known file.
+  local rawLoad2,injected=loadfile,0
+  loadfile=function(p,...)
+   if p==path then injected=injected+1;return nil,'synthetic injected load failure' end
+   return rawLoad2(p,...)
+  end
+  local c3,e3=viaHarness(path)
+  loadfile=rawLoad2
+  check(c3==nil and e3=='synthetic injected load failure' and injected==1,
+   'EXPECT a replaced loadfile is called and its failure returned')
+  -- Warm file, loadfile replaced by a different C builtin: the replacement is
+  -- what runs, exactly as a direct call, and nothing stored is used for it.
+  write(string.format(body,'A'))
+  check(assert(viaHarness(path))('Nexus',{})=='A' and assert(viaHarness(path))('Nexus',{})=='A'
+   and (not reusable or H3.LoaderStats().reusable),'SETUP the file is warm on the reuse path')
+  local nativeLoad=loadfile
+  local function underLoader(replacement)
+   local hits=H3.LoaderStats().hits
+   loadfile=replacement
+   local okD,d1,d2=pcall(loadfile,path)
+   local okH,h1,h2=pcall(viaHarness,path)
+   local stats=H3.LoaderStats()
+   loadfile=nativeLoad
+   return okD,d1,d2,okH,h1,h2,stats,hits
+  end
+  local okD,d1,d2,okH,h1,h2,stats,hits=underLoader(error)
+  check(not okD and not okH and tostring(h1):find(path,1,true)~=nil and stats.hits==hits and not stats.reusable,
+   'EXPECT a warm file under a failing C-builtin loadfile fails as a direct call does: '..tostring(h1))
+  okD,d1,d2,okH,h1,h2,stats,hits=underLoader(loadstring)
+  check(okD and okH and d1==nil and h1==nil and type(d2)=='string' and h2==d2 and stats.hits==hits
+   and not stats.reusable,'EXPECT a warm file under another C-builtin loadfile returns what a direct call returns: '..tostring(h2))
+  -- Warm file A changed to B, then the FILE read method replaced with one that
+  -- answers A: the changed reader is not trusted and the real loader's B runs.
+  local textA=string.format(body,'A')
+  write(textA)
+  check(assert(viaHarness(path))('Nexus',{})=='A' and assert(viaHarness(path))('Nexus',{})=='A',
+   'SETUP the original bytes are warm')
+  write(string.format(body,'B'))
+  local methods=getmetatable(io.stdout).__index
+  local nativeRead,hitsRead=methods.read,H3.LoaderStats().hits
+  methods.read=function() return textA end
+  local okR,hooked=pcall(viaHarness,path)
+  local readStats=H3.LoaderStats()
+  methods.read=nativeRead
+  check(okR and type(hooked)=='function' and hooked('Nexus',{})=='B' and assert(loadfile(path))('Nexus',{})=='B'
+   and readStats.hits==hitsRead and not readStats.reusable,
+   'EXPECT a warm file under a changed FILE read runs the bytes a direct loadfile reads: '..tostring(hooked))
+  -- With the original reader back, reuse resumes on the real bytes.
+  check(assert(viaHarness(path))('Nexus',{})=='B' and assert(viaHarness(path))('Nexus',{})=='B'
+   and (not reusable or (H3.LoaderStats().reusable and H3.LoaderStats().hits>hitsRead)),
+   'EXPECT reuse resumes on the real bytes once the reader is the original again')
+  -- A vanished file gives the real read error.
+  assert(os.remove(path))
+  local c4,e4=loadfile(path);local c5,e5=viaHarness(path)
+  check(c4==nil and c5==nil and type(e4)=='string' and e5==e4,'EXPECT a missing file gives the real read error: '..tostring(e5))
+  if reusable then
+   check(H3.LoaderStats().hits>coldAfter.hits,'EXPECT these controls exercised the reuse path')
+  end
+ end)
+ os.remove(path)
+ loadfile=rawLoad
+ assert(okFile,why)
+ print('OBSERVED harness loader hits='..H3.LoaderStats().hits..' misses='..H3.LoaderStats().misses
+  ..' cold='..H3.LoaderStats().cold..' entries='..H3.LoaderStats().entries..' bytes='..H3.LoaderStats().bytes)
+end
 print('PASS bounded Orb transition and missed-result recovery checks='..checks)
