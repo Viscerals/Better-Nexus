@@ -346,13 +346,45 @@ class SyntheticComposition(unittest.TestCase):
         self.assertEqual(slot_types, {'count', 'text'})
 
     def test_static_bytes_the_runtime_does_not_load_are_refused(self):
-        # The static model claims a complete composition; the runtime loads the actual partial packs.
-        _, model = full_composition()
-        problems, evidence = G.runtime_check(ROOT, model)
+        # The static model claims the complete synthetic composition; the runtime loads (through the
+        # synthetic_paths seam) the same packs with one first-pack entry removed. The shipped packs
+        # are not used: their counts can match a model while their text differs (seam only).
+        sources, model = full_composition()
+        product, following = (row['productId'] for row in model['products'][:2])
+        key = 'panel.button.my_builds'
+        text = model['packs'][product]['entries'][key]
+        self.assertEqual(text, shift(model['active'][key], 1))
+        self.assertNotEqual(text, model['active'][key])
+        self.assertEqual(sorted(model['packs'][product]['entries']), sorted(model['active']))
+        full = sources['packs']
+        line = ('            [%s] = %s,\r\n' % (G._lua_string(key), G._lua_string(text))).encode('utf-8')
+        self.assertEqual(full.count(line), 1)
+        begin = full.index(('    %s = {\r\n' % product).encode('utf-8'))
+        end = full.index(('    %s = {\r\n' % following).encode('utf-8'))
+        self.assertLess(begin, full.index(line))
+        self.assertLess(full.index(line), end)
+        loaded = full.replace(line, b'')
+        entry_lines = lambda data, stop: data[begin:stop].count(b'\r\n            [')
+        # The intended input difference: exactly one entry fewer in that pack, every other byte kept.
+        self.assertEqual(entry_lines(full, end), len(model['active']))
+        self.assertEqual(entry_lines(loaded, end - len(line)), len(model['active']) - 1)
+        self.assertEqual(loaded[:begin], full[:begin])
+        self.assertEqual(loaded[end - len(line):], full[end:])
+        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
+            paths = synthetic_paths(scratch, dict(sources, packs=loaded))
+            self.assertEqual(pathlib.Path(paths['packs']).read_bytes(), loaded)
+            problems, evidence = G.runtime_check(ROOT, model, paths=paths)
         found = sorted({problem['code'] for problem in problems})
         self.assertEqual(evidence['status'], 'RAN')
         self.assertIn('runtime-seam-mismatch', found)
         self.assertIn('runtime-load-mismatch', found)
+        # Each for the intended reason: the removed key's seam, and that pack's admitted count.
+        self.assertEqual(found, ['runtime-load-mismatch', 'runtime-seam-mismatch'])
+        seam = [(p['path'], p.get('key')) for p in problems if p['code'] == 'runtime-seam-mismatch']
+        self.assertEqual(seam, [('complete:' + product, key)])
+        load = [p for p in problems if p['code'] == 'runtime-load-mismatch']
+        self.assertIn('complete:' + product, [p['path'] for p in load])
+        self.assertTrue(all(p['detail'].startswith('pack rows ') for p in load), load)
 
 
 class PackCoverageMutants(unittest.TestCase):
