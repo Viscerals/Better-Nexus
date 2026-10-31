@@ -199,8 +199,15 @@ db=NexusDB;Boot(PUBLIC27,db);Ready()
 NoNotice('reload after the quarantine')
 assert(NexusDB.updateAdvisoryQuarantine.stableRelease.version=='1.96.6','idempotent: the diagnostic record stays once')
 -- A malformed saved advisory is handled the same way.
+-- Before the saved-data owner gives its writable verdict the status is read
+-- and nothing is moved; the move happens once start-up is ready.
 d=T.Profile(3,0);d.updateAdvisory='9.9.9'
-Boot(PUBLIC27,d);NoNotice('malformed saved advisory')
+Boot(PUBLIC27,d)
+assert(Nexus.Store.StateWriteStatus().mode~='durable' and Nexus.Updates.Status().state=='unknown','fixture: the status is read before the owner is ready')
+assert(NexusDB.updateAdvisory=='9.9.9' and NexusDB.updateAdvisoryQuarantine==nil,'malformed saved advisory: nothing is moved before the owner is ready')
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+NoNotice('malformed saved advisory')
+assert(type(NexusDB.updateAdvisoryQuarantine)=='table' and NexusDB.updateAdvisoryQuarantine.reason=='peer report is not release evidence','malformed saved advisory: quarantined once the owner is ready')
 print('PASS saved peer advisory: no notice at login or reload, quarantined once, nothing else touched')
 
 -- 6. Trusted bundled evidence keeps its notice, its wording and its place; a higher peer
@@ -310,6 +317,17 @@ NoNotice('hostile and free-form versions ('..rejected..' refused by the decoder)
 for _,l in ipairs(H.chat)do assert(not l:find('evil',1,true),'no peer text in chat')end
 Nexus.Release.releasesUrl='http://evil.example/x';assert(Nexus.Updates.ReleaseUrl()=='https://github.com/Viscerals/Better-Nexus/releases','a malformed local link falls back to the fixed page')
 Boot(PUBLIC27,(function()local x=T.Profile(3,0);x.updateNotice={version='9.9.9',authority='peer'};return x end)())
+-- Before the saved-data owner gives its writable verdict the notice is not
+-- shown and the saved keys are exactly as found; the quarantine follows once
+-- start-up is ready.
+assert(Nexus.Store.StateWriteStatus().mode~='durable','fixture: the owner has not given a writable verdict yet')
+assert(Nexus.Updates.Status().state=='unknown','a peer-authority notice kept by an older client is not shown before the owner is ready')
+local legacyNotice=NexusDB.updateNotice
+assert(type(legacyNotice)=='table' and legacyNotice.version=='9.9.9' and legacyNotice.authority=='peer'
+ and legacyNotice.quarantinedReason==nil and NexusDB.updateNoticeQuarantine==nil,
+ 'a peer-authority notice kept by an older client is not moved or rewritten before the owner is ready')
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+assert(Nexus.Store.StateWriteStatus().mode=='durable','fixture: the owner is writable once start-up is ready')
 assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateNotice==nil and NexusDB.updateNoticeQuarantine.version=='9.9.9','a peer-authority notice kept by an older client is quarantined, not shown')
 print('PASS hostile input, local link only, legacy notice quarantine')
 
