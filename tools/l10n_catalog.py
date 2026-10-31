@@ -3076,8 +3076,9 @@ _CONSUMER_LIMITS = (
     'every conversion has a value proved present (a last call gives only the results proved '
     'for a seam key method or an unassigned local function, none for any other callee; a value '
     'cut to one, by position or parentheses, keeps what is known of it, or nil for a call path '
-    'giving none) and no value is refused for its conversion: nil, booleans, tables and '
-    'functions for any conversion (for %s by the Lua 5.1 rule; LuaJIT shows an explicit nil or '
+    'giving none, and a never-assigned local is followed to its declared value; any other '
+    'local, parameter or global is of unknown type) and no value is refused for its '
+    'conversion: nil, booleans, tables and functions for any conversion (for %s by the Lua 5.1 rule; LuaJIT shows an explicit nil or '
     'boolean, so that refusal is conservative), non-numeric strings and unproved call values '
     'for numeric ones; other values of unknown type are not checked; gsub and sub are not '
     'followed',
@@ -4516,6 +4517,7 @@ _MAY_BE_NIL = object()
 _SOURCE_NAME = object()
 _UNPROVED = object()
 _CALL_DEPTH = 8
+_ALIAS_STEPS = 16
 
 
 def _call_values(call, depth=0):
@@ -4588,7 +4590,26 @@ def _adjusted(expr, depth=0):
     Parentheses keep the value of what they hold (a nil, boolean, table or
     static string stays known); a call or method gives its first result, or
     nil when a path gives none (_call_values first); ... gives an unknown
-    value that may be nil (_UNPROVED)."""
+    value that may be nil (_UNPROVED).
+
+    A name of an immutable local (SPEC-EFD7-1) holds the one value of its
+    declaration, so it is followed to that expression, through chains of
+    such locals, upvalues of a returning function included: a local
+    statement name declared with an expression (local v = e: the value Lua
+    makes of e for that name, the first result of a call), or a local
+    function. Lexical resolution already picked the binding, so shadowing is
+    respected. A local assigned anywhere (closures included), declared
+    without its own expression (local v, or a later name of local a, b =
+    f()), a parameter, a for variable or a global is not followed: its value
+    stays of unknown type. At most _ALIAS_STEPS links are followed."""
+    for _ in range(_ALIAS_STEPS):
+        while expr.kind == 'paren':
+            expr = expr.expr
+        binding = expr.binding if expr.kind == 'name' else None
+        if binding is None or binding.kind not in ('local', 'localfunction') \
+                or binding.assigned or binding.value is None:
+            break
+        expr = binding.value
     while expr.kind == 'paren':
         expr = expr.expr
     if expr.kind in ('call', 'method'):

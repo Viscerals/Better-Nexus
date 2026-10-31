@@ -3457,6 +3457,52 @@ class ConsumerBindingTests(unittest.TestCase):
              + shown(b'string.format("%s %d", ' + text + b', (one()))'), True),
             ("a cut numeric return for %d", b'local function pair() return 12, "x" end '
              + shown(b'string.format("%s %d %s", ' + text + b', pair())'), True),
+            # A never-assigned local holds the value of its declaration and is
+            # followed to it (SPEC-EFD7-1): each of these eight witnesses
+            # raises "number expected" before SetText in the commissioned
+            # LuaJIT runtime. Valid number and numeric-string aliases (direct,
+            # chained, returned, captured, shadowing) still bind, and a
+            # reassigned local is not followed (a value of unknown type).
+            ("a boolean alias for %d", b'local bad = false '
+             + shown(b'string.format("%s %d", ' + text + b', bad)'), False),
+            ("a nil alias for %d", b'local bad = nil '
+             + shown(b'string.format("%s %d", ' + text + b', bad)'), False),
+            ("a table alias for %d", b'local bad = {} '
+             + shown(b'string.format("%s %d", ' + text + b', bad)'), False),
+            ("a function alias for %d", b'local bad = function() end '
+             + shown(b'string.format("%s %d", ' + text + b', bad)'), False),
+            ("a boolean alias chain for %d", b'local first = false local bad = first '
+             + shown(b'string.format("%s %d", ' + text + b', bad)'), False),
+            ("a returned boolean alias for %d",
+             b'local function bad() local v = false return v end '
+             + shown(b'string.format("%s %d", ' + text + b', bad())'), False),
+            ("a returned nil alias cut for %d",
+             b'local function pair() local v = nil return v, "x" end '
+             + shown(b'string.format("%s %d %s", ' + text + b', pair())'), False),
+            ("a captured boolean alias for %d",
+             b'local v = false local function bad() return v end '
+             + shown(b'string.format("%s %d", ' + text + b', bad())'), False),
+            ("a number alias for %d", b'local n = 12 '
+             + shown(b'string.format("%s %d", ' + text + b', n)'), True),
+            ("a numeric string alias for %d", b'local n = " 0x1F " '
+             + shown(b'string.format("%s %d", ' + text + b', n)'), True),
+            ("a number alias chain for %d", b'local first = 12 local n = first '
+             + shown(b'string.format("%s %d", ' + text + b', n)'), True),
+            ("a returned number alias for %d",
+             b'local function num() local v = 12 return v end '
+             + shown(b'string.format("%s %d", ' + text + b', num())'), True),
+            ("a captured number alias for %d",
+             b'local v = 12 local function num() return v end '
+             + shown(b'string.format("%s %d", ' + text + b', num())'), True),
+            ("a shadowing number alias for %d", b'local bad = false do local bad = 12 '
+             + shown(b'string.format("%s %d", ' + text + b', bad)') + b' end', True),
+            ("a reassigned local is not followed", b'local n = false n = 12 '
+             + shown(b'string.format("%s %d", ' + text + b', n)'), True),
+            # Followed to an unresolved call, the alias holds that call's
+            # unproved value, refused for a numeric conversion as the call
+            # itself is (conservative: its result is not known).
+            ("an alias of an unresolved call for %d", b'local n = specLabel:GetCount() '
+             + shown(b'string.format("%s %d", ' + text + b', n)'), False),
             ("... as the last argument", b'local function f(...) '
              + shown(b'string.format("%s %s", ' + text + b', ...)') + b' end f("x")', False),
             ("no conversion", shown(b'string.format("fixed", ' + text + b')'), False),
