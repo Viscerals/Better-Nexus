@@ -64,9 +64,16 @@ unchanged.
   label exceeds the 1,024-byte slot (v5: the exact English sentence instead of the
   seam's "cannot be shown" status), and generated default names of a new draft (v5:
   in the active language, once, at creation).
-- `data/LocalizationPacks.lua` is unchanged: the six optional packs that ship still hold
-  their 27 draft entries. Full-catalog translations are task-local drafts that are not
-  installed; until a shipped pack holds a key, that key shows English.
+- `data/LocalizationPacks.lua` holds a draft entry for every one of the 4,078 English
+  keys in each of the six optional packs (24,468 entries), in the order of the English
+  base; pack IDs and autonyms are unchanged. Each value is taken unchanged from its
+  selected per-language draft cohort. Values that later cohorts replace were removed
+  before those cohorts were applied, so a missing or invalid entry shows the exact
+  English of its key, never an older translation. 543 entries are byte-identical to
+  their English (for example product, game or code-owned terms kept as drafted, and
+  placeholder-only texts); `RELEASE_LANGUAGES.json` records no `entryReview` declaration
+  for them. Every entry is `draft_unreviewed`: technical and automated source-paired
+  review only.
 
 ## Evidence in the source
 
@@ -82,9 +89,9 @@ unchanged.
   `l10n_passivity_library.lua`, `l10n_pseudo_support_guards.lua`.
 
 All of it is synthetic offline evidence. Competent language review is UNASSIGNED and
-native glyph, font, layout and input checks are NOT_RUN. The six language drafts, their
-composition into packs, the matched full CI, private installation and native review
-are separate gates owned outside this source change.
+native glyph, font, layout and input checks are NOT_RUN. Fluent review of the composed
+packs, the matched full CI, private installation and native review are separate gates
+owned outside this source change.
 
 ## Not complete
 
