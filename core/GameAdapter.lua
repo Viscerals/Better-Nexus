@@ -896,6 +896,17 @@ function A.Board()
     if type(ch) ~= "table" or #ch == 0 then return nil end
     local cards, gi = {}, nil
     local sigParts = {}
+    -- D-ROLL-01: the position in the client's choice array of each projected
+    -- card, for A.Banish/A.Freeze. An entry without a spellId is skipped, so
+    -- after one a card's projected position is not its client slot. Weak keys:
+    -- a record lives as long as its card, and the cards and board a caller
+    -- receives keep their shape. Held in the mutators' ledger, not as another
+    -- main-chunk local (this chunk is at the Lua 5.1 limit of 200).
+    local rawSlots = ledger.boardSlots
+    if not rawSlots then
+        rawSlots = setmetatable({}, { __mode = "k" })
+        ledger.boardSlots = rawSlots
+    end
     for i = 1, #ch do
         local c = ch[i]
         projectionStatus.board.cards = projectionStatus.board.cards + 1
@@ -911,6 +922,7 @@ function A.Board()
                 justFrozen = c.justFrozen and true or false,
             }
             cards[#cards + 1] = card
+            rawSlots[card] = i
             if card.isGuaranteed and not gi then gi = #cards end
             sigParts[#sigParts + 1] = tostring(c.spellId)
                 .. (card.isFrozen and "F" or "") .. (card.isCarried and "C" or "")
@@ -4911,6 +4923,13 @@ function A.Banish(index0)
     local card = board.cards[index0 + 1]
     if not card then return false, "no card" end
     if CardBlocked(card) then return false, "blocked card" end
+    -- D-ROLL-01: name the client slot this card was projected from by this
+    -- mutator's own read above, never a skipped neighbour's. A card A.Board()
+    -- did not project has no record and keeps its projected position, which
+    -- is its client slot whenever no entry was skipped.
+    local slots = ledger.boardSlots
+    local slot = slots and slots[card]
+    local clientIndex0 = slot and slot - 1 or index0
     local ch = A.Charges()
     if ch.banish <= 0 then return false, "no charges" end
     if ledger.banishThisPush then return false, "one per push" end
@@ -4923,7 +4942,7 @@ function A.Banish(index0)
     if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
         or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
-    local ok = svc and SafeCall(svc.BanishPerk, index0)
+    local ok = svc and SafeCall(svc.BanishPerk, clientIndex0)
     selfCalling = false
     if ok then
         ledger.banish = math.max(0, (ledger.banish or 1) - 1)
@@ -5053,6 +5072,10 @@ function A.Freeze(index0)
     local card = board.cards[index0 + 1]
     if not card then return false, "no card" end
     if CardBlocked(card) then return false, "blocked card" end
+    -- D-ROLL-01: the client slot of this card, as in A.Banish.
+    local slots = ledger.boardSlots
+    local slot = slots and slots[card]
+    local clientIndex0 = slot and slot - 1 or index0
     local ch = A.Charges()
     if ch.freeze <= 0 or ch.trustworthy == false then return false, "no charges" end
     local svc = PS()
@@ -5060,10 +5083,12 @@ function A.Freeze(index0)
     if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
         or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
-    local ok = svc and SafeCall(svc.FreezePerk, index0)
+    local ok = svc and SafeCall(svc.FreezePerk, clientIndex0)
     selfCalling = false
     if ok then
         ledger.freeze = math.max(0, (ledger.freeze or 1) - 1)
+        -- The overlay marks a projected card (A.Board), so it keeps the
+        -- projected position, not the client slot.
         selfFreezeSig, selfFreezeIndex = board.signature, index0 + 1
         inFlightKind, inFlightSig = "freeze", board.signature
         return true

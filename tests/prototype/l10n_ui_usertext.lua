@@ -311,6 +311,32 @@ local long=string.rep('Zorblax ',120)
 local fields=T.DestinationFields({kind='savedBuild',slot=4,name=long,wishlist='A|B',wishlistState='assigned'})
 check(fields[2].value==S.OPEN..long..' (slot 4)'..S.CLOSE,'a 960-byte name verbatim in the translated cell')
 check(fields[3].value==S.OPEN..'A||B (assigned)'..S.CLOSE and fields[3].minimum=='A||B','an escaped pipe in a name stays the escaped pair; the bare-name minimum is data only')
+-- I-01: a shortened name never splits its escaped pipe pair, in every seam and
+-- at every cut. The cut name stays a data slot: verbatim in the translated
+-- label, and byte-identical between the English seam and the code English.
+local function paired(text)
+ if type(text)~='string' then return false end
+ for run in text:gmatch('|+')do if #run%2~=0 then return false end end
+ return true
+end
+local piped='Zorblax|Qwyn'
+for n=1,#'Zorblax||Qwyn'+1 do
+ local shown=T.SafeName(piped,n)
+ local eng=withSeam(ENGLISH,function() return T.SavedBuildLabel(2,piped,n) end)
+ local absent=withSeam(nil,function() return T.SavedBuildLabel(2,piped,n) end)
+ check(paired(shown) and T.SavedBuildLabel(2,piped,n)==S.OPEN.."Saved Build '"..shown.."' (slot 2)"..S.CLOSE,
+  'a cut piped name keeps its escaped pair, verbatim in the translated label (cut '..n..': '..tostring(shown)..')')
+ check(eng==absent and eng=="Saved Build '"..shown.."' (slot 2)",'the English seam equals the code English for a cut piped name (cut '..n..')')
+end
+check(T.SafeName(piped,8)=='Zorblax...' and T.SafeName(piped,9)=='Zorblax||...' and T.SafeName(piped)=='Zorblax||Qwyn' and piped=='Zorblax|Qwyn',
+ 'the cut before a pair keeps neither pipe, the cut after it keeps both; the whole name and the raw input are unchanged')
+-- The Auto note's own 200-letter cut, with the pair at letters 200-201.
+local note=string.rep('Zorblax ',24)..'Zorblax|Qwyn'
+local held=string.rep('Zorblax ',24)..'Zorblax...'
+local function heldLine() return T.StatusLines({auto=true,autoNote=note})[1] end
+local engHeld,absentHeld=withSeam(ENGLISH,heldLine),withSeam(nil,heldLine)
+check(heldLine():find(held,1,true)~=nil and engHeld==absentHeld and paired(engHeld) and engHeld:find(held,1,true)~=nil,
+ 'the Auto note is cut before its escaped pair in every seam; English equals the code English')
 -- A slot value above the seam's text-slot limit shows the exact English, not a refusal.
 local huge=string.rep('Kraal ',200)
 check(T.Message('payload changed '..huge)=='This draft changed. Reopen it and review the current targets before saving. Details: payload changed '..huge,'over-limit raw detail falls back to the exact English')
