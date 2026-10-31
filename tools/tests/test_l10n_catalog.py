@@ -1749,6 +1749,11 @@ class CatalogSchemaApi(unittest.TestCase):
                                       b'"normalization": "\\udc00\\ud800",'), "json-surrogate"),
             ("context", self.replaced("context", b'"refs": ["#139", "#147"],',
                                       b'"refs": ["#139", "#147"], "\\udfffx": 0,'), "json-surrogate"),
+            # Upper-case hex digits name the same lone surrogate.
+            ("release", self.replaced("release", b'"Deutsch"', b'"Deu\\uDBFFtsch"'),
+             "json-surrogate"),
+            ("context", self.replaced("context", b'"normalization": "none",',
+                                      b'"normalization": "x\\uDc00",'), "json-surrogate"),
         )
         for which in ("context", "release"):
             for document in (b"[]", b'"text"', b"null", b"1", b"true"):
@@ -3767,6 +3772,55 @@ class CatalogInputMemo(unittest.TestCase):
         declarations["readout.charge_counts"]["kind"] = "text"
         self.assertEqual(catalog.parse_registry_declarations(self.five[4])["readout.charge_counts"]
                          ["kind"], "format")
+
+    def test_an_input_is_frozen_once_before_it_is_hashed_and_parsed(self):
+        # V14 review P2: an accepted bytearray subclass whose conversions show
+        # other bytes than its buffer. Each seam takes the buffer once and
+        # both hashes and parses that copy, so no conversion is consulted and
+        # a kept result always belongs to the bytes it is kept for.
+        class Shifting(bytearray):
+            def __init__(self, data, shown):
+                super().__init__(data)
+                self.shown = shown
+
+            def __bytes__(self):
+                return self.shown
+
+            def decode(self, *arguments, **options):
+                return self.shown.decode(*arguments, **options)
+
+        english = self.raw["english"]
+        optionz = english.replace(MEMO_OPTIONS_LINE, MEMO_OPTIONS_LINE.replace(b"Options", b"Optionz"))
+        catalog = self.fresh()
+        self.assertEqual(catalog.parse_english(Shifting(english, optionz))["panel.button.options"],
+                         "Options")
+        self.assertEqual(catalog.parse_english(english)["panel.button.options"], "Options")
+        self.assertEqual(catalog.parse_english(optionz)["panel.button.options"], "Optionz")
+        limit = (b'kind = "format", slot = "count", resultLimit = 254',
+                 b'kind = "format", slot = "count", resultLimit = 253')
+        refused = self.five[4].replace(*limit)
+        self.assertNotEqual(refused, self.five[4])
+        seams = (("validate_catalog_data", self.four), ("catalog_report", self.four),
+                 ("validate_registry_catalog_data", self.five),
+                 ("registry_catalog_report", self.five),
+                 ("registry_catalog_diagnostics", self.five),
+                 ("pack_provenance_diagnostics", self.five))
+        shown = {0: optionz, 4: refused}
+        for name, ordinary in seams:
+            with self.subTest(seam=name):
+                catalog = self.fresh()
+                seam = getattr(catalog, name)
+                shifting = [Shifting(data, shown.get(index, data[:-1]))
+                            for index, data in enumerate(ordinary)]
+                first = seam(*shifting)
+                self.assertEqual(seam(*ordinary), first)
+                self.assertEqual(getattr(self.fresh(), name)(*ordinary), first)
+                if name.startswith("validate"):
+                    self.assertEqual(first["english"]["panel.button.options"], "Options")
+                # The bytes it showed are still judged as themselves.
+                with self.assertRaises(catalog.CatalogRegistryError) as raised:
+                    catalog.validate_registry_catalog_data(*self.five[:4], refused)
+                self.assertEqual(raised.exception.code, "registry-limit")
 
     def test_a_failure_is_never_kept(self):
         catalog = self.fresh()

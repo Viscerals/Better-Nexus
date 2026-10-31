@@ -31,7 +31,8 @@
     "checkedFields": [
       "kind",
       "placeholders",
-      "resultLimitBytes"
+      "resultLimitBytes",
+      "lines"
     ],
     "rule": "each keys[] row must equal its declaration: kind, placeholder names in declared order with the declared slot type, and resultLimitBytes for a format (absent for text); the declarations, not this document, own those facts",
     "checkedBy": "tools/l10n_catalog.py validate_registry_catalog_data",
@@ -54626,6 +54627,6 @@
       "v6_source16_supplemental": 8,
       "v8_source16_journal_names": 2
     },
-    "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
+    "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py validates the full catalog against the runtime contract: text, block, format and template kinds, typed placeholders and the lines policy, within the bounded runtime cap of 4096 entries (4097 fails closed)."
   }
 }
