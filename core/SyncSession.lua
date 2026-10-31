@@ -1143,36 +1143,6 @@ function Session.New(options)
         }
     end
 
-    local function BuildStatusToken()
-        local adapter = options.getAdapter()
-        local dps = options.getDpsCapture()
-        local slots = adapter and adapter.Slots and adapter.Slots() or nil
-        local wishlist = adapter and adapter.Wishlist
-            and adapter.Wishlist() or nil
-        local player = myName()
-        local level = options.playerLevel()
-        local catalog = options.getCatalog()
-        local builds = catalog and catalog.Count and catalog.Count() or 0
-        local playerInfo = dps and dps.GetPlayerInfo
-            and dps.GetPlayerInfo(player) or nil
-        local payload = {
-            v=options.statusVersion(),
-            s=slots and slots.maxSlots or 0,
-            a=slots and slots.activeSlot or 0,
-            w=wishlist and wishlist.name or "",
-            d=playerInfo and playerInfo.dps or 0,
-            dc=playerInfo and playerInfo.category or "",
-            b=builds,
-            l=level,
-        }
-        local codec = options.getCodec()
-        if not (codec and codec.JSONEncode and codec.Base64Encode) then
-            return nil
-        end
-        local json = codec.JSONEncode(payload)
-        return json and codec.Base64Encode(json) or nil
-    end
-
     function M.HandleStatusRequest(sender, requestId)
         -- Public clients have no remote status-query authorization. Retain the
         -- compatibility surface as an inert default so stale callers cannot
@@ -1184,17 +1154,16 @@ function Session.New(options)
         return false
     end
 
+    -- The diagnostic probe whisper is disabled: no peer can answer it (the
+    -- status request above is inert and a Nexus receiver rejects its "dev"
+    -- request), and its token carried the Wishlist name and other local
+    -- facts. It builds and sends nothing in every mode. The pause and saved
+    -- Off refusals are still reported first, as before.
     function M.SendStatusTo(target)
         if not target or target == "" then return false end
         if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
         if SyncMode() == "off" then return false, SyncModeText("off") end
-        local token = BuildStatusToken()
-        if not token then return false end
-        local message = "WLRQ|" .. myName() .. "|dev|" .. token
-        if #message > options.chatLimit then
-            message = message:sub(1, options.chatLimit)
-        end
-        return pcall(options.sendWhisper, message, target)
+        return false
     end
 
     function M.Reset()

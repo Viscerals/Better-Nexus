@@ -83,6 +83,34 @@ do
  assert(not H.Auto() and H.Takes()==0,'Auto OFF stays OFF after Resume')
 end
 
+-- 3b. The /nexus auto reply follows the request (B-05). Turning a selected
+-- Auto OFF while paused turns it OFF and says only that; a following attempt
+-- to turn it ON while paused stays OFF and says why. Unpaused replies keep
+-- their words.
+do
+ local H=Boot();H.Advance(.5)
+ local REFUSED='cannot be turned ON while Nexus is paused'
+ SlashCmdList.NEXUS('auto');assert(H.Auto(),'setup: Auto ON')
+ SlashCmdList.NEXUS('pause');assert(Nexus.SessionPause.IsPaused(),'setup: paused')
+ local mark=#H.chat+1
+ SlashCmdList.NEXUS('auto')
+ local said=H.Chat(mark)
+ assert(not H.Auto(),'Auto turns OFF while paused')
+ assert(said:find('Automation OFF',1,true),'OFF while paused says Automation OFF: '..said)
+ assert(not said:find(REFUSED,1,true),'OFF while paused does not claim a refused ON: '..said)
+ mark=#H.chat+1
+ SlashCmdList.NEXUS('auto')
+ said=H.Chat(mark)
+ assert(not H.Auto(),'an ON attempt while paused stays OFF')
+ assert(said:find(REFUSED,1,true),'the refused ON says why: '..said)
+ H.Advance(2);assert(H.Takes()==0 and H.attempts==0,'no action while paused, attempts='..H.attempts)
+ SlashCmdList.NEXUS('resume')
+ mark=#H.chat+1;SlashCmdList.NEXUS('auto');said=H.Chat(mark)
+ assert(H.Auto() and said:find('Automation ON',1,true) and not said:find(REFUSED,1,true),'unpaused ON control: '..said)
+ mark=#H.chat+1;SlashCmdList.NEXUS('auto');said=H.Chat(mark)
+ assert(not H.Auto() and said:find('Automation OFF',1,true) and not said:find(REFUSED,1,true),'unpaused OFF control: '..said)
+end
+
 
 -- 4. An intent prepared before the pause is superseded, never submitted.
 do

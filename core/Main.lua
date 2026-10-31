@@ -1127,6 +1127,7 @@ EH:RegisterEvent("CHAT_MSG_CHANNEL")
 EH:RegisterEvent("PLAYER_REGEN_DISABLED")
 EH:RegisterEvent("PLAYER_REGEN_ENABLED")
 EH:SetScript("OnEvent", function(_, event, ...)
+    local lifecycle = Lifecycle()
     if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
         local adapter=Adapter or Nexus.GameAdapter
         local observe=adapter and adapter.ObserveChoiceWorldEvent
@@ -1139,11 +1140,18 @@ EH:SetScript("OnEvent", function(_, event, ...)
         if type(observeDestination)=="function" then pcall(observeDestination,nil,event) end
         -- A loading screen inside this session keeps Auto selected and holds
         -- actions; logout or an unclassified entry turns it OFF.
-        if AutomationRuntime and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
+        -- Only an initialized runtime observes the world boundary. Before
+        -- start-up completes (Store admission, DiagnosticLogs.Init) a runtime
+        -- that Help's guide constructed early is treated exactly like the
+        -- absent one: its roll-record boundary would otherwise write
+        -- diagnostics into a saved root the Store has not admitted. The slash
+        -- and panel Auto toggles wait for initialization and the guide never
+        -- changes Auto, so there is no selection to hold or revoke yet.
+        if AutomationRuntime and lifecycle and lifecycle.IsInitialized()
+            and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
             Panel.SetAuto(false)
         end
     end
-    local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnEvent(event, ...) end
 end)
 -- CHAT_MSG_WHISPER is not registered here: no handler reads it (the addon
@@ -1160,8 +1168,12 @@ local function CommandAuto()
         return false
     end
     local runtime = Automation()
+    -- The reply follows the request: only an attempt to turn Auto ON (it
+    -- was OFF before this toggle) can be the one the pause refused.
+    local wasEnabled = runtime and runtime.AutoEnabled() or false
     local enabled = runtime and runtime.ToggleAuto() or false
-    if not enabled and Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+    if not wasEnabled and not enabled
+        and Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
         Say("command.chat.auto_blocked_by_pause")
         if Panel.SetAuto then Panel.SetAuto(enabled) end
         return
@@ -1501,7 +1513,17 @@ local function CommandAnchor(settings, argument)
         settings.anchorSpellId = nil
         Say(sessionOnly and "command.chat.anchor_cleared_session" or "command.chat.anchor_cleared")
     else
-        settings.anchorSpellId = tonumber(argument)
+        -- Only an exact positive integer is a spell ID (the saved-root rule:
+        -- finite, whole, > 0; no upper bound is assumed). Anything else keeps
+        -- the previous preference and says the command's usage.
+        local spell = tonumber(argument)
+        if not (type(spell) == "number" and spell == spell
+            and spell < math.huge and spell == math.floor(spell) and spell > 0) then
+            -- The command syntax is protocol: a code-owned slot.
+            SayFormat("command.chat.usage", {usage="/nexus anchor <spell ID>|off"})
+            return
+        end
+        settings.anchorSpellId = spell
         SayFormat(sessionOnly and "command.chat.anchor_set_session" or "command.chat.anchor_set",
             {spell=tostring(settings.anchorSpellId)})
     end

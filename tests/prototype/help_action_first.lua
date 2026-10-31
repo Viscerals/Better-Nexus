@@ -172,4 +172,82 @@ for _,x in ipairs(H.frames) do if x:GetParent()==NexusHelpWindow and x.kind=='Bu
 startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 8','Start page returns to Getting started')
 for i=1,#ids do check(#NexusHelpWindow.body:GetText()>300,'page '..i..' has its text');Nexus.Help.Show(ids[i]) end
 check(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled==auto,'reading Help sends, acts and changes nothing')
+
+-- 9. /nexus anchor (B-04): only an exact positive integer is set. Any other
+-- argument keeps the previous preference and says the command's usage through
+-- the existing usage line; explicit off and the bare command still clear. No
+-- spell-ID upper bound is assumed. Nothing acts, sends or changes Auto.
+local settings=Nexus.Store.Settings()
+local ANCHOR_USAGE='/nexus anchor <spell ID>|off'
+local usage,usageSource=Nexus.Localization.Format('command.chat.usage',{usage=ANCHOR_USAGE})
+check(usageSource~='unavailable' and has(usage,ANCHOR_USAGE),'the anchor usage resolves through command.chat.usage: '..tostring(usage))
+for _,value in ipairs({'abc','1.5','-1','0','1e309','-1e309','nan','inf'}) do
+ settings.anchorSpellId=200001
+ local mark=#H.chat+1
+ SlashCmdList.NEXUS('anchor '..value)
+ local said=table.concat(H.chat,'\n',mark)
+ check(settings.anchorSpellId==200001,'anchor '..value..' keeps the previous anchor: '..tostring(settings.anchorSpellId))
+ check(has(said,ANCHOR_USAGE) and not has(said,'preference set to'),'anchor '..value..' says the usage, not a new value: '..said)
+end
+settings.anchorSpellId=200001
+local anchorMark=#H.chat+1
+SlashCmdList.NEXUS('anchor 200002')
+check(settings.anchorSpellId==200002 and has(table.concat(H.chat,'\n',anchorMark),'preference set to 200002'),'an exact positive integer is set and reported')
+SlashCmdList.NEXUS('anchor off');check(settings.anchorSpellId==nil,'explicit off clears the anchor')
+settings.anchorSpellId=200001
+SlashCmdList.NEXUS('anchor');check(settings.anchorSpellId==nil,'the bare command still clears the anchor')
+check(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled==auto,'anchor commands act, send and change Auto nothing')
+
+-- 10. Help before start-up completes (B-13). /nexus help, tutorial and guide
+-- still open the guide while the Store has not admitted the saved root, and a
+-- following world boundary writes no diagnostic key (diagnosticMeta,
+-- rollTraceLog or any other) into that root. PLAYER_LOGOUT, already clean
+-- with Auto OFF, stays a control. Fresh real runtimes; ADDON_LOADED starts
+-- the real coordinator and no frame advance completes it.
+local function Fresh()
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ NexusPanel=nil;NexusGuidedSetup=nil;NexusHelpWindow=nil
+ return dofile('tests/prototype/harness.lua'),dofile('tests/prototype/startup_support.lua')
+end
+local function Ready() return Nexus.StartupStatus().coreReady==true end
+local function CountAppends()
+ local counts={all=0,early=0};local append=Nexus.DiagnosticLogs.Append
+ Nexus.DiagnosticLogs.Append=function(...)
+  counts.all=counts.all+1;if not Ready() then counts.early=counts.early+1 end
+  return append(...)
+ end
+ return counts
+end
+for _,command in ipairs({'help','tutorial','guide'}) do
+ for _,event in ipairs({'PLAYER_ENTERING_WORLD','PLAYER_LEAVING_WORLD','PLAYER_LOGOUT'}) do
+  local label=command..'/'..event
+  local P,T=Fresh()
+  NexusDB=T.Profile(0,0);local raw=NexusDB
+  T.Load();P.Fire('ADDON_LOADED','Nexus')
+  check(not Ready(),label..': fixture start-up still pending')
+  local before=P.Clone(raw);local acts,sends=#P.actions,#P.sent
+  local appends=CountAppends()
+  SlashCmdList.NEXUS(command)
+  check(NexusGuidedSetup and NexusGuidedSetup:IsShown(),label..': the guide opens before start-up completes')
+  check(T.Equal(before,raw),label..': the command alone changes no saved key')
+  P.Fire(event)
+  local added={};for k in pairs(raw) do if before[k]==nil then added[#added+1]=k end end;table.sort(added)
+  check(not Ready() and NexusDB==raw,label..': still pending on the same raw root')
+  check(#added==0 and raw.diagnosticMeta==nil and raw.rollTraceLog==nil,label..': no saved key added before readiness: '..table.concat(added,','))
+  check(appends.early==0,label..': no diagnostic append before readiness: '..appends.early)
+  check(T.Equal(before,raw),label..': the raw root is unchanged')
+  check(#P.actions==acts and #P.sent==sends,label..': no action or send')
+ end
+end
+-- Ready control: after start-up the same guide and world boundary still
+-- record the roll-record boundary, never before readiness.
+do
+ local P=Fresh();P.Boot()
+ check(Ready(),'ready control: start-up completed')
+ SlashCmdList.NEXUS('help');check(NexusGuidedSetup and NexusGuidedSetup:IsShown(),'ready control: the guide opens')
+ local appends=CountAppends();local acts=#P.actions
+ P.Fire('PLAYER_ENTERING_WORLD')
+ check(appends.all>0 and appends.early==0,'ready control: the ready world boundary still records: '..appends.all)
+ check(#P.actions==acts,'ready control: no action')
+end
 print('PASS help_action_first checks='..checks)
