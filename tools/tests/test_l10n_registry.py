@@ -28,7 +28,11 @@ the real bytes (a removed last consumer with fakes retained, a broken map
 chain, a wrong method kind, a TOC or source omission, hash drift and path
 collisions) fail the same gate. Review fix 1 adds discarded, overwritten,
 compared and unused-helper results, review fix 2 a dispatcher overwritten
-through a module alias, and review fix 3 the closed two-TOC contract.
+through a module alias, and review fix 3 the closed two-TOC contract. The
+V15 review fixes add trusted globals, string library fields and the global
+environment replaced by any route (C27), format arguments that are never
+shown (C28), definitions an initializer never runs at load (C29) and the
+digest-cache and parse-memo byte bounds (StateBoundTests).
 
 Synthetic offline evidence only: no Lua runs, and this is not fluent, human
 or native evidence. Python 3.9+, standard library only. Registered in
@@ -3206,6 +3210,262 @@ class ConsumerBindingTests(unittest.TestCase):
                 self.assertEqual(sorted(problem.get("key") for problem
                                         in self.problems(receipt, "binding-unbound")),
                                  sorted(unbound))
+
+    def assert_unbound_exactly(self, receipt, unbound):
+        """The gate fails on receipt with exactly these keys left UNBOUND,
+        each with its own binding-unbound problem."""
+        with self.assertRaises(AssertionError):
+            assert_binding_receipt(self, receipt)
+        self.assertEqual(sorted(row["key"] for row in receipt["keys"]
+                                if row["binding"] == "UNBOUND"), sorted(unbound))
+        self.assertEqual(sorted(problem.get("key") for problem
+                                in self.problems(receipt, "binding-unbound")), sorted(unbound))
+
+    def hosted(self, code):
+        """The progress heading's only consumer removed from the real Panel,
+        then code appended to the real core/SessionPause.lua after a proved
+        client label specLabel (the C26 host)."""
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        host = "core/SessionPause.lua"
+        return with_file(bare, host, self.files[host] + V15_LABEL + code + b'\n')
+
+    def per_site(self, cases):
+        """One receipt for cases of the progress heading that act only on
+        their own site (no global write): each case's code on its own line
+        in its own do block, then each judged by its own site. A case that
+        binds has its site among the proved sites, with an output; one that
+        does not has it among the unproven sites only."""
+        host = "core/SessionPause.lua"
+        first = (self.files[host] + V15_LABEL).count(b"\n") + 1
+        code = b"\n".join(b"do " + case + b" end" for _, case, _ in cases)
+        row = self.binding(self.receipt(self.hosted(code)), "panel.heading.progress")
+        proved = {site["line"] for site in row["sites"] if site["outputs"]}
+        unproven = {site["line"] for site in row["unprovenSites"]}
+        for line, (name, _, binds) in enumerate(cases, first):
+            with self.subTest(case=name):
+                self.assertEqual((line in proved, line in unproven), (binds, not binds))
+        return row
+
+    def test_c27_environment_and_library_writes_refuse_trusted_globals(self):
+        # V15 review fix (SPEC P1 _G.pairs and _G.setmetatable, STD-V15-2):
+        # a trusted global or string library function replaced through _G, a
+        # library field, a static or computed key, an alias, rawset or the
+        # string metatable is no longer trusted, whatever the order of the
+        # write and the use; a reference that may write any global is a
+        # global-environment mutation problem. Reads, tests and other
+        # globals leave each proof in place.
+        progress = "panel.heading.progress"
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        upper = b'specLabel:SetText(string.upper(' + text + b'))'
+        method = b'specLabel:SetText(' + text + b':upper())'
+        fixed = b'function(_) return "fixed" end '
+        hosted = (
+            # (name, code after the label, keys left UNBOUND)
+            # The Spec witnesses' replacements (made in core/UserText.lua
+            # there; a global is one for every loaded file): the dispatcher's
+            # pairs-iterated guard, and the metatable statement of its module
+            # and of ui/Readout.lua's (the charge row's chain).
+            ("pairs replaced through _G", method + b' _G.pairs = function(t) '
+             b't.STORE_PENDING = "shadowed" return next, t, nil end', MAPPED_KEYS),
+            ("setmetatable replaced through _G", method + b' _G.setmetatable = function(t, meta) '
+             b't.Message = function(value) return "constant" end return t end',
+             (CHARGE,) + MAPPED_KEYS),
+            ("string.upper replaced, library call", b'string.upper = ' + fixed + upper,
+             (progress,)),
+            ("string.upper replaced, method call", b'string.upper = ' + fixed + method,
+             (progress,)),
+            ("replaced after the use", method + b' string.upper = ' + fixed, (progress,)),
+            ("replaced through _G.string", b'_G.string.upper = ' + fixed + method, (progress,)),
+            ("replaced under a static key", b'string["up" .. "per"] = ' + fixed + upper,
+             (progress,)),
+            ("replaced through a local alias",
+             b'local s = string; s.upper = ' + fixed + upper, (progress,)),
+            ("replaced under a computed key",
+             b'for k in pairs({}) do string[k] = nil end ' + method, (progress,)),
+            ("replaced by rawset", b'rawset(string, "upper", ' + fixed[:-1] + b') ' + upper,
+             (progress,)),
+            ("the string metatable reached", b'getmetatable("").__index.upper = ' + fixed + method,
+             (progress,)),
+            ("__tostring through the string metatable",
+             b'getmetatable("").__tostring = ' + fixed + b'specLabel:SetText(tostring('
+             + text + b'))', (progress,)),
+            ("tostring replaced through _G", b'_G.tostring = ' + fixed
+             + b'specLabel:SetText(tostring(' + text + b'))', (progress,)),
+            ("format replaced, method call", b'string.format = ' + fixed
+             + b'specLabel:SetText(("%s"):format(' + text + b'))', (progress,)),
+        )
+        for name, code, unbound in hosted:
+            with self.subTest(case=name):
+                self.assert_unbound_exactly(self.receipt(self.hosted(code)), unbound)
+        # Reads, tests, comparisons and other globals keep every proof: one
+        # receipt (they write no trusted global), each site judged alone.
+        self.per_site((
+            ("a library field read", upper + b' local up = string.upper', True),
+            ("a tested getmetatable result",
+             b'if getmetatable(specLabel) == nil then end ' + method, True),
+            ("_G and debug only tested", b'if _G and type(debug) == "table" and _G.UIParent '
+             b'then end ' + method, True),
+            ("another global written through _G",
+             b'_G.NexusSpecValue = 1 local f = _G["GameFont" .. "Normal"] ' + method, True)))
+        # A reference that may write any global: no global stays trusted,
+        # so no output is proved, and the reference is a mutation problem.
+        for name, code in (("_G aliased", b'local G = _G; G.pairs = pairs'),
+                           ("a computed _G write", b'for k in pairs({}) do _G[k] = nil end'),
+                           ("_G passed to rawset", b'rawset(_G, "pairs", pairs)'),
+                           ("an environment function", b'setfenv(1, {})')):
+            with self.subTest(case=name):
+                receipt = self.receipt(self.hosted(method + b' ' + code))
+                self.assertEqual([(problem["path"], problem["construct"]) for problem
+                                  in self.problems(receipt, "binding-mutation")],
+                                 [("core/SessionPause.lua", "global-environment")])
+                self.assertEqual([row["binding"] for row in receipt["keys"]],
+                                 ["UNBOUND"] * len(CURRENT_KEYS))
+
+    def test_c28_format_arguments_bind_only_when_shown(self):
+        # V15 review fix (STD-V15-1): a format argument flows to its result
+        # only when a static Lua 5.1 format shows it with %s; an ignored,
+        # non-text, empty-precision, missing or unknown position never does,
+        # in either call form. gsub and sub can discard the whole text, so
+        # they are no transforms at all.
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        shown = lambda call: b'specLabel:SetText(' + call + b')'
+        # Each case acts only on its own site, so one receipt judges them
+        # all, site by site (per_site).
+        self.per_site((
+            ("%s", shown(b'string.format("%s", ' + text + b')'), True),
+            ("method %s", shown(b'("[%s]"):format(' + text + b')'), True),
+            ("a later %s", shown(b'string.format("%d: %-5s", 1, ' + text + b')'), True),
+            ("a static local format",
+             b'local fmt = "<" .. "%s>" ' + shown(b'string.format(fmt, ' + text + b')'), True),
+            # A call as the last argument passes all its results: Text's
+            # second result fills the second %s, so nothing is missing.
+            ("an open-ended last argument", shown(b'string.format("%s %s", ' + text + b')'), True),
+            ("no conversion", shown(b'string.format("fixed", ' + text + b')'), False),
+            ("method, no conversion", shown(b'("fixed"):format(' + text + b')'), False),
+            ("an unused position", shown(b'string.format("%s", "x", ' + text + b')'), False),
+            ("a non-text conversion", shown(b'string.format("%d", ' + text + b')'), False),
+            ("an empty precision", shown(b'string.format("%.0s", ' + text + b')'), False),
+            ("an escaped percent", shown(b'string.format("%%s", ' + text + b')'), False),
+            ("a missing argument raises",
+             shown(b'string.format("%s %s %s", ' + text + b', 1)'), False),
+            ("an invalid option raises", shown(b'string.format("%y %s", ' + text + b')'), False),
+            ("an unknown format", b'local fmt = specLabel.fmt '
+             + shown(b'string.format(fmt, ' + text + b')'), False),
+            ("sub", shown(b'string.sub(' + text + b', 2, 1)'), False),
+            ("gsub", shown(b'string.gsub(' + text + b', ".*", "fixed")'), False),
+            ("method sub", shown(text + b':sub(1)'), False)))
+        # Without its proved forms the key is unbound, as the gate requires.
+        refused = b"\n".join((shown(b'string.format("fixed", ' + text + b')'),
+                               shown(b'string.gsub(' + text + b', ".*", "fixed")')))
+        self.assert_unbound_exactly(self.receipt(self.hosted(refused)),
+                                    ("panel.heading.progress",))
+
+    def test_c29_only_load_time_definitions_define_a_module_function(self):
+        # V15 review fix (SPEC P1 unused initializer): a module function or a
+        # Nexus export counts only when its file chunk, or an initializer it
+        # calls as a statement, runs it at load; an unused or conditional
+        # initializer defines nothing, and chunk code before the definition
+        # never reaches it. First the real export of ui/Readout.lua, which
+        # the charge row's chain (Nexus.Readout.ChargesLine) needs:
+        readout = self.files[READOUT]
+        export = b"local M = {}\nNexus.Readout = M"
+        self.assertEqual(readout.replace(b"\r\n", b"\n").count(export), 1)
+        initializer = b"local M = {}\nlocal function Export() Nexus.Readout = M end"
+        receipt = self.receipt(with_file(self.files, READOUT, edit(readout, export, initializer)))
+        self.assert_unbound_exactly(receipt, (CHARGE,))
+        assert_binding_receipt(self, self.receipt(with_file(
+            self.files, READOUT, edit(readout, export, initializer + b" Export()"))))
+        # The Spec toy: core/UserText.lua replaced by a module whose
+        # dispatcher only an initializer defines, with a constant lazy field.
+        key = "reason.saved_data_reading"
+        undefined = ["T.Message is not defined when its file loads: its definition is not run "
+                     "by the file chunk or an initializer it calls"]
+        toy = lambda install: TOY_USER_TEXT.replace(b"INSTALL_MARKER", install)
+        late = toy(b"").replace(TOY_SHOW, b"").replace(b"setmetatable(T",
+                                                       TOY_SHOW + b"Install()\nsetmetatable(T")
+        outputs = lambda row: {(output["path"], output["output"])
+                               for site in row["sites"] for output in site["outputs"]}
+        chunk_output, later_output = (USER_TEXT, "AddMessage"), ("core/Main.lua", "AddMessage")
+        for name, source, problems in (
+                ("installed", toy(b"Install()"), None),
+                # Defined in time for the real later call (core/Main.lua, in
+                # a function), not for the toy's chunk code that runs first.
+                ("shown by the chunk before it is installed", late, None),
+                ("never installed", toy(b"-- Install is never called"), undefined),
+                ("installed only conditionally", toy(b"if Nexus.Ready then Install() end"),
+                 undefined)):
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(self.files, USER_TEXT, source))
+                row = self.binding(receipt, key)
+                if problems is None:
+                    self.assertEqual(row["binding"], "MAPPED_TO_CONSUMER")
+                    self.assertTrue(row["sites"])
+                    self.assertTrue(all(site["outputs"] for site in row["sites"]))
+                    self.assertIn(later_output, outputs(row))
+                    self.assertEqual(chunk_output in outputs(row), source is not late)
+                    continue
+                self.assertEqual((row["binding"], row["sites"]), ("UNBOUND", []))
+                self.assertEqual([problem["detail"] for problem
+                                  in self.problems(receipt, "binding-unresolved")], problems)
+
+
+# The V15 host label (C26 to C29) and the Spec toy module (C29): the toy
+# differs between its cases only by INSTALL_MARKER.
+V15_LABEL = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+TOY_SHOW = b'DEFAULT_CHAT_FRAME:AddMessage(Nexus.UserText.Message("STORE_PENDING"))\n'
+TOY_USER_TEXT = b'''Nexus = Nexus or {}
+local T = {}
+Nexus.UserText = T
+local keys = {["STORE_PENDING"] = "reason.saved_data_reading"}
+local function LocalizedReason(key, code)
+    local localization = Nexus.Localization
+    return localization.Text(key)
+end
+local function Install()
+    function T.Message(value)
+        local s = tostring(value or "")
+        if keys[s] then return LocalizedReason(keys[s], s) end
+        return s
+    end
+end
+INSTALL_MARKER
+setmetatable(T, {__index = function(_, name)
+    if name == "Message" then
+        return function(value) return "constant" end
+    end
+end})
+''' + TOY_SHOW
+
+
+class StateBoundTests(unittest.TestCase):
+    """STD-V15-3: an input larger than the digest cache or the parse memo
+    byte bound is processed with the same result but never kept, and evicts
+    nothing kept before it. A fresh tool, so no other test's memo moves."""
+
+    def test_oversized_inputs_are_never_retained(self):
+        catalog = load_catalog()
+        small = b"Nexus = Nexus or {}\nNexus.LocalizationEnglish = {}\n"
+        self.assertEqual(catalog.parse_english(small), {})
+        kept = dict(catalog._DIGESTS)
+        oversized = b"\xff" + b" " * catalog._DIGESTS_BYTES
+        with self.assertRaises(catalog.CatalogSyntaxError) as raised:
+            catalog.parse_english(oversized)
+        self.assertEqual(raised.exception.code, "not-utf8")
+        self.assertEqual(catalog._digest(oversized),
+                         hashlib.sha256(oversized).digest())
+        self.assertEqual(catalog._DIGESTS, kept)
+        self.assertLessEqual(sum(map(len, catalog._DIGESTS)), catalog._DIGESTS_BYTES)
+        # The parse memo: the same refusal result, not kept; the file kept
+        # before it stays.
+        lua = b"local x = 1\n"
+        first = catalog._parsed(lua)
+        memo = dict(catalog._PARSE_MEMO)
+        big = b"\xff" + b" " * catalog._PARSE_MEMO_BYTES
+        self.assertEqual(catalog._parsed(big)[1], {"code": "not-utf8"})
+        self.assertEqual(catalog._PARSE_MEMO, memo)
+        self.assertLessEqual(sum(catalog._PARSE_MEMO_SIZES.values()), catalog._PARSE_MEMO_BYTES)
+        self.assertIs(catalog._parsed(lua), first)
 
 
 class ConsumerCommandLineTests(unittest.TestCase):

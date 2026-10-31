@@ -546,10 +546,14 @@ _DIGESTS_BYTES = 64 * 1024 * 1024
 def _digest(data):
     """The SHA-256 digest of exact bytes, cached by their value (a dict key
     compares the bytes themselves, never an object identity), least recently
-    used out first within _DIGESTS_LIMIT entries and _DIGESTS_BYTES bytes."""
+    used out first within _DIGESTS_LIMIT entries and _DIGESTS_BYTES bytes. An
+    input larger than _DIGESTS_BYTES alone is hashed and never kept, and
+    evicts nothing (STD-V15-3)."""
     digest = _DIGESTS.pop(data, None)
     if digest is None:
         digest = hashlib.sha256(data).digest()
+        if len(data) > _DIGESTS_BYTES:
+            return digest
         while _DIGESTS and (len(_DIGESTS) >= _DIGESTS_LIMIT
                             or sum(map(len, _DIGESTS)) + len(data) > _DIGESTS_BYTES):
             del _DIGESTS[next(iter(_DIGESTS))]
@@ -3058,6 +3062,18 @@ _CONSUMER_LIMITS = (
     'one file; values in globals, computed-key writes, method calls and calls deeper than '
     '8 frames are not followed; and an output outside the loaded source (such as the stock '
     'dropdown menu) or on a receiver not proved to be a client object is not an output',
+    'trusted globals (sinks, client roots, pairs, setmetatable and the string transforms) are '
+    'trusted only while no loaded source assigns them, by name or through _G, writes the '
+    'string library field used, or reaches the string metatable through a getmetatable result '
+    'that leaves a test or comparison; _G as a value, a computed _G write or an environment '
+    'function (getfenv, setfenv, debug other than debug.traceback, code loading) is a '
+    'global-environment mutation problem; a computed _G[k] read whose key is not static is '
+    'assumed to name none of these',
+    'format follows only the arguments a static Lua 5.1 format shows with %s; gsub and sub are '
+    'not followed',
+    'a module function or export counts only when the file chunk, or an initializer it calls '
+    'as a statement, runs it at load; a call in chunk code before that point never reaches it, '
+    'and a call inside a function is assumed to run after the files have loaded',
     'Lua 5.1 lexical and grammar rules; LuaJIT and Lua 5.2 additions are refused',
 )
 _CONSUMER_INPUT_BINDING = ('exact bytes read once from the resolved root for the registry inputs, '
@@ -3765,26 +3781,31 @@ class _Resolver:
                 self.expr(child, scopes)
 
 
-def _path(node, loose=False, depth=0):
+def _path(node, loose=False, depth=0, env=False):
     """The dotted Nexus path an expression names ('Nexus',
     'Nexus.Localization', ...) through the global Nexus, literal fields and
     local aliases, else None. An alias that is assigned again names no path;
     loose=True ignores that, to tell a broken alias of a path apart from an
-    unrelated name."""
+    unrelated name. env=True also reads _G.Nexus as Nexus, for assignment
+    targets only (a mutation is never hidden behind _G; no consumer is
+    accepted through it)."""
     if depth > 64:
         return None
     kind = node.kind
     if kind == 'paren':
-        return _path(node.expr, loose, depth + 1)
+        return _path(node.expr, loose, depth + 1, env)
     if kind == 'name':
         binding = node.binding
         if binding is None:
             return 'Nexus' if node.value == 'Nexus' else None
         if binding.kind != 'local' or binding.value is None or (binding.assigned and not loose):
             return None
-        return _path(binding.value, loose, depth + 1)
+        return _path(binding.value, loose, depth + 1, env)
     if kind == 'index':
-        base = _path(node.obj, loose, depth + 1)
+        if env and node.key.kind == 'string' and node.key.value == 'Nexus' \
+                and _global_ref(node.obj) == _ENV:
+            return 'Nexus'
+        base = _path(node.obj, loose, depth + 1, env)
         if base is not None and node.key.kind == 'string' and node.key.value is not None:
             return base + '.' + node.key.value
     return None
@@ -3940,7 +3961,7 @@ class _UnitScan:
             if target.obj.kind != 'name':
                 self.expr(target.obj, ctx)
             self.expr(target.key, ctx)
-        path = _path(target)
+        path = _path(target, env=True)
         if path is None:
             return
         self.path_assignments.setdefault(path, []).append((target, value))
@@ -4139,17 +4160,48 @@ _STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callst
 _SINK_METHODS = frozenset(('SetText', 'AddLine', 'AddMessage'))
 _SINK_FUNCTIONS = frozenset(('print',))
 # Text-preserving transforms (Source25 continuation): the result of each is a
-# string made from the text it is given, so a localization result followed
-# into one is followed out of it. A string method called on a followed value
-# (a string, so the string library method): its receiver flows to the
-# result, and for format its arguments too. A call of a standard global
-# library function: the argument positions listed flow to the result; the
-# linker drops these edges when the loaded source assigns that global.
-_TEXT_METHODS = frozenset(('gsub', 'sub', 'upper', 'lower', 'format'))
+# string made from the whole text it is given, so a localization result
+# followed into one is followed out of it. A string method called on a
+# followed value (a string, so the string library method through the string
+# metatable): its receiver flows to the result. A call of a standard global
+# library function: the argument positions listed flow to the result. For
+# format (either form) the format itself flows, and a later argument only
+# when a static Lua 5.1 format consumes it with a %s conversion
+# (_format_consumed, STD-V15-1); an ignored, non-text or unknown argument
+# position never does. gsub and sub are not transforms: a pattern or range
+# can discard the whole text (a constant or empty result). The linker drops
+# every such edge while the trusted implementation is not established
+# (_Linker.trusted, STD-V15-2): the loaded source may write that global, a
+# field of the string library or the global environment, or may reach the
+# string metatable.
+_TEXT_METHODS = frozenset(('upper', 'lower', 'format'))
 _TEXT_CALLS = types.MappingProxyType({
-    'tostring': (0,), 'string.gsub': (0,), 'string.sub': (0,), 'string.upper': (0,),
-    'string.lower': (0,), 'string.format': None})
+    'tostring': (0,), 'string.upper': (0,), 'string.lower': (0,), 'string.format': (0,)})
+_FORMAT_CONVERSION = re.compile('%([-+ #0]*)([0-9]{0,2})(?:[.]([0-9]{0,2}))?(.)', re.S)
+_FORMAT_OPTIONS = frozenset('cdiouxXeEfgGqs')
+# The global environment table and the library table whose fields the
+# transforms trust, and the globals through which the loaded source can
+# reach every global (an environment function, the debug library or code
+# loading): a reference to one of those opens the environment (V15 review
+# fix, SPEC P1 _G.pairs and _G.setmetatable).
+_ENV = '_G'
+_STRING = 'string'
+_ENV_OPENERS = frozenset(('getfenv', 'setfenv', 'debug', 'loadstring', 'load', 'loadfile',
+                          'dofile', 'RunScript'))
+# The debug library fields whose read does not open the environment.
+_DEBUG_READS = frozenset(('traceback',))
 _COMPARISON = frozenset(('==', '~=', '<', '<=', '>', '>='))
+
+
+class _AnyName:
+    """The global names the loaded source may write once the global
+    environment is open: every name."""
+
+    def __contains__(self, name):
+        return True
+
+
+_ANY_NAME = _AnyName()
 _OPAQUE = None
 
 
@@ -4212,6 +4264,34 @@ def _flowing_operands(node):
     return flowing
 
 
+_LOOPS = frozenset(('while', 'repeat', 'fornum', 'forin'))
+
+
+def _straight(body):
+    """(the statements of body that run whenever body runs to its end, True
+    when body can only end by running past its last statement): in order,
+    entering do blocks, up to the first statement that can return (or, an
+    if, break). A compound statement itself is kept out: its body is
+    conditional, so nothing in it is established."""
+    out = []
+    for stmt in body:
+        if stmt.kind == 'do':
+            inner, complete = _straight(stmt.body)
+            out.extend(inner)
+            if not complete:
+                return out, False
+            continue
+        if stmt.kind in ('return', 'break'):
+            return out, False
+        if stmt.kind == 'if' or stmt.kind in _LOOPS:
+            leaving = ('return',) if stmt.kind in _LOOPS else ('return', 'break')
+            if any(node.kind in leaving for node in _descendants([stmt])):
+                return out, False
+            continue
+        out.append(stmt)
+    return out, True
+
+
 def _library_name(callee):
     """'name' for a global name callee, 'table.name' for a literal field of a
     global table name, else None (locals and other expressions)."""
@@ -4221,6 +4301,73 @@ def _library_name(callee):
             and callee.key.kind == 'string' and callee.key.value is not None:
         return callee.obj.value + '.' + callee.key.value
     return None
+
+
+def _static_string(node, depth=0):
+    """The string an expression always evaluates to, else None: a literal,
+    a concatenation of such strings, or an unassigned local declared with
+    one, through parentheses."""
+    while node.kind == 'paren':
+        node = node.expr
+    if depth > 16:
+        return None
+    if node.kind == 'string':
+        return node.value
+    if node.kind == 'operation' and node.ops and all(op == '..' for op in node.ops):
+        parts = [_static_string(operand, depth + 1) for operand in node.operands]
+        return None if None in parts else ''.join(parts)
+    binding = node.binding if node.kind == 'name' else None
+    if binding is not None and binding.kind == 'local' and binding.value is not None \
+            and not binding.assigned:
+        return _static_string(binding.value, depth + 1)
+    return None
+
+
+def _global_ref(node, depth=0):
+    """The global a node names: a global name, or a field _G[key] with a
+    static key (_static_string, as _G.name or _G["na" .. "me"]) of a global
+    name it names, through parentheses, else None."""
+    while node.kind == 'paren':
+        node = node.expr
+    if node.kind == 'name':
+        return node.value if node.binding is None else None
+    if node.kind == 'index' and depth < 16 and _global_ref(node.obj, depth + 1) == _ENV:
+        return _static_string(node.key)
+    return None
+
+
+def _format_consumed(fmt, count, open_ended):
+    """The 1-based positions of the arguments after the format that a
+    static (_static_string) Lua 5.1 format string shows as text (a %s
+    conversion, with no precision or a precision of at least 1), or None
+    when the format is not static, is refused by Lua 5.1 (lstrlib.c str_format: an unknown
+    option, repeated flags, a width or precision above two digits) or needs
+    more arguments than the count given (the call raises) unless the last
+    argument is open-ended (a call or ...)."""
+    text = _static_string(fmt)
+    if text is None:
+        return None
+    index, position, consumed = 0, 0, set()
+    while True:
+        index = text.find('%', index)
+        if index < 0:
+            break
+        if text.startswith('%%', index):
+            index += 2
+            continue
+        match = _FORMAT_CONVERSION.match(text, index)
+        if match is None or match.group(4) not in _FORMAT_OPTIONS:
+            return None
+        flags, width, precision, option = match.groups()
+        if len(flags) > 5:          # sizeof(FLAGS) - 1: "invalid format (repeated flags)"
+            return None
+        position += 1
+        if option == 's' and (precision is None or (precision != '' and int(precision) > 0)):
+            consumed.add(position)
+        index = match.end()
+    if position > count and not open_ended:
+        return None
+    return consumed
 
 
 def _metatable_hook(call):
@@ -4319,20 +4466,78 @@ class _UnitFlow:
         # (metatable_hook); the linker also requires the global setmetatable
         # to stay unassigned in the loaded source.
         self.metatable_args = set()
-        # (global name, argument, call) of each _TEXT_CALLS edge.
+        # (implementation, source, transform) of each transform edge: a
+        # _TEXT_CALLS name ('tostring', 'string.upper', ...) or ':' and the
+        # string method name for a method transform (STD-V15-2).
         self.library_edges = []
+        # The global environment and the string library (V15 review fix):
+        # global names written through _G as well as by name (global_writes),
+        # string library fields written ('string.upper', or '*' for any
+        # field: a computed key or a reference to the table that escapes),
+        # every reference that may write any global (env_escapes), and every
+        # getmetatable call whose result may leave a truth test or comparison
+        # (metatable_escapes: it may be the shared string metatable).
+        self.library_writes, self.env_escapes, self.metatable_escapes = set(), [], []
+        self.truth_only, self.getmetatable_calls = set(), []
+        self.type_args, self.type_escapes = set(), []
+        # Load-time establishment (V15 review fix, SPEC P1 unused initializer):
+        # {call: top-level statement index} of the calls in chunk code
+        # outside any function, the statement of each defining value and
+        # assignment target (build only), and the index being walked.
+        self.chunk_calls, self.def_statement, self.top = {}, {}, None
+        self.target_statement = {}
         self.declared = set()   # values given by local declarations (not later assignments)
         self.object_memo = {}
         self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
-        self.block(body, None)
+        for index, stmt in enumerate(body):
+            self.top = index
+            self.statement(stmt, None)
         self.flow_sensitive(body)
+        established = self.load_established(body)
+        self.metatable_contained()
         self.module_funcs = {}
         for module, fields in self.module_defs.items():
             for name, values in fields.items():
                 value = values[0] if len(values) == 1 else None
+                stmt = self.def_statement.get(value) if value is not None else None
                 self.module_funcs[(module, name)] = (
                     value if value is not None and value.kind == 'function' else None,
-                    len(values))
+                    len(values), established.get(stmt))
+        # Only what linking reads is kept with the memoized flow: the load
+        # point (or None) of each Nexus path assignment target, and the
+        # chunk position of each module or path call.
+        self.path_points = {target: established.get(stmt)
+                            for target, stmt in self.target_statement.items()
+                            if _path(target, env=True) is not None}
+        calls = {call for _, _, call in self.module_calls}
+        calls.update(call for rows in self.path_calls.values() for call in rows)
+        self.chunk_calls = {call: top for call, top in self.chunk_calls.items() if call in calls}
+        del self.truth_only, self.type_args, self.getmetatable_calls, self.def_statement
+        del self.target_statement
+
+    def load_established(self, body):
+        """{statement: top-level statement index} of the statements that
+        run whenever the file chunk loads to its end (_straight): those of
+        the chunk, and those of the body of an unassigned local function that
+        such a statement calls as a statement, keyed by the index of the
+        top-level statement that runs them. A definition anywhere else, such
+        as in an initializer nothing calls at load, is not established."""
+        established, invoked = {}, set()
+
+        def visit(statements, top):
+            for stmt in statements:
+                established[stmt] = top
+                if stmt.kind == 'callstat' and stmt.call.kind == 'call':
+                    target = _local_function(stmt.call.func)
+                    if target is not None and target not in invoked:
+                        invoked.add(target)
+                        visit(_straight(target.body)[0], top)
+        for index, stmt in enumerate(body):
+            statements, complete = _straight([stmt])
+            visit(statements, index)
+            if not complete:
+                break
+        return established
 
     def edge(self, source, target):
         self.edges.setdefault(source, []).append(target)
@@ -4489,7 +4694,9 @@ class _UnitFlow:
         elif kind == 'funcstat' and stmt.method is not None:
             # function base:name() writes the field name of base.
             self.function(stmt.func)
-            self.expr(stmt.target, func)
+            self.library_write(stmt.target, stmt.method)
+            self.base(stmt.target, func)
+            self.def_statement[stmt.func] = stmt
             base = stmt.target.binding if stmt.target.kind == 'name' else None
             self.write_field(stmt.method, stmt.func, base)
             if base is not None:
@@ -4505,8 +4712,12 @@ class _UnitFlow:
                     self.expr(expr, func)
             for index, target in enumerate(targets):
                 value = values[index] if index < len(values) else _OPAQUE
+                if value is not _OPAQUE:
+                    self.def_statement[value] = stmt
+                self.target_statement[target] = stmt
                 self.target(target, value, func)
         elif kind == 'callstat':
+            self.truth_only.add(stmt.call)      # its results are discarded
             self.expr(stmt.call, func)
             hooked = _metatable_hook(stmt.call)
             if hooked is not None:
@@ -4527,11 +4738,79 @@ class _UnitFlow:
                 self.define(name.binding, _OPAQUE)
             self.block(stmt.body, func)
         elif kind in ('do', 'while', 'repeat', 'if'):
+            # A condition is only tested: its value never leaves.
+            if kind == 'if':
+                self.truth_only.update(cond for cond, _ in stmt.clauses)
+            elif kind != 'do':
+                self.truth_only.add(stmt.cond)
             for child in _children(stmt):
                 if child.kind not in _STATEMENTS:
                     self.expr(child, func)
             for body in _bodies(stmt):
                 self.block(body, func)
+
+    # -- the global environment and the string library (V15 review fix) -----
+
+    def global_value(self, node, name):
+        """A global (by name or as _G.name) read as a value: the environment
+        table or an environment opener opens the environment, and the string
+        library table itself escapes (any field may be written through it).
+        Only tested or compared (truth_only, as in _G and _G.X), it never
+        leaves; given only to type() (as in type(debug)), it leaves only to
+        type, so it escapes only when the loaded source assigns type
+        (type_escapes, decided by the linker)."""
+        if node in self.truth_only:
+            return
+        if node in self.type_args:
+            if name == _ENV or name in _ENV_OPENERS or name == _STRING:
+                self.type_escapes.append(node)
+            return
+        if name == _ENV or name in _ENV_OPENERS:
+            self.env_escapes.append(node)
+        elif name == _STRING:
+            self.library_writes.add('*')
+
+    def base(self, node, func, target=False):
+        """The table expression of a field read or write: a field of the
+        environment or the string library is no escape of that table. A
+        write target's local name is no read (as before)."""
+        ref = _global_ref(node)
+        if ref == _ENV or ref == _STRING:
+            return
+        if target and node.kind == 'name':
+            if node.binding is None:
+                self.global_value(node, node.value)
+            return
+        self.expr(node, func)
+
+    def library_write(self, table, key):
+        """A write of field key (None: a computed key) of table: through _G
+        it writes that global (a computed key may write any global), on the
+        string library that library field."""
+        ref = _global_ref(table)
+        if ref == _ENV:
+            if key is None:
+                self.env_escapes.append(table)
+            else:
+                self.global_writes.add(key)
+        elif ref == _STRING:
+            self.library_writes.add('*' if key is None else key)
+
+    def metatable_contained(self):
+        """Record each getmetatable call whose result may leave: neither
+        only tested or compared (truth_only) nor held by an unassigned local
+        that is itself only tested or compared."""
+        for call in self.getmetatable_calls:
+            if call in self.truth_only:
+                continue
+            holders = self.def_of.get(call, ())
+            if len(holders) == 1 and type(holders[0]) is _Binding \
+                    and holders[0].kind == 'local' and not holders[0].assigned \
+                    and len(self.defs.get(holders[0], ())) == 1 \
+                    and all(use == 'value' and node in self.truth_only
+                            for use, node in holders[0].uses):
+                continue
+            self.metatable_escapes.append(call)
 
     def target(self, target, value, func):
         if target.kind == 'name':
@@ -4542,8 +4821,8 @@ class _UnitFlow:
                 if _path(target) is not None and value is not _OPAQUE and value.kind == 'name':
                     self.export_values.add(value)
             return
-        if target.obj.kind != 'name':
-            self.expr(target.obj, func)
+        self.library_write(target.obj, _static_string(target.key))
+        self.base(target.obj, func, target=True)
         self.expr(target.key, func)
         base = target.obj.binding if target.obj.kind == 'name' else None
         if target.key.kind != 'string' or target.key.value is None:
@@ -4570,19 +4849,37 @@ class _UnitFlow:
         if kind == 'name':
             if node.binding is not None:
                 self.edge(node.binding, node)
+            else:
+                self.global_value(node, node.value)
         elif kind == 'index':
-            self.expr(node.obj, func)
+            # A read of debug.traceback leaves the debug library unopened. A
+            # computed _G[k] read whose key is not static is assumed to name
+            # neither the environment, the string library nor an opener (a
+            # documented limit); every write through _G stays tracked.
+            if not (_global_ref(node.obj) == 'debug'
+                    and _static_string(node.key) in _DEBUG_READS):
+                self.base(node.obj, func)
             self.expr(node.key, func)
+            ref = _global_ref(node)
+            if ref is not None:
+                self.global_value(node, ref)
             if node.key.kind == 'string' and node.key.value is not None:
                 base = node.obj.binding if node.obj.kind == 'name' else None
                 self.field_reads.setdefault(node.key.value, []).append((node, base))
         elif kind == 'paren':
+            if node in self.truth_only:
+                self.truth_only.add(node.expr)
             self.expr(node.expr, func)
             self.edge(node.expr, node)
         elif kind == 'operation':
+            flowing = _flowing_operands(node)
+            tested = node in self.truth_only
+            kept = {id(operand) for operand in flowing}
+            self.truth_only.update(operand for operand in node.operands
+                                   if tested or id(operand) not in kept)
             for operand in node.operands:
                 self.expr(operand, func)
-            for operand in _flowing_operands(node):
+            for operand in flowing:
                 self.edge(operand, node)
         elif kind == 'call':
             self.call(node, func)
@@ -4594,10 +4891,9 @@ class _UnitFlow:
                 self.edge(node.args[0], ('sink', node))
                 self.sinks[node] = node.obj
             if node.name in _TEXT_METHODS:
-                self.edge(node.obj, node)
+                self.transform(':' + node.name, node.obj, node)
                 if node.name == 'format':
-                    for arg in node.args:
-                        self.edge(arg, node)
+                    self.format_arguments(':format', node.obj, node.args, node)
         elif kind == 'function':
             self.function(node)
         elif kind == 'table':
@@ -4610,6 +4906,20 @@ class _UnitFlow:
                         and field.key.value is not None:
                     self.write_field(field.key.value, field.value, node)
 
+    def transform(self, implementation, source, node):
+        self.edge(source, node)
+        self.library_edges.append((implementation, source, node))
+
+    def format_arguments(self, implementation, fmt, args, node):
+        """The edges of the arguments after a format that it shows as text
+        (_format_consumed); none when that is not proved (STD-V15-1)."""
+        open_ended = bool(args) and (args[-1].kind in ('call', 'method') or (
+            args[-1].kind == 'constant' and args[-1].value == '...'))
+        consumed = _format_consumed(fmt, len(args), open_ended)
+        for position, arg in enumerate(args, 1):
+            if consumed is not None and position in consumed:
+                self.transform(implementation, arg, node)
+
     def pass_args(self, target, args, call):
         """Arguments of one call of a local function, by parameter position;
         the linker returns a value that entered here only to this call."""
@@ -4620,19 +4930,26 @@ class _UnitFlow:
     def call(self, node, func):
         callee, args = node.func, node.args
         self.expr(callee, func)
+        if callee.kind == 'name' and callee.binding is None and callee.value == 'type' \
+                and len(args) == 1:
+            self.type_args.add(args[0])
         for arg in args:
             self.expr(arg, func)
+        if func is None:
+            self.chunk_calls[node] = self.top
+        if callee.kind == 'name' and callee.binding is None and callee.value == 'getmetatable':
+            self.getmetatable_calls.append(node)
         if callee.kind == 'name' and callee.binding is None and callee.value in _SINK_FUNCTIONS:
             for arg in args:
                 self.edge(arg, ('sink', node))
             self.sinks[node] = None
         library = _library_name(callee)
         if library in _TEXT_CALLS:
-            positions = _TEXT_CALLS[library]
-            for position, arg in enumerate(args):
-                if positions is None or position in positions:
-                    self.edge(arg, node)
-                    self.library_edges.append((library.split('.')[0], arg, node))
+            for position in _TEXT_CALLS[library]:
+                if position < len(args):
+                    self.transform(library, args[position], node)
+            if library == 'string.format' and args:
+                self.format_arguments(library, args[0], args[1:], node)
         target = _local_function(callee)
         if target is not None:
             self.edge(('ret', target), node)
@@ -4915,6 +5232,8 @@ def _parsed(data, fresh=False):
             gc.enable()
     if digest in _PARSE_MEMO:     # a fresh parse of the same bytes replaces it
         del _PARSE_MEMO[digest], _PARSE_MEMO_SIZES[digest]
+    if len(data) > _PARSE_MEMO_BYTES:
+        return result               # larger than the whole bound: never kept (STD-V15-3)
     while _PARSE_MEMO and (len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT
                            or sum(_PARSE_MEMO_SIZES.values()) + len(data) > _PARSE_MEMO_BYTES):
         oldest = next(iter(_PARSE_MEMO))
@@ -4939,61 +5258,130 @@ class _Linker:
                 self.assignments.setdefault(path, []).extend(rows)
         self.field_cache, self.ret_links, self.receiver_memo = {}, {}, {}
         self.output_memo = {}
+        # {Nexus path assignment target: its load point (unit order,
+        # top-level statement index)} for the targets established at load.
+        self.path_points = {target: (unit.order, top) for unit in self.units
+                            for target, top in unit.flow.path_points.items() if top is not None}
         # Diagnostic switch for an external equivalence control only (no seam
         # sets it): replay a single root's search as for several roots.
         self.single_root_replay = False
-        self.global_writes = set()
+        # The global environment (V15 review fix): once a loaded source may
+        # write any global (env_escapes), every global name counts as
+        # assigned, so no trusted global, sink, client root or library stays
+        # established.
+        writes, self.library_writes = set(), set()
+        self.env_open = self.string_meta_open = False
+        typed = False
         for unit in self.units:
-            self.global_writes |= unit.flow.global_writes
-        # Library transform edges whose global the loaded source assigns are
-        # not followed (the memoized flow itself is never changed).
+            writes |= unit.flow.global_writes
+            self.library_writes |= unit.flow.library_writes
+            self.env_open = self.env_open or bool(unit.flow.env_escapes)
+            self.string_meta_open = self.string_meta_open or bool(unit.flow.metatable_escapes)
+            typed = typed or bool(unit.flow.type_escapes)
+        self.type_open = typed and 'type' in writes
+        self.env_open = self.env_open or self.type_open
+        self.global_writes = _ANY_NAME if self.env_open else writes
+        # Transform edges whose implementation the loaded source may replace
+        # are not followed (the memoized flow itself is never changed).
         self.blocked = {}
         for unit in self.units:
             dropped = {(arg, call) for name, arg, call in unit.flow.library_edges
-                       if name in self.global_writes}
+                       if not self.trusted(name)}
             if dropped:
                 self.blocked[id(unit.flow)] = dropped
+        # {('pret', path): the load point after which that exported function
+        # is defined}: a call in chunk code that runs before it never reaches
+        # its result.
+        self.pret_points = {}
         for unit in self.units:
             flow = unit.flow
             exports = {}
             for path, module in flow.exports:
                 exports.setdefault(module, []).append(path)
             for module, name, call in flow.module_calls:
-                func = self.module_function(flow, module, name, exports.get(module, ()))[0]
-                if func is not None:
+                func, _, point = self.module_function(flow, module, name,
+                                                      exports.get(module, ()))
+                if func is not None and not self.runs_before(unit, call, point):
                     self.ret_links.setdefault(func, []).append((call, flow))
             for module, paths in exports.items():
                 for (owner, name), _ in flow.module_funcs.items():
                     if owner is not module:
                         continue
-                    func = self.module_function(flow, module, name, paths)[0]
+                    func, _, point = self.module_function(flow, module, name, paths)
                     if func is not None:
-                        self.ret_links.setdefault(func, []).extend(
-                            (('pret', path + '.' + name), None) for path in paths)
+                        for path in paths:
+                            key = ('pret', path + '.' + name)
+                            self.pret_points[key] = max(point, self.export_point(path))
+                            self.ret_links.setdefault(func, []).append((key, None))
+
+    def trusted(self, implementation):
+        """True while the loaded source leaves a transform's implementation
+        established (STD-V15-2): the global it names is never assigned (by
+        name, through _G or by an open environment), no field of the string
+        library that it uses is written (a computed key or an escaping
+        reference to the table may write any), and for a string method or
+        tostring (which first consults __tostring) the shared string
+        metatable is never reached by a getmetatable result that leaves a
+        test or comparison."""
+        method = implementation.startswith(':')
+        name = _STRING + '.' + implementation[1:] if method else implementation
+        root, _, field = name.partition('.')
+        if root in self.global_writes:
+            return False
+        if field and ('*' in self.library_writes or field in self.library_writes):
+            return False
+        return not ((method or name == 'tostring') and self.string_meta_open)
+
+    def runs_before(self, unit, call, point):
+        """True when call is in chunk code (outside any function) that runs
+        before the load point (unit order, top-level statement index)."""
+        top = unit.flow.chunk_calls.get(call)
+        return top is not None and (unit.order, top) <= point
+
+    def export_point(self, path):
+        """The load point of the one established assignment of a Nexus
+        export path (export_established)."""
+        return self.path_points[self.assignments[path][0][0]]
 
     def export_ok(self, path, module, name):
         rows = self.assignments.get(path, ())
         return (len(rows) == 1 and rows[0][1] is not None and rows[0][1].kind == 'name'
                 and rows[0][1].binding is module and not self.assignments.get(path + '.' + name))
 
+    def export_established(self, path):
+        """True when the one assignment of an export path (export_ok) runs
+        when its file loads (load_established, V15 review fix)."""
+        return self.assignments[path][0][0] in self.path_points
+
     def module_function(self, flow, module, name, exports):
-        """(function node or None, reason) for module.name: one definition,
-        on a module table whose identity stays in its file, with every Nexus
-        export of it assigned once and its field never assigned by path."""
+        """(function node or None, reason, load point) for module.name: one
+        definition, on a module table whose identity stays in its file,
+        established when that file loads (load_established: a definition in
+        an initializer nothing calls at load defines nothing, V15 review
+        fix), with every Nexus export of it assigned once, established too,
+        and its field never assigned by path. The load point is (unit order,
+        top-level statement index) of the definition."""
         if module.value is None or module.value.kind != 'table' or not flow.module_ok(module):
             return None, ('the module table %s is assigned again, written through a computed '
-                          'key or escapes its file' % module.node.value)
+                          'key or escapes its file' % module.node.value), None
         if 'setmetatable' in self.global_writes and flow.metatable_hooked(module):
             return None, ('the module table %s has a metatable statement and the loaded source '
-                          'assigns setmetatable' % module.node.value)
-        func, count = flow.module_funcs.get((module, name), (None, 0))
+                          'assigns setmetatable' % module.node.value), None
+        func, count, top = flow.module_funcs.get((module, name), (None, 0, None))
         if count != 1 or func is None:
             return None, ('%s.%s has %d definitions, directly or through a local alias'
-                          % (module.node.value, name, count))
+                          % (module.node.value, name, count)), None
+        if top is None:
+            return None, ('%s.%s is not defined when its file loads: its definition is not run '
+                          'by the file chunk or an initializer it calls'
+                          % (module.node.value, name)), None
         for path in exports:
             if not self.export_ok(path, module, name):
-                return None, '%s or %s.%s is assigned elsewhere' % (path, path, name)
-        return func, None
+                return None, '%s or %s.%s is assigned elsewhere' % (path, path, name), None
+            if not self.export_established(path):
+                return None, ('%s is not assigned when its file loads: its assignment is not run '
+                              'by the file chunk or an initializer it calls' % path), None
+        return func, None, (self.owner[id(flow)].order, top)
 
     # -- the may-flow search -----------------------------------------------
 
@@ -5156,8 +5544,10 @@ class _Linker:
                 return [(read, flow, next_stack)
                         for read, next_stack in self.field_reads(key[1], flow, stack)]
             if tag == 'pret':
+                point = self.pret_points[key]
                 return [(call, unit.flow, ()) for unit in self.units
-                        for call in unit.flow.path_calls.get(key[1], ())]
+                        for call in unit.flow.path_calls.get(key[1], ())
+                        if not self.runs_before(unit, call, point)]
             if tag == 'ret':
                 if stack:
                     call = stack[-1]
@@ -5598,6 +5988,16 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                     'code': 'binding-mutation', 'line': target.line, 'column': target.column,
                     'construct': 'seam-assignment',
                     'detail': '%s is assigned outside %s' % (path, _AUTHORITY)}))
+        # V15 review fix: a reference that may write any global (the
+        # environment table as a value or under a computed key, or an
+        # environment opener) may replace Nexus, the seam or any trusted
+        # global, so it is a mutation problem, not only a lost proof.
+        for node in unit.flow.env_escapes + (unit.flow.type_escapes if linker.type_open else []):
+            problems.append(located(unit, {
+                'code': 'binding-mutation', 'line': node.line, 'column': node.column,
+                'construct': 'global-environment',
+                'detail': 'the loaded source may write any global here (%s)' % (
+                    _global_ref(node) or _ENV)}))
         for arg, method, kind, root, site, wrapper in scan.literals:
             declaration = declarations.get(arg.value)
             where = {'line': arg.line, 'column': arg.column}
@@ -5630,8 +6030,9 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                 if funcstat.target.obj.binding is not None else None
             name = funcstat.target.key.value
             exports = sorted(path for path, binding in unit.flow.exports if binding is module)
-            func, reason = (None, 'the dispatcher is not defined on a local module table') \
-                if module is None else linker.module_function(unit.flow, module, name, exports)
+            func, reason, _ = (None, 'the dispatcher is not defined on a local module table',
+                               None) if module is None \
+                else linker.module_function(unit.flow, module, name, exports)
             if reason is None and func is not candidate['func']:
                 reason = '%s.%s is not this function' % (module.node.value, name)
             if reason is None and not exports:
