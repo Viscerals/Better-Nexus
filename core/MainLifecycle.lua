@@ -71,6 +71,10 @@ function Lifecycle.New(options)
     local communityMutationTicket
     local communityReady = false
     local sharedWorldEntryPending = false
+    -- B-03: the adapter call that raised an error during the latest world
+    -- entry, {owner=, error=} (bounded one-line text), or nil. Reported by
+    -- StartupStatus; session-only, never saved, never used as readiness.
+    local worldEntryFailure = nil
     local rebindEvidenceDb, rebindEvidenceSource, rebindEvidenceOwner, rebindEvidenceInit
     local maintenanceFailureRecorded=false
     local syncInitialized = false
@@ -224,6 +228,9 @@ function Lifecycle.New(options)
             recordsSeen=startupTiming.communityRecordsSeen or 0,
             step=step,stepDone=stepDone,stepTotal=stepTotal,
             failure=FailureFacts(),
+            -- B-03: a detached copy, so a status write cannot clear it.
+            worldEntryFailure=worldEntryFailure and {owner=worldEntryFailure.owner,
+                error=worldEntryFailure.error} or nil,
             coreSlices=startupTiming.slices or 0,
             syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
             syncGateAdapterReady=syncGate.adapterReady,
@@ -253,6 +260,9 @@ function Lifecycle.New(options)
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
         ["DpsCapture.OnCombatEnd"]={active=false,message=nil},
         ["DataRetention.Request"]={active=false,message=nil},
+        -- B-03: the two adapter calls of the world-entry sequence.
+        ["Adapter.OnEvent"]={active=false,message=nil},
+        ["Adapter.RequestSlots"]={active=false,message=nil},
     }
 
     local function RunIsolatedOwner(source, callback, ...)
@@ -1187,7 +1197,31 @@ function Lifecycle.New(options)
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
         local Store = dependencies.Store
-        Adapter.OnEvent(event)
+        -- B-03: the shared entry (retention request, Sync start or world
+        -- entry with its channel join, DPS start) is owned before any adapter
+        -- call below can raise an error. Before this, one error here left it
+        -- unscheduled until the next loading screen while StartupStatus said
+        -- ready. CompleteSharedWorldEntry still runs it once, on a later
+        -- scheduler turn, and still holds it while the session is paused.
+        sharedWorldEntryPending = true
+        worldEntryFailure = nil
+        -- The two adapter calls are isolated: an error is recorded under its
+        -- owner (while that call keeps failing with the same error, a later
+        -- entry does not record it again),
+        -- the first one is named in StartupStatus().worldEntryFailure for this
+        -- entry, and the rest of the sequence keeps its order. Return values
+        -- keep their meanings and are not inspected.
+        local function WorldEntryStep(source, callback, ...)
+            local ok, err = RunIsolatedOwner(source, callback, ...)
+            if ok or worldEntryFailure then return ok end
+            local okText, text = pcall(ErrorText, err)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = (text:gsub("[%c|]", " "))
+            if #text > 160 then text = text:sub(1, 160) .. "..." end
+            worldEntryFailure = {owner=source, error=text}
+            return false
+        end
+        WorldEntryStep("Adapter.OnEvent", Adapter.OnEvent, event)
         -- Ordinary account registration, gated on readiness (1198-1206).
         SubmitOrdinaryRegistration()
         -- The client's own auto-accept option is changed only where the
@@ -1199,12 +1233,11 @@ function Lifecycle.New(options)
             and not (type(readOnlyRoot) == "function" and readOnlyRoot()) then
             Adapter.SetSoloPicker()
         end
-        Adapter.RequestSlots()
+        WorldEntryStep("Adapter.RequestSlots", Adapter.RequestSlots)
         local automation = EnsureAutomation()
         if dependencies.JournalTab then
             dependencies.JournalTab.TryInstall(automation.JournalData)
         end
-        sharedWorldEntryPending = true
     end
 
     local function CompleteSharedWorldEntry()
