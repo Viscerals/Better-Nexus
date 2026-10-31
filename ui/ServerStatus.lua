@@ -278,22 +278,17 @@ local function ModeRoot()
     return type(root) == "table" and root or NexusDB
 end
 
-local function EnsureDefaultMode()
-    local root = ModeRoot()
-    if root.soulAshHudMode ~= "server" and root.soulAshHudMode ~= "nexus" then
-        root.soulAshHudMode = "nexus"
-    end
-end
-
+-- C-05: the saved choice is read, never normalized. Only "server" selects the
+-- server HUD; an absent value, or one this build does not know (a later
+-- build's choice), is shown as the Nexus HUD for this session and is left
+-- exactly as saved, so a rollback or a newer build reads back what it wrote.
+-- M.SetMode is the only writer of this key.
 local function UsingNexusHud()
-    EnsureDefaultMode()
-    return ModeRoot().soulAshHudMode == "nexus"
+    return ModeRoot().soulAshHudMode ~= "server"
 end
 
--- The same answer WITHOUT normalizing the stored value. EnsureDefaultMode
--- writes the default into the profile, which is right when this owner is
--- applying the preference and wrong when something is merely reading it: a
--- support report must not store a setting just by describing one.
+-- The same answer for a passive reader: a support report must not store a
+-- setting just by describing one, and must not create the saved root either.
 local function SavedModeIsNexus()
     local saved = type(NexusDB) == "table" and ModeRoot().soulAshHudMode or nil
     return saved ~= "server"
@@ -525,7 +520,6 @@ end
 
 function M.Init()
     NexusDB = NexusDB or {}
-    EnsureDefaultMode()
     if scanner then return end
 
     scanner = CreateFrame("Frame", "NexusServerStatusScanner", UIParent)
@@ -612,6 +606,8 @@ function M.VisibilityFacts()
     }
 end
 
+-- The player's explicit choice: the only place the saved mode is written, and
+-- only ever as one of the two known values.
 function M.SetMode(mode)
     ModeRoot().soulAshHudMode = mode == "server" and "server" or "nexus"
     ApplyVisibility(true)

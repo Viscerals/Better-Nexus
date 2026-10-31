@@ -272,5 +272,57 @@ do
  ExpectHidden(H,'#164 no-op Show, then a real give-back')
  check(AutoFacts()==auto and writes.n==0,'#164 no-op Show: Auto, settings and the widget\'s placement, alpha and mouse are unchanged')
 end
+-- C-05: reading the HUD preference never stores it. A saved value that is
+-- absent, or one this build does not know (a later build's choice), is shown
+-- as the Nexus HUD for the session and is kept exactly as saved through Init,
+-- every read, scanner passes and an offline module reload, so a rollback or a
+-- newer build reads back what it wrote. Only an explicit SetMode stores a
+-- known choice. Synthetic saved tables only; no live SavedVariables.
+local function ModeText() return F.Serialize(NexusDB.soulAshHudMode) end
+for _,case in ipairs({{label='missing'},{label='unknown',value='future-hud-mode'}}) do
+ local label='C-05 '..case.label..' saved mode'
+ local expected=F.Serialize(case.value)
+ local db=F.Database({});db.soulAshHudMode=case.value
+ H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
+ check(ModeText()==expected,label..': Init and scans leave the saved value as it was ('..ModeText()..')')
+ check(Nexus.ServerStatus.IsUsingNexusHud()==true,label..': the session shows the Nexus HUD')
+ check(Nexus.ServerStatus.VisibilityFacts().mode=='nexus',label..': and reports it as the effective preference')
+ ExpectCaption(H,'HC1','HC1',label)
+ ExpectShown(H,label)
+ Nexus.ServerStatus.GetSummary();Nexus.ServerStatus.IsDetected()
+ Nexus.ServerStatus.Rescan();Nexus.ServerStatus.PanelVisibilityChanged();Settle(H)
+ check(ModeText()==expected,label..': reads, a rescan and later scans store nothing ('..ModeText()..')')
+ local saved
+ H,saved=F.Reload(Before('Hardcore 1',2,true));Settle(H)
+ local key='["soulAshHudMode"]='
+ if case.value==nil then
+  check(saved:find(key,1,true)==nil,label..': the round-tripped data holds no stored mode')
+ else
+  check(saved:find(key..expected..',',1,true)~=nil,label..': the round-tripped data holds the exact saved value')
+ end
+ check(ModeText()==expected,label..': an offline module reload keeps it ('..ModeText()..')')
+ ExpectCaption(H,'HC1','HC1',label..' after reload')
+ ExpectShown(H,label..' after reload')
+ -- Explicit known choices are still stored, and later reads keep them.
+ Nexus.ServerStatus.SetMode('server')
+ check(NexusDB.soulAshHudMode=='server' and H.difficultyHud.root:IsShown()==true
+  and Nexus.ServerStatus.VisibilityFacts().mode=='server',label..': an explicit server choice is stored and gives the widget back')
+ Settle(H)
+ check(NexusDB.soulAshHudMode=='server' and Nexus.ServerStatus.IsUsingNexusHud()==false,label..': and later scans keep it')
+ Nexus.ServerStatus.SetMode('nexus');Settle(H)
+ check(NexusDB.soulAshHudMode=='nexus',label..': an explicit Nexus choice is stored')
+ ExpectShown(H,label..' explicit Nexus HUD')
+ check(#H.actions==0,label..': no game action')
+end
+do
+ -- Control: a known saved server choice is read as it is and kept.
+ local label='C-05 known server saved mode'
+ local db=F.Database({});db.soulAshHudMode='server'
+ H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
+ check(NexusDB.soulAshHudMode=='server' and Nexus.ServerStatus.IsUsingNexusHud()==false
+  and Nexus.ServerStatus.VisibilityFacts().mode=='server',label..': read as the server HUD and kept')
+ check(H.difficultyHud.root:IsShown()==true,label..': the stock widget keeps its place')
+ check(#H.actions==0,label..': no game action')
+end
 
 print('PASS server_status_reload_consumer checks='..checks..'; synthetic producer; native cause UNKNOWN')
