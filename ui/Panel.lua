@@ -867,7 +867,7 @@ function M.CreateContextHeader(parent)
     parent._contextChange:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
-function M.UpdateContextHeader(model)
+function M.UpdateContextHeader(model, settled)
     if not (frame and frame._contextTitle) then return false end
     local facts = M.DestinationFacts(model) or {}
     local fields, tooltip = Nexus.UserText.DestinationFields(facts)
@@ -901,6 +901,18 @@ function M.UpdateContextHeader(model)
         {frame._contextBuild, frame._contextBuildHit, LF("panel.label.context_build", {build = SafeText(build)})},
         {frame._contextWishlist, frame._contextWishlistHit, LF("panel.label.context_wishlist", {wishlist = SafeText(wishlist)})},
     }
+    -- C-03 (as M.UpdateDestinationRow): on a settled render (no layout pass)
+    -- whose header words, hovers, widths and Auto state are the ones already
+    -- applied, nothing is re-anchored, refitted or set again. A layout pass
+    -- always applies the header: it places the My Builds button itself.
+    local autoShown = frame._autoBtn:IsShown() and true or false
+    local autoState = not autoShown and (model.auto == nil and LT("panel.label.auto_state_unknown")
+        or (model.auto and LT("panel.label.auto_state_on") or LT("panel.label.auto_state_off"))) or nil
+    local key = table.concat({tostring(width), tostring(titleWidth), tostring(labelWidth),
+        lines[1][3], lines[2][3], lines[3][3], tostring(tooltip[1]), tostring(tooltip[2]),
+        tostring(tooltip[3]), tostring(tooltip[4]), tostring(autoState)}, "\031")
+    if settled and frame._nexusHeaderKey == key then return true end
+    frame._nexusHeaderKey = nil
     frame._contextTitle:ClearAllPoints()
     frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -8)
     M.EnsureHeaderGrip()
@@ -927,13 +939,13 @@ function M.UpdateContextHeader(model)
     end
     M.EnsureHeaderClose()
     local state = frame._contextAutoState
-    if frame._autoBtn:IsShown() then
+    if autoShown then
         state:Hide()
     else
-        state:SetText(model.auto == nil and LT("panel.label.auto_state_unknown")
-            or (model.auto and LT("panel.label.auto_state_on") or LT("panel.label.auto_state_off")))
+        state:SetText(autoState)
         state:Show()
     end
+    frame._nexusHeaderKey = key
     return true
 end
 
@@ -1206,6 +1218,78 @@ local function Signature(value, seen)
     return table.concat(out)
 end
 
+-- The difficulty card's shown values (C-02): its difficulty word, Soul Ash,
+-- multiplier and Intensity, and the Intensity level its hover states. They
+-- change no geometry: the layout signature keeps only whether each is there
+-- (the card's visibility and the bar's), and a change of the values alone is
+-- applied without a layout pass (M.RefreshServerStatusValues). Every other
+-- field, an unknown one included, stays in the layout signature.
+M.SERVER_STATUS_VALUES = {tier = "truthy", mode = "truthy", ash = "truthy", gain = "truthy",
+    intensity = "present", intensityLevel = "present"}
+function M.ServerStatusLayout(ss)
+    if type(ss) ~= "table" then return ss end
+    local out = {}
+    for key, value in pairs(ss) do
+        local kind = M.SERVER_STATUS_VALUES[key]
+        if kind == "truthy" then out[key] = value and true or false
+        elseif kind == "present" then out[key] = true
+        else out[key] = value end
+    end
+    return out
+end
+
+-- The card's words and hover facts from a summary; false (and nothing set)
+-- when the summary shows no card. Geometry, the bar's scale and ticks and
+-- the card's visibility stay with the layout pass.
+function M.RenderServerStatusValues(ss, complete)
+    worldStatusBox._summary = DefensiveCopy(ss)
+    if not (ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil)) then return false end
+    local difficulty = ss.tier or ss.mode or LT("panel.label.difficulty_fallback")
+    -- Parse and format the ash number for compact display
+    local function FmtAsh(raw)
+        if not raw then return "—" end
+        local stripped = tostring(raw):gsub(",", "")
+        local n = tonumber(stripped)
+        if not n then return tostring(raw) end
+        if n >= 1000000 then
+            local m = n / 1000000
+            local ms = string.format("%.1f", m); return (ms:match("%.0$") and ms:gsub("%.0$","") or ms) .. "M"
+        elseif n >= 1000 then
+            local k = n / 1000
+            local ks = string.format("%.1f", k); return (ks:match("%.0$") and ks:gsub("%.0$","") or ks) .. "k"
+        end
+        return tostring(math.floor(n))
+    end
+    local ashFmt = FmtAsh(ss.ash)
+    -- Only the scanner's validated distinction is used: a Hardcore tier
+    -- (ServerStatus tier HC1-HC5) keeps the original red; a known Normal
+    -- (mode "Normal", no tier) is neutral, as the game's own widget shows
+    -- it; an unknown mode keeps the card's former red caption.
+    worldStatusText:SetText(((ss.tier == nil and ss.mode == "Normal")
+        and "|cffd9d9d9" or "|cffff6b5f") .. difficulty .. "|r")
+    worldStatusAsh:SetText((complete and ("|cff8ec9d6" .. LT("panel.label.soul_ash") .. "  |r")
+        or ("|cffb8b8b8" .. LT("panel.label.ash_short") .. " |r")) .. "|cffffffff" .. ashFmt .. "|r")
+    worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
+    return true
+end
+
+-- A settled render whose card values changed (C-02): the words, the hover
+-- facts and the bar's value, on the scale the last layout pass set.
+function M.RefreshServerStatusValues(model)
+    local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local total, owned = tonumber(pr.total) or 0, tonumber(pr.owned) or 0
+    local complete = total > 0 and owned >= total
+        and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
+    if not M.RenderServerStatusValues(ss, complete) then return false end
+    local scale = worldStatusBox._intensityScale
+    if scale and ss.intensity ~= nil then
+        worldStatusBox.intensityBar:SetValue(
+            math.max(0, math.min(scale.max, tonumber(ss.intensity) or 0)))
+    end
+    return true
+end
+
 local function ModelSignatures(model)
     local source = type(model.progress) == "table" and model.progress or {}
     -- The destination descriptor, projected once for this candidate (pure,
@@ -1235,7 +1319,7 @@ local function ModelSignatures(model)
             cards=model.cards,
             recommendation=model.recommendation,
             level=model.level,
-            serverStatus=model.serverStatus,
+            serverStatus=M.ServerStatusLayout(model.serverStatus),
             showPerformance=showPerformance,
             layoutRevision=layoutKey,
             assignment=model.assignment,
@@ -1276,6 +1360,7 @@ local function ModelSignatures(model)
             bestDps=model.bestDps,
         }),
         notice = Signature(model.updateNotice),
+        serverValues = Signature(model.serverStatus),
         status = Signature(model.status),
         auto = Signature(model.auto),
         destination = destination,
@@ -1646,8 +1731,15 @@ function M.ApplyOwnedFonts()
     return true
 end
 
+-- C-03: the scripts are bound once; each performance render only replaces
+-- the facts the hover reads (widget._nexusDpsTip).
 local function AddDpsTooltip(widget, title, personal, global)
+    widget._nexusDpsTip = {title = title, personal = personal, global = global}
+    if widget._nexusDpsBound then return end
+    widget._nexusDpsBound = true
     widget:SetScript("OnEnter", function(self)
+        local tip = self._nexusDpsTip or {}
+        local title, personal, global = tip.title, tip.personal, tip.global
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(title, 1, 1, 1)
         if personal then
@@ -2096,16 +2188,34 @@ end
 -- headings and the Extra copies list are fitted only while shown (a hidden
 -- one takes no input). The destination row's hovers stay with their hidden
 -- row; the counts that open the Wishlist Editor are not passive.
-function M.FitPassiveHovers()
+-- C-03: `settled` (no layout pass ran, so nothing else re-anchored a hover)
+-- refits only a hover whose text, box, justification or face changed since
+-- its last fit (M.PassiveHoverKey); a layout pass refits every one.
+function M.PassiveHoverKey(text, wrapped)
+    local okFont, path, size, flags = pcall(text.GetFont, text)
+    return table.concat({tostring(text:GetText()), tostring(text:GetWidth()), tostring(text:GetHeight()),
+        tostring(text.GetJustifyH and text:GetJustifyH() or "LEFT"), wrapped and "wrap" or "line",
+        tostring(okFont and path), tostring(okFont and size), tostring(okFont and flags)}, "\031")
+end
+
+function M.FitPassiveHovers(settled)
     if not frame then return end
     local p = frame._play or {}
+    local function Fit(hit, text, wrapped)
+        if not (hit and text) then return end
+        local key = M.PassiveHoverKey(text, wrapped)
+        if settled and hit._nexusFitKey == key then return end
+        hit._nexusFitKey = nil
+        M.FitPassiveHover(hit, text, wrapped)
+        hit._nexusFitKey = key
+    end
     local pairs_ = {
         {frame._contextTitleHit, frame._contextTitle}, {frame._contextBuildHit, frame._contextBuild},
         {frame._contextWishlistHit, frame._contextWishlist},
         {p.tomesHit, p.tomes}, {p.extraHit, p.extra}, {p.bestHit, p.bestLabel}, {p.orbHit, p.orb},
         {frame._callboardTitleHit, frame._callboardTitle}, {frame._callboardLineHit, frame._callboardLine},
     }
-    for i = 1, #pairs_ do M.FitPassiveHover(pairs_[i][1], pairs_[i][2]) end
+    for i = 1, #pairs_ do Fit(pairs_[i][1], pairs_[i][2]) end
     local shownOnly = {
         {frame._chargesHover, frame._chargesText}, {frame._recommendationHover, recText, true},
         {frame._progressLabelHit, progressLabel}, {frame._needLabelHit, needLabel},
@@ -2113,7 +2223,8 @@ function M.FitPassiveHovers()
     }
     for i = 1, #shownOnly do
         local hit = shownOnly[i][1]
-        if hit and hit:IsShown() then M.FitPassiveHover(hit, shownOnly[i][2], shownOnly[i][3]) end
+        if hit and hit:IsShown() then Fit(hit, shownOnly[i][2], shownOnly[i][3])
+        elseif hit then hit._nexusFitKey = nil end
     end
 end
 
@@ -2721,7 +2832,9 @@ local function EnsureFrame()
     planBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Explore holds the shared views: its label is greyed while shared data
-    -- loads (LoadingStatus), as the Build Library button's was.
+    -- loads (LoadingStatus), as the Build Library button's was. The OnEnter
+    -- set below replaces the binding's hover hook; the hub hover carries the
+    -- loading explanation itself (M.ExploreLoadingLines, C-04).
     exploreBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exploreBtn:SetSize(62, 22)
     exploreBtn:SetText((Nexus.Localization.Text("panel.button.explore")))
@@ -3067,6 +3180,27 @@ function M.SharedDataLine()
     end
     return Say("loading", LT(status.coreReady == true
         and "panel.status.shared_data_local_ready" or "panel.status.shared_data_local_wait"))
+end
+
+-- C-04: the explanation LoadingStatus.BindSharedButton gives a shared-view
+-- button while its data is not ready (the view, the current step, what stays
+-- available), in its own words and colours, for the Explore hub's hover.
+-- EnsureFrame binds Explore before setting its OnEnter, which replaces that
+-- hook, so the hub hover carries the explanation itself. Ready, or a status
+-- that cannot be read, adds nothing. Reads only.
+function M.ExploreLoadingLines()
+    local loading = Nexus.LoadingStatus
+    if not (loading and type(loading.PhaseText) == "function") then return {} end
+    local ok, status = false, nil
+    if type(Nexus.StartupStatus) == "function" then ok, status = pcall(Nexus.StartupStatus) end
+    if not ok or type(status) ~= "table" or status.state == "ready" then return {} end
+    return {
+        {LF(status.state == "failed" and "loading.tooltip.view_unavailable" or "loading.tooltip.view_loading",
+            {view = LT("panel.button.explore")}), .65, .65, .68},
+        {loading.PhaseText(status), .9, .9, .9, true},
+        {LT(status.coreReady and "loading.tooltip.local_tools_available"
+            or "loading.tooltip.local_tools_unlock"), .8, .8, .8, true},
+    }
 end
 
 -- The Orb run for the Orbs hub, from the passive reason view the setup
@@ -3586,6 +3720,13 @@ function M.ShowHubTooltip(kind, owner)
     for index, line in ipairs(M.HubTooltipLines(kind)) do
         if index == 1 then GameTooltip:AddLine(line, 1, 1, 1)
         else GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
+    end
+    -- C-04: while shared data loads, Explore's hover also gives the loading
+    -- explanation (M.ExploreLoadingLines), placed with the rest.
+    if kind == "explore" then
+        for _, line in ipairs(M.ExploreLoadingLines()) do
+            GameTooltip:AddLine(line[1], line[2], line[3], line[4], line[5])
+        end
     end
     GameTooltip:Show()
     if not panel then M._hubTipPlacement = "top"; return end
@@ -5613,6 +5754,12 @@ local function ApplyModel(model, signatures, roll)
             renderStats.performancePasses = renderStats.performancePasses + 1
             changed = true
         end
+        -- C-02: the difficulty card's values alone (Soul Ash, multiplier,
+        -- Intensity) take no layout pass.
+        if signatures.serverValues ~= previousSignatures.serverValues then
+            M.RefreshServerStatusValues(model)
+            changed = true
+        end
         if signatures.auto ~= previousSignatures.auto
             and frame._autoBtn:IsShown() then
             frame._autoBtn:SetText(AutoLabel(model.auto))
@@ -5623,7 +5770,8 @@ local function ApplyModel(model, signatures, roll)
             changed = true
         end
         if not changed then renderStats.skipped = renderStats.skipped + 1 end
-        return true
+        -- Settled: no layout pass ran (ApplyCandidate, C-03).
+        return true, true
     end
     renderStats.layouts = renderStats.layouts + 1
     if frame._menuBtn then
@@ -6068,36 +6216,9 @@ local function ApplyModel(model, signatures, roll)
     if not noBuild then RenderPerformanceState(pr, complete, showPerformance) end
 
     LayoutServerStatus(complete and not noBuild)
-    worldStatusBox._summary = DefensiveCopy(ss)
-    if ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) then
-        local difficulty = ss.tier or ss.mode or LT("panel.label.difficulty_fallback")
-        -- Parse and format the ash number for compact display
-        local function FmtAsh(raw)
-            if not raw then return "—" end
-            local stripped = tostring(raw):gsub(",", "")
-            local n = tonumber(stripped)
-            if not n then return tostring(raw) end
-            if n >= 1000000 then
-                local m = n / 1000000
-                local ms = string.format("%.1f", m); return (ms:match("%.0$") and ms:gsub("%.0$","") or ms) .. "M"
-            elseif n >= 1000 then
-                local k = n / 1000
-                local ks = string.format("%.1f", k); return (ks:match("%.0$") and ks:gsub("%.0$","") or ks) .. "k"
-            end
-            return tostring(math.floor(n))
-        end
-        local ashFmt = FmtAsh(ss.ash)
-        -- Tooltip keeps full unformatted value
-        local ashFull = ss.ash and tostring(ss.ash):gsub(",","") or "—"
-        -- Only the scanner's validated distinction is used: a Hardcore tier
-        -- (ServerStatus tier HC1-HC5) keeps the original red; a known Normal
-        -- (mode "Normal", no tier) is neutral, as the game's own widget shows
-        -- it; an unknown mode keeps the card's former red caption.
-        worldStatusText:SetText(((ss.tier == nil and ss.mode == "Normal")
-            and "|cffd9d9d9" or "|cffff6b5f") .. difficulty .. "|r")
-        worldStatusAsh:SetText((complete and ("|cff8ec9d6" .. LT("panel.label.soul_ash") .. "  |r")
-            or ("|cffb8b8b8" .. LT("panel.label.ash_short") .. " |r")) .. "|cffffffff" .. ashFmt .. "|r")
-        worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
+    -- The words and hover facts (M.RenderServerStatusValues, shared with a
+    -- settled render's value pass); the hover keeps the full unformatted ash.
+    if M.RenderServerStatusValues(ss, complete) then
         -- The bar is scaled to the game's validated maximum. Without valid
         -- constants, or without a reading, it has no truthful scale and stays
         -- hidden; the tooltip still states the raw value.
@@ -6192,12 +6313,14 @@ end
 local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
-    local applied = ApplyModel(model, signatures, roll)
+    -- settled: no layout pass ran. The header and the passive hovers then
+    -- apply only what changed (C-03); a layout pass applies them whole.
+    local applied, settled = ApplyModel(model, signatures, roll)
     if applied then
-        M.UpdateContextHeader(model)
+        M.UpdateContextHeader(model, settled)
         -- The Orb line's words follow the run on settled renders too.
         M.RefreshOrbLine(model, frame._responsiveLayout)
-        M.FitPassiveHovers()
+        M.FitPassiveHovers(settled)
     end
     if applied then
         -- The HUD can grow taller than the viewport with large fonts, an
