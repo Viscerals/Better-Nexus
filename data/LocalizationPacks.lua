@@ -25,8 +25,11 @@
 -- and correction only; no competent human reviewer of any language has
 -- accepted it, and no reviewer identity or date is recorded here. An entry
 -- that is byte-identical to its English (a product, game or code-owned term,
--- or a placeholder-only text) is a draft choice; no entry-review
--- declaration for it is recorded in docs/localization/RELEASE_LANGUAGES.json.
+-- or a placeholder-only text) is a draft choice. Entry-specific technical
+-- review declarations, where one exists, are recorded separately in the
+-- entryReview metadata of docs/localization/RELEASE_LANGUAGES.json; not every
+-- such entry has one, and a declaration does not establish competent human,
+-- native, rights or product-level language acceptance.
 -- Client terminology, locale aliases, fonts, glyphs and layout fit are not
 -- verified natively. Data presence alone does not prove that a consumer
 -- shows a key or that a window is fully localized.
