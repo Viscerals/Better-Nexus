@@ -11,6 +11,8 @@ Results are reported as they are. A test that was not run is NOT a pass:
   * FAIL or TIMEOUT                      -> exit 1
   * a listed test without a result row   -> exit 1
   * a NOT_RUN row                        -> printed as NOT RUN; exit 1
+  * a nonzero exit of the Lua runner     -> printed as LUA RUNNER FAILED; exit 1, even if every row is PASS
+The --output report records the runner's exit status as "lua_runner_exit".
 Every listed test runs from this checkout; none needs a separate project, archive or variable.
 The inventory size is whatever tools/run_prototype_tests.py lists; no count is hard-coded here.
 Before the RESULT line, "timing:" lines give the elapsed time and limit of every executed test whose
@@ -186,11 +188,19 @@ def main() -> int:
     if ns.output.exists():
         ns.output.unlink()
     run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    # The runner's own exit status is kept apart from its report: a nonzero exit fails the check even when
+    # every report row is a PASS, and exit 0 alone proves nothing without a complete report.
+    runner_exit = run.returncode
+    runner_failed = (f'LUA RUNNER FAILED: tools/run_prototype_tests.py exited {runner_exit};'
+                     ' the run is not accepted, whatever its report shows') if runner_exit != 0 else None
     if not ns.output.is_file():
         print(run.stdout[-4000:]); print(run.stderr[-4000:])
+        if runner_failed:
+            print(runner_failed)
         print('RESULT: the runner wrote no report; nothing is counted as passed')
         return 1
     report = json.loads(ns.output.read_text(encoding='utf-8'))
+    report['lua_runner_exit'] = runner_exit
     rows = {r['test']: r for r in report['results']}
     # The Python tests run after the Lua suite, never in a shard; their rows stay apart from the Lua rows.
     python_rows = [] if ns.only else run_python_tests(python_tests, runner.PYTHON_TEST_TIMEOUT_SECONDS)
@@ -209,6 +219,9 @@ def main() -> int:
         r = rows[n]
         print(f'--- {n}: {r["status"]}')
         print((r.get('stdout') or '')[-1500:]); print((r.get('stderr') or '')[-1500:])
+    if runner_failed:
+        print(f'--- Lua runner: exit {runner_exit}')
+        print((run.stdout or '')[-1500:]); print((run.stderr or '')[-1500:])
     print(f'runtime: {report["runtime"]}')
     print(f'passed {len(passed)}, failed {len(failed)}, NOT RUN {len(not_run)}, no result row {len(unexecuted)}, listed {len(expected)}')
     for n in not_run:
@@ -222,7 +235,9 @@ def main() -> int:
         print((admission.get('stdout') or '').rstrip())
     for line in python_lines(python_rows, python_tests, bool(ns.only)):
         print(line)
-    if failed or unexecuted or not_run or python_failed:
+    if runner_failed:
+        print(runner_failed)
+    if failed or unexecuted or not_run or python_failed or runner_failed:
         print('RESULT: FAILED')
         return 1
     print('RESULT: no listed test failed; every listed test ran')
