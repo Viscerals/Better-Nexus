@@ -34,13 +34,15 @@ local callbacks = {}
 -- peer-advisory quarantine, the legacy dismissed-list conversion and a new
 -- dismissal) happens only when saved data may really be written. Two
 -- conditions must hold: the start-up that initialized this module stated that
--- its session may write, and the saved-data owner does not refuse writes at
--- that moment. A refused shared catalog and a read-only saved format therefore
--- keep every stored update key exactly as found, also through /nexus update,
--- which answers before start-up completes. An owner that is merely still
--- loading is an early state of a valid owner, not a refusal, so ordinary
--- upkeep is unchanged there. The bundled release notice is evaluated and shown
--- in every case.
+-- its session may write, and the saved-data owner affirmatively reports that
+-- saved data is writable ("durable") at that moment. A refused shared catalog
+-- and a read-only saved format therefore keep every stored update key exactly
+-- as found, also through /nexus update, which answers before start-up
+-- completes. An owner that is still loading (before STORE_READY, or before the
+-- character identity is known) has not given that verdict yet, so nothing is
+-- written then either; the same upkeep runs on the next evaluation after the
+-- owner is ready. The bundled release notice is evaluated and shown in every
+-- case.
 local sessionPersists = true
 local function CanPersist()
     if not sessionPersists then return false end
@@ -51,7 +53,7 @@ local function CanPersist()
     end
     local ok, status = pcall(Store.StateWriteStatus)
     if not ok or type(status) ~= "table" then return false end
-    return status.mode ~= "unavailable"
+    return status.mode == "durable"
 end
 local notifiedTargets = {}            -- session only: one chat notice per target
 local hintTarget = nil                -- session only: the highest reported public test

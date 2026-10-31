@@ -2441,20 +2441,25 @@ end
 -- an unverified format, the first failing field. carriedFrom names the plain
 -- name-keyed row the first write will copy (known saved formats 3-5 only).
 function Store.StateWriteStatus()
+    local db = NexusDB
+    -- The saved-format verdict is a property of the root, not of the
+    -- character, so it is given first: a read-only root is refused even while
+    -- the identity is not known yet, never reported as merely "loading".
+    if type(db) == "table" then
+        local formatClass, savedFormat, field = SavedFormat.Classify(db)
+        if formatClass == "future" or formatClass == "unverified"
+            or formatClass == "malformed" then
+            local markerType, markerText
+            if formatClass == "malformed" then markerType, markerText = SavedFormat.Describe(db) end
+            return {mode="unavailable", reason="saved-format", format=formatClass,
+                savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
+                knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field,
+                markerType=markerType, markerText=markerText}
+        end
+    end
     local ownerKey = CurrentIdentity()
     if not ownerKey then return {mode="loading", reason="identity"} end
-    local db = NexusDB
     if type(db) ~= "table" then return {mode="unavailable", reason="database"} end
-    local formatClass, savedFormat, field = SavedFormat.Classify(db)
-    if formatClass == "future" or formatClass == "unverified"
-        or formatClass == "malformed" then
-        local markerType, markerText
-        if formatClass == "malformed" then markerType, markerText = SavedFormat.Describe(db) end
-        return {mode="unavailable", reason="saved-format", format=formatClass,
-            savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
-            knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field,
-            markerType=markerType, markerText=markerText}
-    end
     local C = boundCoordinator
     if type(C) == "table" and type(C.State) == "function" then
         local ok, state = pcall(C.State, C)
