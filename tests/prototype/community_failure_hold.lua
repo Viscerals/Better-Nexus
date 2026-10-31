@@ -3854,4 +3854,123 @@ end)
 
 end
 
+-- COORD01 nil-projection detail fallback; 41cd955 is the baseline of its EXPECTs.
+-- Real TOC boot with the synthetic Leaderboard fixture. The captured actual
+-- RefreshDetailPanel runs first with its healthy projection, then with its
+-- EnsureCommunityProjection upvalue returning nil. That nil is a deliberately
+-- injected boundary, not an established native or startup incident. The real
+-- controller reader is wrapped by a pass-through recorder; the boundary and
+-- the reader are restored before any check runs.
+do
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local function Find(value,needle,seen)
+ if (type(value)~='function' and type(value)~='table') or seen[value] then return end
+ seen[value]=true
+ if type(value)=='function' then
+  for i=1,100 do
+   local name,v=debug.getupvalue(value,i);if not name then break end
+   if name==needle then return v end
+   if name~='_ENV' then local got=Find(v,needle,seen);if got then return got end end
+  end
+ else
+  for k,v in pairs(value) do if k~='_G' then local got=Find(v,needle,seen);if got then return got end end end
+ end
+end
+C.scenario('coord01-nil-projection-detail-controller-reader',function()
+ local fx=L.New({players={
+  {name='PrototypeTester',class='MAGE',isLocal=true,dps={dummy=40000},locked=0},
+  {name='NoRecord',class='PRIEST',dps={},locked=0},
+ }})
+ local H=F.Boot(fx:Install(F.Database({version=2})))
+ assert(C.setup(Nexus.StartupStatus().state=='ready','real TOC startup ready with synthetic Leaderboard fixture'))
+ local CB=Nexus.CommunityBuilds
+ local ownId,otherId=fx.players[1].buildId,fx.players[2].buildId
+ CB.ShowBuild(ownId)
+ for _=1,4000 do
+  local p=NexusCommunityBuildsFrame and NexusCommunityBuildsFrame._detailPanel
+  if p and p:IsShown() and p._nexusShownId==ownId then break end
+  H.Advance(.05,.05)
+ end
+ local panel=NexusCommunityBuildsFrame and NexusCommunityBuildsFrame._detailPanel
+ assert(C.setup(panel and panel:IsShown() and panel._nexusShownId==ownId,'real own fixture detail is displayed'))
+ local detail=Find(CB.Refresh,'RefreshDetailPanel',{})
+ assert(C.setup(type(detail)=='function','actual RefreshDetailPanel is captured read-only'))
+ local instance=Find(detail,'ControllerInstance',{})
+ local controller=type(instance)=='function' and instance() or nil
+ assert(C.setup(type(controller)=='table' and type(controller.HasLeaderboardRecord)=='function'
+  and controller.HasLeaderboardRecord(ownId)==true and controller.HasLeaderboardRecord(otherId)==false,
+  'real controller-loaded fixture builds have and lack a DPS record'))
+ local slot,projection
+ for i=1,100 do
+  local name,value=debug.getupvalue(detail,i);if not name then break end
+  if name=='EnsureCommunityProjection' then slot,projection=i,value;break end
+ end
+ assert(C.setup(slot~=nil and type(projection)=='function','actual projection boundary is captured'))
+ local admin=controller.IsAdmin() and true or false
+ local reader=controller.HasLeaderboardRecord
+ local phase,boundary='healthy',0
+ local reads={healthy={},nilled={}}
+ local function Display()
+  local state=panel.editState:IsShown()
+  return {id=panel._nexusShownId,shown=panel:IsShown(),edit=panel.editBtn:IsShown(),
+   delete=panel.deleteBtn:IsShown(),state=state,
+   readOnly=state and (panel.editState:GetText() or ''):find('Echo list is read-only',1,true)~=nil or false}
+ end
+ local results={healthy={},nilled={}}
+ local run={pcall(function()
+  controller.HasLeaderboardRecord=function(build,...)
+   local info=debug.getinfo(2,'S')
+   local result=reader(build,...)
+   if info and info.source=='@ui/CommunityRenderer.lua' then
+    local list=reads[phase];list[#list+1]={id=type(build)=='table' and build.id or build,result=result}
+   end
+   return result
+  end
+  for _,id in ipairs({ownId,otherId}) do
+   local ok,err=pcall(detail,id);results.healthy[id]={ok=ok,err=err,display=Display()}
+  end
+  phase='nilled'
+  debug.setupvalue(detail,slot,function()boundary=boundary+1;return nil end)
+  for _,id in ipairs({ownId,otherId}) do
+   local ok,err=pcall(detail,id);results.nilled[id]={ok=ok,err=err,display=Display()}
+  end
+ end)}
+ debug.setupvalue(detail,slot,projection);controller.HasLeaderboardRecord=reader
+ local _,restored=debug.getupvalue(detail,slot)
+ assert(C.setup(run[1],'healthy and nil-projection detail window ran',run[2]))
+ C.guard(restored==projection and controller.HasLeaderboardRecord==reader,
+  'projection boundary and real controller reader are restored')
+ local hOwn,hOther=results.healthy[ownId],results.healthy[otherId]
+ local nOwn,nOther=results.nilled[ownId],results.nilled[otherId]
+ assert(C.setup(hOwn.ok and hOther.ok,'healthy projection detail renders both fixture builds',hOwn.err or hOther.err))
+ C.guard(hOwn.display.id==ownId and hOwn.display.edit and hOwn.display.delete and hOwn.display.readOnly,
+  'healthy own detail keeps owner controls and DPS-backed read-only state',F.Serialize(hOwn.display))
+ C.guard(hOther.display.id==otherId and not hOther.display.edit and not hOther.display.state
+  and hOther.display.delete==admin,'healthy other-owner detail keeps no edit controls',F.Serialize(hOther.display))
+ C.guard(#reads.healthy==0,'healthy projection detail does not take the fallback reader',#reads.healthy)
+ C.expect(nOwn.ok and nOther.ok,'nil-projection fallback detail returns without error',nOwn.err or nOther.err)
+ C.guard(boundary==2,'both nil-projection calls reach the injected boundary',boundary)
+ C.expect(#reads.nilled==2 and reads.nilled[1].id==ownId and reads.nilled[1].result==true
+  and reads.nilled[2].id==otherId and reads.nilled[2].result==false,
+  'fallback uses the controller reader once for a build with and without a DPS record',F.Serialize(reads.nilled))
+ C.expect(nOwn.display.id==ownId and nOwn.display.shown and nOwn.display.edit and nOwn.display.delete
+  and nOwn.display.readOnly,'nil-projection own detail shows owner controls and DPS-backed read-only state',
+  F.Serialize(nOwn.display))
+ C.expect(nOther.display.id==otherId and nOther.display.shown and not nOther.display.edit
+  and not nOther.display.state and nOther.display.delete==admin,
+  'nil-projection other-owner detail shows no edit controls or own-edit state',F.Serialize(nOther.display))
+ C.expect(nOwn.display.edit==hOwn.display.edit and nOwn.display.delete==hOwn.display.delete
+  and nOwn.display.state==hOwn.display.state and nOwn.display.readOnly==hOwn.display.readOnly
+  and nOther.display.edit==hOther.display.edit and nOther.display.delete==hOther.display.delete
+  and nOther.display.state==hOther.display.state,
+  'fallback owner and read-only display matches the healthy projection display')
+ C.guard(rawget(_G,'HasLeaderboardRecord')==nil,'no shared HasLeaderboardRecord global is created')
+ C.guard(#H.actions==0 and #H.sent==0,'detail fallback performs no synthetic game or network action')
+ print('COORD01_DETAIL',F.Serialize({admin=admin,boundary=boundary,reads=reads,
+  healthy={own=hOwn.display,other=hOther.display},
+  nilled={own=nOwn.display,other=nOther.display,ownError=nOwn.err~=nil and V.printable(nOwn.err) or false,
+   otherError=nOther.err~=nil and V.printable(nOther.err) or false},native='NOT_RUN'}))
+end)
+end
+
 C.finish('(public failure hold and recovery; synthetic host only)')

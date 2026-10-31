@@ -2842,7 +2842,7 @@ local function RefreshDetailPanel(buildId, listPending)
             detail.admin, detail.loadoutLocked
     else
         mine, admin, loadoutLocked = IsOwnBuild(build),
-            IsAdmin(), HasLeaderboardRecord(build)
+            IsAdmin(), ControllerInstance().HasLeaderboardRecord(build)
     end
     if mine then
         detailPanel.editBtn:Show()

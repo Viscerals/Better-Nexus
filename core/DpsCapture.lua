@@ -2747,7 +2747,10 @@ function DPS.PumpSyncHash()
     end
     local applied = DpsDigest.PumpPending(DpsDigest.CLAIMS_PER_PUMP)
     local quick = false
-    if applied then _, quick = DpsDigest.RebuildSmallDirty() end
+    if applied then
+        local _
+        _, quick = DpsDigest.RebuildSmallDirty()
+    end
     local ready, progressed = DpsDigest.PumpBuckets()
     ready = ready and applied
     progressed = progressed or quick or not applied
