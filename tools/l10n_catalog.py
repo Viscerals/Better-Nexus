@@ -460,9 +460,29 @@ class _Parser:
         return {'name': found['name'], 'entries': found['entries']}
 
 
+def _snapshot(value, name='source'):
+    """The one immutable snapshot of an accepted input (bytes or bytearray,
+    subclasses included), else TypeError. A subclass is read once through its
+    buffer, never through an overridable conversion such as __bytes__, and
+    every later hash, decode, memo key and report of the call uses this
+    snapshot only, so no stage can observe other bytes than another."""
+    if not isinstance(value, (bytes, bytearray)):
+        raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    return value if type(value) is bytes else bytes(memoryview(value))
+
+
+_FOUR_INPUTS = ('english_source', 'packs_source', 'key_context_json', 'release_json')
+_FIVE_INPUTS = _FOUR_INPUTS + ('localization_source',)
+
+
+def _snapshots(names, values):
+    """The snapshot of each named input, in order (TypeError names the first
+    that is not bytes or bytearray)."""
+    return tuple(_snapshot(value, name) for name, value in zip(names, values))
+
+
 def _parse(source, target, table):
-    if not isinstance(source, (bytes, bytearray)):
-        raise TypeError('source must be bytes, not %s' % type(source).__name__)
+    source = _snapshot(source)
 
     def parse(data):
         try:
@@ -512,14 +532,44 @@ _INPUT_MEMO = {}
 _INPUT_MEMO_LIMIT = 32
 # A lone UTF-16 surrogate code point (the JSON check json-surrogate).
 _SURROGATE = re.compile('[\ud800-\udfff]')
+# A JSON escape of a code point in that range, in either letter case (or a
+# false match such as an escaped backslash before "ud800", which only costs
+# the full check).
+_SURROGATE_ESCAPE = re.compile(r'\\u[dD][89a-fA-F]')
+
+
+_DIGESTS = {}
+_DIGESTS_LIMIT = 1024
+_DIGESTS_BYTES = 64 * 1024 * 1024
+
+
+def _digest(data):
+    """The SHA-256 digest of exact bytes, cached by their value (a dict key
+    compares the bytes themselves, never an object identity), least recently
+    used out first within _DIGESTS_LIMIT entries and _DIGESTS_BYTES bytes."""
+    digest = _DIGESTS.pop(data, None)
+    if digest is None:
+        digest = hashlib.sha256(data).digest()
+        while _DIGESTS and (len(_DIGESTS) >= _DIGESTS_LIMIT
+                            or sum(map(len, _DIGESTS)) + len(data) > _DIGESTS_BYTES):
+            del _DIGESTS[next(iter(_DIGESTS))]
+    _DIGESTS[data] = digest
+    return digest
 
 
 def _memoized(kind, source, parse):
     """parse(source), or a copy of its kept result for the same kind and the
     exact same bytes (see above). source is one byte string, or a tuple of
-    them for a result of several inputs (each hashed apart, in order)."""
-    sources = source if type(source) is tuple else (source,)
-    key = (kind,) + tuple(hashlib.sha256(data).digest() for data in sources)
+    them for a result of several inputs (each hashed apart, in order). Each
+    is snapshotted (_snapshot) once, and that same snapshot is both hashed for
+    the key and handed to parse."""
+    if type(source) is tuple:
+        source = tuple(_snapshot(data) for data in source)
+        sources = source
+    else:
+        source = _snapshot(source)
+        sources = (source,)
+    key = (kind,) + tuple(_digest(data) for data in sources)
     kept = _INPUT_MEMO.pop(key, None)
     if kept is not None:
         _INPUT_MEMO[key] = kept
@@ -538,7 +588,17 @@ def _collector_paused(seam):
     copies of its inputs (and a consumer receipt its search state) while it
     runs; a collection meanwhile would promote them and then rescan every
     memoized syntax tree. Reference counting still frees memory, and no
-    result depends on the collector."""
+    result depends on the collector.
+
+    Ownership boundary: the collector switch is interpreter-wide, so this is
+    correct for serial use only, one seam call (and its nested seam calls)
+    at a time in a process, as the command line and the registered tests
+    use it. Each call restores exactly the state it found, nested calls
+    included and on error. Overlapping calls from several threads, or
+    another component switching the collector during a call, are not
+    supported: an outer call may then re-enable collection while another is
+    still running. The input and parse memos are module state with the same
+    serial boundary."""
     @functools.wraps(seam)
     def call(*args, **kwargs):
         collecting = gc.isenabled()
@@ -704,6 +764,10 @@ def _decode_json(source, where):
         raise CatalogValidationError('json-invalid', where) from None
     if type(document) is not dict:
         raise CatalogValidationError('json-top-level', where)
+    if _SURROGATE_ESCAPE.search(text) is None:
+        # Strict UTF-8 text holds no surrogate, so a decoded one can only come
+        # from a \uD800-\uDFFF escape; without one the walk below finds none.
+        return document
     stack = [(document, where)]
     while stack:
         value, path = stack.pop()
@@ -1082,12 +1146,9 @@ def validate_catalog_data(english_source: bytes, packs_source: bytes,
     else static text. Missing translated entries are valid partial data;
     nothing is rendered, and this is not a coverage, review or evidence
     check."""
-    for name, value in (('english_source', english_source), ('packs_source', packs_source),
-                        ('key_context_json', key_context_json), ('release_json', release_json)):
-        if not isinstance(value, (bytes, bytearray)):
-            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
-    return _memoized('catalog', (english_source, packs_source, key_context_json, release_json),
-                     lambda sources: _validate_catalog(*sources))
+    sources = _snapshots(_FOUR_INPUTS, (english_source, packs_source, key_context_json,
+                                        release_json))
+    return _memoized('catalog', sources, lambda sources: _validate_catalog(*sources))
 
 
 def _validate_catalog(english_source, packs_source, key_context_json, release_json):
@@ -1096,8 +1157,9 @@ def _validate_catalog(english_source, packs_source, key_context_json, release_js
     key_context = _strict_json(key_context_json, 'keyContext')
     release = _strict_json(release_json, 'release')
     shapes = _context_shapes(key_context)
-    _check_english(english, shapes, _context_keys(key_context) | set(shapes))
-    _check_context(key_context, english, shapes)
+    _core_checks('catalog-core', (english_source, key_context_json), lambda: (
+        _check_english(english, shapes, _context_keys(key_context) | set(shapes)),
+        _check_context(key_context, english, shapes)))
     products = _check_release(release)
     _check_packs(packs, english, products, shapes)
     return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release}
@@ -1426,16 +1488,20 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
     declaration is not evidence of fluent competence, contributor rights or
     native truth, and data inspection establishes no native client fact.
     Nothing is read, written, fetched, rendered or executed."""
-    sources = (english_source, packs_source, key_context_json, release_json)
-    validated = validate_catalog_data(*sources)
-    return _coverage_report(validated, sources, _REPORT_INPUTS, REPORT_SCHEMA_VERSION,
-                            NOTICE['validationScope'])
+    sources = _snapshots(_FOUR_INPUTS, (english_source, packs_source, key_context_json,
+                                        release_json))
+    # The whole report is a function of the exact bytes of the four inputs,
+    # so a report of the same bytes is kept in the input memo (_memoized: a
+    # new copy per call, an invalid input never kept and refused again).
+    return _memoized('report', sources, lambda sources: _coverage_report(
+        validate_catalog_data(*sources), sources, _REPORT_INPUTS, REPORT_SCHEMA_VERSION,
+        NOTICE['validationScope']))
 
 
 def _input_rows(input_names, sources):
     """One row per (name, source) of input_names with the SHA-256 and length
     of its exact bytes in sources."""
-    return [{'name': name, 'source': source, 'sha256': hashlib.sha256(bytes(data)).hexdigest(),
+    return [{'name': name, 'source': source, 'sha256': _digest(bytes(data)).hex(),
              'byteLength': len(data)} for (name, source), data in zip(input_names, sources)]
 
 
@@ -1972,10 +2038,9 @@ class _LiteralParser(_Parser):
 def _parse_literal_table(source):
     """Parse the bytes of a 'return <table>' literal source (grammar above)
     into nested lists, dicts, strings, integers and booleans. Syntax only."""
-    if not isinstance(source, (bytes, bytearray)):
-        raise TypeError('source must be bytes, not %s' % type(source).__name__)
+    source = _snapshot(source)
     try:
-        text = bytes(source).decode('utf-8')
+        text = source.decode('utf-8')
     except UnicodeDecodeError:
         raise CatalogSyntaxError('not-utf8') from None
     parser = _LiteralParser(_tokens(text, integers=True))
@@ -2134,9 +2199,7 @@ def parse_registry_declarations(source: bytes) -> dict:
     never evaluated, imported or executed. A syntax failure raises
     CatalogSyntaxError (CODES); a marker or declaration failure raises
     CatalogRegistryError (REGISTRY_CODES)."""
-    if not isinstance(source, (bytes, bytearray)):
-        raise TypeError('source must be bytes, not %s' % type(source).__name__)
-    return _memoized('declarations', source, _parse_declarations)
+    return _memoized('declarations', _snapshot(source), _parse_declarations)
 
 
 def _parse_declarations(source):
@@ -2223,14 +2286,28 @@ def validate_registry_catalog_data(english_source: bytes, packs_source: bytes,
     english, packs, keyContext, release and declarations. Each argument must
     be bytes or bytearray, else TypeError. Failures raise CatalogSyntaxError,
     CatalogValidationError or CatalogRegistryError; nothing is executed."""
-    for name, value in (('english_source', english_source), ('packs_source', packs_source),
-                        ('key_context_json', key_context_json), ('release_json', release_json),
-                        ('localization_source', localization_source)):
-        if not isinstance(value, (bytes, bytearray)):
-            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
-    return _memoized('registry', (english_source, packs_source, key_context_json, release_json,
-                                  localization_source),
-                     lambda sources: _validate_registry(*sources))
+    sources = _snapshots(_FIVE_INPUTS, (english_source, packs_source, key_context_json,
+                                        release_json, localization_source))
+    return _memoized('registry', sources, lambda sources: _validate_registry(*sources))
+
+
+def _core_checks(kind, sources, check):
+    """Run check(), the release-independent part of a strict verdict, once
+    per exact bytes of sources: a success is kept in the input memo
+    (_memoized) and a failure, never kept, raises again on every call. The
+    caller runs every earlier and later check itself, so the strict order of
+    failures is unchanged."""
+    _memoized(kind, sources, lambda _: (check(), True)[1])
+
+
+def _registry_core(english_source, key_context_json, localization_source, english, key_context,
+                   declarations, shapes):
+    """The English, registry and key-context checks of the registry-bound
+    verdict (see _core_checks)."""
+    _core_checks('registry-core', (english_source, key_context_json, localization_source), lambda: (
+        _check_english(english, shapes, declarations),
+        _check_registry(declarations, english, key_context),
+        _check_context(key_context, english, shapes)))
 
 
 def _validate_registry(english_source, packs_source, key_context_json, release_json,
@@ -2241,9 +2318,8 @@ def _validate_registry(english_source, packs_source, key_context_json, release_j
     release = _strict_json(release_json, 'release')
     declarations = parse_registry_declarations(localization_source)
     shapes = _declared_shapes(declarations)
-    _check_english(english, shapes, declarations)
-    _check_registry(declarations, english, key_context)
-    _check_context(key_context, english, shapes)
+    _registry_core(english_source, key_context_json, localization_source, english, key_context,
+                   declarations, shapes)
     products = _check_release(release)
     _check_packs(packs, english, products, shapes)
     return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release,
@@ -2258,8 +2334,13 @@ def registry_catalog_report(english_source: bytes, packs_source: bytes,
     inputs, then the catalog_report derivation with five input rows, the
     registry-bound validationScope and a registry section listing the
     declarations. An invalid input gets no report."""
-    sources = (english_source, packs_source, key_context_json, release_json,
-               localization_source)
+    sources = _snapshots(_FIVE_INPUTS, (english_source, packs_source, key_context_json,
+                                        release_json, localization_source))
+    return _memoized('registry-report', sources, _registry_report)     # as catalog_report
+
+
+def _registry_report(sources):
+    """The uncached registry_catalog_report of the five snapshotted inputs."""
     validated = validate_registry_catalog_data(*sources)
     report = _coverage_report(validated, sources, _REGISTRY_INPUTS,
                               REGISTRY_REPORT_SCHEMA_VERSION, REGISTRY_SCOPE)
@@ -2389,9 +2470,8 @@ def _trusted_catalog(sources):
     release = _strict_json(release_json, 'release')
     declarations = parse_registry_declarations(localization_source)
     shapes = _declared_shapes(declarations)
-    _check_english(english, shapes, declarations)
-    _check_registry(declarations, english, key_context)
-    _check_context(key_context, english, shapes)
+    _registry_core(english_source, key_context_json, localization_source, english, key_context,
+                   declarations, shapes)
     products = _check_release(release)
     retired = _check_retired(key_context, declarations)
     _check_pack_set(packs, products)
@@ -2452,11 +2532,7 @@ def registry_catalog_diagnostics(english_source: bytes, packs_source: bytes,
     executed or modified."""
     sources = (english_source, packs_source, key_context_json, release_json,
                localization_source)
-    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
-                            'release_json', 'localization_source'), sources):
-        if not isinstance(value, (bytes, bytearray)):
-            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
-    sources = tuple(bytes(value) for value in sources)
+    sources = _snapshots(_FIVE_INPUTS, sources)
     try:
         registry_catalog_report(*sources)
         strict = {'result': 'valid'}
@@ -2768,11 +2844,7 @@ def pack_provenance_diagnostics(english_source: bytes, packs_source: bytes,
     read, written, fetched, executed or modified."""
     sources = (english_source, packs_source, key_context_json, release_json,
                localization_source)
-    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
-                            'release_json', 'localization_source'), sources):
-        if not isinstance(value, (bytes, bytearray)):
-            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
-    sources = tuple(bytes(value) for value in sources)
+    sources = _snapshots(_FIVE_INPUTS, sources)
     strict = _strict_verdict(sources)
     observed = hashlib.sha256(sources[0]).hexdigest()
     historical, rows, problems, stage = None, None, [], 'release'
@@ -3034,8 +3106,8 @@ def _consumer_records(records, suffix, name):
                   where + '.byteLength')
         path = row['path']
         _consumer(_safe_path(path, suffix), 'consumer-path', path if type(path) is str else where)
-        data = bytes(row['data'])
-        _consumer(hashlib.sha256(data).hexdigest() == row['sha256'], 'consumer-hash-mismatch', path)
+        data = _snapshot(row['data'])
+        _consumer(_digest(data).hex() == row['sha256'], 'consumer-hash-mismatch', path)
         _consumer(len(data) == row['byteLength'], 'consumer-length-mismatch', path)
         rows.append((path, data))
     return rows
@@ -3551,6 +3623,12 @@ class _Resolver:
 
     def __init__(self):
         self.localfunctions = []
+        # {id(name node): the function whose own body holds the reference
+        # (None: the file chunk)}, for _UnitFlow's reaching definitions.
+        self.owners, self.current = {}, None
+        # Every function node and every for-in statement of the file, in the
+        # order resolved, so _UnitFlow and _UnitScan need no walk of their own.
+        self.functions, self.forins = [], []
 
     def lookup(self, scopes, name):
         for scope in reversed(scopes):
@@ -3567,6 +3645,7 @@ class _Resolver:
     def reference(self, scopes, node, use):
         binding = self.lookup(scopes, node.value)
         node.binding = binding
+        self.owners[id(node)] = self.current
         if binding is not None:
             binding.uses.append((use, node))
             if use == 'target':
@@ -3578,6 +3657,14 @@ class _Resolver:
             self.statement(stmt, scopes)
 
     def function(self, func, scopes):
+        self.functions.append(func)
+        outer, self.current = self.current, func
+        try:
+            self.function_body(func, scopes)
+        finally:
+            self.current = outer
+
+    def function_body(self, func, scopes):
         scopes = scopes + [{}]
         if func.method:
             self.declare(scopes, _Node('name', func, value='self', binding=None), 'param',
@@ -3643,6 +3730,7 @@ class _Resolver:
             self.declare(inner, stmt.var, 'for')
             self.block(stmt.body, inner)
         elif kind == 'forin':
+            self.forins.append(stmt)
             for expr in stmt.exprs:
                 self.expr(expr, scopes)
             inner = scopes + [{}]
@@ -3710,15 +3798,18 @@ def _seam_method(path):
     return None
 
 
-def _literal_map(binding, string_values):
+def _literal_map(binding, string_values, iterated=frozenset()):
     """[(code, value node)] of a read-only local table of literal string keys
     (and literal string values when string_values), else None. The table
-    must never be assigned again and only ever be indexed."""
+    must never be assigned again and only ever be indexed, or iterated by
+    a for-in header pairs(table) whose name node is in iterated (the caller
+    then requires the global pairs to stay unassigned)."""
     if binding is None or binding.kind != 'local' or binding.value is None:
         return None
     table = binding.value
-    if table.kind != 'table' or binding.assigned or any(use != 'index'
-                                                        for use, _ in binding.uses):
+    if table.kind != 'table' or binding.assigned or any(
+            use != 'index' and not (use == 'value' and node in iterated)
+            for use, node in binding.uses):
         return None
     entries, seen = [], set()
     for field in table.fields:
@@ -3749,10 +3840,19 @@ class _UnitScan:
     map dispatches and Nexus path assignments. Memoized with the parse;
     receipts copy its rows and never change them."""
 
-    def __init__(self, body, localfunctions):
+    def __init__(self, body, localfunctions, forins=None):
         self.problems, self.dynamic, self.literals = [], [], []
         self.wrappers, self.internal = {}, set()
         self.candidates, self.seam_assignments, self.path_assignments = [], [], {}
+        if forins is None:      # the resolver's list, else one walk of the file
+            forins = [stmt for stmt in _descendants(body, True) if stmt.kind == 'forin']
+        # Name nodes T of each for-in header pairs(T) (a read-only iteration).
+        self.iterated = frozenset(
+            stmt.exprs[0].args[0] for stmt in forins
+            if len(stmt.exprs) == 1 and stmt.exprs[0].kind == 'call'
+            and stmt.exprs[0].func.kind == 'name' and stmt.exprs[0].func.binding is None
+            and stmt.exprs[0].func.value == 'pairs' and len(stmt.exprs[0].args) == 1
+            and stmt.exprs[0].args[0].kind == 'name')
         self.find_wrappers(localfunctions)
         self.block(body, (None, ('function', None, None)))
 
@@ -4007,11 +4107,15 @@ class _UnitScan:
             elif funcstat is None or funcstat.method is not None \
                     or funcstat.target.kind != 'index' or funcstat.target.obj.kind != 'name':
                 reason = 'the dispatch is not in a function T.Name of a module table'
+        iterated = False
         if reason is None:
             for earlier in func.body[:tail[0][2]]:
                 guard = _guard(earlier, variable)
                 if guard is not None:
                     codes = _literal_map(guard.binding, False)
+                    if codes is None:
+                        codes = _literal_map(guard.binding, False, self.iterated)
+                        iterated = codes is not None
                     if codes is None:
                         reason = '%s is not a read-only local table of literal keys' % guard.value
                         break
@@ -4025,7 +4129,7 @@ class _UnitScan:
             return
         self.candidates.append({'node': node, 'wrapper': wrapper, 'map': mapping,
                                 'entries': entries, 'shadow': shadow, 'func': func,
-                                'funcstat': funcstat})
+                                'funcstat': funcstat, 'iterated': iterated})
 
 
 _STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callstat', 'do',
@@ -4034,6 +4138,17 @@ _STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callst
 # methods, and every argument of the global print.
 _SINK_METHODS = frozenset(('SetText', 'AddLine', 'AddMessage'))
 _SINK_FUNCTIONS = frozenset(('print',))
+# Text-preserving transforms (Source25 continuation): the result of each is a
+# string made from the text it is given, so a localization result followed
+# into one is followed out of it. A string method called on a followed value
+# (a string, so the string library method): its receiver flows to the
+# result, and for format its arguments too. A call of a standard global
+# library function: the argument positions listed flow to the result; the
+# linker drops these edges when the loaded source assigns that global.
+_TEXT_METHODS = frozenset(('gsub', 'sub', 'upper', 'lower', 'format'))
+_TEXT_CALLS = types.MappingProxyType({
+    'tostring': (0,), 'string.gsub': (0,), 'string.sub': (0,), 'string.upper': (0,),
+    'string.lower': (0,), 'string.format': None})
 _COMPARISON = frozenset(('==', '~=', '<', '<=', '>', '>='))
 _OPAQUE = None
 
@@ -4097,6 +4212,43 @@ def _flowing_operands(node):
     return flowing
 
 
+def _library_name(callee):
+    """'name' for a global name callee, 'table.name' for a literal field of a
+    global table name, else None (locals and other expressions)."""
+    if callee.kind == 'name' and callee.binding is None:
+        return callee.value
+    if callee.kind == 'index' and callee.obj.kind == 'name' and callee.obj.binding is None \
+            and callee.key.kind == 'string' and callee.key.value is not None:
+        return callee.obj.value + '.' + callee.key.value
+    return None
+
+
+def _metatable_hook(call):
+    """The name node of M in a statement setmetatable(M, {__index = function
+    (t, ...) ... end}) whose metatable is an inline constructor holding only
+    __index, a function that never uses its table parameter t, else None.
+    Lua consults __index only for a field the table does not hold, so every
+    field the module defines resolves to that definition alone; nothing here
+    stores M or writes through the hook, and the statement discards the
+    result. The linker additionally requires the global setmetatable to stay
+    unassigned (module_function)."""
+    if call.kind != 'call' or call.func.kind != 'name' or call.func.binding is not None \
+            or call.func.value != 'setmetatable' or len(call.args) != 2:
+        return None
+    target, meta = call.args
+    if target.kind != 'name' or target.binding is None or meta.kind != 'table' \
+            or len(meta.fields) != 1:
+        return None
+    field = meta.fields[0]
+    if field.key is None or field.key.kind != 'string' or field.key.value != '__index' \
+            or field.value.kind != 'function' or not field.value.params:
+        return None
+    first = field.value.params[0].binding
+    if first is None or first.uses:
+        return None
+    return target
+
+
 def _module_root(binding):
     """The binding a chain of unassigned local aliases (local a = b) names."""
     for _ in range(16):
@@ -4151,7 +4303,8 @@ class _UnitFlow:
     receipt can resolve: local functions here, module functions and their
     Nexus exports when the units are linked."""
 
-    def __init__(self, body):
+    def __init__(self, body, owners=None, functions=None):
+        self.owners, self.functions = owners, functions
         self.edges, self.defs, self.def_of = {}, {}, {}
         self.field_writes, self.field_reads, self.field_def_of = {}, {}, {}
         self.field_bases = {}
@@ -4162,10 +4315,17 @@ class _UnitFlow:
         self.module_defs, self.dynamic_modules = {}, set()
         self.alias_of, self.export_values, self.exports = {}, set(), []
         self.chunk_returns = set()
+        # Name nodes passed as the table of a lazy-field metatable statement
+        # (metatable_hook); the linker also requires the global setmetatable
+        # to stay unassigned in the loaded source.
+        self.metatable_args = set()
+        # (global name, argument, call) of each _TEXT_CALLS edge.
+        self.library_edges = []
         self.declared = set()   # values given by local declarations (not later assignments)
         self.object_memo = {}
         self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
         self.block(body, None)
+        self.flow_sensitive(body)
         self.module_funcs = {}
         for module, fields in self.module_defs.items():
             for name, values in fields.items():
@@ -4176,6 +4336,41 @@ class _UnitFlow:
 
     def edge(self, source, target):
         self.edges.setdefault(source, []).append(target)
+
+    def flow_sensitive(self, body):
+        """Replace the binding hop of each local that only its own function
+        body assigns and reads (_ReachingDefinitions) by direct edges from
+        each definition to the reads it reaches; such a local is then never
+        gated, because an overwritten definition no longer reaches the read.
+        Every other binding keeps the every-definition rule."""
+        owners = self.owners if self.owners is not None else _owner_functions(body)
+        missing = object()
+        eligible = set()
+        for binding, func in self.made_in.items():
+            if type(binding) is not _Binding or binding.kind != 'local':
+                continue
+            nodes = [node for _, node in binding.uses] + list(binding.assigned)
+            if all(owners.get(id(node), missing) is func for node in nodes):
+                eligible.add(binding)
+        if not eligible:
+            return
+        passes = _ReachingDefinitions(eligible)
+        passes.run(body)
+        functions = self.functions
+        if functions is None:   # the resolver's list, else one walk of the file
+            functions = [node for node in _descendants(body, True) if node.kind == 'function']
+        for func in functions:  # each pass only adds to its own reads, in any order
+            passes.run(func.body)
+        for binding in eligible:
+            for value in self.defs.get(binding, ()):
+                if value is not _OPAQUE and value in self.edges:
+                    self.edges[value] = [target for target in self.edges[value]
+                                         if target is not binding]
+            for use in self.edges.pop(binding, ()):
+                for value in passes.reach.get(use, ()):
+                    if value is not _OPAQUE and value is not _NIL_DEF:
+                        self.edge(value, use)
+        self.flow_sensitive_locals = frozenset(eligible)
 
     def define(self, binding, value):
         self.defs.setdefault(binding, []).append(value)
@@ -4240,7 +4435,8 @@ class _UnitFlow:
         """A local module table (or alias of one) whose identity stays here:
         never assigned again, never written through a computed key, and used
         only through literal fields, by its Nexus export, as a value the
-        file chunk returns (discarded by the TOC loader) or by a local alias
+        file chunk returns (discarded by the TOC loader), as the table of a
+        lazy-field metatable statement (metatable_hook) or by a local alias
         with the same properties."""
         if depth > 16 or binding.kind != 'local' or binding.assigned \
                 or binding in self.dynamic_modules:
@@ -4249,11 +4445,25 @@ class _UnitFlow:
             if use in ('index', 'field-target'):
                 continue
             alias = self.alias_of.get(node) if use == 'value' else None
-            if use == 'value' and (node in self.export_values or node in self.chunk_returns or (
+            if use == 'value' and (node in self.export_values or node in self.chunk_returns
+                                   or node in self.metatable_args or (
                     alias is not None and self.module_ok(alias, depth + 1))):
                 continue
             return False
         return True
+
+    def metatable_hooked(self, binding, depth=0):
+        """True when this module table (or a local alias of it) is the table
+        of a lazy-field metatable statement here."""
+        if depth > 16:
+            return False
+        for use, node in binding.uses:
+            if use == 'value' and node in self.metatable_args:
+                return True
+            alias = self.alias_of.get(node) if use == 'value' else None
+            if alias is not None and self.metatable_hooked(alias, depth + 1):
+                return True
+        return False
 
     def block(self, body, func):
         for stmt in body:
@@ -4298,6 +4508,9 @@ class _UnitFlow:
                 self.target(target, value, func)
         elif kind == 'callstat':
             self.expr(stmt.call, func)
+            hooked = _metatable_hook(stmt.call)
+            if hooked is not None:
+                self.metatable_args.add(hooked)
         elif kind == 'return':
             for expr in stmt.exprs:
                 self.expr(expr, func)
@@ -4380,6 +4593,11 @@ class _UnitFlow:
             if node.name in _SINK_METHODS and node.args:
                 self.edge(node.args[0], ('sink', node))
                 self.sinks[node] = node.obj
+            if node.name in _TEXT_METHODS:
+                self.edge(node.obj, node)
+                if node.name == 'format':
+                    for arg in node.args:
+                        self.edge(arg, node)
         elif kind == 'function':
             self.function(node)
         elif kind == 'table':
@@ -4408,6 +4626,13 @@ class _UnitFlow:
             for arg in args:
                 self.edge(arg, ('sink', node))
             self.sinks[node] = None
+        library = _library_name(callee)
+        if library in _TEXT_CALLS:
+            positions = _TEXT_CALLS[library]
+            for position, arg in enumerate(args):
+                if positions is None or position in positions:
+                    self.edge(arg, node)
+                    self.library_edges.append((library.split('.')[0], arg, node))
         target = _local_function(callee)
         if target is not None:
             self.edge(('ret', target), node)
@@ -4449,6 +4674,179 @@ class _UnitFlow:
         return calls
 
 
+_NIL_DEF = object()     # the value a local holds before any definition reaches it
+
+
+class _ReachingDefinitions:
+    """Flow-sensitive reaching definitions (Source25 continuation) for the
+    locals that only their own function body assigns and reads: for each read
+    of such a local, the definitions (local declaration values and later
+    assignment values) that may still hold when the read runs. Lua 5.1 has
+    only structured control flow: the branches of an if join; a while, for
+    or repeat body may run again (iterated to a fixpoint) or not at all (a
+    repeat body runs at least once); return ends its path, break leaves its
+    loop; an assignment replaces the local's definitions on its path. A
+    definition killed on every path to a read does not reach it, so an
+    overwritten result is never followed there. Locals that a nested
+    function assigns or reads keep the flow-insensitive every-definition
+    rule of _UnitFlow. A multiple-value position without its own value, a
+    for variable and a value-less declaration hold no followed value."""
+
+    def __init__(self, eligible):
+        self.eligible = eligible
+        self.reach = {}
+
+    def run(self, func_body):
+        self.block(func_body, {})
+
+    def uses(self, expr, env):
+        stack = [expr]
+        while stack:
+            node = stack.pop()
+            if node.kind == 'function':
+                continue        # a nested function is its own pass
+            if node.kind == 'name' and node.binding in self.eligible:
+                self.reach.setdefault(node, set()).update(env.get(node.binding, ()))
+            stack.extend(_children(node))
+
+    @staticmethod
+    def join(envs):
+        envs = [env for env in envs if env is not None]
+        if not envs:
+            return None
+        out = {}
+        for env in envs:
+            for binding, values in env.items():
+                out[binding] = out.get(binding, frozenset()) | values
+        return out
+
+    def block(self, body, env):
+        """(env after the block, or None when every path leaves it; [env at
+        each break])."""
+        breaks = []
+        for stmt in body:
+            if env is None:
+                break
+            env, more = self.statement(stmt, env)
+            breaks.extend(more)
+        return env, breaks
+
+    def assign(self, env, binding, value):
+        # env is owned by the current straight-line path: branches and loop
+        # bodies receive their own copies (statement, loop).
+        if binding in self.eligible:
+            env[binding] = frozenset((value,))
+        return env
+
+    def loop(self, env, body, cond=None, at_least_once=False):
+        """The env after a loop and its body's breaks: the body is iterated
+        from the union of the entry and every iteration's end."""
+        entry, breaks, end = env, [], None
+        while True:
+            if cond is not None and not at_least_once:
+                self.uses(cond, entry)
+            end, more = self.block(body, dict(entry))
+            breaks = more
+            if cond is not None and at_least_once and end is not None:
+                self.uses(cond, end)
+            grown = self.join([entry, end])
+            if grown == entry:
+                break
+            entry = grown
+        exits = [end] if at_least_once else [entry]
+        return self.join(exits + breaks), []
+
+    def statement(self, stmt, env):
+        kind = stmt.kind
+        if kind == 'local':
+            for expr in stmt.exprs:
+                self.uses(expr, env)
+            for index, name in enumerate(stmt.names):
+                value = stmt.exprs[index] if index < len(stmt.exprs) else (
+                    _OPAQUE if stmt.exprs else _NIL_DEF)
+                env = self.assign(env, name.binding, value)
+            return env, []
+        if kind in ('localfunction', 'funcstat'):
+            if kind == 'funcstat' and stmt.target.kind == 'name' and stmt.method is None:
+                env = self.assign(env, stmt.target.binding, stmt.func)
+            elif kind == 'funcstat':
+                self.uses(stmt.target, env)
+            return env, []
+        if kind == 'assign':
+            for expr in stmt.exprs:
+                self.uses(expr, env)
+            for target in stmt.targets:
+                if target.kind != 'name':
+                    self.uses(target, env)
+            for index, target in enumerate(stmt.targets):
+                if target.kind == 'name':
+                    value = stmt.exprs[index] if index < len(stmt.exprs) else _OPAQUE
+                    env = self.assign(env, target.binding, value)
+            return env, []
+        if kind == 'callstat':
+            self.uses(stmt.call, env)
+            return env, []
+        if kind == 'return':
+            for expr in stmt.exprs:
+                self.uses(expr, env)
+            return None, []
+        if kind == 'break':
+            return None, [dict(env)]
+        if kind == 'do':
+            return self.block(stmt.body, env)
+        if kind == 'if':
+            outs, breaks = [], []
+            for cond, body in stmt.clauses:
+                self.uses(cond, env)
+                out, more = self.block(body, dict(env))
+                outs.append(out)
+                breaks.extend(more)
+            if stmt.orelse is not None:
+                out, more = self.block(stmt.orelse, dict(env))
+                outs.append(out)
+                breaks.extend(more)
+            else:
+                outs.append(env)
+            return self.join(outs), breaks
+        if kind == 'while':
+            return self.loop(env, stmt.body, stmt.cond)
+        if kind == 'repeat':
+            return self.loop(env, stmt.body, stmt.cond, at_least_once=True)
+        if kind == 'fornum':
+            for expr in (stmt.start, stmt.stop, stmt.step):
+                if expr is not None:
+                    self.uses(expr, env)
+            return self.loop(env, stmt.body)
+        if kind == 'forin':
+            for expr in stmt.exprs:
+                self.uses(expr, env)
+            return self.loop(env, stmt.body)
+        return env, []
+
+
+def _owner_functions(body):
+    """{id(name node): the function node whose own body holds it (None: the
+    file chunk)} for every name node of the file."""
+    owners, stack = {}, [(node, None) for node in body]
+    while stack:
+        node, func = stack.pop()
+        if node.kind == 'name':
+            owners[id(node)] = func
+        inner = node if node.kind == 'function' else func
+        if node.kind == 'localfunction':
+            stack.append((node.func, func))
+            continue
+        if node.kind == 'funcstat':
+            stack.append((node.target, func))
+            stack.append((node.func, func))
+            continue
+        if node.kind == 'function':
+            for param in node.params:
+                owners[id(param)] = node
+        stack.extend((child, inner) for child in _children(node))
+    return owners
+
+
 class _Unit:
     """One loaded Lua source and its memoized parse, scan and flow graph."""
 
@@ -4457,8 +4855,11 @@ class _Unit:
         self.body, self.error, self.leads, self.scan, self.flow = _parsed(data, fresh)
 
 
-# Parsed files memoized by the SHA-256 of their exact bytes, oldest dropped
-# first. A parse, its scan and its flow graph depend only on those bytes,
+# Parsed files memoized by the SHA-256 of their exact bytes, the least
+# recently used dropped first, at most _PARSE_MEMO_LIMIT files and
+# _PARSE_MEMO_BYTES source bytes (a parse holds about one tracked object per
+# two source bytes, so the bound keeps the hot files of a repository while a
+# one-off edited copy leaves). A parse, its scan and its flow graph depend only on those bytes,
 # and linking changes none of them (it only fills the flow's object-origin
 # memo, itself a function of the same bytes), so a memoized parse is the same parse;
 # nothing is read or written. Two equal files of one call get separate
@@ -4466,7 +4867,9 @@ class _Unit:
 import gc
 
 _PARSE_MEMO = {}
+_PARSE_MEMO_SIZES = {}
 _PARSE_MEMO_LIMIT = 256
+_PARSE_MEMO_BYTES = 16 * 1024 * 1024
 
 
 def _parse_bytes(data):
@@ -4480,7 +4883,8 @@ def _parse_bytes(data):
         body = _LuaParser(tokens).chunk()
         resolver = _Resolver()
         resolver.block(body, [])
-        scan, flow = _UnitScan(body, resolver.localfunctions), _UnitFlow(body)
+        scan = _UnitScan(body, resolver.localfunctions, resolver.forins)
+        flow = _UnitFlow(body, resolver.owners, resolver.functions)
     except CatalogSyntaxError as error:
         return None, {'code': error.code, 'line': error.line, 'column': error.column}, [], \
             None, None
@@ -4494,8 +4898,9 @@ def _parse_bytes(data):
 def _parsed(data, fresh=False):
     """(syntax tree or None, error or None, string literals as (value, line,
     column), scan, flow) of the exact bytes of one Lua file."""
-    digest = hashlib.sha256(data).digest()
+    digest = _digest(data)
     if digest in _PARSE_MEMO and not fresh:
+        _PARSE_MEMO[digest] = _PARSE_MEMO.pop(digest)     # most recently used last
         return _PARSE_MEMO[digest]
     # Building one tree allocates hundreds of thousands of acyclic objects;
     # the cyclic collector would rescan every memoized tree meanwhile. It is
@@ -4508,9 +4913,14 @@ def _parsed(data, fresh=False):
     finally:
         if collecting:
             gc.enable()
-    while len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT:
-        del _PARSE_MEMO[next(iter(_PARSE_MEMO))]
+    if digest in _PARSE_MEMO:     # a fresh parse of the same bytes replaces it
+        del _PARSE_MEMO[digest], _PARSE_MEMO_SIZES[digest]
+    while _PARSE_MEMO and (len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT
+                           or sum(_PARSE_MEMO_SIZES.values()) + len(data) > _PARSE_MEMO_BYTES):
+        oldest = next(iter(_PARSE_MEMO))
+        del _PARSE_MEMO[oldest], _PARSE_MEMO_SIZES[oldest]
     _PARSE_MEMO[digest] = result
+    _PARSE_MEMO_SIZES[digest] = len(data)
     return result
 
 
@@ -4528,9 +4938,21 @@ class _Linker:
             for path, rows in unit.scan.path_assignments.items():
                 self.assignments.setdefault(path, []).extend(rows)
         self.field_cache, self.ret_links, self.receiver_memo = {}, {}, {}
+        self.output_memo = {}
+        # Diagnostic switch for an external equivalence control only (no seam
+        # sets it): replay a single root's search as for several roots.
+        self.single_root_replay = False
         self.global_writes = set()
         for unit in self.units:
             self.global_writes |= unit.flow.global_writes
+        # Library transform edges whose global the loaded source assigns are
+        # not followed (the memoized flow itself is never changed).
+        self.blocked = {}
+        for unit in self.units:
+            dropped = {(arg, call) for name, arg, call in unit.flow.library_edges
+                       if name in self.global_writes}
+            if dropped:
+                self.blocked[id(unit.flow)] = dropped
         for unit in self.units:
             flow = unit.flow
             exports = {}
@@ -4561,6 +4983,9 @@ class _Linker:
         if module.value is None or module.value.kind != 'table' or not flow.module_ok(module):
             return None, ('the module table %s is assigned again, written through a computed '
                           'key or escapes its file' % module.node.value)
+        if 'setmetatable' in self.global_writes and flow.metatable_hooked(module):
+            return None, ('the module table %s has a metatable statement and the loaded source '
+                          'assigns setmetatable' % module.node.value)
         func, count = flow.module_funcs.get((module, name), (None, 0))
         if count != 1 or func is None:
             return None, ('%s.%s has %d definitions, directly or through a local alias'
@@ -4745,7 +5170,9 @@ class _Linker:
                 return out
             if tag == 'sink':
                 return []
-        out = [(nxt, flow, stack) for nxt in flow.edges.get(key, ())]
+        blocked = self.blocked.get(id(flow))
+        out = [(nxt, flow, stack) for nxt in flow.edges.get(key, ())
+               if blocked is None or (key, nxt) not in blocked]
         if len(stack) < _STACK_LIMIT:
             out.extend((param, flow, stack + (call,))
                        for param, call in flow.call_args.get(key, ()))
@@ -4862,6 +5289,13 @@ class _Linker:
         is checked against the argument of the call on the value's own stack
         when there is one. A local table with its own SetText is never an
         output."""
+        memo = (node, id(flow), stack)
+        if memo not in self.output_memo:
+            self.output_memo[memo] = self.output_proved(node, flow, stack)
+        return self.output_memo[memo]
+
+    def output_proved(self, node, flow, stack):
+        """output_ok without its per-receipt memo."""
         receiver = flow.sinks[node]
         if receiver is None:
             return node.func.value not in self.global_writes
@@ -5033,9 +5467,26 @@ class _Linker:
         CreateFontString widget of a proved client object, or a reference
         client_object proves."""
         if value.kind == 'call':
-            return (value.func.kind == 'name' and value.func.binding is None
-                    and value.func.value in _WIDGET_FUNCTIONS
-                    and value.func.value not in self.global_writes)
+            if value.func.kind == 'name' and value.func.binding is None:
+                return (value.func.value in _WIDGET_FUNCTIONS
+                        and value.func.value not in self.global_writes)
+            # A local widget helper (Source25 continuation): a call of a
+            # resolved local function each of whose return statements gives
+            # a client value, and that has at least one.
+            target = _local_function(value.func)
+            if target is None or depth > 16:
+                return False
+            statements = [stmt for stmt in _descendants(target.body) if stmt.kind == 'return']
+            if not statements or any(not stmt.exprs for stmt in statements):
+                return False
+            returns = [stmt.exprs[0] for stmt in statements]
+            memo = ('helper', id(target))
+            if memo in self.receiver_memo:
+                return self.receiver_memo[memo]
+            self.receiver_memo[memo] = False    # a helper cycle proves nothing
+            result = all(self.client_value(expr, flow, depth + 1) for expr in returns)
+            self.receiver_memo[memo] = result
+            return result
         if value.kind == 'method':
             return (value.name in _WIDGET_METHODS and not self.field_defs(value.name)
                     and self.client_object(value.obj, flow, depth + 1))
@@ -5065,13 +5516,35 @@ class _Linker:
         reaches an output, under the every-definition rule of that key."""
         proofs = {}
         for key, roots in roots_by_key.items():
-            allowed, _ = self.search(roots)
+            allowed, sinks = self.search(roots)
             proofs[key] = {}
+            if len(roots) == 1 and not self.single_root_replay:
+                # One root: its own search under the key's every-definition
+                # rule is the search just made (allowed is its reached
+                # fixpoint), so its sinks are those sinks.
+                if sinks:
+                    proofs[key][id(roots[0][0])] = self.outputs(sinks)
+                continue
             for root in roots:
                 _, sinks = self.search([root], allowed)
                 if sinks:
                     proofs[key][id(root[0])] = self.outputs(sinks)
         return proofs
+
+
+def _consumer_facts(registry):
+    """The parts of the validated registry-bound catalog a consumer receipt
+    uses: the declarations, each window family's status and adopted keys,
+    and each key-context row's familySurface."""
+    validated = validate_registry_catalog_data(*registry)
+    context = validated['keyContext']
+    return {'declarations': validated['declarations'],
+            'windowFamilies': [{'name': family['name'], 'semanticStatus': family['semanticStatus'],
+                                'coverageStatus': family['coverageStatus'],
+                                'adoptedKeys': list(family['adoptedKeys'])}
+                               for family in context['windowFamilies']],
+            'surfaces': {row['key']: row.get('familySurface') for row in context['keys']
+                         if type(row) is dict}}
 
 
 @_collector_paused
@@ -5083,20 +5556,21 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
     A non-bytes registry input is a TypeError, an invalid catalog raises its
     strict error unchanged and a record failure raises CatalogConsumerError.
     No file is read or written, nothing is fetched, executed or modified, and
-    only the in-memory parse memo (_PARSE_MEMO) is kept between calls."""
+    only the in-memory memos are kept between calls: the Lua parse memo
+    (_PARSE_MEMO) and the input memo of the strict verdicts this receipt
+    runs first (_INPUT_MEMO, see _memoized)."""
     registry = (english_source, packs_source, key_context_json, release_json,
                 localization_source)
-    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
-                            'release_json', 'localization_source'), registry):
-        if not isinstance(value, (bytes, bytearray)):
-            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
-    registry = tuple(bytes(value) for value in registry)
+    registry = _snapshots(_FIVE_INPUTS, registry)
     tocs, supplied, listed = _consumer_inputs(
         (registry[0], registry[1], registry[4]), toc_records, source_records)
-    # The strict registry-bound verdict first: an invalid catalog gets no receipt.
-    registry_catalog_report(*registry)
-    validated = validate_registry_catalog_data(*registry)
-    declarations, context = validated['declarations'], validated['keyContext']
+    # The strict registry-bound verdict first: an invalid catalog gets no
+    # receipt (its error raises unchanged, on every call; a valid verdict is
+    # kept in the input memo, see _core_checks). Only the declarations and
+    # the key-context family facts of the validated catalog are used below.
+    _core_checks('consumer-verdict', registry, lambda: registry_catalog_report(*registry))
+    facts = _memoized('consumer-facts', registry, lambda sources: _consumer_facts(sources))
+    declarations = facts['declarations']
     units, contents = [], set()
     for path in listed:
         data = supplied[path]
@@ -5162,6 +5636,8 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                 reason = '%s.%s is not this function' % (module.node.value, name)
             if reason is None and not exports:
                 reason = 'the module table %s is not exported as a Nexus path' % module.node.value
+            if reason is None and candidate['iterated'] and 'pairs' in linker.global_writes:
+                reason = 'a guard table is iterated by pairs, which the loaded source assigns'
             if reason is not None:
                 problems.append(located(unit, {
                     'code': 'binding-unresolved', 'line': node.line, 'column': node.column,
@@ -5217,13 +5693,12 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                         for field, value in unit.error.items()})
             problems.append(((unit.order, 0, 0), row))
     families = {}
-    for family in context['windowFamilies']:
+    for family in facts['windowFamilies']:
         for key in family['adoptedKeys']:
             families.setdefault(key, []).append({
                 'name': family['name'], 'semanticStatus': family['semanticStatus'],
                 'coverageStatus': family['coverageStatus']})
-    surfaces = {row['key']: row.get('familySurface') for row in context['keys']
-                if type(row) is dict}
+    surfaces = facts['surfaces']
     rows, unbound, positions, proven_rows = [], [], set(), {}
     for key in declarations:
         proven, unproven = [], []
@@ -5268,13 +5743,13 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
         'mode': _CONSUMER_MODE,
         'inputs': _input_rows(_REGISTRY_INPUTS, registry),
         'hashBasis': _HASH_BASIS,
-        'tocs': [{'path': path, 'sha256': hashlib.sha256(data).hexdigest(),
+        'tocs': [{'path': path, 'sha256': _digest(data).hex(),
                   'byteLength': len(data),
                   'loaded': [entry for entry, (toc, _, _) in listed.items() if toc == path]}
                  for path, data in tocs],
         'sources': [{'path': unit.path, 'toc': listed[unit.path][0],
                      'tocLine': listed[unit.path][1],
-                     'sha256': hashlib.sha256(unit.data).hexdigest(),
+                     'sha256': _digest(unit.data).hex(),
                      'byteLength': len(unit.data),
                      'role': ('provider' if unit.path == _AUTHORITY else 'catalog-data'
                               if unit.path in (_ENGLISH_SOURCE, _PACKS_SOURCE) else 'scanned'),
