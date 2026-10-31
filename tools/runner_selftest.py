@@ -9,8 +9,8 @@ It imports the runner and calls its main() with subprocess.run, shutil.which and
 replaced by controlled stand-ins. No Lua runtime is started and nothing waits for a timeout:
 a timeout is a raised subprocess.TimeoutExpired, and elapsed time is a fake clock that each
 stand-in process advances. It calls tools/ci_check.py's main() with every process replaced
-by a stand-in: the runner writes a controlled report, and a registered Python test exits
-with a chosen code, times out or fails to start. No Python test file is run. Each case
+by a stand-in: the runner writes a controlled report (or none) and exits with a chosen code,
+and a registered Python test exits with a chosen code, times out or fails to start. No Python test file is run. Each case
 prints one "ok" line; any wrong result prints WRONG and the exit status is 1.
 """
 from __future__ import annotations
@@ -130,14 +130,15 @@ def python_test_name(argument, root) -> str:
         return str(argument)
 
 
-def ci_check_call(report: dict, *args: str, python=None, prepare=None):
+def ci_check_call(report: dict, *args: str, python=None, prepare=None, runner_exit=None):
     """Call tools/ci_check.py main() with every process replaced by a stand-in.
 
     The runner process writes `report`. Any other process is a registered Python test: python
     maps its path to an exit code, 'timeout' (TimeoutExpired with partial bytes output, after
     45.25 s) or 'launch' (FileNotFoundError); the default is exit 0 after 0.5 s. The clock is
     fake and starts at 2000.0. prepare(ci) may change the module before main() runs. A report
-    of None makes the runner process write no report.
+    of None makes the runner process write no report. The runner process prints 'runner out'
+    and 'runner err' and exits runner_exit; by default 0 when it writes a report and 1 when not.
     Returns code (an exception is returned as the exit status), out (stdout lines), calls
     ((command, keywords) of every process started, in order) and report (the --output file
     afterwards, or None)."""
@@ -145,14 +146,15 @@ def ci_check_call(report: dict, *args: str, python=None, prepare=None):
     outcomes = python or {}
     calls = []
     clock = [2000.0]
+    if runner_exit is None:
+        runner_exit = 1 if report is None else 0
 
     def fake_run(command, **kwargs):
         calls.append((list(command), kwargs))
         if any(str(part).endswith('run_prototype_tests.py') for part in command):
-            if report is None:
-                return subprocess.CompletedProcess(command, 1, stdout='runner out', stderr='runner err')
-            pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
-            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+            if report is not None:
+                pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
+            return subprocess.CompletedProcess(command, runner_exit, stdout='runner out', stderr='runner err')
         name = python_test_name(command[-1], ci.ROOT)
         outcome = outcomes.get(name, 0)
         if outcome == 'timeout':
@@ -543,6 +545,77 @@ def main() -> int:
            and result.out[-1:] == ['RESULT: the runner wrote no report; nothing is counted as passed']
            and not any(line.startswith('python: ') for line in result.out),
            f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+
+    # 14c. The Lua runner's own exit status counts apart from its report. A nonzero runner exit fails the check
+    # even when the report it wrote shows every listed test passed: the report is kept and records the exit, the
+    # runner's output and exit are printed, and no success RESULT line appears. Exit 0 alone is not enough: with
+    # no report the check still fails. 3221225794 is 0xC0000142, a Windows process-initialization failure.
+    success = 'RESULT: no listed test failed; every listed test ran'
+    no_report = 'RESULT: the runner wrote no report; nothing is counted as passed'
+    all_lua = f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}'
+
+    def runner_failed(runner_code):
+        return (f'LUA RUNNER FAILED: tools/run_prototype_tests.py exited {runner_code};'
+                ' the run is not accepted, whatever its report shows')
+
+    def runner_block(out, runner_code):
+        """The runner's exit and output tails, printed before the Lua summary as a failed test's are."""
+        block = [f'--- Lua runner: exit {runner_code}', 'runner out', 'runner err']
+        starts = [i for i in range(len(out)) if out[i:i + 3] == block]
+        return bool(starts) and 'runtime: LuaJIT' in out and starts[0] < out.index('runtime: LuaJIT')
+
+    for runner_code in (17, 1, 3221225794):
+        result = ci_check_call(complete, runner_exit=runner_code)
+        pyrep = (result.report or {}).get('python_tests') or {}
+        expect(f'a Lua runner exit {runner_code} after a complete all-PASS report fails the check: the exit and'
+               ' runner output are printed, the report is kept and records the exit, every registered Python test'
+               ' still runs, no success RESULT line, exit 1',
+               result.code == 1 and result.out[-2:] == [runner_failed(runner_code), 'RESULT: FAILED']
+               and success not in result.out and runner_block(result.out, runner_code) and all_lua in result.out
+               and (result.report or {}).get('lua_runner_exit') == runner_code
+               and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+               and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0),
+               f'exit {result.code}, lua_runner_exit {(result.report or {}).get("lua_runner_exit")!r},'
+               f' last {result.out[-3:]}')
+    result = ci_check_call(controlled_report(names, {'parse': {'status': 'FAIL', 'exit': 1, 'stdout': 'parse out',
+                                                               'stderr': 'parse err'}}), runner_exit=1)
+    expect('a Lua runner exit 1 with a FAIL row prints both the failed test and the runner failure, exit 1',
+           result.code == 1 and result.out[-2:] == [runner_failed(1), 'RESULT: FAILED']
+           and result.out[2:5] == ['--- parse: FAIL', 'parse out', 'parse err'] and runner_block(result.out, 1)
+           and f'passed {len(names) - 1}, failed 1, NOT RUN 0, no result row 0, listed {len(names)}' in result.out,
+           f'exit {result.code}, out {result.out[:8]}, last {result.out[-3:]}')
+    result = ci_check_call(controlled_report(['parse', 'boot'], {}), '--only', 'parse,boot', runner_exit=17)
+    expect('a Lua runner exit 17 after an all-PASS shard report fails the shard, which stays PARTIAL with every'
+           ' Python test NOT SELECTED and only the runner started, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.out[-2:] == [runner_failed(17), 'RESULT: FAILED']
+           and success not in result.out and runner_block(result.out, 17)
+           and 'PARTIAL: a shard was selected; this is not a complete run' in result.out
+           and all(f'python: NOT SELECTED in a shard (not run, not a pass): {path}' in result.out
+                   for path in PYTHON_REGISTRY),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None, runner_exit=17)
+    expect('a Lua runner exit 17 without a report prints the exit and runner output, starts no Python test and'
+           ' counts nothing as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.report is None
+           and result.out[-2:] == [runner_failed(17), no_report]
+           and 'runner out' in result.out and 'runner err' in result.out
+           and not any(line.startswith(('python: ', 'passed ')) for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None, runner_exit=0)
+    expect('control: a Lua runner exit 0 without a report still fails, starts no Python test, counts nothing as'
+           ' passed and reports no runner failure, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.report is None and result.out[-1:] == [no_report]
+           and not any(line.startswith(('python: ', 'passed ', 'LUA RUNNER FAILED')) for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(complete, runner_exit=0)
+    expect('control: a Lua runner exit 0 with a complete all-PASS report and every Python test passing stays a'
+           ' success without runner output or a runner failure line; the report records exit 0, exit 0',
+           result.code == 0 and result.out[-1:] == [success] and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+           and (result.report or {}).get('lua_runner_exit') == 0
+           and not any(line.startswith(('--- Lua runner', 'LUA RUNNER FAILED')) or line in ('runner out', 'runner err')
+                       for line in result.out),
+           f'exit {result.code}, lua_runner_exit {(result.report or {}).get("lua_runner_exit")!r},'
+           f' last {result.out[-3:]}')
 
     # 15. A --only shard runs the selected Lua tests only; each Python test is NOT SELECTED, never a pass.
     result = ci_check_call(controlled_report(['parse', 'boot'], {}), '--only', 'parse,boot')
