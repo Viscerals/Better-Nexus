@@ -302,8 +302,9 @@ print('PASS panel options label')
 -- through an L.Text stand-in and a direct SetText; here nothing stands in for
 -- the label. Fresh real-TOC boots (format5_support F.Boot) of synthetic saved
 -- data: right after data\LocalizationPacks.lua loads, a scoped F.fileHooks
--- entry copies the in-memory packs and sets only the copied frFR
--- "panel.button.options" (the shipped frFR holds none); the real
+-- entry deep-copies the in-memory packs and overwrites only the copied frFR
+-- "panel.button.options" (the shipped complete frFR already holds its own
+-- reviewed "Options", which stays unchanged); the real
 -- core/Localization.lua then checks and copies it, frFR is chosen only in the
 -- synthetic settings, and Panel.Render, OptionsLabel / OptionsText,
 -- PlaceOptionsButton and the registered OnEnter / OnLeave / OnClick of the
@@ -363,22 +364,58 @@ do
  -- characters x model width ("Réglages" 8, "! Réglages" 10).
  local SHORT_CUT={[G.MODELS.default]={false,false},[G.MODELS.px16]={false,false},
   [G.MODELS.small]={false,false},[G.MODELS.double]={true,true},[C125]={false,true}}
- local HELP='Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.'
- local NOTICE='Update available: 1.20.0-beta.1 test.9029'
+ -- Independent literal expectations of the surrounding presentation, per
+-- active language: the reviewed English base and the reviewed shipped frFR
+-- values (panel.tooltip.options_contents, panel.tooltip.update_available,
+-- panel.tooltip.update_releases_link, panel.label.auto_state_off,
+-- panel.label.context_wishlist with usertext.value.wishlist_assigned_named).
+-- Only the Options label itself is the test candidate; the help, notice,
+-- Auto state and Wishlist words are the language's own and localize.
+ local LOCALE={
+  enUS={help='Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.',
+   notice='Update available: 1.20.0-beta.1 test.9029',
+   releases='Open this menu for the manual Releases-page link.',
+   autoOff='Auto OFF',
+   wishlist='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)'},
+  frFR={help='Aide et configuration, param\195\168tres, avis, journaux et actions du panneau. Plan, Explorer et Orbs sont en bas du panneau.',
+   notice='Mise \195\160 jour disponible : 1.20.0-beta.1 test.9029',
+   releases='Ouvrez ce menu pour le lien manuel vers la page Releases.',
+   autoOff='Auto D\195\137SACTIV\195\137',
+   wishlist='Liste de souhaits : Synthetic |||| Wishlist Caf\195\169 (assign\195\169e)'},
+ }
+ local function Words()
+  local words=LOCALE[(Nexus.Localization.ActiveLanguage())]
+  assert(words,'SETUP O1: literal expectations exist for the active language')
+  return words
+ end
  -- The control's own hover: its name heads it, complete and wrapped while
  -- the button shows that name shortened (with or without the trusted "! "),
- -- so the complete label is shown exactly once; then help and the notice.
+ -- so the complete label is shown exactly once; then help and the notice,
+ -- in the active language.
  local function Want(label,notice,shortened)
-  local out={}
+  local words,out=Words(),{}
   out[#out+1]={label,1,1,1,shortened or nil}
-  out[#out+1]={HELP,0.8,0.8,0.8,true}
+  out[#out+1]={words.help,0.8,0.8,0.8,true}
   if notice then
    out[#out+1]={' '}
-   out[#out+1]={NOTICE,1,0.82,0,true}
-   out[#out+1]={'Open this menu for the manual Releases-page link.',0.8,0.8,0.8,true}
+   out[#out+1]={words.notice,1,0.82,0,true}
+   out[#out+1]={words.releases,0.8,0.8,0.8,true}
   end
   return out
  end
+ -- The reviewed shipped frFR Options menu, row by row (Panel MoreMenuItems
+ -- under the synthetic fixture), as independent literals.
+ local FRENCH_MENU={'Aide et configuration','Questions (FAQ)','Configuration / Bienvenue',
+  "L'Auto expliqu\195\169 (d\195\169tails complets)","Plus d'aide et de fen\195\170tres",'Param\195\168tres',
+  'Apparence : Nexus Vista, Nexus Am\195\169thyste','Ouvrir les param\195\168tres...',"Param\195\168tres d'automatisation",
+  'Langue : Fran\195\167ais','Afficher les records de DPS (masqu\195\169s)',
+  'Utiliser le HUD difficult\195\169 / Soul Ash du serveur (HUD du jeu non d\195\169tect\195\169)','Avis',
+  'Version et mises \195\160 jour : aucune info de mise \195\160 jour v\195\169rifi\195\169e',
+  'Avis de mise \195\160 jour : activ\195\169s, stables + builds de test','Session',
+  'Mettre Nexus en pause pour cette session',
+  "Met en pause l'Auto, les actions d'Orb, le partage et l'enregistrement du DPS.",
+  'Une action d\195\169j\195\160 envoy\195\169e peut encore se terminer.','Panneau',
+  'Taille du panneau principal : 100%','R\195\169initialiser la position du panneau','Masquer le panneau Nexus'}
  local NAME='Synthetic || Wishlist Caf\195\169'
  local function Model(o)
   o=o or {}
@@ -394,7 +431,7 @@ do
    charges=o.offer and {banish=0,freeze=7} or nil,
   }
  end
- local H,log,shipped,baseline
+ local H,log,shipped,shippedFacts,baseline
  local function Effects()
   local id,initialized,automatic=Nexus.Localization.ActiveLanguage()
   return {db=F.Serialize(NexusDB),settings=H.Clone(Nexus.Store.Settings()),language=id,initialized=initialized,
@@ -414,7 +451,7 @@ do
  local function Boot(language,options)
   local db=F.Database({version=2});db.settings.uiLanguage=language
   local prior=F.fileHooks
-  shipped=nil
+  shipped,shippedFacts=nil,nil
   F.fileHooks=options~=nil and {['data\\LocalizationPacks.lua']=function()
    shipped=Nexus.LocalizationPacks
    local packs={}
@@ -422,6 +459,9 @@ do
     local entries={};for key,text in pairs(pack.entries)do entries[key]=text end
     packs[id]={name=pack.name,entries=entries}
    end
+   -- What the shipped frFR held before the copy was changed.
+   local count=0;for _ in pairs(shipped.frFR.entries)do count=count+1 end
+   shippedFacts={entries=shipped.frFR.entries,count=count,options=shipped.frFR.entries[KEY]}
    packs.frFR.entries[KEY]=options
    Nexus.LocalizationPacks=packs
   end} or nil
@@ -489,11 +529,18 @@ do
   Passive('O1 menu opening')
   return opened
  end
+ -- The opened menu's rows: their texts, and their structure (title, submenu
+-- and its size, click, checked, disabled, checkable) without the text.
  local function TopTexts(opened)
   local out={}
+  for _,item in ipairs(opened and opened.list or {})do out[#out+1]=tostring(item.text) end
+  return out
+ end
+ local function TopShape(opened)
+  local out={}
   for _,item in ipairs(opened and opened.list or {})do
-   local text=tostring(item.text)
-   if not text:find('^Language') then out[#out+1]=text end
+   out[#out+1]={item.isTitle==true,item.hasArrow==true,type(item.func),item.checked==true,item.disabled==true,
+    item.notCheckable==true,type(item.menuList)=='table' and #item.menuList or -1}
   end
   return out
  end
@@ -530,7 +577,8 @@ do
    check(G.Apart(r[names[i]],r[names[j]]),why..': '..names[i]..' and '..names[j]..' do not overlap')
   end end
   check(G.Inside(r.options,{0,0,W,f:GetHeight()}) and G.Inside(r.close,{0,0,W,f:GetHeight()}),why..': line 1 stays inside the panel')
-  check(G.Visible(autoShown and f._autoBtn:GetText() or f._contextAutoState:GetText())=='Auto OFF',why..': Auto reads exactly Auto OFF')
+  check(G.Visible(autoShown and f._autoBtn:GetText() or f._contextAutoState:GetText())==Words().autoOff,
+   why..': Auto reads exactly the active language\'s reviewed Auto OFF words ('..Words().autoOff..')')
   check(Nexus.LayoutMetrics.Shortened(label)==expectShort,
    why..': the 80 px label is '..(expectShort and 'shortened' or 'whole')..' in this model ('..label:GetStringWidth()..' px)')
   local lines,owners,cycle=Hover(menu)
@@ -576,6 +624,25 @@ do
   rawset(UIParent,'GetEffectiveScale',uiScale)
   G.UseFont(G.MODELS.default)
  end
+ -- The shipped frFR table is untouched: same table, same entry count, its own
+-- reviewed "Options" (equal to the English word in the reviewed frFR draft),
+-- while the deep copy differs from it only in the overwritten Options entry.
+ local function Shipped(tag,want)
+  local copy=Nexus.LocalizationPacks
+  check(shipped and shippedFacts and copy~=shipped and copy.frFR~=shipped.frFR and copy.frFR.entries~=shipped.frFR.entries
+   and shipped.frFR.entries==shippedFacts.entries,tag..': the hook kept the shipped tables and loaded a deep copy')
+  local count,copied,others=0,0,true
+  for key,text in pairs(shipped.frFR.entries)do
+   count=count+1
+   if key~=KEY then others=others and copy.frFR.entries[key]==text end
+  end
+  for _ in pairs(copy.frFR.entries)do copied=copied+1 end
+  check(count==shippedFacts.count and count==#Nexus.Localization.Keys() and copied==count,
+   tag..': the shipped frFR still holds '..count..' entries, one per English key; the copy as many ('..copied..')')
+  check(shipped.frFR.entries[KEY]=='Options' and shippedFacts.options=='Options' and shipped.frFR.entries[KEY]~=want,
+   tag..': the shipped frFR keeps its own reviewed Options entry, unchanged and different from the test text')
+  check(copy.frFR.entries[KEY]==want and others,tag..': only the copied Options entry holds the test text; every other copied entry is the shipped one')
+ end
  local function Admitted(L,want,tag)
   local text,source,reason=L.Text(KEY)
   check(text==want and source=='candidate' and reason==nil,tag..': the real loader admitted the test candidate ('..tostring(source)..')')
@@ -585,11 +652,15 @@ do
   for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
   local ids={}
   for _,language in ipairs(L.Languages())do ids[#ids+1]=language.id..'='..language.name end
+  -- The shipped frFR is a complete pack: one entry per English key. The copy
+  -- overwrites its existing Options entry, so the count does not grow.
+  local keys=#L.Keys()
+  check(keys==4078 and L.Diagnostics().base.accepted==keys,tag..': the English base holds the 4078-key catalog ('..keys..')')
   check(table.concat(ids,',')=='enUS=English,frFR=Fran\195\167ais,deDE=Deutsch,esES=Espa\195\177ol,plPL=Polski,ptBR=Portugu\195\170s (Brasil),ruRU=\208\160\209\131\209\129\209\129\208\186\208\184\208\185'
-   and L.Diagnostics().packs.adopted==6 and L.Diagnostics().packs.refused==0 and row and row.accepted==28 and row.rejected==0,
-   tag..': the same seven offered languages, no pseudo language; frFR copied all 28 entries ('..table.concat(ids,',')..')')
-  check(shipped and shipped.frFR.entries[KEY]==nil and Nexus.LocalizationPacks.frFR.entries[KEY]==want,
-   tag..': only the in-memory copy holds the test text; the shipped frFR has no Options entry')
+   and L.Diagnostics().packs.adopted==6 and L.Diagnostics().packs.refused==0 and row and row.accepted==keys and row.rejected==0,
+   tag..': the same seven offered languages, no pseudo language; frFR copied all '..keys..' entries, the overwritten Options among them ('
+    ..table.concat(ids,',')..'; '..tostring(row and row.accepted)..'/'..tostring(row and row.rejected)..')')
+  Shipped(tag,want)
  end
  -- A. English control: the shipped data, no hook.
  local L=Boot(nil,nil)
@@ -598,9 +669,14 @@ do
  check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
  Passive('O1 English render')
  local englishWishlist=NexusPanel._contextWishlist:GetText()
- local englishMenu=TopTexts(Menu())
- check(englishWishlist=='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)' and #englishMenu>10,
-  'SETUP O1 English: the escaped Wishlist name and the Options menu ('..tostring(englishWishlist)..')')
+ local englishOpened=Menu()
+ local englishMenu,englishShape=TopTexts(englishOpened),TopShape(englishOpened)
+ check(englishWishlist==LOCALE.enUS.wishlist and #englishMenu>10 and #englishMenu==#FRENCH_MENU,
+  'SETUP O1 English: the escaped Wishlist name and the Options menu ('..tostring(englishWishlist)..', '..#englishMenu..' rows)')
+ -- The English control keeps the English hover, notice and Auto OFF words.
+ check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1 English: render with the notice')
+ Header(420,'O1 English, trusted notice','Options',false,true)
+ check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
  -- B. The exact 256-byte expanded candidate through the real loader.
  L=Boot('frFR',LONG)
  Admitted(L,LONG,'O1 expanded')
@@ -625,7 +701,11 @@ do
  local opened=Menu()
  check(opened and opened.anchor==menu and opened.frame==P._moreMenu and opened.list[1].isTitle,'O1 expanded: the click opens the Options menu at the control')
  local menuTexts=TopTexts(opened)
- check(same(menuTexts,englishMenu),'O1 expanded: the Options menu offers the same rows as in English (Language aside)')
+ check(same(TopShape(opened),englishShape),'O1 expanded: the Options menu offers the same rows as in English: titles, submenus and their sizes, clicks and states, row by row')
+ check(same(menuTexts,FRENCH_MENU),'O1 expanded: every row shows the reviewed frFR words, the Language row naming Fran\195\167ais')
+ local localized=0
+ for i,text in ipairs(menuTexts)do if text~=englishMenu[i] then localized=localized+1 end end
+ check(localized==#menuTexts-2,'O1 expanded: all rows but the two whose reviewed frFR equals English (Questions (FAQ), Session) differ from English ('..localized..')')
  for _,text in ipairs(menuTexts)do check(not text:find(LONG,1,true),'O1 expanded: the menu rows do not carry the label') end
  frames=#H.frames
  local warm={label=menu:GetFontString(),regions=#menu.regions,children=#menu.children,enter=menu:GetScript('OnEnter'),
@@ -665,8 +745,13 @@ do
  check(Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})=='Ban:0 Rel:? Gel:7 ~'
   and L.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}},{})=='B:0 R:? F:7',
   'O1 expanded: the estimate mark follows the whole row; an explicit {} pack gives the English row')
- check(f._contextWishlist:GetText()==englishWishlist and P._lastModel.progress.wishlistName==NAME,
-  'O1 expanded: the escaped Wishlist name is shown byte for byte as in English and kept raw')
+ -- The surrounding Wishlist words localize; the supplied name bytes do not.
+ local ESCAPED='Synthetic |||| Wishlist Caf\195\169'
+ local shownWishlist=f._contextWishlist:GetText()
+ local function Count(text)local n,i=0,1;while true do local s,e=text:find(ESCAPED,i,true);if not s then return n end;n=n+1;i=e+1 end end
+ check(shownWishlist==LOCALE.frFR.wishlist and Count(shownWishlist)==1 and Count(englishWishlist)==1
+  and P._lastModel.progress.wishlistName==NAME,
+  'O1 expanded: the reviewed frFR Wishlist line shows the escaped name byte for byte, once, as in English, and keeps it raw ('..tostring(shownWishlist)..')')
  -- C. The short control: the same route; whole where the model fits it.
  L=Boot('frFR',SHORT)
  Admitted(L,SHORT,'O1 short')
@@ -688,12 +773,18 @@ do
   local text,source,reason=L.Text(KEY)
   local row
   for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
-  check(text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==27 and row.rejected==1,
-   tag..': the loader refused the entry and Options falls back to English ('..tostring(reason)..', rejected '..tostring(row and row.rejected)..')')
+  local keys=#L.Keys()
+  check(keys==4078 and text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==keys-1 and row.rejected==1,
+   tag..': the loader refused the one overwritten entry, kept the other '..(keys-1)..' and Options falls back to English ('
+    ..tostring(reason)..', accepted '..tostring(row and row.accepted)..', rejected '..tostring(row and row.rejected)..')')
+  check(shipped.frFR.entries[KEY]=='Options' and shipped.frFR.entries[KEY]==shippedFacts.options,
+   'SETUP '..tag..': the shipped frFR Options entry is unchanged')
   check(select(3,L.Resolve(KEY,{[KEY]=bad[2]}))=='invalid_candidate','SETUP '..tag..': the same bytes are an invalid candidate under the text contract')
   check(Nexus.LocalizationPacks.frFR.entries[KEY]==bad[2] and #Nexus.LocalizationPacks.frFR.entries[KEY]==#bad[2],
    'SETUP '..tag..': the test data kept its own raw bytes ('..#bad[2]..')')
-  check(select(2,L.Text('panel.button.my_builds'))=='candidate' and L.Text('panel.button.my_builds')=='Mes builds',
+  -- The reviewed frFR keeps the game page name My Builds; Auto OFF is translated.
+  check(select(2,L.Text('panel.button.my_builds'))=='candidate' and L.Text('panel.button.my_builds')=='My Builds'
+   and select(2,L.Text('panel.button.auto_off'))=='candidate' and L.Text('panel.button.auto_off')=='Auto D\195\137SACTIV\195\137',
    'SETUP '..tag..': the rest of the frFR fixture pack is still active')
   G.UseFont(G.MODELS.default)
   check(Nexus.Panel.Render(Model({notice=true})),'SETUP '..tag..': render')

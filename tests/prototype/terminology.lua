@@ -769,15 +769,23 @@ do
  -- reroll unknown and freeze 7. Literal expectations, not derived from data.
  local W3K,WPK,CHK='reason.wait_three_choices','reason.wait_pending_pick_count','readout.charge_counts'
  local AUTHORED={
-  frFR={[W3K]="En attente des trois prochains choix d'Echo",[WPK]='en attente du nombre de choix restants',[CHK]='Ban:{banish} Rel:{reroll} Gel:{freeze}'},
-  deDE={[W3K]='Warten auf die n\195\164chsten drei Echo-Auswahlen',[WPK]='warten auf die Anzahl ausstehender Auswahlen',[CHK]='Verb:{banish} Neu:{reroll} Einfr:{freeze}'},
-  esES={[W3K]='Esperando las pr\195\179ximas tres opciones de Echo',[WPK]='esperando el n\195\186mero de elecciones pendientes',[CHK]='Dest:{banish} Rel:{reroll} Cong:{freeze}'},
-  plPL={[W3K]='Oczekiwanie na kolejne trzy wybory Echo',[WPK]='oczekiwanie na liczb\196\153 pozosta\197\130ych wybor\195\179w',[CHK]='Wygn:{banish} Przel:{reroll} Zamr:{freeze}'},
+  -- Current reviewed drafts of the full catalog (source-paired correction
+  -- replaced the pilot wording of frFR/plPL WPK, deDE W3K/WPK and esES W3K).
+  frFR={[W3K]="En attente des trois prochains choix d'Echo",[WPK]='en attente du d\195\169compte des choix en suspens',[CHK]='Ban:{banish} Rel:{reroll} Gel:{freeze}'},
+  deDE={[W3K]='Warte auf die n\195\164chsten drei Echo-Auswahlen',[WPK]='warte auf die Anzahl ausstehender Auswahlen',[CHK]='Verb:{banish} Neu:{reroll} Einfr:{freeze}'},
+  esES={[W3K]='Esperando las pr\195\179ximas tres elecciones de Echo',[WPK]='esperando el n\195\186mero de elecciones pendientes',[CHK]='Dest:{banish} Rel:{reroll} Cong:{freeze}'},
+  plPL={[W3K]='Oczekiwanie na kolejne trzy wybory Echo',[WPK]='oczekiwanie na liczb\196\153 oczekuj\196\133cych wybor\195\179w',[CHK]='Wygn:{banish} Przel:{reroll} Zamr:{freeze}'},
   ptBR={[W3K]='Aguardando as pr\195\179ximas tr\195\170s escolhas de Echo',[WPK]='aguardando a contagem de escolhas pendentes',[CHK]='Banir:{banish} Rolar:{reroll} Cong:{freeze}'},
   ruRU={[W3K]='\208\158\208\182\208\184\208\180\208\176\208\189\208\184\208\181 \209\129\208\187\208\181\208\180\209\131\209\142\209\137\208\184\209\133 \209\130\209\128\209\145\209\133 \208\178\208\176\209\128\208\184\208\176\208\189\209\130\208\190\208\178 Echo',
    [WPK]='\208\190\208\182\208\184\208\180\208\176\208\189\208\184\208\181 \209\135\208\184\209\129\208\187\208\176 \208\190\209\129\209\130\208\176\208\178\209\136\208\184\209\133\209\129\209\143 \208\178\209\139\208\177\208\190\209\128\208\190\208\178',
    [CHK]='\208\152\208\183\208\179:{banish} \208\159\208\181\209\128:{reroll} \208\151\208\176\208\188:{freeze}'},
  }
+ local KEPT_GAME_LABEL={['frFR:panel.button.my_builds']='My Builds',['esES:panel.button.my_builds']='My Builds',
+  ['plPL:panel.button.my_builds']='My Builds',['ptBR:panel.button.my_builds']='My Builds'}
+ -- The card Freeze action as each reviewed draft names it in the locked-slot
+ -- hover (literal; the inflected noun form in pl/ru; frFR keeps the game term).
+ local FREEZE_TERM={frFR='Freeze',deDE='Einfrieren',esES='Congelar',plPL='Zamro\197\188enie',ptBR='Congelar',
+  ruRU='\208\183\208\176\208\188\208\190\209\128\208\190\208\183\208\186\208\176'}
  local CHARGE07={frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',plPL='Wygn:0 Przel:? Zamr:7',
   ptBR='Banir:0 Rolar:? Cong:7',ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
  local enum=Nexus.DefaultProfile.uiLanguages
@@ -795,7 +803,13 @@ do
  check(L.ActiveLanguage()=='enUS' and select(2,L.ActiveLanguage())==true,'the English profile starts with English active, initialized once')
  local d=L.Diagnostics()
  check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
- for _,row in ipairs(d.packs.rows)do check(row.accepted==27 and row.rejected==0,'real pack '..row.id..' has all 27 entries: three original static, two newer static, 21 Panel static and the charge-row template')end
+ -- Full visible-UI catalog (#143-#148): every real pack holds one valid entry
+ -- for every reviewed English key, so each pack row admits the complete key
+ -- set (4078 at this pin) and rejects nothing. The six-message and Panel
+ -- cohorts below remain named subsets of that complete set.
+ local englishKeys=L.Keys()
+ check(#englishKeys==4078 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4078 keys, each with English')
+ for i,row in ipairs(d.packs.rows)do check(row.id==IDS[i+1] and row.accepted==#englishKeys and row.rejected==0,'real pack '..row.id..' admits all '..#englishKeys..' catalog entries and rejects none ('..row.accepted..'/'..row.rejected..')')end
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
@@ -821,27 +835,48 @@ do
  for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
  for i=2,#IDS do
   local id=IDS[i];local pack=packData[id]
-  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==27,'pack '..id..': its own name and exactly 27 entries: the six-message cohort and the 21 Panel meanings')
-  local onlyCohort=true
-  for key in pairs(pack.entries)do onlyCohort=onlyCohort and (packKeys[key]==true or AUTHORED[id][key]~=nil or panelEnglish[key]~=nil) end
-  check(onlyCohort,'pack '..id..' holds only six-message and Panel cohort keys: no other English key')
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==#englishKeys,'pack '..id..': its own name and exactly one entry per English key ('..count(pack.entries)..')')
+  local onlyEnglish,missing=true,{}
+  for key in pairs(pack.entries)do onlyEnglish=onlyEnglish and data[key]~=nil and L.Has(key) end
+  for _,key in ipairs(englishKeys)do if pack.entries[key]==nil then missing[#missing+1]=key end end
+  check(onlyEnglish and #missing==0,'pack '..id..' holds exactly the English key set: no extra key and none missing ('..(missing[1] or '')..')')
+  local cohortPresent=true
+  for key in pairs(packKeys)do cohortPresent=cohortPresent and pack.entries[key]~=nil end
+  for key in pairs(AUTHORED[id])do cohortPresent=cohortPresent and pack.entries[key]~=nil end
+  for key in pairs(panelEnglish)do cohortPresent=cohortPresent and pack.entries[key]~=nil end
+  check(cohortPresent,'pack '..id..' keeps the six-message and Panel cohorts as a subset of its complete key set')
   for _,case in ipairs(panelCohort)do
    local key,text=case[1],pack.entries[case[1]]
    local copied=false
    for _,other in ipairs(cohort)do copied=copied or text==other[3] end
    for _,other in ipairs(panelCohort)do copied=copied or text==other[2] end
-   check(type(text)=='string' and isolated(text) and not copied and not text:find('[%%{}<>|]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..key..': a drafted static text, not English, a placeholder or markup')
+   -- The only English-identical Panel entries of the current drafts: the My
+   -- Builds button keeps the server page's own name in these four packs (a
+   -- legitimately identical game label, historically qualified). Exactly
+   -- these pairs, byte-exact; any other copy of English still fails.
+   if KEPT_GAME_LABEL[id..':'..key] then
+    check(text==KEPT_GAME_LABEL[id..':'..key] and text==case[2] and isolated(text),'pack '..id..' '..key..' keeps exactly the game page name '..case[2])
+   else
+    check(type(text)=='string' and isolated(text) and not copied and not text:find('[%%{}<>|]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..key..': a drafted static text, not English, a placeholder or markup')
+   end
    resolves(key,{[key]=text},text,'candidate',nil,'pack '..id..' '..key..' passes the text contract')
   end
   local required={['panel.tooltip.my_builds_destination']={'My Builds','Saved Build'},
    ['panel.tooltip.open_my_builds']={'My Builds'},['panel.tooltip.assignment_chooser']={'Echo Journal'},
    ['panel.tooltip.create_wishlist_source']={'Nexus'},
-   ['panel.tooltip.create_wishlist_draft']={'Create & assign','Create unassigned'},
    ['panel.tooltip.locked_plan']={'Echo'},['panel.tooltip.locked_acquire']={'Echo'},
-   ['panel.tooltip.locked_placement']={'Echo'},['panel.tooltip.locked_not_freeze']={'Echo','Freeze'}}
+   ['panel.tooltip.locked_placement']={'Echo'},['panel.tooltip.locked_not_freeze']={'Echo',FREEZE_TERM[id]}}
   for key,labels in pairs(required)do for _,label in ipairs(labels)do
-   check(type(pack.entries[key])=='string' and pack.entries[key]:find(label,1,true)~=nil,'pack '..id..' '..key..' keeps the identifiable English label '..label)
+   check(type(pack.entries[key])=='string' and pack.entries[key]:find(label,1,true)~=nil,'pack '..id..' '..key..' keeps the identifiable label '..label)
   end end
+  -- The full catalog localizes the editor's own action buttons, so the Panel
+  -- hover names exactly the labels that pack's editor shows (each translated),
+  -- keeping its "nothing saved or assigned until" consequence.
+  for _,button in ipairs({'editor.button.create_and_assign','editor.button.create_unassigned'})do
+   local label=pack.entries[button]
+   check(type(label)=='string' and label~=data[button] and isolated(label) and pack.entries['panel.tooltip.create_wishlist_draft']:find(label,1,true)~=nil,
+    'pack '..id..' panel.tooltip.create_wishlist_draft names its own translated editor button '..button..' ('..tostring(label)..')')
+  end
   for _,key in ipairs({W3K,WPK,CHK})do
    local text=pack.entries[key]
    check(text==AUTHORED[id][key] and isolated(text) and text~=data[key],'pack '..id..' '..key..': exactly the authored draft bytes, not the English')
@@ -887,7 +922,8 @@ do
    for _,case in ipairs(panelCohort)do
     local want=packData[id].entries[case[1]]
     local text,source,why=m.Text(case[1])
-    check(type(want)=='string' and text==want and source=='candidate' and why==nil and text~=case[2],'active '..id..' Text gives its Panel draft: '..case[1])
+    local kept=KEPT_GAME_LABEL[id..':'..case[1]]
+    check(type(want)=='string' and text==want and source=='candidate' and why==nil and (kept and text==kept or not kept and text~=case[2]),'active '..id..' Text gives its Panel draft: '..case[1])
     text,source,why=m.Resolve(case[1])
     check(text==case[2] and source=='base' and why==nil,'Resolve stays the exact Panel English under '..id..': '..case[1])
    end

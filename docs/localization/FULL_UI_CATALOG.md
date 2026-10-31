@@ -71,9 +71,11 @@ unchanged.
   before those cohorts were applied, so a missing or invalid entry shows the exact
   English of its key, never an older translation. 543 entries are byte-identical to
   their English (for example product, game or code-owned terms kept as drafted, and
-  placeholder-only texts); `RELEASE_LANGUAGES.json` records no `entryReview` declaration
-  for them. Every entry is `draft_unreviewed`: technical and automated source-paired
-  review only.
+  placeholder-only texts). For 529 of them `RELEASE_LANGUAGES.json` records a
+  `legitimately_identical` `entryReview` declaration: an automated source-paired review
+  with a public evidence reference, not fluent human or native acceptance. The other 14
+  have no declaration yet. Every entry is `draft_unreviewed`: technical and automated
+  source-paired review only.
 
 ## Evidence in the source
 
@@ -107,8 +109,10 @@ owned outside this source change.
   them.
 - No plural, gender, date or number grammar exists; paired one/other keys keep the
   English two-way choice.
-- `tools/l10n_catalog.py` and its tests still encode the 64-entry pilot and the two
-  pilot kinds, and the shared parity corpus (`tests/prototype/fixtures/l10n_parity`)
-  still encodes the 64/65 boundary. Their update is a separate, owned tooling change;
-  until then `localization_parity` and the registry-bound Python tests fail on the
-  composed catalog.
+- `tools/l10n_catalog.py` follows the runtime's 4,096-entry cap (declarations, English
+  base and each pack) and its four kinds `text`, `block`, `format` and `template`. The
+  shared parity corpus (`tests/prototype/fixtures/l10n_parity`) keeps its committed 64/65
+  pilot cases and derives the current 4,096/4,097 boundary controls from them in memory.
+  The catalog itself has 4,078 keys, 18 below the cap. Results of the Python tests bound
+  to the shipped catalog, packs and release metadata, within their 45-second per-file
+  limit, are recorded separately against the final source; none is claimed here.

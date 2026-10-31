@@ -364,11 +364,33 @@ for _,case in ipairs({PROTECTED[1],PROTECTED[3],PROTECTED[5]})do
   Nexus.Panel.Show()
   local items;EasyMenu=function(list)items=list end;NexusPanel._menuBtn:Click()
   -- The language chooser is a direct Options choice (native QA test.163008).
-  local menu
+  -- With a pack active its row and submenu title are localized, so the actual
+  -- opened submenu is found by its exact title row and row label in the active
+  -- language (literal expectations), and exactly one item must match.
+  local active=Nexus.Localization.ActiveLanguage()
+  local TITLE={enUS='Nexus language',esES='Idioma de Nexus'}
+  local ROW={enUS='Language: ',esES='Idioma: '}
+  local menu,matches
+  matches=0
   for _,item in ipairs(items or {})do
-   if type(item.text)=='string' and item.text:find('^Language')then menu=item end
+   local first=type(item.menuList)=='table' and item.menuList[1] or nil
+   if type(item.text)=='string' and item.text:sub(1,#ROW[active])==ROW[active]
+    and first and first.isTitle and first.text==TITLE[active] then menu=item;matches=matches+1 end
   end
-  local disabled=0;for _,row in ipairs(menu and menu.menuList or {})do if row.func and row.disabled==true then disabled=disabled+1 end end
+  check(matches==1,label..': exactly one Options item opens the language submenu ('..matches..')')
+  -- All eight offered choices: Automatic, then the seven manual languages in
+  -- enum order, each visibly disabled; the refused Automatic row has no click,
+  -- the seven manual rows keep their guarded callbacks.
+  local ORDER={'enUS','frFR','deDE','esES','plPL','ptBR','ruRU'}
+  local NAMES={enUS='English',frFR='Fran\195\167ais',deDE='Deutsch',esES='Espa\195\177ol',plPL='Polski',ptBR='Portugu\195\170s (Brasil)',ruRU='\208\160\209\131\209\129\209\129\208\186\208\184\208\185'}
+  local list=menu and menu.menuList or {}
+  local choices=0;for _,row in ipairs(list)do if not row.isTitle and not row.notCheckable then choices=choices+1 end end
+  check(choices==8 and list[2] and list[2].disabled==true and list[2].func==nil,label..': eight offered choices; the refused Automatic row is disabled without a click')
+  for i,id in ipairs(ORDER)do
+   local row=list[i+2]
+   check(row and row.disabled==true and row.func~=nil and type(row.text)=='string' and row.text:find(NAMES[id],1,true)~=nil,label..': manual choice '..id..' is listed by its own name and visibly disabled')
+  end
+  local disabled=0;for _,row in ipairs(list)do if row.func and row.disabled==true then disabled=disabled+1 end end
   check(menu and disabled==7,label..': every language choice is disabled')
   local result=Nexus.Panel.ChooseLanguage('frFR')
   check(result.state=='refused' and result.reason=='read-only' and writes==0,label..': a choice is refused before the writer')

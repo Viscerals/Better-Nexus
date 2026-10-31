@@ -547,6 +547,62 @@ do
  local CHARGES={enUS='B:0 R:? F:7',frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',
   plPL='Wygn:0 Przel:? Zamr:7',ptBR='Banir:0 Rolar:? Cong:7',
   ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
+ -- Full UI localization: the reviewed wording of the language chooser and of the level-prefixed
+ -- readout line in each active language, as literal expectations (copied from the reviewed
+ -- English and pack texts, not read from the data): the level-12 prefix of readout.status.level_prefixed,
+ -- the submenu title, the menu-row label prefix and pending suffix, the Automatic row prefix, the row
+ -- suffixes, the refusal sentence around its reason, the reason words, and the two notes.
+ local LANGUAGE_LITERALS={
+ enUS={level12='Lv 12 - ',title='Nexus language',row='Language: ',pending=' (new choice after reload)',automatic='Automatic (',
+  active=' - active',saved=' - saved, applies after reload',inUse=' - in use',unavailable={'Changes unavailable: ','.'},
+  reasons={startup='Nexus is still starting',capacity='saved data is kept unchanged after a shared-data capacity refusal',
+   drift='the saved data changed since start-up; reload first',
+   ['read-only']='this saved data is kept read-only by this build'},
+  sessionOnly='The last choice was not saved, so it will not apply after a reload.',
+  unsupported='The saved language is not offered by this build; English is shown.'},
+ frFR={level12='Niv. 12 - ',title='Langue de Nexus',row='Langue : ',pending=' (nouveau choix apr\195\168s rechargement)',automatic='Automatique (',
+  active=' - active',saved=' - enregistr\195\169e, s\39applique apr\195\168s rechargement',inUse=' - utilis\195\169e',unavailable={'Changements indisponibles : ','.'},
+  reasons={startup='Nexus est encore en cours de d\195\169marrage',capacity='les donn\195\169es enregistr\195\169es restent inchang\195\169es apr\195\168s un refus de capacit\195\169 des donn\195\169es partag\195\169es',
+   drift='les donn\195\169es enregistr\195\169es ont chang\195\169 depuis le d\195\169marrage ; rechargez d\39abord',
+   ['read-only']='ces donn\195\169es enregistr\195\169es sont gard\195\169es en lecture seule par cette version'},
+  sessionOnly='Le dernier choix n\39a pas \195\169t\195\169 enregistr\195\169 ; il ne s\39appliquera donc pas apr\195\168s un rechargement.',
+  unsupported='La langue enregistr\195\169e n\39est pas propos\195\169e par cette version ; l\39anglais est affich\195\169.'},
+ deDE={level12='St. 12 - ',title='Nexus-Sprache',row='Sprache: ',pending=' (neue Wahl nach Neuladen)',automatic='Automatisch (',
+  active=' - aktiv',saved=' - gespeichert, gilt nach Neuladen',inUse=' - in Verwendung',unavailable={'\195\132nderungen nicht verf\195\188gbar: ','.'},
+  reasons={startup='Nexus startet noch',capacity='gespeicherte Daten bleiben nach einer Ablehnung wegen der Kapazit\195\164t geteilter Daten unver\195\164ndert',
+   drift='die gespeicherten Daten haben sich seit dem Start ge\195\164ndert; lade zuerst neu',
+   ['read-only']='diese gespeicherten Daten h\195\164lt dieser Build schreibgesch\195\188tzt'},
+  sessionOnly='Die letzte Wahl wurde nicht gespeichert und gilt daher nach einem Neuladen nicht.',
+  unsupported='Die gespeicherte Sprache wird von diesem Build nicht angeboten; Englisch wird angezeigt.'},
+ esES={level12='Nv 12 - ',title='Idioma de Nexus',row='Idioma: ',pending=' (nueva elecci\195\179n tras recargar)',automatic='Autom\195\161tico (',
+  active=' - activo',saved=' - guardado, se aplica tras recargar',inUse=' - en uso',unavailable={'Cambios no disponibles: ','.'},
+  reasons={startup='Nexus a\195\186n se est\195\161 iniciando',capacity='los datos guardados se mantienen sin cambios tras un rechazo por capacidad de los datos compartidos',
+   drift='los datos guardados han cambiado desde el inicio; recarga primero',
+   ['read-only']='esta versi\195\179n mantiene estos datos guardados en solo lectura'},
+  sessionOnly='La \195\186ltima elecci\195\179n no se guard\195\179, as\195\173 que no se aplicar\195\161 tras recargar.',
+  unsupported='Esta versi\195\179n no ofrece el idioma guardado; se muestra ingl\195\169s.'},
+ plPL={level12='Poz. 12 - ',title='J\196\153zyk Nexus',row='J\196\153zyk: ',pending=' (nowy wyb\195\179r po prze\197\130adowaniu)',automatic='Automatyczny (',
+  active=' - aktywny',saved=' - zapisany, obowi\196\133zuje po prze\197\130adowaniu',inUse=' - w u\197\188yciu',unavailable={'Zmiany niedost\196\153pne: ','.'},
+  reasons={startup='Nexus wci\196\133\197\188 si\196\153 uruchamia',capacity='zapisane dane pozostaj\196\133 bez zmian po odmowie z powodu pojemno\197\155ci udost\196\153pnionych danych',
+   drift='zapisane dane zmieni\197\130y si\196\153 od uruchomienia; najpierw prze\197\130aduj',
+   ['read-only']='ta wersja pozostawia te zapisane dane tylko do odczytu'},
+  sessionOnly='Ostatni wyb\195\179r nie zosta\197\130 zapisany, wi\196\153c nie zadzia\197\130a po prze\197\130adowaniu.',
+  unsupported='Zapisany j\196\153zyk nie jest oferowany w tej wersji; pokazywany jest angielski.'},
+ ptBR={level12='Nv 12 - ',title='Idioma do Nexus',row='Idioma: ',pending=' (nova escolha ap\195\179s recarregar)',automatic='Autom\195\161tico (',
+  active=' - ativo',saved=' - salvo, vale ap\195\179s recarregar',inUse=' - em uso',unavailable={'Altera\195\167\195\181es indispon\195\173veis: ','.'},
+  reasons={startup='o Nexus ainda est\195\161 iniciando',capacity='os dados salvos s\195\163o mantidos inalterados ap\195\179s uma recusa de capacidade dos dados compartilhados',
+   drift='os dados salvos mudaram desde a inicializa\195\167\195\163o; recarregue a interface primeiro',
+   ['read-only']='estes dados salvos s\195\163o mantidos somente leitura por esta vers\195\163o'},
+  sessionOnly='A \195\186ltima escolha n\195\163o foi salva, ent\195\163o n\195\163o vai valer depois de recarregar a interface.',
+  unsupported='O idioma salvo n\195\163o \195\169 oferecido por esta vers\195\163o; o ingl\195\170s \195\169 mostrado.'},
+ ruRU={level12='\208\163\209\128. 12 - ',title='\208\175\208\183\209\139\208\186 Nexus',row='\208\175\208\183\209\139\208\186: ',pending=' (\208\189\208\190\208\178\209\139\208\185 \208\178\209\139\208\177\208\190\209\128 \208\191\208\190\209\129\208\187\208\181 \208\191\208\181\209\128\208\181\208\183\208\176\208\179\209\128\209\131\208\183\208\186\208\184)',automatic='\208\144\208\178\209\130\208\190\208\188\208\176\209\130\208\184\209\135\208\181\209\129\208\186\208\184 (',
+  active=' - \208\176\208\186\209\130\208\184\208\178\208\181\208\189',saved=' - \209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189, \208\191\209\128\208\184\208\188\208\181\208\189\208\184\209\130\209\129\209\143 \208\191\208\190\209\129\208\187\208\181 \208\191\208\181\209\128\208\181\208\183\208\176\208\179\209\128\209\131\208\183\208\186\208\184',inUse=' - \208\184\209\129\208\191\208\190\208\187\209\140\208\183\209\131\208\181\209\130\209\129\209\143',unavailable={'\208\152\208\183\208\188\208\181\208\189\208\181\208\189\208\184\209\143 \208\189\208\181\208\180\208\190\209\129\209\130\209\131\208\191\208\189\209\139: ','.'},
+  reasons={startup='Nexus \208\181\209\137\209\145 \208\183\208\176\208\191\209\131\209\129\208\186\208\176\208\181\209\130\209\129\209\143',capacity='\209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189\208\189\209\139\208\181 \208\180\208\176\208\189\208\189\209\139\208\181 \208\190\209\129\209\130\208\176\209\142\209\130\209\129\209\143 \208\177\208\181\208\183 \208\184\208\183\208\188\208\181\208\189\208\181\208\189\208\184\208\185 \208\191\208\190\209\129\208\187\208\181 \208\190\209\130\208\186\208\176\208\183\208\176 \208\191\208\190 \209\145\208\188\208\186\208\190\209\129\209\130\208\184 \208\190\208\177\209\137\208\184\209\133 \208\180\208\176\208\189\208\189\209\139\209\133',
+   drift='\209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189\208\189\209\139\208\181 \208\180\208\176\208\189\208\189\209\139\208\181 \208\184\208\183\208\188\208\181\208\189\208\184\208\187\208\184\209\129\209\140 \208\191\208\190\209\129\208\187\208\181 \208\183\208\176\208\191\209\131\209\129\208\186\208\176; \209\129\208\189\208\176\209\135\208\176\208\187\208\176 \208\191\208\181\209\128\208\181\208\183\208\176\208\179\209\128\209\131\208\183\208\184\209\130\208\181 \208\184\208\189\209\130\208\181\209\128\209\132\208\181\208\185\209\129',
+   ['read-only']='\209\141\209\130\208\176 \208\178\208\181\209\128\209\129\208\184\209\143 \208\180\208\181\209\128\208\182\208\184\209\130 \209\141\209\130\208\184 \209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189\208\189\209\139\208\181 \208\180\208\176\208\189\208\189\209\139\208\181 \209\130\208\190\208\187\209\140\208\186\208\190 \208\180\208\187\209\143 \209\135\209\130\208\181\208\189\208\184\209\143'},
+  sessionOnly='\208\159\208\190\209\129\208\187\208\181\208\180\208\189\208\184\208\185 \208\178\209\139\208\177\208\190\209\128 \208\189\208\181 \209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189, \208\191\208\190\209\141\209\130\208\190\208\188\209\131 \208\191\208\190\209\129\208\187\208\181 \208\191\208\181\209\128\208\181\208\183\208\176\208\179\209\128\209\131\208\183\208\186\208\184 \208\190\208\189 \208\189\208\181 \208\191\209\128\208\184\208\188\208\181\208\189\208\184\209\130\209\129\209\143.',
+  unsupported='\208\161\208\190\209\133\209\128\208\176\208\189\209\145\208\189\208\189\209\139\208\185 \209\143\208\183\209\139\208\186 \208\189\208\181 \208\191\209\128\208\181\208\180\208\187\208\176\208\179\208\176\208\181\209\130\209\129\209\143 \209\141\209\130\208\190\208\185 \208\178\208\181\209\128\209\129\208\184\208\181\208\185; \208\191\208\190\208\186\208\176\208\183\208\176\208\189 \208\176\208\189\208\179\208\187\208\184\208\185\209\129\208\186\208\184\208\185.'}
+ }
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local PACKS=assert(penv.Nexus and penv.Nexus.LocalizationPacks,'pack data');checks=checks+1
  local function Want(id,case)return id=='enUS' and case[3] or PACKS[id].entries[case[2]] end
@@ -556,15 +612,27 @@ do
   local owner=Nexus.MainInternals.StoreAuthorityOwner;local original=owner.UpdateSettingsV1
   owner.UpdateSettingsV1=function(...)writes.n=writes.n+1;return original(...)end
  end
+ -- The reviewed literals of the language that is active now.
+ local function Literal()
+  local literal=LANGUAGE_LITERALS[Nexus.Localization.ActiveLanguage()]
+  check(literal~=nil,'SETUP the active language has reviewed literal expectations')
+  return literal
+ end
  local function LanguageMenu()
   local items;EasyMenu=function(list)items=list end
   NexusPanel._menuBtn:Click()
   local found,rows=nil,0
   -- The language chooser is a direct Options choice (native QA test.163008).
   check(type(items)=='table' and #items>0,'the Options menu lists its direct choices')
+  -- Full UI localization: the row is found by the exact label prefix of the active language
+  -- (LANGUAGE_LITERALS), never by English text, and its submenu must open with that
+  -- language's exact title row.
+  local literal=Literal()
   for _,item in ipairs(items)do
-   if type(item.text)=='string' and item.text:find('^Language')then found=found or item;rows=rows+1 end
+   if type(item.text)=='string' and item.text:sub(1,#literal.row)==literal.row then found=found or item;rows=rows+1 end
   end
+  check(found==nil or type(found.menuList)=='table' and type(found.menuList[1])=='table' and found.menuList[1].isTitle==true
+   and found.menuList[1].text==literal.title,'the Language submenu opens with its exact localized title row')
   return found,rows
  end
  local function Row(menu,id)
@@ -601,7 +669,8 @@ do
    if type(row)=='table' and not row.notCheckable and not row.isTitle then
     checkable=checkable+1
     local text,id=tostring(row.text),nil
-    if text:sub(1,11)=='Automatic (' then
+    local automatic=Literal().automatic
+    if text:sub(1,#automatic)==automatic then
      id='automatic'
     else
      for i=2,#CHOICES do
@@ -621,15 +690,18 @@ do
   return table.concat(out,',')
  end
  -- A refused menu: all eight offered choices present and visibly disabled,
- -- the Automatic row without a click, and the reason row naming the refusal.
- local function RefusedChoices(menu,reason,label)
+ -- the Automatic row without a click, and the reason row naming the refusal
+ -- (refusal code -> its exact sentence in the active language).
+ local function RefusedChoices(menu,code,label)
+  local literal=Literal()
+  local reason=assert(literal.reasons[code],'a reviewed reason literal for '..tostring(code))
   local found,count,checkable=Choices(menu)
   check(count==8 and checkable==8,label..': all eight offered choices are listed ('..count..' found in '..checkable..' choice rows)')
   for _,id in ipairs(CHOICES)do
    check(found[id]~=nil and found[id].disabled==true,label..': the '..id..' choice is present and visibly disabled')
   end
   check(found.automatic.func==nil,label..': the refused Automatic row carries no click')
-  check(MenuText(menu):find('Changes unavailable: '..reason..'.',1,true)~=nil,label..': the menu names the refusal: '..reason)
+  check(MenuText(menu):find(literal.unavailable[1]..reason..literal.unavailable[2],1,true)~=nil,label..': the menu names the refusal: '..reason)
   return found
  end
  local function Expect(id,label)
@@ -637,7 +709,10 @@ do
   for _,case in ipairs(COHORT)do
    local want=Want(id,case)
    check(Nexus.UserText.Message(case[1])==want and Nexus.UserText.Message(want)==want,label..': UserText shows the active text, stable when normalized again: '..case[1])
-   check(Nexus.Readout.Status({text=case[1],level=12})=='Lv 12 - '..want,label..': the readout status line: '..case[1])
+   -- Full UI localization: Readout.Status formats readout.status.level_prefixed in the active
+   -- language (exact rounded level 12, the translated reason, its punctuation).
+   check(Nexus.Readout.Status({text=case[1],level=12})==LANGUAGE_LITERALS[id].level12..want,label..': the readout status line: '..case[1])
+   check(id~='enUS' or Nexus.Readout.Status({text=case[1],level=12})=='Lv 12 - '..want,label..': the English control line: '..case[1])
    local model={status=case[1],recommendation=case[1],cards={},auto=false,level=40,version=Nexus.VERSION,
     progress={wishlistName='Language review',total=2,owned=0,missing={},shed={},unknownTomes={},toLock={}}}
    Nexus.Panel.Show();assert(Nexus.Panel.Render(model))
@@ -674,7 +749,8 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
  check(text:find('reload',1,true) and not text:lower():find('fully',1,true) and not text:find('Changes unavailable',1,true),'the reload requirement, no full-support claim, no refusal')
  local function Auto(m)
   for _,row in ipairs(m and m.menuList or {})do
-   if type(row.text)=='string' and row.text:sub(1,11)=='Automatic (' and not row.notCheckable then return row end
+   local automatic=Literal().automatic
+   if type(row.text)=='string' and row.text:sub(1,#automatic)==automatic and not row.notCheckable then return row end
   end
  end
  check(Auto(menu) and Auto(menu).checked==true and Auto(menu).text:find('English',1,true) and not Auto(menu).disabled and Row(menu,'enUS').checked~=true and Row(menu,'enUS').text:find('active',1,true) and rawget(NexusDB.settings,'uiLanguage')==nil,'EXPECT #141: the actual ... menu checks Automatic (showing English) as the default preference while no preference is saved; English is the active language, not a saved manual choice')
@@ -767,7 +843,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   Expect('deDE','capacity-refused session')
   local saved=F.Serialize(NexusDB)
   Nexus.Panel.Show();menu=LanguageMenu()
-  check(Row(menu,'frFR').disabled==true and MenuText(menu):find('Changes unavailable',1,true),'capacity refusal: every choice is disabled with its reason')
+  check(Row(menu,'frFR').disabled==true and MenuText(menu):find(Literal().unavailable[1],1,true),'capacity refusal: every choice is disabled with its reason')
   local r=Nexus.Panel.ChooseLanguage('frFR')
   check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved,'capacity refusal: refused before the writer, root unchanged')
   -- Review F3: the same oversized root through the real registered menu.
@@ -781,7 +857,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
    and status.savedUnsupported==false and select(3,Nexus.Localization.ActiveLanguage())==false,
    'capacity refusal: the status and the session start name the durable manual deDE, not the Automatic default')
   menu=LanguageMenu()
-  local found=RefusedChoices(menu,'saved data is kept unchanged after a shared-data capacity refusal','capacity refusal')
+  local found=RefusedChoices(menu,'capacity','capacity refusal')
   check(CheckedChoices(found)=='deDE','capacity refusal: only the durable manual deDE is checked; Automatic is not')
   r=Nexus.Panel.ChooseLanguage('automatic')
   check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved and Effects()==effects,
@@ -806,7 +882,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   local effects=Effects()
   local status=Nexus.Panel.LanguageStatus()
   check(status.refusal=='drift' and status.preference=='automatic' and status.automatic==true and status.savedUnsupported==false,'replaced settings: the status reads the admitted saved source and refuses for drift')
-  local found=RefusedChoices(menu,'the saved data changed since start-up; reload first','replaced settings')
+  local found=RefusedChoices(menu,'drift','replaced settings')
   check(CheckedChoices(found)=='automatic','replaced settings: Automatic, the admitted absent preference, is the only checked choice')
   r=Nexus.Panel.ChooseLanguage('automatic')
   check(r.state=='refused' and r.reason=='drift' and writes.n==0 and Effects()==effects,'replaced settings: a direct Automatic submit is refused before the writer')
@@ -872,14 +948,14 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   status=Nexus.Panel.LanguageStatus()
   check(status.automatic==false and status.activeAutomatic==false and status.pending==false and status.preferencePending==false and writes.n==0,'after reload manual deDE is the session preference')
   Nexus.Panel.Show();menu=LanguageMenu()
-  check(Row(menu,'deDE').checked==true and Auto(menu).checked~=true and Nexus.Panel.LanguageMenuLabel()=='Language: Deutsch','the menu checks the manual deDE')
+  check(Row(menu,'deDE').checked==true and Auto(menu).checked~=true and Nexus.Panel.LanguageMenuLabel()=='Sprache: Deutsch','the menu checks the manual deDE, labelled in the active German')
   effects=Effects()
   Auto(menu).func()
   status=Nexus.Panel.LanguageStatus()
   check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='automatic' and Effects()==effects,'manual deDE -> Automatic: one durable write of the Automatic value')
   check(status.automatic==true and status.saved=='enUS' and status.active=='deDE' and status.pending==true and status.preferencePending==true,'status: Automatic is saved and pending; deDE is still the active language, never called Automatic')
   Nexus.Panel.Hide();Nexus.Panel.Show();menu=LanguageMenu()
-  check(Auto(menu).checked==true and Auto(menu).text:find('saved, applies after reload',1,true) and not Auto(menu).text:find('in use',1,true) and Row(menu,'deDE').text:find('active',1,true) and Row(menu,'deDE').checked~=true and Nexus.Panel.LanguageMenuLabel()=='Language: Deutsch (new choice after reload)','reopened: the pending Automatic preference beside the active deDE')
+  check(Auto(menu).checked==true and Auto(menu).text:find(Literal().saved,1,true) and not Auto(menu).text:find(Literal().inUse,1,true) and Row(menu,'deDE').text:find(Literal().active,1,true) and Row(menu,'deDE').checked~=true and Nexus.Panel.LanguageMenuLabel()=='Sprache: Deutsch (neue Wahl nach Neuladen)','reopened: the pending Automatic preference beside the active deDE, in the active German')
   Expect('deDE','Automatic pending, reopened panel')
   check(Nexus.Localization.InitializeActiveLanguage('automatic')=='deDE','a later initialization does not switch the session')
   H=F.Reload(ClientFact);CountWriter()
@@ -933,7 +1009,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   check(mode=='session' and writes.n==1 and Nexus.Store.Settings().uiLanguage=='automatic' and rawget(NexusDB.settings,'uiLanguage')=='frFR' and F.Serialize(NexusDB)==frozen,'a session-only Automatic result changes only the detached projection; the saved manual frFR stays')
   check(status.sessionOnly==true and status.automatic==false and status.saved=='frFR' and status.active=='frFR' and status.refusal=='read-only','status keeps the durable manual frFR and says the Automatic choice was not saved')
   menu=LanguageMenu()
-  check(Row(menu,'frFR').checked==true and Auto(menu).checked~=true and Auto(menu).disabled==true and Auto(menu).func==nil and not Auto(menu).text:find('saved',1,true) and MenuText(menu):find('The last choice was not saved',1,true),'the menu never labels the session-only Automatic saved, and a refused Automatic row cannot submit')
+  check(Row(menu,'frFR').checked==true and Auto(menu).checked~=true and Auto(menu).disabled==true and Auto(menu).func==nil and not Auto(menu).text:find(Literal().saved,1,true) and MenuText(menu):find(Literal().sessionOnly,1,true),'the menu never labels the session-only Automatic saved, and a refused Automatic row cannot submit')
   local r=Nexus.Panel.ChooseLanguage('automatic')
   check(r.state=='refused' and r.reason=='read-only' and writes.n==1 and F.Serialize(NexusDB)==frozen,'the read-only root refuses an Automatic choice before the writer')
   H=F.Reload(ClientFact);CountWriter()
@@ -987,7 +1063,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   -- Automatic carries no click, and a direct Automatic submit is refused
   -- for startup with no writer, settings, root, action, send or popup.
   check(early.initialized==false,'SETUP early start-up: the language is not initialized yet, so no lifecycle status callback exists')
-  local found=RefusedChoices(early.menu,'Nexus is still starting','early start-up')
+  local found=RefusedChoices(early.menu,'startup','early start-up')
   check(early.automatic.state=='refused' and early.automatic.reason=='startup' and early.writes==0 and early.same and early.root and early.quiet,'early start-up: a direct Automatic submit is refused and nothing is written, sent or shown')
   local fallback=early.status
   check(fallback.active=='enUS' and fallback.refusal=='startup' and fallback.pending==false and fallback.automaticPreference=='automatic' and fallback.automaticLanguage=='enUS' and #fallback.languages==7,'early start-up: the fallback keeps the active English, the startup refusal, the Automatic value and every installed language')
@@ -1030,7 +1106,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   for _,case in ipairs(failing)do
    Nexus.Panel.Init({LanguageStatus=case[2]})
    local status=Nexus.Panel.LanguageStatus()
-   local found=RefusedChoices({menuList=Nexus.Panel.LanguageMenuItems(function(fn)return fn end)},'Nexus is still starting',case[1])
+   local found=RefusedChoices({menuList=Nexus.Panel.LanguageMenuItems(function(fn)return fn end)},'startup',case[1])
    check(status.active=='enUS' and status.refusal=='startup' and status.saved==nil and status.preference==nil and status.automatic==nil and CheckedChoices(found)=='',case[1]..': the fallback keeps the active English and leaves the saved preference unknown, with no row checked')
    local refused=Nexus.Panel.ChooseLanguage('automatic')
    check(refused.state=='refused' and refused.reason=='startup' and freshCalls==0 and writes.n==1 and F.Serialize(NexusDB)==root and Effects()==effects,case[1]..': a direct Automatic submit is refused; no writer, root or game effect')
@@ -1077,9 +1153,9 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
     'EXPECT F1 '..label..': the module '..(case.automatic and 'starts' or 'does not start')..' on Automatic, as the lifecycle status says (third result '..tostring(automatic)..')')
    local effects=Effects()
    Nexus.Panel.Show();menu=LanguageMenu()
-   local found=RefusedChoices(menu,'this saved data is kept read-only by this build',label)
+   local found=RefusedChoices(menu,'read-only',label)
    check(CheckedChoices(found)==case.checked,label..': the menu checks '..case.checked..' and nothing else ('..CheckedChoices(found)..')')
-   check((found.automatic.text:find(' - in use',1,true)~=nil)==case.automatic and (MenuText(menu):find(NOTICE,1,true)~=nil)==case.unsupported,
+   check((found.automatic.text:find(Literal().inUse,1,true)~=nil)==case.automatic and (MenuText(menu):find(Literal().unsupported,1,true)~=nil)==case.unsupported,
     label..': Automatic is in use only for an Automatic start; the unsupported notice only for an unsupported saved value')
    local r=Nexus.Panel.ChooseLanguage('automatic')
    check(r.state=='refused' and r.reason=='read-only' and writes.n==0,label..': a direct Automatic submit is refused before the writer')
@@ -1163,6 +1239,17 @@ do
     if mode=='candidate' then packs.frFR.entries[row[1]]=CAND[row[1]]
     elseif mode=='fallback' then packs.deDE.entries[row[1]]=i%2==1 and BAD[((i-1)/2)%#BAD+1] or nil end
    end
+   if mode=='fallback' then
+    -- The shipped deDE now holds a draft for every key, so this fixture pack
+    -- is built explicitly: the 21 meanings stay invalid or absent (above) and
+    -- every other key holds its exact English, as the hovers' other lines
+    -- expect.
+    local cohort={}
+    for _,row in ipairs(KEYS)do cohort[row[1]]=true end
+    for key,text in pairs(Nexus.LocalizationEnglish)do
+     if not cohort[key] then packs.deDE.entries[key]=text end
+    end
+   end
    if mode=='candidate' then
     packs.frFR.entries['readout.charge_counts']=LONGCHARGE
     -- Issue #165: the HUD Options label is a mapped key the panel resolves on
@@ -1172,8 +1259,14 @@ do
     packs.frFR.entries['panel.button.options']=OPTIONS_CAND
     -- Full visible-UI catalog: every other reviewed key holds its exact
     -- English, so the candidate pack stays complete as the catalog grows.
+    -- The shipped frFR now holds a draft for every key, so this fixture pack
+    -- is built explicitly: each key other than the 21 candidates, the charge
+    -- template and Options is set to its exact English (the hovers' other
+    -- lines stay the English the expectations below name).
+    local fixture={['readout.charge_counts']=true,['panel.button.options']=true}
+    for _,row in ipairs(KEYS)do fixture[row[1]]=true end
     for key,text in pairs(Nexus.LocalizationEnglish)do
-     if packs.frFR.entries[key]==nil then packs.frFR.entries[key]=text end
+     if not fixture[key] then packs.frFR.entries[key]=text end
     end
    end
    Nexus.LocalizationPacks=packs
@@ -1689,6 +1782,10 @@ do
  -- GUARD: the real charge rows of the six real packs, unchanged (no fixture).
  local ROWS={frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',plPL='Wygn:0 Przel:? Zamr:7',
   ptBR='Banir:0 Rolar:? Cong:7',ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
+ -- Full UI localization: the charge hover heading (panel.tooltip.charges_heading) in each real
+ -- pack, as literal expectations.
+ local CHARGE_HEADINGS={frFR='Charges',deDE='Ladungen',esES='Cargas',plPL='\197\129adunki',ptBR='Cargas',
+  ruRU='\208\151\208\176\209\128\209\143\208\180\209\139'}
  for _,id in ipairs({'frFR','deDE','esES','plPL','ptBR','ruRU'})do
   Boot(id,nil)
   assert(Nexus.Panel.Render(Active()))
@@ -1709,9 +1806,17 @@ do
    ..(#lockWant>#lockBody and ', after the complete heading' or ', with no added heading'))
   local charges=NexusPanel._chargesText
   check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==72 and charges:GetHeight()==NexusPanel._responsiveLayout.small,'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its unchanged 72 px box')
-  local want={{'Charges',1,1,1},{ROWS[id],1,1,1,true}}
-  for _,line in ipairs(Nexus.Readout.ChargesLegend())do want[#want+1]={line,0.85,0.85,0.85,true}end
-  check(same(Lines(NexusPanel._chargesHover),want),'GUARD #143 real '..id..': the actual _chargesHover carries the complete row and the unchanged English legend')
+  -- The legend in this pack's own input entries (as for the locked-target lines above), with
+  -- the code-owned "?: " and "~: " markers; Readout.ChargesLegend must give the same lines.
+  local legend={entries['readout.tooltip.charges_legend_letters'],'?: '..entries['readout.tooltip.charges_legend_unknown'],
+   '~: '..entries['readout.tooltip.charges_legend_estimated'],entries['readout.tooltip.charges_legend_auto']}
+  local shownLegend=Nexus.Readout.ChargesLegend()
+  local want={{CHARGE_HEADINGS[id],1,1,1},{ROWS[id],1,1,1,true}}
+  for i,line in ipairs(legend)do
+   check(shownLegend[i]==line,'GUARD #143 real '..id..': legend line '..i..' is the pack text')
+   want[#want+1]={line,0.85,0.85,0.85,true}
+  end
+  check(#shownLegend==#legend and same(Lines(NexusPanel._chargesHover),want),'GUARD #143 real '..id..': the actual _chargesHover carries the localized heading, the complete row and the legend of the active pack')
  end
  -- The explicit coverage-literal exception, checked last so a pre-binding
  -- Panel first fails on its mapped consumers above.
@@ -1719,21 +1824,40 @@ do
  -- in order (a menu row does not wrap).
  local SCOPE={'Nexus shows its own text in the selected language where a draft translation exists; text without one stays in English.',
   'Game names, player names and diagnostic data are not translated.','Translations are drafts pending fluent and native review.'}
- local easy,items=EasyMenu,nil
- local before=Effects()
- EasyMenu=function(list)items=list end
- NexusPanel._menuBtn:Click()
- EasyMenu=easy
- local language,found,stale
- for _,item in ipairs(items or {})do
-  if type(item.text)=='string' and item.text:find('^Language')then language=item end
+ -- Full UI localization: the note is a reviewed key of every pack, so it is checked in English
+ -- (a fresh English boot, with the stale six-message guard) and in the active ruRU of the last
+ -- real-pack boot above, each with its exact lines; the Language submenu is found by its exact
+ -- title row in that language, never by an English label.
+ local SCOPES={
+  enUS={title='Nexus language',lines=SCOPE},
+  ruRU={title='\208\175\208\183\209\139\208\186 Nexus',lines={
+   'Nexus \208\191\208\190\208\186\208\176\208\183\209\139\208\178\208\176\208\181\209\130 \209\129\208\178\208\190\208\185 \209\130\208\181\208\186\209\129\209\130 \208\189\208\176 \208\178\209\139\208\177\209\128\208\176\208\189\208\189\208\190\208\188 \209\143\208\183\209\139\208\186\208\181 \209\130\208\176\208\188, \208\179\208\180\208\181 \208\181\209\129\209\130\209\140 \209\135\208\181\209\128\208\189\208\190\208\178\208\190\208\185 \208\191\208\181\209\128\208\181\208\178\208\190\208\180; \209\130\208\181\208\186\209\129\209\130 \208\177\208\181\208\183 \208\191\208\181\209\128\208\181\208\178\208\190\208\180\208\176 \208\190\209\129\209\130\208\176\209\145\209\130\209\129\209\143 \208\189\208\176 \208\176\208\189\208\179\208\187\208\184\208\185\209\129\208\186\208\190\208\188.',
+   '\208\157\208\176\208\183\208\178\208\176\208\189\208\184\209\143 \208\184\208\183 \208\184\208\179\209\128\209\139, \208\184\208\188\208\181\208\189\208\176 \208\184\208\179\209\128\208\190\208\186\208\190\208\178 \208\184 \208\180\208\184\208\176\208\179\208\189\208\190\209\129\209\130\208\184\209\135\208\181\209\129\208\186\208\184\208\181 \208\180\208\176\208\189\208\189\209\139\208\181 \208\189\208\181 \208\191\208\181\209\128\208\181\208\178\208\190\208\180\209\143\209\130\209\129\209\143.',
+   '\208\159\208\181\209\128\208\181\208\178\208\190\208\180\209\139 \226\128\148 \209\135\208\181\209\128\208\189\208\190\208\178\208\184\208\186\208\184, \208\186\208\190\209\130\208\190\209\128\209\139\208\181 \208\181\209\137\209\145 \208\182\208\180\209\131\209\130 \208\191\209\128\208\190\208\178\208\181\209\128\208\186\208\184 \208\187\209\142\208\180\209\140\208\188\208\184, \209\129\208\178\208\190\208\177\208\190\208\180\208\189\208\190 \208\178\208\187\208\176\208\180\208\181\209\142\209\137\208\184\208\188\208\184 \209\143\208\183\209\139\208\186\208\190\208\188, \208\184 \208\191\209\128\208\190\208\178\208\181\209\128\208\186\208\184 \208\178 \208\184\208\179\209\128\208\190\208\178\208\190\208\188 \208\186\208\187\208\184\208\181\208\189\209\130\208\181.'}},
+ }
+ local function Scope(id)
+  local want=SCOPES[id]
+  check(Nexus.Localization.ActiveLanguage()==id,'SETUP #143 scope note: active language '..id)
+  local easy,items=EasyMenu,nil
+  local before=Effects()
+  EasyMenu=function(list)items=list end
+  NexusPanel._menuBtn:Click()
+  EasyMenu=easy
+  local language,menus,found,stale=nil,0,nil,false
+  for _,item in ipairs(items or {})do
+   local list=type(item.menuList)=='table' and item.menuList or nil
+   if list and type(list[1])=='table' and list[1].isTitle==true and list[1].text==want.title then language=item;menus=menus+1 end
+  end
+  for _,row in ipairs(language and language.menuList or {})do
+   if row.text==want.lines[1] and row.disabled==true and row.notCheckable==true then found=1
+   elseif found and found<#want.lines and row.text==want.lines[found+1] and row.disabled==true and row.notCheckable==true then found=found+1 end
+   if tostring(row.text):find('six messages',1,true)then stale=true end
+  end
+  check(menus==1 and found==#want.lines and not stale and same(Effects(),before),'#143 '..id..': the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
  end
- for _,row in ipairs(language and language.menuList or {})do
-  if row.text==SCOPE[1] and row.disabled==true and row.notCheckable==true then found=1
-  elseif found and found<#SCOPE and row.text==SCOPE[found+1] and row.disabled==true and row.notCheckable==true then found=found+1 end
-  if tostring(row.text):find('six messages',1,true)then stale=true end
- end
- check(found==#SCOPE and not stale and same(Effects(),before),'#143: the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
+ Scope('ruRU')
+ Boot('enUS',nil)
+ Scope('enUS')
 end
 
 -- UX-02: a fresh real boot with the shipped defaults (Freeze allowed, trusted
