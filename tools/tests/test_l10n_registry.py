@@ -3248,7 +3248,7 @@ class ConsumerBindingTests(unittest.TestCase):
         return row
 
     def test_c27_environment_and_library_writes_refuse_trusted_globals(self):
-        # V15 review fix (SPEC P1 _G.pairs and _G.setmetatable, STD-V15-2):
+        # V15 review fix (SPEC-V15-1 _G.pairs and _G.setmetatable, STD-V15-2):
         # a trusted global or string library function replaced through _G, a
         # library field, a static or computed key, an alias, rawset or the
         # string metatable is no longer trusted, whatever the order of the
@@ -3307,13 +3307,38 @@ class ConsumerBindingTests(unittest.TestCase):
             ("_G and debug only tested", b'if _G and type(debug) == "table" and _G.UIParent '
              b'then end ' + method, True),
             ("another global written through _G",
-             b'_G.NexusSpecValue = 1 local f = _G["GameFont" .. "Normal"] ' + method, True)))
+             b'_G.NexusSpecValue = 1 local f = _G["GameFont" .. "Normal"] ' + method, True),
+            # STD-8849-2: a computed _G[k] read keeps a proof only when its
+            # key is proved to name no trusted global, or the global it reads
+            # is only tested, field-tested or called as a method.
+            ("a read-only literal list of names", b'local names = {"NexusSpecA", "NexusSpecB"} '
+             b'for i = 1, #names do local f = _G[names[i]] if f and f.Hide then pcall(f.Hide, f) '
+             b'end end ' + method, True),
+            ("a loop over literal suffixes", b'for _, part in ipairs({"Low", "High"}) do '
+             b'local f = _G[specLabel:GetName() .. part] if f then f:Hide() end end ' + method,
+             True),
+            ("an unknown global only tested and called as a method",
+             b'local f = _G[specLabel:GetName()] if f and f.IsShown and f:IsShown() then end '
+             + method, True)))
         # A reference that may write any global: no global stays trusted,
         # so no output is proved, and the reference is a mutation problem.
         for name, code in (("_G aliased", b'local G = _G; G.pairs = pairs'),
                            ("a computed _G write", b'for k in pairs({}) do _G[k] = nil end'),
                            ("_G passed to rawset", b'rawset(_G, "pairs", pairs)'),
-                           ("an environment function", b'setfenv(1, {})')):
+                           ("an environment function", b'setfenv(1, {})'),
+                           # STD-8849-2: the reviewer's computed reads of the
+                           # string library, and an unknown global passed on
+                           # or called through a method the source defines.
+                           ("a computed _G read written through",
+                            b'local key = tostring("string"); _G[key].upper = function(_) '
+                            b'return "fixed" end'),
+                           ("a computed _G call key written through",
+                            b'_G[tostring("string")].upper = function(_) return "fixed" end'),
+                           ("an unknown global passed on",
+                            b'local f = _G[specLabel:GetName()] Nexus.Readout.ChargesLine(f)'),
+                           ("an unknown global's method defined here",
+                            b'function specLabel.Grab(self) end local f = _G[specLabel:GetName()] '
+                            b'if f then f:Grab() end')):
             with self.subTest(case=name):
                 receipt = self.receipt(self.hosted(method + b' ' + code))
                 self.assertEqual([(problem["path"], problem["construct"]) for problem
@@ -3323,10 +3348,12 @@ class ConsumerBindingTests(unittest.TestCase):
                                  ["UNBOUND"] * len(CURRENT_KEYS))
 
     def test_c28_format_arguments_bind_only_when_shown(self):
-        # V15 review fix (STD-V15-1): a format argument flows to its result
-        # only when a static Lua 5.1 format shows it with %s; an ignored,
-        # non-text, empty-precision, missing or unknown position never does,
-        # in either call form. gsub and sub can discard the whole text, so
+        # V15 review fix (STD-V15-1, STD-8849-1): a format argument flows to
+        # its result only when a static Lua 5.1 format shows it with %s and
+        # the call is not known to raise; an ignored, non-text,
+        # empty-precision, missing or unknown position never does, nor does
+        # any argument of a call with too few proved values or a known
+        # incompatible argument, in either call form. gsub and sub can discard the whole text, so
         # they are no transforms at all.
         text = b'Nexus.Localization.Text("panel.heading.progress")'
         shown = lambda call: b'specLabel:SetText(' + call + b')'
@@ -3338,9 +3365,25 @@ class ConsumerBindingTests(unittest.TestCase):
             ("a later %s", shown(b'string.format("%d: %-5s", 1, ' + text + b')'), True),
             ("a static local format",
              b'local fmt = "<" .. "%s>" ' + shown(b'string.format(fmt, ' + text + b')'), True),
-            # A call as the last argument passes all its results: Text's
-            # second result fills the second %s, so nothing is missing.
-            ("an open-ended last argument", shown(b'string.format("%s %s", ' + text + b')'), True),
+            ("a number for %d", shown(b'string.format("%s %d", ' + text + b', 12)'), True),
+            ("a numeric string for %d", shown(b'string.format("%s %d", ' + text + b', " 0x1F ")'),
+             True),
+            # STD-8849-1: a call as the last argument is counted as one value,
+            # never as many as the format wants (Text gives three), and a
+            # known incompatible argument always raises.
+            ("an open-ended last argument", shown(b'string.format("%s %s", ' + text + b')'),
+             False),
+            ("four conversions for Text", shown(b'string.format("%s %s %s %s", ' + text + b')'),
+             False),
+            ("a one-result last call", b'local function one() return "x" end '
+             + shown(b'string.format("%s %s %s", ' + text + b', one())'), False),
+            ("a non-number for %d",
+             shown(b'string.format("%s %d", ' + text + b', "not-a-number")'), False),
+            ("method, a non-number for %d",
+             shown(b'("%s %d"):format(' + text + b', "not-a-number")'), False),
+            ("nil for %s", shown(b'string.format("%s %s", ' + text + b', nil)'), False),
+            ("... as the last argument", b'local function f(...) '
+             + shown(b'string.format("%s %s", ' + text + b', ...)') + b' end f("x")', False),
             ("no conversion", shown(b'string.format("fixed", ' + text + b')'), False),
             ("method, no conversion", shown(b'("fixed"):format(' + text + b')'), False),
             ("an unused position", shown(b'string.format("%s", "x", ' + text + b')'), False),
@@ -3362,10 +3405,11 @@ class ConsumerBindingTests(unittest.TestCase):
                                     ("panel.heading.progress",))
 
     def test_c29_only_load_time_definitions_define_a_module_function(self):
-        # V15 review fix (SPEC P1 unused initializer): a module function or a
+        # V15 review fix (SPEC-V15-2 unused initializer): a module function or a
         # Nexus export counts only when its file chunk, or an initializer it
         # calls as a statement, runs it at load; an unused or conditional
-        # initializer defines nothing, and chunk code before the definition
+        # initializer defines nothing, and code run at load before the
+        # definition (in the chunk or a called initializer, STD-8849-3)
         # never reaches it. First the real export of ui/Readout.lua, which
         # the charge row's chain (Nexus.Readout.ChargesLine) needs:
         readout = self.files[READOUT]
@@ -3384,6 +3428,20 @@ class ConsumerBindingTests(unittest.TestCase):
         toy = lambda install: TOY_USER_TEXT.replace(b"INSTALL_MARKER", install)
         late = toy(b"").replace(TOY_SHOW, b"").replace(b"setmetatable(T",
                                                        TOY_SHOW + b"Install()\nsetmetatable(T")
+        # STD-8849-3: the toy's own display moved into the called
+        # initializer, before or after the definition there, or around a
+        # nested initializer that defines it.
+        installed = toy(b"Install()").replace(TOY_SHOW, b"")
+        defining = b"local function Install()\n"
+        body_end = b"    end\nend\nInstall()"
+        early = installed.replace(defining, defining + TOY_SHOW)
+        after = installed.replace(body_end, b"    end\n" + TOY_SHOW + b"end\nInstall()")
+        nested = lambda before: installed.replace(defining, b"local function Define()\n").replace(
+            body_end, b"    end\nend\nlocal function Install()\n"
+            + (TOY_SHOW + b"Define()\n" if before else b"Define()\n" + TOY_SHOW)
+            + b"end\nInstall()")
+        for source in (early, after, nested(True), nested(False)):
+            self.assertEqual(source.count(TOY_SHOW), 1)
         outputs = lambda row: {(output["path"], output["output"])
                                for site in row["sites"] for output in site["outputs"]}
         chunk_output, later_output = (USER_TEXT, "AddMessage"), ("core/Main.lua", "AddMessage")
@@ -3392,6 +3450,10 @@ class ConsumerBindingTests(unittest.TestCase):
                 # Defined in time for the real later call (core/Main.lua, in
                 # a function), not for the toy's chunk code that runs first.
                 ("shown by the chunk before it is installed", late, None),
+                ("shown by the initializer before it defines it", early, None),
+                ("shown by the initializer after it defines it", after, None),
+                ("shown before a nested initializer defines it", nested(True), None),
+                ("shown after a nested initializer defines it", nested(False), None),
                 ("never installed", toy(b"-- Install is never called"), undefined),
                 ("installed only conditionally", toy(b"if Nexus.Ready then Install() end"),
                  undefined)):
@@ -3403,7 +3465,8 @@ class ConsumerBindingTests(unittest.TestCase):
                     self.assertTrue(row["sites"])
                     self.assertTrue(all(site["outputs"] for site in row["sites"]))
                     self.assertIn(later_output, outputs(row))
-                    self.assertEqual(chunk_output in outputs(row), source is not late)
+                    self.assertEqual(chunk_output in outputs(row),
+                                     source not in (late, early, nested(True)))
                     continue
                 self.assertEqual((row["binding"], row["sites"]), ("UNBOUND", []))
                 self.assertEqual([problem["detail"] for problem

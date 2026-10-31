@@ -3067,10 +3067,15 @@ _CONSUMER_LIMITS = (
     'string library field used, or reaches the string metatable through a getmetatable result '
     'that leaves a test or comparison; _G as a value, a computed _G write or an environment '
     'function (getfenv, setfenv, debug other than debug.traceback, code loading) is a '
-    'global-environment mutation problem; a computed _G[k] read whose key is not static is '
-    'assumed to name none of these',
-    'format follows only the arguments a static Lua 5.1 format shows with %s; gsub and sub are '
-    'not followed',
+    'global-environment mutation problem, and so is a computed _G[k] read unless its key is '
+    'proved to name no trusted global (static strings, read-only literal tables, loops over '
+    'them, a distinguishing concatenation piece) or the global it reads is only tested, '
+    'compared, typed, field-tested or called as a method no loaded source defines (a method '
+    'an unknown object reaches through a metatable __index is not modelled)',
+    'format follows only the arguments a static Lua 5.1 format shows with %s, and only when '
+    'every conversion has an argument proved present (an open-ended last call counts as one '
+    'value) and no argument is statically known to fail its conversion; an argument of unknown '
+    'type is not checked; gsub and sub are not followed',
     'a module function or export counts only when the file chunk, or an initializer it calls '
     'as a statement, runs it at load; a call in chunk code before that point never reaches it, '
     'and a call inside a function is assumed to run after the files have loaded',
@@ -4183,7 +4188,7 @@ _FORMAT_OPTIONS = frozenset('cdiouxXeEfgGqs')
 # transforms trust, and the globals through which the loaded source can
 # reach every global (an environment function, the debug library or code
 # loading): a reference to one of those opens the environment (V15 review
-# fix, SPEC P1 _G.pairs and _G.setmetatable).
+# fix SPEC-V15-1: _G.pairs and _G.setmetatable).
 _ENV = '_G'
 _STRING = 'string'
 _ENV_OPENERS = frozenset(('getfenv', 'setfenv', 'debug', 'loadstring', 'load', 'loadfile',
@@ -4336,17 +4341,174 @@ def _global_ref(node, depth=0):
     return None
 
 
-def _format_consumed(fmt, count, open_ended):
+# The globals whose identity a proof may depend on (STD-8849-2): a computed
+# _G[k] read whose key may be one of them is an unknown global that may be
+# the environment, the string library, Nexus, a trusted function or an
+# environment opener (debug's functions included).
+_ENV_TRACKED = frozenset((
+    _ENV, _STRING, 'Nexus', 'pairs', 'ipairs', 'next', 'setmetatable', 'getmetatable', 'rawset',
+    'rawget', 'rawequal', 'tostring', 'print', 'type', 'pcall', 'xpcall', 'select', 'unpack',
+    'CreateFrame', 'UIParent', 'GameTooltip', 'DEFAULT_CHAT_FRAME', 'gethook', 'getinfo',
+    'getlocal', 'getregistry', 'getupvalue', 'sethook', 'setlocal', 'setupvalue',
+    'traceback')) | _ENV_OPENERS
+
+
+def _parameterless(value):
+    """True when a written field value is a function literal taking no
+    argument at all: no parameter, no implicit self and no ...."""
+    return value is not _OPAQUE and value.kind == 'function' and not value.params \
+        and not value.method and not value.vararg
+
+
+class _EnvContext:
+    """Parent links and for-in headers of one function body (closures
+    included), built only for a computed _G[k] read that needs them."""
+
+    def __init__(self, body):
+        self.parent, self.forin = {}, {}
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            if node.kind == 'forin':
+                for position, name in enumerate(node.names):
+                    self.forin[name.binding] = (node, position)
+            for child in _children(node):
+                self.parent[id(child)] = node
+                stack.append(child)
+
+    def read_only_table(self, binding, truth_only):
+        """The constructor of an unassigned local table that is only read
+        (indexed, or only tested or measured), else None."""
+        if binding is None or binding.kind != 'local' or binding.assigned \
+                or binding.value is None or binding.value.kind != 'table':
+            return None
+        for use, node in binding.uses:
+            if use == 'index' and not self.written(node):
+                continue
+            if use == 'value' and node in truth_only:
+                continue
+            return None
+        return binding.value
+
+    def written(self, node):
+        """True when node is the table of an assignment or definition target."""
+        target = self.parent.get(id(node))
+        holder = self.parent.get(id(target)) if target is not None else None
+        return target is not None and target.kind == 'index' and target.obj is node \
+            and holder is not None and (
+                (holder.kind == 'assign' and any(t is target for t in holder.targets))
+                or (holder.kind == 'funcstat' and holder.target is target))
+
+    def candidates(self, key, truth_only, deps, depth=0):
+        """Every string key may be, or None when that is not proved: a
+        static string, a field of a read-only local literal table whose
+        values are all static, or a for-in variable over such a table."""
+        while key.kind == 'paren':
+            key = key.expr
+        text = _static_string(key)
+        if text is not None:
+            return frozenset((text,))
+        if depth > 8:
+            return None
+        if key.kind == 'index' and key.obj.kind == 'name':
+            return self.table_values(self.read_only_table(key.obj.binding, truth_only), 1)
+        binding = key.binding if key.kind == 'name' else None
+        if binding is not None and binding.kind == 'for' and binding in self.forin:
+            stmt, position = self.forin[binding]
+            call = stmt.exprs[0] if len(stmt.exprs) == 1 else None
+            if call is None or call.kind != 'call' or call.func.kind != 'name' \
+                    or call.func.binding is not None \
+                    or call.func.value not in ('pairs', 'ipairs') \
+                    or len(call.args) != 1 or position > 1:
+                return None
+            table = call.args[0]
+            if table.kind == 'name':
+                table = self.read_only_table(table.binding, truth_only)
+            if table is None or table.kind != 'table':
+                return None
+            deps.add(call.func.value)
+            return self.table_values(table, position)
+        return None
+
+    @staticmethod
+    def table_values(table, position):
+        """The static string keys (position 0) or values (position 1) of a
+        constructor, or None when one is not static."""
+        if table is None:
+            return None
+        out = set()
+        for field in table.fields:
+            part = field.value if position == 1 else field.key
+            text = _static_string(part) if part is not None else None
+            if text is None:
+                return None
+            out.add(text)
+        return frozenset(out)
+
+    def excluded(self, key, truth_only, deps):
+        """True when key is proved to name no tracked global (_ENV_TRACKED):
+        all its candidates are untracked, or it is a concatenation with a
+        piece whose every candidate is in no tracked name."""
+        found = self.candidates(key, truth_only, deps)
+        if found is not None:
+            return not (found & _ENV_TRACKED)
+        if key.kind == 'operation' and key.ops and all(op == '..' for op in key.ops):
+            for piece in key.operands:
+                local = set()
+                found = self.candidates(piece, truth_only, local)
+                if found and all(text and not any(text in name for name in _ENV_TRACKED)
+                                 for text in found):
+                    deps.update(local)
+                    return True
+        return False
+
+
+# What C strtod (Lua 5.1 lua_str2number) may accept after its whitespace:
+# a string that matches none of these is never a number for %d and the
+# other numeric conversions, so that format call always raises.
+_MAYBE_NUMBER = re.compile(
+    r'[+-]?(?:(?:[0-9]+[.]?[0-9]*|[.][0-9]+)(?:[eE][+-]?[0-9]+)?'
+    r'|0[xX](?:[0-9a-fA-F]+[.]?[0-9a-fA-F]*|[.][0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?'
+    r'|(?i:inf(?:inity)?|nan(?:[(][0-9A-Za-z_]*[)])?))')
+_FORMAT_NUMERIC = frozenset('cdiouxXeEfgG')
+
+
+def _format_argument_fails(arg, option):
+    """True when a format argument is statically known to raise for its
+    conversion (lstrlib.c: luaL_checklstring for s and q, luaL_checknumber
+    for the others): nil, a boolean, a table or a function for any of them,
+    and a static string that strtod can never read for a numeric one. Any
+    other argument is not known to fail (a data-dependent failure is
+    outside this static check)."""
+    if arg.kind == 'constant' and arg.value in ('nil', 'true', 'false'):
+        return True
+    if arg.kind in ('table', 'function'):
+        return True
+    text = _static_string(arg)
+    if text is None or option not in _FORMAT_NUMERIC:
+        return False
+    return _MAYBE_NUMBER.fullmatch(text.strip(' \t\n\v\f\r')) is None
+
+
+def _format_consumed(fmt, args):
     """The 1-based positions of the arguments after the format that a
     static (_static_string) Lua 5.1 format string shows as text (a %s
     conversion, with no precision or a precision of at least 1), or None
-    when the format is not static, is refused by Lua 5.1 (lstrlib.c str_format: an unknown
-    option, repeated flags, a width or precision above two digits) or needs
-    more arguments than the count given (the call raises) unless the last
-    argument is open-ended (a call or ...)."""
+    when that call is not proved to return (STD-V15-1, STD-8849-1): the
+    format is not static, Lua 5.1 refuses it (lstrlib.c str_format: an
+    unknown option, more than five flags, a width or precision above two
+    digits), an argument is statically known to fail its conversion
+    (_format_argument_fails), or a conversion has no argument proved
+    present. Each argument gives one value, except the last one when it is
+    open-ended: a call or method gives at least one value only by
+    assumption, so exactly one is counted (never as many as the format
+    wants), and ... gives none for certain."""
     text = _static_string(fmt)
     if text is None:
         return None
+    present = len(args)
+    if args and args[-1].kind == 'constant' and args[-1].value == '...':
+        present -= 1
     index, position, consumed = 0, 0, set()
     while True:
         index = text.find('%', index)
@@ -4362,11 +4524,11 @@ def _format_consumed(fmt, count, open_ended):
         if len(flags) > 5:          # sizeof(FLAGS) - 1: "invalid format (repeated flags)"
             return None
         position += 1
+        if position > present or _format_argument_fails(args[position - 1], option):
+            return None
         if option == 's' and (precision is None or (precision != '' and int(precision) > 0)):
             consumed.add(position)
         index = match.end()
-    if position > count and not open_ended:
-        return None
     return consumed
 
 
@@ -4480,21 +4642,24 @@ class _UnitFlow:
         self.library_writes, self.env_escapes, self.metatable_escapes = set(), [], []
         self.truth_only, self.getmetatable_calls = set(), []
         self.type_args, self.type_escapes = set(), []
-        # Load-time establishment (V15 review fix, SPEC P1 unused initializer):
-        # {call: top-level statement index} of the calls in chunk code
-        # outside any function, the statement of each defining value and
-        # assignment target (build only), and the index being walked.
-        self.chunk_calls, self.def_statement, self.top = {}, {}, None
+        # Computed _G[k] reads (STD-8849-2): (read, function) while walking;
+        # then, for each read proved harmless only on conditions the linker
+        # checks, (read, globals that must stay unassigned, method names it
+        # is the receiver of, method names it is an argument of).
+        self.env_reads, self.env_read_conditions = [], []
+        # Load-time establishment (V15 review fix SPEC-V15-2, unused initializer;
+        # STD-8849-3 ordering, see load_points): the statement of each
+        # defining value and assignment target (build only).
+        self.def_statement = {}
         self.target_statement = {}
         self.declared = set()   # values given by local declarations (not later assignments)
-        self.object_memo = {}
+        self.object_memo, self.module_ok_memo = {}, {}
         self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
-        for index, stmt in enumerate(body):
-            self.top = index
-            self.statement(stmt, None)
+        self.block(body, None)
         self.flow_sensitive(body)
-        established = self.load_established(body)
+        established, load_calls = self.load_points(body)
         self.metatable_contained()
+        self.check_env_reads(body)
         self.module_funcs = {}
         for module, fields in self.module_defs.items():
             for name, values in fields.items():
@@ -4504,40 +4669,67 @@ class _UnitFlow:
                     value if value is not None and value.kind == 'function' else None,
                     len(values), established.get(stmt))
         # Only what linking reads is kept with the memoized flow: the load
-        # point (or None) of each Nexus path assignment target, and the
-        # chunk position of each module or path call.
+        # point (or None) of each Nexus path assignment target, and the load
+        # point of each module or path call made while the file loads.
         self.path_points = {target: established.get(stmt)
                             for target, stmt in self.target_statement.items()
                             if _path(target, env=True) is not None}
         calls = {call for _, _, call in self.module_calls}
         calls.update(call for rows in self.path_calls.values() for call in rows)
-        self.chunk_calls = {call: top for call, top in self.chunk_calls.items() if call in calls}
+        self.chunk_calls = {call: point for call, point in load_calls.items() if call in calls}
         del self.truth_only, self.type_args, self.getmetatable_calls, self.def_statement
+        del self.env_reads, self.env_contexts, self.env_chunk
         del self.target_statement
 
-    def load_established(self, body):
-        """{statement: top-level statement index} of the statements that
-        run whenever the file chunk loads to its end (_straight): those of
-        the chunk, and those of the body of an unassigned local function that
-        such a statement calls as a statement, keyed by the index of the
-        top-level statement that runs them. A definition anywhere else, such
-        as in an initializer nothing calls at load, is not established."""
-        established, invoked = {}, set()
+    def load_points(self, body):
+        """({statement: load point}, {call: load point}) of the file chunk
+        (STD-8849-3). A load point is a tuple of statement indexes, ordered
+        as the file loads: (i,) for the chunk's statement i, (i, k) for
+        statement k of a do block in it or of the body of an initializer
+        that statement i calls, and so on for nested blocks and nested
+        initializer calls. An initializer is an unassigned local function
+        that an established statement calls as a statement; its body runs
+        right there, at the first such call. A statement is established when
+        it runs whenever the chunk loads to its end (_straight's rule: up to
+        the first statement that can return, or, an if, break; a compound
+        statement's own body is conditional). Every call in chunk code or in
+        an invoked initializer body, established or not (but not inside a
+        nested function, which may run later), gets the point of the
+        statement it is in, so a call earlier than a definition is never
+        taken to see it."""
+        established, calls, invoked = {}, {}, set()
 
-        def visit(statements, top):
-            for stmt in statements:
-                established[stmt] = top
+        def mark(stmt, point):
+            for node in _descendants([stmt]):
+                if node.kind == 'call':
+                    calls.setdefault(node, point)
+
+        def run(statements, prefix, live):
+            for index, stmt in enumerate(statements):
+                point = prefix + (index,)
+                if stmt.kind == 'do':
+                    live = run(stmt.body, point, live)
+                    continue
+                mark(stmt, point)
+                if not live:
+                    continue
+                if stmt.kind in ('return', 'break'):
+                    live = False
+                    continue
+                if stmt.kind == 'if' or stmt.kind in _LOOPS:
+                    leaving = ('return',) if stmt.kind in _LOOPS else ('return', 'break')
+                    if any(node.kind in leaving for node in _descendants([stmt])):
+                        live = False
+                    continue
+                established[stmt] = point
                 if stmt.kind == 'callstat' and stmt.call.kind == 'call':
                     target = _local_function(stmt.call.func)
                     if target is not None and target not in invoked:
                         invoked.add(target)
-                        visit(_straight(target.body)[0], top)
-        for index, stmt in enumerate(body):
-            statements, complete = _straight([stmt])
-            visit(statements, index)
-            if not complete:
-                break
-        return established
+                        run(target.body, point, True)
+            return live
+        run(body, (), True)
+        return established, calls
 
     def edge(self, source, target):
         self.edges.setdefault(source, []).append(target)
@@ -4642,7 +4834,16 @@ class _UnitFlow:
         only through literal fields, by its Nexus export, as a value the
         file chunk returns (discarded by the TOC loader), as the table of a
         lazy-field metatable statement (metatable_hook) or by a local alias
-        with the same properties."""
+        with the same properties. A function of this flow alone, so each
+        top-level answer is kept with it (module_ok_memo)."""
+        if depth == 0:
+            if binding not in self.module_ok_memo:
+                self.module_ok_memo[binding] = self.module_ok_at(binding, 0)
+            return self.module_ok_memo[binding]
+        return self.module_ok_at(binding, depth)
+
+    def module_ok_at(self, binding, depth):
+        """module_ok at one alias depth, without its memo."""
         if depth > 16 or binding.kind != 'local' or binding.assigned \
                 or binding in self.dynamic_modules:
             return False
@@ -4796,6 +4997,151 @@ class _UnitFlow:
         elif ref == _STRING:
             self.library_writes.add('*' if key is None else key)
 
+    def check_env_reads(self, body):
+        """Each computed _G[k] read whose key is not static (STD-8849-2) is
+        harmless only when its key is proved to name no tracked global
+        (_EnvContext.excluded), or when the unknown global it reads is
+        contained: only tested, compared or given to type(); a field read
+        of it whose value is itself only tested, compared or given to
+        type(); or the receiver of a method call, V:m(...) or pcall(V.m, V,
+        ...), with an untracked m, or an argument of a method call on any
+        object, X:m(..., V) or pcall(X.m, X, ..., V). A local holding it must
+        be used only those ways. Anything else (a write through it, passing
+        it to a function, storing or returning it, calling it) opens the
+        environment (env_escapes). The globals the proof relies on (type,
+        pairs, ipairs, pcall) and both kinds of method name are left for the
+        linker to check (_Linker.env_read_refuted)."""
+        self.env_contexts, self.env_chunk = {}, body
+        for read, func in self.env_reads:
+            context = self.env_context(func)
+            deps, methods = set(), (set(), set())
+            if context.excluded(read.key, self.truth_only, deps) \
+                    or self.env_contained(read, context, deps, methods, set(), 0):
+                if deps or methods[0] or methods[1]:
+                    self.env_read_conditions.append((read, frozenset(deps),
+                                                     frozenset(methods[0]),
+                                                     frozenset(methods[1])))
+                continue
+            self.env_escapes.append(read)
+
+    def env_context(self, func):
+        """The _EnvContext of a function body (None: the file chunk)."""
+        if func not in self.env_contexts:
+            self.env_contexts[func] = _EnvContext(func.body if func is not None
+                                                  else self.env_chunk)
+        return self.env_contexts[func]
+
+    def env_tested(self, node, context, deps):
+        """True when a value is only tested, compared or given to type()."""
+        if node in self.truth_only:
+            return True
+        if node in self.type_args:
+            deps.add('type')
+            return True
+        parent = context.parent.get(id(node))
+        return parent is not None and parent.kind == 'paren' and self.env_tested(parent, context,
+                                                                                 deps)
+
+    def env_contained(self, node, context, deps, methods, seen, depth):
+        """The containment rule of check_env_reads for one occurrence."""
+        if depth > 16:
+            return False
+        if self.env_tested(node, context, deps):
+            return True
+        parent = context.parent.get(id(node))
+        if parent is None:
+            return False
+        kind = parent.kind
+        if kind == 'paren':
+            return self.env_contained(parent, context, deps, methods, seen, depth + 1)
+        if kind == 'operation':
+            if any(operand is node for operand in _flowing_operands(parent)):
+                return self.env_contained(parent, context, deps, methods, seen, depth + 1)
+            return True     # an operand whose value is not the result
+        if kind == 'index' and parent.obj is node:
+            name = _static_string(parent.key)
+            return not context.written(node) and name is not None \
+                and name not in _ENV_TRACKED and self.env_tested(parent, context, deps)
+        if kind == 'method' and parent.name not in _ENV_TRACKED:
+            if parent.obj is node:
+                methods[0].add(parent.name)
+                return True
+            if any(arg is node for arg in parent.args):
+                methods[1].add(parent.name)
+                return True
+            return False
+        if kind == 'call' and parent.func.kind == 'name' and parent.func.binding is None \
+                and parent.func.value == 'pcall' and len(parent.args) >= 2 \
+                and any(arg is node for arg in parent.args[1:]):
+            # pcall(X.m, X, ...): a method call of X, V its receiver or argument.
+            method, receiver = parent.args[0], parent.args[1]
+            name = _static_string(method.key) if method.kind == 'index' else None
+            if method.kind != 'index' or method.obj.kind != 'name' or receiver.kind != 'name' \
+                    or method.obj.binding is None or method.obj.binding is not receiver.binding \
+                    or name is None or name in _ENV_TRACKED:
+                return False
+            deps.add('pcall')
+            methods[0 if receiver is node else 1].add(name)
+            return True
+        target = _local_function(parent.func) if kind == 'call' else None
+        if target is not None:
+            # An argument of a resolved local function: contained when the
+            # parameter it fills is (a value no parameter takes is dropped).
+            index = next((i for i, arg in enumerate(parent.args) if arg is node), None)
+            if index is None:
+                return False
+            if index >= len(target.params):
+                return not target.vararg
+            return self.env_holder_contained(target.params[index].binding,
+                                             self.env_context(target), deps, methods, seen,
+                                             depth + 1)
+        if kind in ('local', 'assign'):
+            values = parent.exprs
+            index = next((i for i, value in enumerate(values) if value is node), None)
+            names = parent.names if kind == 'local' else parent.targets
+            if index is None:
+                return False
+            if index >= len(names):
+                return True     # a value no name receives
+            target = names[index]
+            binding = target.binding if target.kind == 'name' else None
+            if binding is None or binding.kind != 'local':
+                return False    # stored in a global or a field
+            return self.env_holder_contained(binding, context, deps, methods, seen, depth)
+        return False
+
+    def env_holder_contained(self, binding, context, deps, methods, seen, depth):
+        """Every use of a local holding the unknown global is contained."""
+        if binding is None:
+            return False
+        if binding in seen:
+            return True
+        seen.add(binding)
+        for use, node in binding.uses:
+            if use == 'target':
+                continue        # another definition of the local
+            if use == 'index' and not context.written(node):
+                parent = context.parent.get(id(node))
+                if parent is not None and parent.kind == 'index' and parent.obj is node:
+                    holder = context.parent.get(id(parent))
+                    # pcall(V.m, V): the method read is its first argument.
+                    if holder is not None and holder.kind == 'call' and holder.args \
+                            and holder.args[0] is parent and len(holder.args) >= 2 \
+                            and holder.args[1].kind == 'name' \
+                            and holder.args[1].binding is binding:
+                        if self.env_contained(holder.args[1], context, deps, methods, seen,
+                                              depth + 1):
+                            continue
+                        return False
+                if self.env_contained(node, context, deps, methods, seen, depth + 1):
+                    continue
+                return False
+            if use == 'value' and self.env_contained(node, context, deps, methods, seen,
+                                                     depth + 1):
+                continue
+            return False
+        return True
+
     def metatable_contained(self):
         """Record each getmetatable call whose result may leave: neither
         only tested or compared (truth_only) nor held by an unassigned local
@@ -4853,9 +5199,8 @@ class _UnitFlow:
                 self.global_value(node, node.value)
         elif kind == 'index':
             # A read of debug.traceback leaves the debug library unopened. A
-            # computed _G[k] read whose key is not static is assumed to name
-            # neither the environment, the string library nor an opener (a
-            # documented limit); every write through _G stays tracked.
+            # computed _G[k] read whose key is not static is checked after the
+            # walk (check_env_reads, STD-8849-2).
             if not (_global_ref(node.obj) == 'debug'
                     and _static_string(node.key) in _DEBUG_READS):
                 self.base(node.obj, func)
@@ -4863,6 +5208,8 @@ class _UnitFlow:
             ref = _global_ref(node)
             if ref is not None:
                 self.global_value(node, ref)
+            elif _global_ref(node.obj) == _ENV:
+                self.env_reads.append((node, func))
             if node.key.kind == 'string' and node.key.value is not None:
                 base = node.obj.binding if node.obj.kind == 'name' else None
                 self.field_reads.setdefault(node.key.value, []).append((node, base))
@@ -4912,10 +5259,9 @@ class _UnitFlow:
 
     def format_arguments(self, implementation, fmt, args, node):
         """The edges of the arguments after a format that it shows as text
-        (_format_consumed); none when that is not proved (STD-V15-1)."""
-        open_ended = bool(args) and (args[-1].kind in ('call', 'method') or (
-            args[-1].kind == 'constant' and args[-1].value == '...'))
-        consumed = _format_consumed(fmt, len(args), open_ended)
+        (_format_consumed); none when that is not proved (STD-V15-1,
+        STD-8849-1)."""
+        consumed = _format_consumed(fmt, args)
         for position, arg in enumerate(args, 1):
             if consumed is not None and position in consumed:
                 self.transform(implementation, arg, node)
@@ -4935,8 +5281,6 @@ class _UnitFlow:
             self.type_args.add(args[0])
         for arg in args:
             self.expr(arg, func)
-        if func is None:
-            self.chunk_calls[node] = self.top
         if callee.kind == 'name' and callee.binding is None and callee.value == 'getmetatable':
             self.getmetatable_calls.append(node)
         if callee.kind == 'name' and callee.binding is None and callee.value in _SINK_FUNCTIONS:
@@ -5178,9 +5522,10 @@ class _Unit:
 # two source bytes, so the bound keeps the hot files of a repository while a
 # one-off edited copy leaves). A parse, its scan and its flow graph depend only on those bytes,
 # and linking changes none of them (it only fills the flow's object-origin
-# memo, itself a function of the same bytes), so a memoized parse is the same parse;
-# nothing is read or written. Two equal files of one call get separate
-# parses (fresh), so their local names stay distinct.
+# and module_ok memos, themselves functions of the same bytes), so a
+# memoized parse is the same parse; nothing is read or written. Two equal
+# files of one call get separate parses (fresh), so their local names stay
+# distinct.
 import gc
 
 _PARSE_MEMO = {}
@@ -5194,7 +5539,7 @@ def _parse_bytes(data):
     try:
         text = data.decode('utf-8')
     except UnicodeDecodeError:
-        return None, {'code': 'not-utf8'}, [], None, None
+        return None, {'code': 'not-utf8'}, {}, None, None
     try:
         tokens = _lua_tokens(text)
         body = _LuaParser(tokens).chunk()
@@ -5203,12 +5548,15 @@ def _parse_bytes(data):
         scan = _UnitScan(body, resolver.localfunctions, resolver.forins)
         flow = _UnitFlow(body, resolver.owners, resolver.functions)
     except CatalogSyntaxError as error:
-        return None, {'code': error.code, 'line': error.line, 'column': error.column}, [], \
+        return None, {'code': error.code, 'line': error.line, 'column': error.column}, {}, \
             None, None
     except RecursionError:
-        return None, {'code': 'nesting-too-deep'}, [], None, None
-    leads = [(token.value, token.line, token.column) for token in tokens
-             if token.kind == 'string']
+        return None, {'code': 'nesting-too-deep'}, {}, None, None
+    # {string value: [(line, column) of each literal with it, in order]}
+    leads = {}
+    for token in tokens:
+        if token.kind == 'string':
+            leads.setdefault(token.value, []).append((token.line, token.column))
     return body, None, leads, scan, flow
 
 
@@ -5260,8 +5608,9 @@ class _Linker:
         self.output_memo = {}
         # {Nexus path assignment target: its load point (unit order,
         # top-level statement index)} for the targets established at load.
-        self.path_points = {target: (unit.order, top) for unit in self.units
-                            for target, top in unit.flow.path_points.items() if top is not None}
+        self.path_points = {target: (unit.order,) + point for unit in self.units
+                            for target, point in unit.flow.path_points.items()
+                            if point is not None}
         # Diagnostic switch for an external equivalence control only (no seam
         # sets it): replay a single root's search as for several roots.
         self.single_root_replay = False
@@ -5272,14 +5621,21 @@ class _Linker:
         writes, self.library_writes = set(), set()
         self.env_open = self.string_meta_open = False
         typed = False
+        conditions = []
         for unit in self.units:
+            conditions.extend((unit, condition) for condition in unit.flow.env_read_conditions)
             writes |= unit.flow.global_writes
             self.library_writes |= unit.flow.library_writes
             self.env_open = self.env_open or bool(unit.flow.env_escapes)
             self.string_meta_open = self.string_meta_open or bool(unit.flow.metatable_escapes)
             typed = typed or bool(unit.flow.type_escapes)
         self.type_open = typed and 'type' in writes
-        self.env_open = self.env_open or self.type_open
+        # A computed _G[k] read proved harmless only while these globals stay
+        # unassigned and no loaded source defines its method names
+        # (STD-8849-2); a refuted one opens the environment like any other.
+        self.env_read_escapes = [(unit, condition[0]) for unit, condition in conditions
+                                 if self.env_read_refuted(writes, *condition[1:])]
+        self.env_open = self.env_open or self.type_open or bool(self.env_read_escapes)
         self.global_writes = _ANY_NAME if self.env_open else writes
         # Transform edges whose implementation the loaded source may replace
         # are not followed (the memoized flow itself is never changed).
@@ -5314,6 +5670,34 @@ class _Linker:
                             self.pret_points[key] = max(point, self.export_point(path))
                             self.ret_links.setdefault(func, []).append((key, None))
 
+    def env_read_refuted(self, writes, deps, receivers, arguments):
+        """True when a computed _G[k] read proved harmless on conditions
+        (check_env_reads) loses that proof: a global it relies on, or one of
+        its method names, is assigned as a global; a method it is the
+        receiver of is written on a table that may be a global's (anything
+        but a local module table whose identity stays in its file, module_ok);
+        or a method it is an argument of is written at all (on whatever
+        table, that method could receive it). A definition that is a
+        function without parameters (no self, no ...) can never receive the
+        value and refutes nothing."""
+        if (deps | receivers | arguments) & writes:
+            return True
+        for unit in self.units:
+            flow = unit.flow
+            for name in arguments:
+                if any(not _parameterless(value) for value in flow.field_writes.get(name, ())):
+                    return True
+            for name in receivers:
+                for value in flow.field_writes.get(name, ()):
+                    if _parameterless(value):
+                        continue
+                    base = flow.field_bases[value][1] if value is not _OPAQUE else None
+                    root = flow.alias_root(base) if type(base) is _Binding else None
+                    if root is None or root.kind != 'local' or root.value is None \
+                            or root.value.kind != 'table' or not flow.module_ok(root):
+                        return True
+        return False
+
     def trusted(self, implementation):
         """True while the loaded source leaves a transform's implementation
         established (STD-V15-2): the global it names is never assigned (by
@@ -5333,10 +5717,11 @@ class _Linker:
         return not ((method or name == 'tostring') and self.string_meta_open)
 
     def runs_before(self, unit, call, point):
-        """True when call is in chunk code (outside any function) that runs
-        before the load point (unit order, top-level statement index)."""
-        top = unit.flow.chunk_calls.get(call)
-        return top is not None and (unit.order, top) <= point
+        """True when call is made while its file loads (load_points: chunk
+        code or an invoked initializer, outside nested functions) no later
+        than the load point (unit order, statement indexes...)."""
+        at = unit.flow.chunk_calls.get(call)
+        return at is not None and (unit.order,) + at <= point
 
     def export_point(self, path):
         """The load point of the one established assignment of a Nexus
@@ -5381,7 +5766,7 @@ class _Linker:
             if not self.export_established(path):
                 return None, ('%s is not assigned when its file loads: its assignment is not run '
                               'by the file chunk or an initializer it calls' % path), None
-        return func, None, (self.owner[id(flow)].order, top)
+        return func, None, (self.owner[id(flow)].order,) + top
 
     # -- the may-flow search -----------------------------------------------
 
@@ -5906,8 +6291,10 @@ class _Linker:
         reaches an output, under the every-definition rule of that key."""
         proofs = {}
         for key, roots in roots_by_key.items():
-            allowed, sinks = self.search(roots)
             proofs[key] = {}
+            if not roots:
+                continue        # a search from no root reaches nothing
+            allowed, sinks = self.search(roots)
             if len(roots) == 1 and not self.single_root_replay:
                 # One root: its own search under the key's every-definition
                 # rule is the search just made (allowed is its reached
@@ -5992,7 +6379,9 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
         # environment table as a value or under a computed key, or an
         # environment opener) may replace Nexus, the seam or any trusted
         # global, so it is a mutation problem, not only a lost proof.
-        for node in unit.flow.env_escapes + (unit.flow.type_escapes if linker.type_open else []):
+        refuted = [read for owner, read in linker.env_read_escapes if owner is unit]
+        for node in unit.flow.env_escapes + refuted \
+                + (unit.flow.type_escapes if linker.type_open else []):
             problems.append(located(unit, {
                 'code': 'binding-mutation', 'line': node.line, 'column': node.column,
                 'construct': 'global-environment',
@@ -6115,10 +6504,16 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
         proven_rows[key] = ([row for _, row in sorted(proven, key=lambda item: item[0])],
                             [row for _, row in sorted(unproven, key=lambda item: item[0])])
     leads = {key: {} for key in declarations}
+    taken = {}
+    for path, line, column in positions:
+        taken.setdefault(path, set()).add((line, column))
     for unit in units:
-        for value, line, column in unit.leads:
-            if value in leads and (unit.path, line, column) not in positions:
-                leads[value][unit.path] = leads[value].get(unit.path, 0) + 1
+        sited = taken.get(unit.path)
+        for value, spots in unit.leads.items():
+            if value in leads:
+                count = len(spots) - (sum(1 for spot in spots if spot in sited) if sited else 0)
+                if count:
+                    leads[value][unit.path] = count
     for key, declaration in declarations.items():
         sites, unproven = proven_rows[key]
         kinds = {row['site'] for row in sites}
