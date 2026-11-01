@@ -275,20 +275,47 @@ REFERENCE_SUCCESSORS = {
                                   "of the full visible-UI catalog",
 }
 # Full visible-UI scope: unlike the English successor, the composed packs and
-# the release metadata carry a strong current identity. Packs: the
-# truthful-header revision first committed in 31272db6; release metadata: the
-# 529 entry-review declarations first committed in dd6d35af. Canonical Git
+# the release metadata carry a strong current identity. Packs: the eight
+# Saved Build label translations first committed in 351a83b5; release
+# metadata: the 529 original entry-review declarations followed by the six
+# neutral-template declarations, first committed in 23d61936. Canonical Git
 # (LF) SHA-256 and length and the Git blob are compared with canonical
 # bytes. Only *.lua is checked out with a fixed eol=crlf, so only the packs
 # also record their physical checkout bytes; RELEASE_LANGUAGES.json is
 # text=auto and its physical bytes depend on the platform. A later intended
-# change of either file needs its own reviewed identity here.
+# change of either file needs its own reviewed identity here. The values are
+# literal operator facts computed from those immutable Git pins, never from
+# the bytes under test.
 CURRENT_SUCCESSOR_INPUTS = {
+    "data/LocalizationPacks.lua": {
+        "canonical": ("f12cdd45ea20f9ee8f4a67b3d11571349562102a2caa6a9190ba33d1f99d559c", 3316610),
+        "blob": "581e63a2b1c6086940f13e30354008e4fc2caba9",
+        "firstCommit": "351a83b5c355867864ce510ea912560485f723e5",
+        "physical": ("be85fd2079960bed0f71b657e73853ac83d11c15b1e00b27433174324e636cb7", 3341147)},
+    "docs/localization/RELEASE_LANGUAGES.json": {
+        "canonical": ("78628e4fd0cd70030ba40e5b62424492f27497590f0813e86c92fbf3bec2986c", 265898),
+        "blob": "00fdd4fc3947b4dfaef84c2e4ab43d67502d651b",
+        "firstCommit": "23d619366a02fe59e43e47e7842a1423189190fb"},
+}
+# The superseded strong identities of the same two files, kept as history and
+# never refreshed: the truthful-header packs first committed in 31272db6 and
+# the 529-declaration release metadata first committed in dd6d35af, with the
+# per-language value maps bound to those packs by the accepted six-language
+# input selection. The current bytes must differ from them
+# (assert_current_successor_identity); the maps are recorded, not compared.
+HISTORICAL_SUCCESSOR_INPUTS = {
     "data/LocalizationPacks.lua": {
         "canonical": ("aef3635a65032ecdd693765a8fcd2ba2feb1aee0fa90206ea798696837f2909a", 3314202),
         "blob": "5104fd091157e6c4f78ce78d611d97971e8e76df",
         "firstCommit": "31272db6f8753a18def930ee771da0ac62e666d2",
-        "physical": ("4978bfb03e6374d46f1ecb64d1d1086657e46d37527a77f6799a810b39de8c52", 3338739)},
+        "physical": ("4978bfb03e6374d46f1ecb64d1d1086657e46d37527a77f6799a810b39de8c52", 3338739),
+        "valueMaps": {
+            "frFR": "4ac02d6ef0ad673b4f86fdf51894a041441f345a209942f3c286025b3f0d7bdc",
+            "deDE": "55b62590cc1115a81be3f986e5e1586fd53db610f6d61fbf2be5564a42c68676",
+            "esES": "ca2fe45bef40eeac6c1f787452f120024c04b20fca0a47d4f250bab0c7ce6529",
+            "plPL": "a8bb86be8022e4519cf0521f1c592fe1782e38e0403a02d9d54145931438fdef",
+            "ptBR": "0b4dadcad493c2c1e06ee1a2ff6c22448e4f0371a6fd9158d88736bfb2e56baa",
+            "ruRU": "eb93be7df74a1c3b5429d6eacfe9ab379a65c140918574be32645a85ccaad4c0"}},
     "docs/localization/RELEASE_LANGUAGES.json": {
         "canonical": ("b0354a8b48c0ff49c301d06d1990c731ef0af3848d618928573b2447f7276eaf", 263240),
         "blob": "63143c5577bdbc2842b36ecb8dba490b28547e8b",
@@ -296,35 +323,48 @@ CURRENT_SUCCESSOR_INPUTS = {
 }
 # The decoded entries of each current pack: SHA-256 of canonical JSON
 # (ensure_ascii false, sorted keys, separators "," and ":") of the key-to-text
-# map, as bound per language by the accepted six-language input selection.
+# map, as bound per language by the packs pinned at 351a83b5 (literal
+# operator facts; esES is unchanged by that commit).
 CURRENT_PACK_VALUE_MAPS = {
-    "frFR": "4ac02d6ef0ad673b4f86fdf51894a041441f345a209942f3c286025b3f0d7bdc",
-    "deDE": "55b62590cc1115a81be3f986e5e1586fd53db610f6d61fbf2be5564a42c68676",
-    "esES": "ca2fe45bef40eeac6c1f787452f120024c04b20fca0a47d4f250bab0c7ce6529",
-    "plPL": "a8bb86be8022e4519cf0521f1c592fe1782e38e0403a02d9d54145931438fdef",
-    "ptBR": "0b4dadcad493c2c1e06ee1a2ff6c22448e4f0371a6fd9158d88736bfb2e56baa",
-    "ruRU": "eb93be7df74a1c3b5429d6eacfe9ab379a65c140918574be32645a85ccaad4c0",
+    "frFR": "6a5c02c181aefbcd3bc134ecba8bb605e458267bde18494793f8463bbcabface",
+    "deDE": "1fcfe95b2616af46c15c90d35bb5e517ac2dd6b384f7d875643e7bbb3b7a01ab",
+    "esES": "92d58d3e29b1a8c454b1e5324f8436a4ba4591872f811e1f866f4d2e2da6b86e",
+    "plPL": "67a4a8194e4562a34f127b3271d98e008ced5b5f66659b5caa50c08845381ef3",
+    "ptBR": "120f5bc0b595aba1f97e591b580011e2a7c3912cb0f79dba1d90e7120806037d",
+    "ruRU": "dc39e376fbd6fdf75aee2ccdad1ad5d5f589d049090e1f994aa8c2713573e6f0",
 }
-# The actual entry-review declarations: 529 automated, source-paired
-# legitimately_identical records bound to one persisted public review. They
-# are technical metadata, not fluent human, native or rights acceptance.
-CURRENT_DECLARATIONS_SHA256 = "423115440fc785ce68aaa8f9d2e7b1c96042d6de57b77b84fba93f7a45503bd3"
-CURRENT_DECLARED_COUNTS = {"frFR": 105, "deDE": 107, "esES": 89, "plPL": 88, "ptBR": 91, "ruRU": 49}
+# The actual entry-review declarations: two distinct evidence cohorts, in
+# this order, all technical metadata, not fluent human, native, rights or
+# whole-pack acceptance. The digest and counts cover the whole list.
+CURRENT_DECLARATIONS_SHA256 = "a1bb0991b5c737c8a348277dea8168e33afa5001874727b32946548cbb90374a"
+CURRENT_DECLARED_COUNTS = {"frFR": 106, "deDE": 108, "esES": 90, "plPL": 89, "ptBR": 92, "ruRU": 50}
+# Cohort 1, first and unchanged: 529 automated, source-paired
+# legitimately_identical records bound to one persisted public review.
+ORIGINAL_DECLARATION_COUNT = 529
+ORIGINAL_DECLARATIONS_SHA256 = "423115440fc785ce68aaa8f9d2e7b1c96042d6de57b77b84fba93f7a45503bd3"
 CURRENT_DECLARATION_REVIEWER = "Codex /root/composition_identical_record_assessment (automated)"
 CURRENT_DECLARATION_REFERENCE = "https://github.com/Viscerals/Better-Nexus/issues/148#issuecomment-6532515152"
-# The 14 English-identical entries without a declaration (held pending their
-# own public review reference): each stays a deliberate_english_placeholder.
-CURRENT_ENGLISH_PLACEHOLDER_KEYS = {
-    "frFR": ["editor.notify.label_saved_build_number", "orb.assignment.identity_found_reason"],
-    "deDE": ["editor.notify.label_saved_build_named", "editor.notify.label_saved_build_number",
-             "orb.assignment.identity_found_reason"],
-    "esES": ["orb.assignment.identity_found_reason"],
-    "plPL": ["editor.notify.label_saved_build_named", "editor.notify.label_saved_build_number",
-             "orb.assignment.identity_found_reason"],
-    "ptBR": ["editor.notify.label_saved_build_named", "editor.notify.label_saved_build_number",
-             "orb.assignment.identity_found_reason"],
-    "ruRU": ["editor.notify.label_saved_build_number", "orb.assignment.identity_found_reason"],
-}
+# Cohort 2, appended: the six neutral {reason}. wrapper templates, declared
+# legitimately_identical by an independent automated structural review (not
+# a human language review) whose retrieved evidence is a private,
+# access-restricted page, not a public reference. It covers these six
+# entries only.
+NEUTRAL_TEMPLATE_KEY = "orb.assignment.identity_found_reason"
+NEUTRAL_TEMPLATE_TEXT = "{reason}."
+NEUTRAL_TEMPLATE_REVIEWER = "Codex (independent automated structural review)"
+NEUTRAL_TEMPLATE_REFERENCE = "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab"
+NEUTRAL_TEMPLATE_DECLARATIONS = [
+    {"productId": pack_id, "key": NEUTRAL_TEMPLATE_KEY,
+     "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+     "reviewer": NEUTRAL_TEMPLATE_REVIEWER, "decision": "legitimately_identical",
+     "evidenceReference": NEUTRAL_TEMPLATE_REFERENCE, "status": "declared"}
+    for pack_id in ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")
+]
+# English-identical entries without a declaration: none. The eight Saved
+# Build labels now differ from their English, and the six neutral wrappers
+# are declared above; each pack's list stays present and empty.
+CURRENT_ENGLISH_PLACEHOLDER_KEYS = {pack_id: [] for pack_id in
+                                    ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")}
 CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
                              "m7Span": "PENDING", "fullUiCoverage": "PENDING",
                              "fluentHumanAcceptance": "UNASSIGNED",
@@ -443,19 +483,26 @@ def assert_current_successor_identity(test, relative, physical):
     """Where CURRENT_SUCCESSOR_INPUTS records it, the exact current identity:
     canonical Git (LF) SHA-256, length and blob, and for the packs the
     physical checkout bytes. The physical CRLF identity is never claimed to
-    equal the canonical one."""
+    equal the canonical one. Where HISTORICAL_SUCCESSOR_INPUTS records a
+    superseded identity of the same file, the current bytes must not be it."""
     current = CURRENT_SUCCESSOR_INPUTS.get(relative)
     if current is None:
         return
     canonical = canonical_git_lf(physical)
-    test.assertEqual((hashlib.sha256(canonical).hexdigest(), len(canonical)), current["canonical"],
-                     relative)
-    test.assertEqual(hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest(),
-                     current["blob"], relative)
+    digest = (hashlib.sha256(canonical).hexdigest(), len(canonical))
+    blob = hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest()
+    physical_digest = (hashlib.sha256(bytes(physical)).hexdigest(), len(physical))
+    test.assertEqual(digest, current["canonical"], relative)
+    test.assertEqual(blob, current["blob"], relative)
     if "physical" in current:
-        test.assertEqual((hashlib.sha256(bytes(physical)).hexdigest(), len(physical)),
-                         current["physical"], relative)
+        test.assertEqual(physical_digest, current["physical"], relative)
         test.assertNotEqual(current["physical"], current["canonical"], relative)
+    historical = HISTORICAL_SUCCESSOR_INPUTS.get(relative)
+    if historical is not None:
+        test.assertNotEqual(digest, historical["canonical"], relative)
+        test.assertNotEqual(blob, historical["blob"], relative)
+        if "physical" in historical:
+            test.assertNotEqual(physical_digest, historical["physical"], relative)
 
 
 # The commit that first holds the Options label adoption and the current
@@ -2346,10 +2393,27 @@ class CatalogCoverageReport(unittest.TestCase):
         for row in declarations:
             self.assertEqual(list(row), ["productId", "key", "translatedTextSha256", "reviewer",
                                          "decision", "evidenceReference", "status"])
+        # Two distinct evidence cohorts, each bound to its own reviewer and
+        # reference: the 529 original records stay first and byte-for-value
+        # unchanged; exactly the six neutral-template records follow. Neither
+        # cohort's reviewer or reference may stand in for the other's.
+        original = declarations[:ORIGINAL_DECLARATION_COUNT]
+        neutral = declarations[ORIGINAL_DECLARATION_COUNT:]
+        self.assertEqual(len(original), ORIGINAL_DECLARATION_COUNT)
+        self.assertEqual(pack_value_map_sha256(original), ORIGINAL_DECLARATIONS_SHA256)
+        for row in original:
             self.assertEqual((row["reviewer"], row["decision"], row["evidenceReference"],
                               row["status"]),
                              (CURRENT_DECLARATION_REVIEWER, "legitimately_identical",
                               CURRENT_DECLARATION_REFERENCE, "declared"))
+        self.assertEqual(neutral, NEUTRAL_TEMPLATE_DECLARATIONS)
+        self.assertNotIn(NEUTRAL_TEMPLATE_KEY, {row["key"] for row in original})
+        # The neutral records bind the literal wrapper text, not a value read
+        # from the packs under test.
+        self.assertEqual({row["translatedTextSha256"] for row in neutral},
+                         {report_sha(NEUTRAL_TEMPLATE_TEXT)})
+        self.assertNotEqual((NEUTRAL_TEMPLATE_REVIEWER, NEUTRAL_TEMPLATE_REFERENCE),
+                            (CURRENT_DECLARATION_REVIEWER, CURRENT_DECLARATION_REFERENCE))
         # The historical fixture view stays declaration-free.
         self.assertEqual(self.release["entryReview"]["declarations"], [])
         self.assertEqual({k: v for k, v in actual.items() if k != "entryReview"},
@@ -3552,9 +3616,13 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual(report_reasons(report, "entries-missing"), [])
         self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
                          PACK_IDS)
+        # The report states a category reason only for a pack whose list is
+        # not empty (as for every other entries- reason), so with no held
+        # placeholder there is none.
         self.assertEqual([(r["subject"], r["keys"])
                           for r in report_reasons(report, "entries-deliberate-english-placeholder")],
-                         [(pack_id, CURRENT_ENGLISH_PLACEHOLDER_KEYS[pack_id]) for pack_id in PACK_IDS])
+                         [(pack_id, CURRENT_ENGLISH_PLACEHOLDER_KEYS[pack_id]) for pack_id in PACK_IDS
+                          if CURRENT_ENGLISH_PLACEHOLDER_KEYS[pack_id]])
         self.assertEqual((report["evidence"]["declarationCount"],
                           report["evidence"]["qualifiedDeclarations"]),
                          (sum(CURRENT_DECLARED_COUNTS.values()), sum(CURRENT_DECLARED_COUNTS.values())))
