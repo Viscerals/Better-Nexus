@@ -287,20 +287,138 @@ C.scenario('P7 M2 N7: an Auto ON board shows its three cards and no charges line
   'P7: and carries and shows no charges')
 end)
 
-C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip',function()
+-- P8: the click only asks the game's button for the page (a request, never
+-- an observed open page). The route (JournalTab.OpenBuilds, unchanged)
+-- settles at once, then at 0.10 s and last at 0.35 s: through C_Timer.After
+-- when the client has it, otherwise through the Journal's own settle frame
+-- (NexusJournalSettleDriver). Its words on the page are read once that last
+-- settle ran. Both paths are run, each on its own boot:
+--   'frame'  C_Timer is absent (as in the harness). Only that frame's own
+--            OnUpdate is called, in a bounded loop of 0.05 s steps while it is
+--            shown; the synthetic clock H.now moves with it. No other frame's
+--            OnUpdate runs (never H.Advance), so every counter and line
+--            observed comes from the route. The frame must belong to this
+--            boot: the global name outlives a boot (Reset keeps it).
+--   'timer'  C_Timer is ready: a test-local recording timer of the one shape
+--            the Journal uses, After(delay, callback), installed only around
+--            the click and its settles. It runs nothing itself; the scenario
+--            runs the recorded callbacks once each, in due order, with H.now
+--            moved to each due time. This is an offline fixture only: no
+--            claim about the client's C_Timer availability.
+-- The prior global C_Timer is restored afterwards on both paths.
+local SETTLE_DRIVER='NexusJournalSettleDriver'
+-- This boot's settle frame: the global, only while it is one of the current
+-- harness's frames (never a frame of an earlier boot).
+local function CurrentSettleDriver()
+ local named=rawget(_G,SETTLE_DRIVER)
+ if named==nil then return nil end
+ for _,f in ipairs(H.frames) do if rawequal(f,named) then return f end end
+ return nil
+end
+local function RecordingTimer()
+ local t={queue={},delays={},count=0}
+ t.api={After=function(delay,fn)
+  t.count=t.count+1
+  t.delays[#t.delays+1]=tostring(delay)
+  t.queue[#t.queue+1]={due=H.now+(tonumber(delay) or 0),order=t.count,fn=fn}
+ end}
+ return t
+end
+-- Runs the recorded callbacks once each, earliest first (bounded).
+local function DrainTimer(t)
+ local ran,errors=0,{}
+ while #t.queue>0 and ran<64 do
+  table.sort(t.queue,function(a,b) if a.due~=b.due then return a.due<b.due end return a.order<b.order end)
+  local entry=table.remove(t.queue,1)
+  if entry.due>H.now then H.now=entry.due end
+  ran=ran+1
+  local ok,err=pcall(entry.fn)
+  if not ok then errors[#errors+1]=tostring(err) end
+ end
+ return ran,errors
+end
+-- Calls the settle frame's own OnUpdate while it is shown (bounded).
+local function DriveSettleFrame(driver,tick,limit)
+ local ticks=0
+ while driver:IsShown() and ticks<limit do
+  ticks=ticks+1
+  H.now=H.now+.05
+  tick(driver,.05)
+ end
+ return ticks
+end
+local UNCONFIRMED='could not confirm that the Echoes page is open'
+local OPEN_CLAIM='The Echoes page is open.'
+local function JournalCoach(path)
+ local tag=path=='timer' and ' (C_Timer ready)' or ''
+ local prior=rawget(_G,'C_Timer')
  BootSetup()
  local journal,micro=JournalHost()
  -- The game's button toggles the page: here it was open and closes again.
  micro:SetScript('OnClick',function() journal:Hide() end)
  Nexus.Help.Show('start')
  local assign=ChildButton(NexusHelpWindow,'Assign Wishlist...')
- C.setup(assign~=nil,'P8: fixture: Help offers Assign Wishlist...')
- local before=Counters()
- local said=Said(function() if assign then assign:Click() end end)
- print('OBSERVED','P8 said='..said)
- C.expect(said:find('could not confirm that the Echoes page is open',1,true)~=nil
-  and not said:find('The Echoes page is open.',1,true),'P8: no claim that the page is open when Nexus cannot see it',said)
- C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing',Show(Counters()))
+ C.setup(assign~=nil,'P8: fixture: Help offers Assign Wishlist...'..tag)
+ local idle=CurrentSettleDriver()
+ C.setup(not (idle and idle:IsShown()),'P8: fixture: no Journal settle of this boot is queued before the click'..tag)
+ local before,settings=Counters(),Settings()
+ local timer=path=='timer' and RecordingTimer() or nil
+ rawset(_G,'C_Timer',timer and timer.api or nil)
+ local ok,err=pcall(function()
+  local clicked=Said(function() if assign then assign:Click() end end)
+  C.guard(not clicked:find(OPEN_CLAIM,1,true),'P8: the click alone claims no open page'..tag,clicked)
+  C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing'..tag,Show(Counters()))
+  local settled,observed,again='','',nil
+  if timer then
+   local last=false
+   for _,d in ipairs(timer.delays) do if tonumber(d)==0.35 then last=true end end
+   C.setup(last,'P8: fixture: the click queued the route\'s last settle (0.35 s) on the ready timer'..tag,
+    table.concat(timer.delays,','))
+   local driver=CurrentSettleDriver()
+   C.guard(not (driver and driver:IsShown()),'P8: with the timer ready the Journal settle frame is not used'..tag)
+   local ran,errors=0,{}
+   settled=Said(function() ran,errors=DrainTimer(timer) end)
+   C.guard(#errors==0,'P8: each timer callback runs without error'..tag,table.concat(errors,' | '))
+   C.guard(#timer.queue==0,'P8: every recorded callback ran once and none is left'..tag,tostring(#timer.queue))
+   observed='C_Timer.After (test-local recording timer) delays='..table.concat(timer.delays,',')..' ran='..ran
+   again=function() DrainTimer(timer) end
+  else
+   local driver=CurrentSettleDriver()
+   local tick=driver and driver:GetScript('OnUpdate')
+   if C.setup(driver~=nil and driver:IsShown() and type(tick)=='function',
+    'P8: fixture: the click queued a settle on this boot\'s own Journal settle frame (in H.frames, shown, with its OnUpdate)',
+    'driver='..tostring(driver~=nil)..' global='..tostring(rawget(_G,SETTLE_DRIVER)~=nil)) then
+    local ticks=0
+    settled=Said(function() ticks=DriveSettleFrame(driver,tick,40) end)
+    C.guard(not driver:IsShown(),'P8: the settle frame is idle once the route has settled',tostring(ticks)..' ticks')
+    observed='settle frame '..SETTLE_DRIVER..' (this boot) ticks='..ticks
+    -- Its OnUpdate called again: nothing is left to run.
+    again=function() for _=1,10 do H.now=H.now+.05;tick(driver,.05) end end
+   else
+    observed='settle frame not observed: no settle was driven'
+   end
+  end
+  local said=clicked..(clicked~='' and settled~='' and ' / ' or '')..settled
+  print('OBSERVED','P8 path='..observed..' priorC_Timer='..tostring(prior~=nil)..' said='..said)
+  C.expect(said:find(UNCONFIRMED,1,true)~=nil and not said:find(OPEN_CLAIM,1,true),
+   'P8: no claim that the page is open when Nexus cannot see it'..tag,said)
+  C.guard(select(2,said:gsub(UNCONFIRMED,''))<=1,'P8: the unconfirmed notice is said at most once'..tag,said)
+  C.guard(Same(Counters(),before) and Settings()==settings,
+   'P8: the route and its settles act, request, send and change no setting'..tag,Show(Counters()))
+  local later=again and Said(again) or ''
+  C.guard(not later:find('Echoes page',1,true),'P8: a settled route says nothing more about the page'..tag,later)
+  C.guard(Same(Counters(),before),'P8: and still acts, requests and sends nothing'..tag,Show(Counters()))
+ end)
+ rawset(_G,'C_Timer',prior)
+ if not ok then error(err,0) end
+end
+
+C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip',function()
+ JournalCoach('frame')
+end)
+
+C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip (C_Timer ready)',function()
+ JournalCoach('timer')
 end)
 
 C.scenario('P9 M2 N4: the replay\'s routes wait for start-up as Help\'s do; the replay stays open',function()
