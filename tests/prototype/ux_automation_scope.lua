@@ -296,11 +296,27 @@ C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nex
  local assign=ChildButton(NexusHelpWindow,'Assign Wishlist...')
  C.setup(assign~=nil,'P8: fixture: Help offers Assign Wishlist...')
  local before=Counters()
- local said=Said(function() if assign then assign:Click() end end)
- print('OBSERVED','P8 said='..said)
+ -- The click only asks the game's button for the page (a request, not an
+ -- observed open page). The route settles at once, then at 0.10 s and last
+ -- at 0.35 s, through C_Timer.After when the client has it, otherwise
+ -- through the Journal's own settle frame, which the harness clock drives
+ -- (H.Advance). Its words on the page are read once that last settle ran.
+ local clicked=Said(function() if assign then assign:Click() end end)
+ C.guard(not clicked:find('The Echoes page is open.',1,true),'P8: the click alone claims no open page',clicked)
+ C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing',Show(Counters()))
+ local acted,sent=#H.actions,#H.sent
+ local settled=Said(function() H.Advance(.5) end)
+ local said=clicked..(clicked~='' and settled~='' and ' / ' or '')..settled
+ print('OBSERVED','P8 said='..said..' timer='..(C_Timer and 'C_Timer' or 'settle frame'))
  C.expect(said:find('could not confirm that the Echoes page is open',1,true)~=nil
   and not said:find('The Echoes page is open.',1,true),'P8: no claim that the page is open when Nexus cannot see it',said)
- C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing',Show(Counters()))
+ C.guard(#H.actions==acted and #H.sent==sent,'P8: the route\'s later settles perform and send nothing',Show(Counters()))
+ -- Cleanup: each settle runs once, and the settle frame (used only without
+ -- C_Timer) is idle again once nothing is queued.
+ local driver=rawget(_G,'NexusJournalSettleDriver')
+ C.guard(C_Timer~=nil or not (driver and driver:IsShown()),'P8: no settle stays queued once the route has settled')
+ local later=Said(function() H.Advance(.5) end)
+ C.guard(not later:find('Echoes page',1,true),'P8: a settled route says nothing more about the page',later)
 end)
 
 C.scenario('P9 M2 N4: the replay\'s routes wait for start-up as Help\'s do; the replay stays open',function()

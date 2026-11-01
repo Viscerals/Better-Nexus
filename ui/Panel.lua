@@ -2191,6 +2191,14 @@ end
 -- C-03: `settled` (no layout pass ran, so nothing else re-anchored a hover)
 -- refits only a hover whose text, box, justification or face changed since
 -- its last fit (M.PassiveHoverKey); a layout pass refits every one.
+-- The face is the nominal path, size and flags its GetFont reports
+-- (M.PassiveHoverKey), and the GetFont the text answers with. A face whose
+-- metrics differ under the same nominal font is installed with a new
+-- reader, so a new reader is a changed face: the fit is not kept from the
+-- earlier one. That reader is held by the hit itself and compared by
+-- identity (never by its printed address), so a collected one cannot seem
+-- to come back. It costs no call: the client's own reader is one fixed
+-- method, so a settled render still measures and re-anchors nothing.
 function M.PassiveHoverKey(text, wrapped)
     local okFont, path, size, flags = pcall(text.GetFont, text)
     return table.concat({tostring(text:GetText()), tostring(text:GetWidth()), tostring(text:GetHeight()),
@@ -2203,11 +2211,11 @@ function M.FitPassiveHovers(settled)
     local p = frame._play or {}
     local function Fit(hit, text, wrapped)
         if not (hit and text) then return end
-        local key = M.PassiveHoverKey(text, wrapped)
-        if settled and hit._nexusFitKey == key then return end
-        hit._nexusFitKey = nil
+        local key, face = M.PassiveHoverKey(text, wrapped), text.GetFont
+        if settled and hit._nexusFitKey == key and rawequal(hit._nexusFitFace, face) then return end
+        hit._nexusFitKey, hit._nexusFitFace = nil, nil
         M.FitPassiveHover(hit, text, wrapped)
-        hit._nexusFitKey = key
+        hit._nexusFitKey, hit._nexusFitFace = key, face
     end
     local pairs_ = {
         {frame._contextTitleHit, frame._contextTitle}, {frame._contextBuildHit, frame._contextBuild},
@@ -2224,7 +2232,7 @@ function M.FitPassiveHovers(settled)
     for i = 1, #shownOnly do
         local hit = shownOnly[i][1]
         if hit and hit:IsShown() then Fit(hit, shownOnly[i][2], shownOnly[i][3])
-        elseif hit then hit._nexusFitKey = nil end
+        elseif hit then hit._nexusFitKey, hit._nexusFitFace = nil, nil end
     end
 end
 
