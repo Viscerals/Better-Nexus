@@ -114,7 +114,7 @@ Nexus.LocalizationEnglish = {
     ["command.chat.performance_unavailable"] = "performance diagnostics unavailable",
     ["command.chat.policy_selected"] = "Rolling strategy selected: {strategy}. It applies at the next safe action boundary; no pending action is cleared or repeated.",
     ["command.chat.policy_values"] = "adaptive = experimental strategy (default). released = the earlier strategy. See /nexus reference.",
-    ["command.chat.progress_no_wishlist"] = "no wishlist set -- advisor only, nothing to track.",
+    ["command.chat.progress_no_wishlist"] = "no Wishlist is available to track right now -- advisor only.",
     ["command.chat.progress_this_run"] = "this run: {progress} echoes ({percent}%) -- {short} still short",
     ["command.chat.prototype_backup"] = "Back up WTF and your previous Nexus folder before testing. No native gameplay acceptance is claimed.",
     ["command.chat.prototype_intro"] = "Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus reference explains each mode.",

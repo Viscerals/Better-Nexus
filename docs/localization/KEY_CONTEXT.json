@@ -1171,10 +1171,10 @@
     {
       "key": "command.chat.progress_no_wishlist",
       "kind": "text",
-      "english": "no wishlist set -- advisor only, nothing to track.",
+      "english": "no Wishlist is available to track right now -- advisor only.",
       "placeholders": [],
       "group": "command",
-      "meaning": "Lower-case status: no Wishlist is assigned, so there is no progress to show.",
+      "meaning": "Lower-case status, shown whenever the adapter's Wishlist read (A.Wishlist) returns nothing: no usable Wishlist can be tracked at this moment, so no progress is shown and Nexus only advises. Covers none assigned or chosen, an empty Saved Build, loadout or server data not yet read or still restoring, and an assigned Wishlist whose locked targets are not yet usable. Do not say that no Wishlist exists or that none is assigned.",
       "consumer": "core/Main.lua CommandProgress",
       "familySurface": "chat: /nexus progress and /nexus missing reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
       "cohort": "fullui:chat"
@@ -49017,7 +49017,7 @@
       ],
       "resultLimitBytes": 1256,
       "group": "editor",
-      "meaning": "Auto line. Keep 'Auto', 'ON' and the setting name 'autoSave' exactly (UI terms / setting identifier).",
+      "meaning": "Auto line. Keep the setting name 'autoSave' exactly (setting identifier); write 'Auto' and 'ON' exactly as the Auto switch is labelled in this language (panel.button.auto_on / panel.label.auto_state_on).",
       "consumer": "Save/Create Wishlist confirmation popup (second paragraph) popup",
       "familySurface": "wishlist: Save/Create Wishlist confirmation popup (second paragraph) (popup); family coverage PENDING review",
       "cohort": "fullui:wishlist"
