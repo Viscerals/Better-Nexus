@@ -2,8 +2,10 @@
 -- a callback that runs after an owner's first pause check still stops the new
 -- work behind it. Each case pauses from inside a real dependency callback
 -- (boundary sink, native request, option read, tome read, slot read, CTL,
--- channel read, whisper guard, Details read), and each has an unpaused
--- control on the same rig. Already-sent work and its marks are kept.
+-- channel read, Details read), and each has an unpaused control on the same
+-- rig. Already-sent work and its marks are kept. B7 (the diagnostic whisper's
+-- peer guard) is no longer a live boundary: under G-01 the probe is inert and
+-- never reaches that guard, so B7 asserts that non-reachability instead.
 local function Reset()
  if NexusOrbRuntime then NexusOrbRuntime:SetScript('OnUpdate',nil);NexusOrbRuntime:SetScript('OnEvent',nil);NexusOrbRuntime:Hide() end
  Nexus=nil;NexusDB=nil;NexusSupportDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;ProjectEbonhold=nil;NexusPanel=nil
@@ -169,20 +171,42 @@ for _,mode in ipairs({'control','held','quick'}) do
 end
 end)
 
--- B7. Diagnostic whisper: Pause inside its peer guard.
+-- B7. Diagnostic whisper: an INERT compatibility case, not a late boundary.
+-- The old boundary (a Pause raised inside the probe's peer guard,
+-- SyncWire.IsWhisperTargetBlocked) no longer applies: under G-01
+-- (core/SyncSession.lua SendStatusTo) the probe builds and sends nothing and
+-- never calls that guard. An armed PauseInside wrapper stays on the guard in
+-- every state to prove it is not reached. held/quick put the session into a
+-- held pause, or a quick Pause and Resume, before the call; the result keeps
+-- pause precedence truthfully and the call leaves session state unchanged.
+-- The control then shows the same wrapper does observe a real guard call.
 Case('B7',function()
 for _,mode in ipairs({'control','held','quick'}) do
  local pause,quick=mode~='control',mode=='quick'
  local H=Boot()
- local n=#H.sent
- local w=pause and PauseInside(Nexus.SyncWire,'IsWhisperTargetBlocked',quick)
- Nexus.Sync.SendStatusTo('Peer')
- if pause then
-  w.restore()
-  assert(#H.sent==n,'B7: no whisper after a pause inside its guard')
+ local P=Nexus.SessionPause
+ if pause then P.Pause();if quick then P.Resume() end end
+ local held=P.IsPaused()
+ assert(held==(mode=='held'),'B7 '..mode..': fixture session state')
+ local epoch=P.Status().epoch
+ local n,chat=#H.sent,#H.chat
+ local w=PauseInside(Nexus.SyncWire,'IsWhisperTargetBlocked',quick)
+ local ok,why,extra=Nexus.Sync.SendStatusTo('Peer')
+ local calls=w.calls
+ assert(calls==0,'B7 '..mode..': the inert probe never reaches its old peer guard, calls='..calls)
+ assert(#H.sent==n and #H.chat==chat,'B7 '..mode..': zero output, sends='..(#H.sent-n))
+ if held then
+  assert(ok==false and why=='Nexus paused for this session' and extra==nil,'B7 held: the pause reason keeps precedence: '..tostring(why))
  else
-  assert(#H.sent==n+1 and H.sent[#H.sent].kind=='WHISPER','B7 control: whispered')
+  assert(ok==false and why==nil and extra==nil,'B7 '..mode..': an inert false with no fabricated reason: '..tostring(why))
  end
+ assert(P.IsPaused()==held and P.Status().epoch==epoch,'B7 '..mode..': session pause state is unchanged by the probe')
+ if mode=='control' then
+  Nexus.SyncWire.IsWhisperTargetBlocked('Peer')
+  assert(w.calls==1 and P.IsPaused(),'B7 control: the wrapper observes a real guard call')
+  P.Resume()
+ end
+ w.restore()
 end
 end)
 

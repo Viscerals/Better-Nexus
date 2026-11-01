@@ -16,8 +16,10 @@ local function UntilSent(H,seconds)
 end
 local W=function()return Nexus.SyncWire end
 
--- S1. Control: a manual Sync is sent, a HELLO is answered, a direct packet and
--- the diagnostic whisper go out.
+-- S1. Control: a manual Sync is sent, a HELLO is answered and a direct packet
+-- goes out. The diagnostic probe whisper is disabled in every mode (G-01,
+-- core/SyncSession.lua SendStatusTo): unpaused, its compatibility facade is a
+-- bare false and submits zero bytes; it is not a positive control.
 do
  local H=Boot();H.sent={}
  SlashCmdList.NEXUS('sync')
@@ -30,8 +32,9 @@ do
  local ok=W().SendPacket('WLRQ|PrototypeTester|0,0,0,0',{},1)
  assert(ok and H.Sends(n)==1,'control: a direct packet is sent')
  n=#H.sent
- assert(Nexus.Sync.SendStatusTo('Peer'),'control: the diagnostic whisper is sent')
- assert(H.Sends(n)==1 and H.sent[#H.sent].kind=='WHISPER','control: one whisper')
+ local probed,why=Nexus.Sync.SendStatusTo('Peer')
+ assert(probed==false and why==nil,'control: the disabled diagnostic facade is an inert false with no reason: '..tostring(why))
+ assert(H.Sends(n)==0,'control: the disabled diagnostic facade sends zero bytes, sends='..H.Sends(n))
 end
 
 -- S2. Paused: no manual request, no inbound admission or reply, no direct
@@ -49,7 +52,10 @@ do
  assert(W().Receive(W().PREFIX,'HELLO1','WHISPER','Peer')==false,'no inbound admission')
  assert(not Nexus.Sync.HandleNativeChannelIncoming('WLRQ|Peer|0,0,0,0','Peer'),'no native channel admission')
  assert(not W().SendPacket('WLRQ|PrototypeTester|0,0,0,0',{},1),'no direct packet')
- assert(not Nexus.Sync.SendStatusTo('Peer'),'no diagnostic whisper')
+ local probeMark=#H.sent
+ local probed,why=Nexus.Sync.SendStatusTo('Peer')
+ assert(probed==false and why=='Nexus paused for this session','no diagnostic whisper; the pause reason keeps precedence: '..tostring(why))
+ assert(H.Sends(probeMark)==0,'the paused diagnostic facade sends zero bytes')
  H.Advance(60)
  assert(H.Sends(n)==0,'nothing sent while paused, sends='..H.Sends(n))
  assert(Nexus.SyncModePolicy.Mode()==mode and H.channel==channel,'saved mode and channel unchanged')
