@@ -288,10 +288,10 @@ REFERENCE_SUCCESSORS = {
 # the bytes under test.
 CURRENT_SUCCESSOR_INPUTS = {
     "data/LocalizationPacks.lua": {
-        "canonical": ("3de7a296c2acd3ae33449a69d8084f4bfec72d11ec4dedb16a667a4e6c805d0e", 3316552),
-        "blob": "155f11a856b8e80759c213db38017d03ff0d2bbf",
-        "firstCommit": "b6a58b6a8611fda0791286b21466217b1326c6bc",
-        "physical": ("958ca7a85d94e2cf4be7338815b4636bddfc19070c1e8e208a3d945b5ec72833", 3341089)},
+        "canonical": ("050f166cde8ba0f2b93bd4e74777599ce75124b92119802021e9f94229c6e2c4", 3316548),
+        "blob": "b7dbabe8ea84fa1ff51e079f272a7569631e61f4",
+        "firstCommit": "e562927c51099ef56516009d099a8d40d637eb97",
+        "physical": ("cd1a37879621d7596f93d6a00f718eec591ec23901a4121c4c24337a705f7ae4", 3341085)},
     "docs/localization/RELEASE_LANGUAGES.json": {
         "canonical": ("78628e4fd0cd70030ba40e5b62424492f27497590f0813e86c92fbf3bec2986c", 265898),
         "blob": "00fdd4fc3947b4dfaef84c2e4ab43d67502d651b",
@@ -326,7 +326,7 @@ HISTORICAL_SUCCESSOR_INPUTS = {
 # map, as bound per language by the packs pinned at 351a83b5 (literal
 # operator facts; esES is unchanged by that commit).
 CURRENT_PACK_VALUE_MAPS = {
-    "frFR": "ed0998a23d09680ec72e4e5ea0f7fc92cfc5e5a31026e9e43e9f50aa914e1748",
+    "frFR": "b769274bc66cc38542252725927ac69bee261c5d9f1b4b0a1526507f1da02f03",
     "deDE": "e1124f68173d6fa89c4564740c9b16b504d26f3ce6f35a4d4984904d19a73aa0",
     "esES": "b361ef47eb8935dcc4a42302285991b1a48f521979a00b9b9645d0c48c40312d",
     "plPL": "9d0e86860c6d11aca2cc73cf83273f77027bf61bfdf5162697b8c32866d4b5f7",
