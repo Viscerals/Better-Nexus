@@ -22,9 +22,15 @@
 --  P5 English (no pack): every page's blocks join to its exact English text,
 --     every T("key", "English") literal of the family's files is that key's
 --     English base, and representative windows show their exact English.
+--  P6 the Assign step's result bodies (changed, other, partial, stale and the
+--     two-field mismatch) in each of the six real language packs chosen by
+--     the saved interface language, and in English as the name-role control.
 -- Synthetic offline evidence only: no glyph, font, layout or native claim.
 local S=dofile('tests/prototype/l10n_pseudo_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
+-- The loader before any pseudo boot hook (S.InstallBootHook replaces it until
+-- its one use); P6 boots only with this one.
+local PRISTINE_LOADFILE=loadfile
 local checks,failed=0,{}
 local function check(v,m) checks=checks+1;if not v then failed[#failed+1]=m;print('FAIL '..m) end end
 local OPEN,CLOSE=S.OPEN,S.CLOSE
@@ -542,6 +548,216 @@ do
  local text3=Coach(e)
  check(buttonWith(_G.NexusGuidedSetup,'Weiter (100%)')~=nil,'R5 guide: a literal percent in a static label stays literal')
  check(text3:find(P('Step 2 of 7'),1,true)~=nil,'R5 guide: the translated kicker keeps its counts beside a literal-percent label')
+end
+
+------------------------------------------------------------------------
+-- P6: the Assign step's unconfirmed result bodies in the six real language
+-- packs, and in English as the name-role control. Each session is a real TOC
+-- boot whose language is the saved interface language (settings.uiLanguage);
+-- no pseudo pack. The scenario is the reproduced one: public Wishlist and
+-- Saved Build choices, replacement consent where the slot follows another
+-- Wishlist, ArmAssign / BeginAssign / Note receipts, the real core
+-- AssignStatus and the real U.Render. The only synthetic inputs are bounded
+-- seams for Saved Build 2: its assignment read back and its action token.
+-- No status, localization, FormatCopy, Fmt or render function is replaced.
+-- A one-field sentence gets only its own field: changed, partial and stale
+-- the Saved Build, other the other Wishlist the receipt names (never the
+-- Saved Build or the read back); the two-field mismatch keeps the Saved Build
+-- and the Wishlist read back. Each whole body is checked at its FontString.
+-- Rendering is passive (no adapter assignment write, action, send, saved
+-- change or Auto) and Continue keeps waiting on every unconfirmed result.
+------------------------------------------------------------------------
+do
+ -- Every earlier boot hook removed itself on its one use; any leftover one
+ -- is removed here, so no pseudo pack reaches these boots.
+ if loadfile~=PRISTINE_LOADFILE then loadfile=PRISTINE_LOADFILE end
+ check(loadfile==PRISTINE_LOADFILE,'P6 SETUP no pseudo boot hook is installed')
+ -- Distinct player-owned names (UTF-8): the chosen Wishlist, the other
+ -- Wishlist a receipt names, the Wishlist read back and the Saved Build.
+ local CHOSEN='Chosen Wishlist player-name \195\156'
+ local OTHER='Other Wishlist player-name \206\169'
+ local READBACK='Read-back Wishlist player-name \195\159'
+ local BUILD='Saved Build QA Dest'
+ local KEYS={changed='guide.body.assign_stale_body_changed',other='guide.body.assign_stale_body_other',
+  partial='guide.body.assign_stale_body_partial',stale='guide.body.assign_stale_body_stale',
+  mismatch='guide.body.assign_stale_body_mismatch'}
+ local STATES={'changed','other','partial','stale','mismatch'}
+ local WRITERS={'SetLoadoutWishlist','SetFirstRunWishlist','ClearLoadoutWishlist','ClearFirstRunWishlist',
+  'ConfirmWishlistRoles','SetLoadoutWishlistIdentity'}
+ local function clone(t) local r={};for k,v in pairs(t) do r[k]=v end;return r end
+ -- Either client boolean convention (harness.lua).
+ local function enabled(b) local v=b and b:IsEnabled();return v==true or v==1 end
+ -- A coach FontString drawn this render (shown, or one scroll away: the
+ -- bounded window marks it _nexusOut) whose whole text is exactly `text`.
+ local function shownExactly(root,text)
+  for _,r in ipairs(root.regions or {}) do
+   if r.kind=='FontString' and r:GetText()==text and (r:IsShown() or r._nexusOut) then return true end
+  end
+  return false
+ end
+ -- A coach button drawn this render whose complete label (Arm: b.full, also
+ -- when the shown text is fitted) is exactly `text`.
+ local function buttonExactly(root,text)
+  for _,b in ipairs(root.children or {}) do
+   if b.kind=='Button' and (b:IsShown() or b._nexusOut) and (b.full==text or b:GetText()==text) then return b end
+  end
+ end
+ local function Session(language)
+  local H=F.Boot(F.Database{mutate=function(db)
+   db.hasSeenQuickStart=true
+   if language~='enUS' then db.settings.uiLanguage=language end
+   db.chars[F.NAME].loadoutWishlists={}
+  end},function(h)
+   h.playerLevel=80
+   h.AddEcho(201172,'Echo One',0,5);h.AddEcho(201173,'Echo Six',0,5)
+   h.AddEcho(201174,'Echo Free',0,5);h.AddEcho(201175,'Echo Fire',0,5)
+   h.service.GetServerMaxSlots=function() return 6 end
+   h.perks.serverBuildSlots={
+    [1]={name='Saved Build One',verified=true,echoes={{spellId=201172,quality=0,stacks=1}}},
+    [2]={name=BUILD,verified=true,echoes={{spellId=201175,quality=0,stacks=1}}},
+    [106]={name='Other pool',verified=false,echoes={{spellId=201173,quality=0,stacks=1}}},
+    [107]={name=CHOSEN,verified=false,echoes={{spellId=201174,quality=0,stacks=1}}}}
+   h.perks.serverActiveSlot=2
+   F.OrbService(h)
+  end)
+  H.Notify();Nexus.GameAdapter.Poll();H.Advance(1)
+  Nexus.DisableOrdinaryAutomation()
+  return H
+ end
+
+ for _,language in ipairs({'deDE','esES','frFR','plPL','ptBR','ruRU','enUS'}) do
+  local H=Session(language)
+  local A,L,G,U=Nexus.GameAdapter,Nexus.Localization,Nexus.GuidedSetup,Nexus.GuidedSetupUI
+  local english=language=='enUS'
+  local tag='P6 '..language
+  check(L.ActiveLanguage()==language,tag..' SETUP the saved interface language is the session language')
+  if not english then
+   check(type(Nexus.LocalizationPacks)=='table' and type(Nexus.LocalizationPacks[language])=='table',tag..' SETUP its real pack is loaded')
+  end
+  local SafeName=Nexus.UserText.SafeName
+  check(SafeName(CHOSEN)==CHOSEN and SafeName(OTHER)==OTHER and SafeName(READBACK)==READBACK,
+   tag..' SETUP the UTF-8 Wishlist names are safe player text as they are')
+  local guide=Nexus.UserText.Guide
+  -- The result head and the chooser's again label: static copy leaves.
+  local headKey,againKey='guide.body.assign_stale','guide.button.open_again'
+  check(L.Resolve(headKey)==guide.assign.stale and L.Resolve(againKey)==guide.buttons.openAgain,
+   tag..' SETUP the result head and chooser-again keys are those copy leaves')
+  local head,again=L.Text(headKey),L.Text(againKey)
+  -- Counted pass-throughs: an assignment write would be seen, never made here.
+  local writes=0
+  for _,name in ipairs(WRITERS) do
+   local real=A[name]
+   if type(real)=='function' then A[name]=function(...) writes=writes+1;return real(...) end end
+  end
+  local candidate
+  for _,v in ipairs(A.GetWishlistCandidates() or {}) do if tonumber(v.slot)==107 then candidate=v end end
+  check(candidate~=nil and candidate.name==CHOSEN,tag..' SETUP the chosen Wishlist is listed under its own name')
+  local originalRead,originalToken=G.ReadAssignment,A.AssignmentActionToken
+
+  local function Run(state)
+   local st=tag..' '..state
+   G.ReadAssignment,A.AssignmentActionToken=originalRead,originalToken
+   G.Replay();G.SetPath('existing')
+   check(U.Show()==true,st..' SETUP the coach opens')
+   local chose,targeted=G.ChooseWishlist(candidate),G.ChooseTarget(2)
+   local w=G.State().wishlist
+   check(chose==true and targeted==true and w~=nil,st..' SETUP public Wishlist and Saved Build choices')
+   if not w then return end
+   -- other and mismatch: Saved Build 2 follows another Wishlist (read back).
+   local replaced=state=='other' or state=='mismatch'
+   local read=replaced and {state='assigned',key='readback-wishlist-key',name=READBACK,action='base-action'}
+    or {state='none',action='base-action'}
+   local token='base-action'
+   G.ReadAssignment=function(destination)
+    if destination~=2 then return originalRead(destination) end
+    return clone(read)
+   end
+   A.AssignmentActionToken=function(destination,...)
+    if destination~=2 then return originalToken(destination,...) end
+    return token
+   end
+   local consent=not replaced or G.ConfirmReplace()
+   local armed=G.ArmAssign()
+   check(consent==true and armed==true,st..' SETUP public replacement consent and bound assignment request')
+   if not (consent and armed) then return end
+   if state=='changed' then
+    read.action='later-action'
+   else
+    local key=state=='other' and 'other-wishlist-key' or w.key
+    local origin=G.BeginAssign(2,key)
+    check(origin~=nil,st..' SETUP public operation origin')
+    if not origin then return end
+    if not replaced then token='own-action' end
+    G.Note('assign',{destination=2,ok=true,key=key,name=state=='other' and OTHER or w.name,
+     guide=origin,origin='bounded-synthetic-readback-regression'})
+    if state=='partial' then read={state='roles',key=w.key,name=w.name,action='own-action'}
+    elseif state=='stale' then read={state='assigned',key=w.key,name=w.name,action='later-action'} end
+   end
+   check(G.GoTo('assign')==true,st..' SETUP the Assign step')
+   local status=G.AssignStatus()
+   check(status.state==state,st..' SETUP the real core status ('..tostring(status.state)..')')
+   if status.state~=state then return end
+   local facts=G.TargetFacts()
+   check(facts~=nil and facts.ready==true,st..' SETUP the result view is reached')
+   if not facts then return end
+   check(not G.CanNext(),st..': an unconfirmed result never allows Continue')
+   if state=='other' then check(status.name==OTHER and status.readName==READBACK,st..' SETUP the receipt and the read back name different Wishlists') end
+   if state=='mismatch' then check(status.readName==READBACK,st..' SETUP the read back names its Wishlist') end
+   -- The Saved Build as the view labels it (guide.body.target_slot).
+   local dest=L.Format('guide.body.target_slot',{slot=L.Count(2),name=SafeName(facts.name)})
+   check(dest:find(BUILD,1,true)~=nil,st..' SETUP the Saved Build label holds its name')
+   local fields
+   if state=='other' then fields={other=SafeName(status.name)}
+   elseif state=='mismatch' then fields={build=dest,other=SafeName(status.readName)}
+   else fields={build=dest} end
+   local expected,source=L.Format(KEYS[state],fields)
+   check(type(expected)=='string' and source~='unavailable',st..' SETUP the pack template formats with its own fields')
+   if type(expected)~='string' then return end
+   local raw=guide.assign.staleBody[state]
+   local englishForm
+   if state=='other' then englishForm=string.format(raw,SafeName(OTHER))
+   elseif state=='mismatch' then englishForm=string.format(raw,dest,SafeName(READBACK))
+   else englishForm=string.format(raw,dest) end
+   if english then check(expected==englishForm,st..': English keeps its exact sentence')
+   else check(expected~=englishForm,st..' SETUP the pack translates this sentence') end
+   -- Whose name the sentence carries.
+   if state=='other' then
+    check(expected:find(OTHER,1,true) and not expected:find(BUILD,1,true) and not expected:find(READBACK,1,true)
+     and not expected:find(CHOSEN,1,true),st..': names the other Wishlist only')
+   elseif state=='mismatch' then
+    check(expected:find(dest,1,true) and expected:find(READBACK,1,true),st..': names the Saved Build and the Wishlist read back')
+   else
+    check(expected:find(dest,1,true) and not expected:find(OTHER,1,true) and not expected:find(READBACK,1,true),st..': names the Saved Build only')
+   end
+   -- What the old two-argument call showed: the strict template refused it
+   -- and the English printf put the Saved Build where 'other' means a Wishlist.
+   local legacy=string.format(raw,dest,SafeName(state=='other' and status.name or status.readName) or '?')
+   local before,beforeWrites=Effects(H),writes
+   U.Render()
+   local after=Effects(H)
+   check(after==before and writes==beforeWrites,st..' PASSIVE: rendering changed no saved data, action, send, write or Auto'..Diff(before,after))
+   local f=_G.NexusGuidedSetup
+   local shown=U.VisibleText()
+   check(shownExactly(f,expected),st..': the whole body is shown at its FontString: '..shown:sub(1,400))
+   if legacy~=expected then check(shown:find(legacy,1,true)==nil,st..': the old English fallback is not shown') end
+   if state=='other' then
+    local wrong=L.Format(KEYS.other,{other=dest})
+    check(shown:find(wrong,1,true)==nil,st..': the Saved Build is never shown as the other Wishlist')
+   end
+   check(shownExactly(f,head),st..': the static result head is shown in the session language')
+   check(f.next and f.next:IsShown() and not enabled(f.next),st..': Continue is shown waiting')
+   -- Routing kept: stale and changed offer Check again only; the others
+   -- also reopen the chooser.
+   local recheck=state=='stale' or state=='changed'
+   check((buttonExactly(f,again)~=nil)==(not recheck),st..': the chooser-again action is offered '..(recheck and 'never' or 'beside Check again'))
+  end
+
+  for _,state in ipairs(candidate and STATES or {}) do Run(state) end
+  G.ReadAssignment,A.AssignmentActionToken=originalRead,originalToken
+  U.Hide()
+  check(writes==0,tag..' PASSIVE: no adapter assignment write was made')
+  check(not Auto(),tag..' PASSIVE: Auto stays OFF')
+ end
 end
 
 if #failed>0 then error('l10n_ui_guide: '..#failed..' of '..checks..' checks failed; first: '..failed[1]) end
