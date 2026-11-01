@@ -747,7 +747,7 @@ function H.OpenGuide()
     local shown,why=ui.Show()
     if not shown then
         return Refuse(why=="warning-open"
-            and T("help.error.guide_warning_open","Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again.")
+            and T("help.error.guide_warning_open","Guided setup did not open. Answer the open warning, then open Guided setup again.")
             or T("help.error.guide_unavailable_now","Guided setup is not available right now."))
     end
     Leave()

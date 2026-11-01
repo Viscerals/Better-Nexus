@@ -78,6 +78,28 @@ local function Diff(a,b)
  local i=1;while i<=#a and a:sub(i,i)==b:sub(i,i) do i=i+1 end
  return ' first difference: before ...'..a:sub(math.max(1,i-80),i+80)..' | after ...'..b:sub(math.max(1,i-80),i+80)
 end
+-- The actual Help route to Guided setup while a warning waits (no stub:
+-- GuidedSetupUI.Show itself refuses for any open warning kind). Returns
+-- whether it ran, its result and refusal, and what chat heard.
+local function OpenGuideHeard()
+ local heard,realPrint={},print
+ print=function(...) heard[#heard+1]=tostring((...)) end
+ local ok,shown,why=pcall(function() return Nexus.Help.OpenGuide() end)
+ print=realPrint
+ return ok,shown,why,table.concat(heard,' / ')
+end
+-- The blocked-guide refusal is accurate for every warning kind: Guided setup
+-- did not open, answer the open warning, then open Guided setup again. It
+-- names no answer button (first-launch shows Continue / Close, Auto Yes / No).
+local function AccurateGuideRefusal(text)
+ text=tostring(text or '')
+ return text:find('Guided setup did not open.',1,true)~=nil
+  and text:find('Answer the open warning',1,true)~=nil
+  and text:find('then open Guided setup again.',1,true)~=nil
+  and text:find('(Yes or No)',1,true)==nil
+  and text:find('%f[%a]Yes%f[%A]')==nil and text:find('%f[%a]No%f[%A]')==nil
+end
+local function CoachOpen() return _G.NexusGuidedSetup~=nil and NexusGuidedSetup:IsShown() end
 
 -- Data that is never translated: the fixture's character, realm, Saved
 -- Build, Wishlist and Echo names, numbers. Pending words of other families
@@ -357,6 +379,21 @@ do
  H.now=H.now+5.2
  w:GetScript('OnUpdate')(w,0)
  check(w.countdown:GetText()==P('Do you understand?') and w.yes:IsEnabled(),'P2 after the reading delay: translated question, answers enabled')
+ -- Help's Guided setup route while the first-launch warning still waits: the
+ -- real refusal, which must not name Yes / No (this warning shows Continue /
+ -- Close). Nothing is answered to reach it; nothing opens or changes.
+ do
+  local pre=Effects(H)
+  local ok,shown,why,said=OpenGuideHeard()
+  check(ok and shown==false and type(why)=='string' and why~='' and S.IsPseudo(why) and AccurateGuideRefusal(why),
+   'P2 first-launch warning open: Help.OpenGuide refuses, says to answer the open warning and retry, and names no Yes / No '..tostring(why))
+  check(type(why)=='string' and why~='' and said:find(why,1,true)~=nil,'P2 first-launch warning open: chat says the same refusal '..said)
+  check(not CoachOpen() and w:IsShown() and Nexus.OverwriteWarning.IsOpen()
+   and w.yes:GetText()==P('Continue \226\128\148 Auto stays OFF') and w.no:GetText()==P('Close') and w.yes:IsEnabled(),
+   'P2 first-launch warning open: no coach; the warning, its answers and their labels stay')
+  local post=Effects(H)
+  check(post==pre and not Auto(),Diff(pre,post)..'P2 first-launch warning open: the refused Guide route changed no saved data, action, send or Auto')
+ end
  -- No (Close): declines and opens the information-only Welcome.
  w.no:Click()
  local q=_G.NexusQuickStart
@@ -393,6 +430,20 @@ do
  scan('P2 Auto warning (Readout lines are another family\'s)',{{text=table.concat(abody,'\n')}})
  check(w.body:GetText():find(P('Choose No to keep Auto OFF. Opening this warning does not enable Auto.'),1,true)~=nil,'P2 Auto warning keeps its closing consent line')
  check(w.yes:GetText()==P('Yes') and w.no:GetText()==P('No'),'P2 Auto warning answers are translated')
+ -- Help's Guided setup route while the Auto warning still waits: the same
+ -- accurate refusal; the warning is neither answered nor accepted.
+ do
+  local pre=Effects(H)
+  local ok,shown,why,said=OpenGuideHeard()
+  check(ok and shown==false and type(why)=='string' and why~='' and S.IsPseudo(why) and AccurateGuideRefusal(why),
+   'P2 Auto warning open: Help.OpenGuide refuses, says to answer the open warning and retry '..tostring(why))
+  check(type(why)=='string' and why~='' and said:find(why,1,true)~=nil,'P2 Auto warning open: chat says the same refusal '..said)
+  check(accepted==0 and not CoachOpen() and w:IsShown() and Nexus.OverwriteWarning.IsOpen()
+   and w.yes:GetText()==P('Yes') and w.no:GetText()==P('No'),
+   'P2 Auto warning open: nothing accepted, no coach; the warning and its Yes / No labels stay')
+  local post=Effects(H)
+  check(post==pre and not Auto(),Diff(pre,post)..'P2 Auto warning open: the refused Guide route changed no saved data, action, send or Auto')
+ end
  Nexus.OverwriteWarning.CancelAuto(owner)
  check(accepted==0 and not w:IsShown(),'P2 cancelled: nothing accepted')
  local after=Effects(H)

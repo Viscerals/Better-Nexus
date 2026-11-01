@@ -9336,10 +9336,10 @@
     {
       "key": "help.error.guide_warning_open",
       "kind": "text",
-      "english": "Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again.",
+      "english": "Guided setup did not open. Answer the open warning, then open Guided setup again.",
       "placeholders": [],
       "group": "help",
-      "meaning": "Refusal shown in the Reference window note, in chat after \"Nexus:\" and by the caller. Keep \"Nothing was ...\" complete; keep /nexus commands exact. \"Yes or No\" are the warning's answer buttons.",
+      "meaning": "Refusal shown in the Reference window note, in chat after \"Nexus:\" and by the caller. Keep \"Nothing was ...\" complete; keep /nexus commands exact. \"The open warning\" is whichever overwrite warning is waiting: the first-launch one answers Continue / Close, the Auto one Yes / No; name no answer button.",
       "consumer": "Reference window (the read-only Nexus manual) note line, chat, and the calling window's notice error",
       "familySurface": "guide: Reference window (the read-only Nexus manual) note line, chat, and the calling window's notice (error); family coverage PENDING review",
       "cohort": "fullui:guide"
