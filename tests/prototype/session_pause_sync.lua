@@ -39,7 +39,9 @@ end
 
 -- S2. Paused: no manual request, no inbound admission or reply, no direct
 -- packet, handshake or diagnostic whisper. The saved mode, the channel and
--- the transport fault flag are untouched. Resume itself sends nothing.
+-- the transport fault flag are untouched. Resume itself sends nothing, and
+-- after it the disabled diagnostic facade stays an inert false with no stale
+-- pause reason and zero bytes (G-01: before/during/after the pause).
 do
  local H=Boot()
  local mode=Nexus.SyncModePolicy.Mode()
@@ -62,6 +64,10 @@ do
  assert(W().Stats().suspended==false,'the transport fault flag is not used for the pause')
  SlashCmdList.NEXUS('resume')
  assert(H.Sends(n)==0,'Resume itself sends nothing')
+ assert(not Nexus.SessionPause.IsPaused(),'fixture: the session is resumed')
+ local after,afterWhy=Nexus.Sync.SendStatusTo('Peer')
+ assert(after==false and afterWhy==nil,'after Resume: the disabled diagnostic facade is an inert false with no stale pause reason: '..tostring(afterWhy))
+ assert(H.Sends(n)==0,'after Resume: the disabled diagnostic facade sends zero bytes, sends='..H.Sends(n))
 end
 
 -- S3. Work queued before the pause is not released by Resume. A manual Sync
