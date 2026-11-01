@@ -867,14 +867,23 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
  -- admitted. Opening the real menu and clicking must preserve both tables.
  do
   H=F.Boot(F.Database({version=2}));CountWriter()
-  local admitted=NexusDB.settings
-  check(NexusDB.authorityBundle.storeData.settings==admitted,'fixture: original settings are admitted')
+  -- A-STATE-01: the bundle's Store-data wrapper holds a fresh empty detached
+  -- settings table, never the live graph. The admitted identity is the live
+  -- top-level settings table the Store serves, which the language guard
+  -- captured at start-up; the wrapper is not that identity.
+  local admitted,detached=NexusDB.settings,NexusDB.authorityBundle.storeData.settings
+  check(type(detached)=='table' and getmetatable(detached)==nil and next(detached)==nil and not rawequal(detached,admitted),'fixture: the bundle wrapper holds an empty detached settings table, not the admitted live settings')
+  Nexus.Panel.Show()
+  check(rawequal(Nexus.Store.Settings(),admitted) and Nexus.Panel.LanguageStatus().refusal==nil and writes.n==0,'fixture: original settings are admitted: the Store serves them and no choice is refused')
+  -- The admitted table leaves the serialized root once replaced, so its
+  -- content is compared on its own.
+  local admittedText=F.Serialize(admitted)
   NexusDB.settings={uiLanguage='enUS',unknown={keep=true}}
   local replacement=NexusDB.settings;local frozen=F.Serialize(NexusDB)
   Nexus.Panel.Show();menu=LanguageMenu()
   local r=Nexus.Panel.ChooseLanguage('frFR')
   check(Row(menu,'frFR').disabled==true and r.state=='refused' and r.reason=='drift' and writes.n==0,'replaced settings: disabled and refused before the writer')
-  check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: both identities and the whole root stay unchanged')
+  check(NexusDB.settings==replacement and F.Serialize(admitted)==admittedText and NexusDB.authorityBundle.storeData.settings==detached and next(detached)==nil and F.Serialize(NexusDB)==frozen,'replaced settings: both live tables, the detached wrapper settings and the whole root stay unchanged')
   -- Review F3: the drifted session's real menu offers all eight choices,
   -- each disabled. It checks the admitted saved preference (absent, so
   -- Automatic), never the unadmitted replacement's enUS, and a direct
@@ -886,7 +895,7 @@ check(Row(menu,'enUS') and text:find('text without one stays in English',1,true)
   check(CheckedChoices(found)=='automatic','replaced settings: Automatic, the admitted absent preference, is the only checked choice')
   r=Nexus.Panel.ChooseLanguage('automatic')
   check(r.state=='refused' and r.reason=='drift' and writes.n==0 and Effects()==effects,'replaced settings: a direct Automatic submit is refused before the writer')
-  check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: after the Automatic refusal both identities and the whole root stay unchanged')
+  check(NexusDB.settings==replacement and F.Serialize(admitted)==admittedText and NexusDB.authorityBundle.storeData.settings==detached and next(detached)==nil and F.Serialize(NexusDB)==frozen,'replaced settings: after the Automatic refusal both live tables, the detached wrapper settings and the whole root stay unchanged')
   NexusDB.settings=admitted
   r=Nexus.Panel.ChooseLanguage('frFR')
   check(r.state=='saved' and writes.n==1 and admitted.uiLanguage=='frFR','restoring the admitted settings permits a durable choice')
