@@ -9,8 +9,9 @@
 -- retry and replacement request beside pool Save/Load. Its FAILURE AND
 -- REFUSAL block covers unverified fault injection and unknown, future,
 -- read-only, malformed, loading, owner and root refusal presentation in the
--- UI. Its RAISED SAVE AND UNAVAILABLE CATALOG block covers a Save callback
--- that raises and Load saved without a catalog. The popup host is the
+-- UI. Its RAISED SAVE AND UNAVAILABLE CATALOG block covers a Save or removal
+-- callback that raises before writing, its checked retry, and Load saved
+-- without a catalog. The popup host is the
 -- identity-aware synthetic host of
 -- flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
@@ -1020,16 +1021,20 @@ do
         Quiet(fx,'READ-ONLY refusals')
     end
 
-    -- RAISED SAVE AND UNAVAILABLE CATALOG (#151 review A1 and A3). Fresh
-    -- serialized boots, the real editor entry and the rendered controls. A1:
-    -- FlexiblePlanStore.New is wrapped only while the editor builds its chooser,
-    -- so that real facade's Save callback can raise once; every other read and
-    -- save forwards to it, and a separate real facade writes the newer pool.
+    -- RAISED SAVE AND UNAVAILABLE CATALOG (#151 review A1, A3 and V1). Fresh
+    -- serialized boots, the real editor entry and the rendered controls. A1 and
+    -- V1: FlexiblePlanStore.New is wrapped only while the editor builds its
+    -- chooser, so that real facade's Save or Clear callback can raise once,
+    -- before it writes anything; every other call forwards to it. Each Read is
+    -- counted and each Save or Clear records the receipt it was given, so a
+    -- retry is shown to pass the bound receipt without a read or a rebind. A
+    -- separate real facade writes the newer pool.
     -- A3: a chooser built through options.catalog on the real catalog callback
     -- the editor passes, returning no catalog only while it is down. Font models
     -- are offline aids; native popups, fonts and timing are NOT_RUN.
     do
         local MAYBE='Not confirmed: this save could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.'
+        local CLEAR_MAYBE='Not confirmed: this removal could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.'
         local STALE='The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.'
         local REFUSED='Not saved: the saved pool changed after this session last read it. Your pool is kept. Unsaved changes.'
         local NOTE='1 Echo in this pool no longer matches the catalog; its saved details and count are kept.'
@@ -1050,13 +1055,21 @@ do
             return #lines==1 and lines[1] or nil
         end
         local boot=F.Boot(F.Database(),Seed)
-        local realNew,fault=Nexus.FlexiblePlanStore.New,{}
+        local realNew,fault=Nexus.FlexiblePlanStore.New,{reads=0,saves={},clears={}}
         Nexus.FlexiblePlanStore.New=function(options)
             local real=realNew(options)
-            return {Read=real.Read,Clear=real.Clear,Save=function(...)
-                if fault.on then fault.on=false;error('synthetic raised Save',0) end
-                return real.Save(...)
-            end}
+            return {Read=function() fault.reads=fault.reads+1;fault.read=real.Read();return fault.read end,
+                Clear=function(receipt)
+                    fault.clears[#fault.clears+1]=receipt
+                    if fault.clear then fault.clear=false;error('synthetic raised Clear',0) end
+                    return real.Clear(receipt)
+                end,
+                Save=function(session,receipt)
+                    fault.saves[#fault.saves+1]=receipt
+                    if fault.on then fault.on=false;error('synthetic raised Save',0) end
+                    fault.result=real.Save(session,receipt)
+                    return fault.result
+                end}
         end
         local fx=Open(boot)
         Nexus.FlexiblePlanStore.New=realNew
@@ -1064,17 +1077,88 @@ do
         NexusFlexiblePlanSave:Click()
         check(made and Persisted()==T.SAVED and F.Serialize(Raw())==Record({3,1}) and Nexus.FlexiblePlanStore.New==realNew,
             'RAISED CONTROL the editor chooser saves through the wrapped real facade; the constructor is restored')
+        local bound=fault.result and fault.result.state=='saved' and fault.result.receipt or nil
+        check(#fault.saves==1 and type(bound)=='table' and bound.class=='CURRENT',
+            'RAISED CONTROL that Save went through the wrapped Save once and the facade issued a CURRENT receipt')
+
+        -- V1 Save: the callback raises before any write; the immediate explicit
+        -- retry, with no Load saved, Reset or read between, is checked and saves.
         Count(A,2)
-        local held,whole=Raw(),F.Serialize(NexusDB)
+        local held,whole,reads=Raw(),F.Serialize(NexusDB),fault.reads
+        fault.on=true
+        NexusFlexiblePlanSave:Click()
+        check(fault.on==false and #fault.saves==2 and rawequal(fault.saves[2],bound) and rawequal(Raw(),held)
+            and F.Serialize(Raw())==Record({3,1}) and F.Serialize(NexusDB)==whole and Rendered(A)==2 and Rendered(B)==1
+            and fault.reads==reads,
+            'RAISED a Save callback given the bound receipt raises before writing; the saved record, the whole root and the rendered counts stay')
+        check(Persisted()==MAYBE..' Unsaved changes.',
+            'RAISED the status says Not confirmed and Unsaved changes: never Saved, and no claim that the saved pool changed elsewhere or that Save pool stays refused')
+        NexusFlexiblePlanSearch:SetText('')
+        check(Persisted()==MAYBE..' Unsaved changes.' and fault.reads==reads and rawequal(Raw(),held) and F.Serialize(NexusDB)==whole,
+            'RAISED a redraw keeps that status and reads and writes no saved data')
+        NexusFlexiblePlanSave:Click()
+        local retried=fault.result
+        check(#fault.saves==3 and rawequal(fault.saves[3],bound) and retried.state=='saved' and not retried.unchanged
+            and fault.reads==reads and Persisted()==T.SAVED and F.Serialize(Raw())==Record({2,1}) and Holders()==1
+            and Rendered(A)==2 and Rendered(B)==1,
+            'RAISED CONTROL the immediate explicit retry passes the same bound receipt to the same real facade and saves exactly 310001x2 310002x1')
+
+        -- V1 removal: an accepted Clear raises before any write; a new explicit
+        -- Save pool asks again, and only that fresh question's Accept removes.
+        NexusFlexiblePlanReset:Click()
+        local rebound=fault.read
+        NexusFlexiblePlanSave:Click()
+        local c1=Popup.shown[CLEAR]
+        held,whole,reads=Raw(),F.Serialize(NexusDB),fault.reads
+        check(c1~=nil and type(rebound)=='table' and rebound.class=='CURRENT' and Persisted()==T.ASK_CLEAR..' '..T.UNSAVED_EMPTY
+            and Budget():find(EMPTY_BUDGET)~=nil and F.Serialize(held)==Record({2,1}),
+            'RAISED setup an explicit Reset reads and rebinds the empty session; Save pool then asks before removing the saved pool')
+        fault.clear=true
+        Click(c1,1)
+        check(fault.clear==false and #fault.clears==1 and rawequal(fault.clears[1],rebound) and rawequal(Raw(),held)
+            and F.Serialize(Raw())==Record({2,1}) and F.Serialize(NexusDB)==whole and Budget():find(EMPTY_BUDGET)~=nil
+            and Popup.shown[CLEAR]==nil and fault.reads==reads,
+            'RAISED an accepted removal whose Clear callback raises before writing keeps the saved record, the whole root and the empty session')
+        check(Persisted()==CLEAR_MAYBE..' Unsaved changes.',
+            'RAISED the status says the removal is Not confirmed: never removed or Saved, and no claim that the saved pool changed elsewhere')
+        local clearDialog=StaticPopupDialogs[CLEAR]
+        clearDialog.OnAccept(c1.frame,c1.data);clearDialog.OnCancel(c1.frame,c1.data)
+        check(#fault.clears==1 and rawequal(Raw(),held) and Persisted()==CLEAR_MAYBE..' Unsaved changes.' and Popup.shown[CLEAR]==nil,
+            'RAISED the replayed accepted removal request calls no Clear and changes neither the saved pool nor the status')
+        NexusFlexiblePlanSave:Click()
+        local c2,hides=Popup.shown[CLEAR],Hidden(CLEAR)
+        check(c2~=nil and c2~=c1 and c2.data~=c1.data and Persisted()==T.ASK_CLEAR..' '..CLEAR_MAYBE..' Unsaved changes.'
+            and fault.reads==reads and #fault.clears==1 and rawequal(Raw(),held),
+            'RAISED a new explicit Save pool asks a fresh removal question without a read; still no claim of a change elsewhere')
+        clearDialog.OnAccept(c1.frame,c1.data);clearDialog.OnCancel(c1.frame,c1.data)
+        check(Popup.shown[CLEAR]==c2 and Hidden(CLEAR)==hides and #fault.clears==1 and rawequal(Raw(),held),
+            'RAISED the old request replayed beside the fresh question removes nothing and neither answers nor retires it')
+        Click(c2,1)
+        check(#fault.clears==2 and rawequal(fault.clears[2],rebound) and fault.reads==reads and Raw()==nil and Holders()==0
+            and Persisted()==T.CLEARED and Popup.shown[CLEAR]==nil,
+            'RAISED CONTROL the fresh Accept passes the same bound receipt to the same real facade and removes the saved pool')
+
+        -- After a raised Save the bound receipt still refuses a newer saved pool.
+        local remade=Add(A) and Count(A,3) and Add(B) and Count(B,1)
+        NexusFlexiblePlanSave:Click()
+        check(remade and Persisted()==T.SAVED and F.Serialize(Raw())==Record({3,1}),
+            'RAISED setup Save pool writes 310001x3 310002x1 again over the removed key')
+        Count(A,2)
+        held,whole=Raw(),F.Serialize(NexusDB)
         fault.on=true
         NexusFlexiblePlanSave:Click()
         check(fault.on==false and rawequal(Raw(),held) and F.Serialize(NexusDB)==whole and Rendered(A)==2 and Rendered(B)==1
-            and Persisted()==MAYBE..' Unsaved changes. '..STALE,
-            'RAISED a Save callback that raises writes nothing; the status says Not confirmed and stale, never Saved')
+            and Persisted()==MAYBE..' Unsaved changes.',
+            'RAISED a Save callback that raises writes nothing; the status says Not confirmed and unsaved, never Saved')
         local probe=realNew({store=Nexus.Store})
         local newer=probe.Save({ids={B},rows={[B]={spellId=B,quality=1,maxStack=3,groupId=9}},chosen={[B]=3}},probe.Read())
         local newerRecord,newerText=Raw(),Literal({B},{1},{3},{9},{3})
         check(newer.state=='saved' and F.Serialize(newerRecord)==newerText,'RAISED setup the real data owner then saves a newer exact pool 310002x3')
+        reads=fault.reads
+        NexusFlexiblePlanEntry:Click()
+        check(fault.reads==reads+1 and Persisted()==MAYBE..' Unsaved changes. '..STALE and Rendered(A)==2 and Rendered(B)==1
+            and rawequal(Raw(),newerRecord),
+            'RAISED CONTROL once an explicit Show reads the newer saved pool, the status adds that it changed elsewhere; nothing is written')
         local texts={}
         for i=1,2 do NexusFlexiblePlanSave:Click();texts[i]=Persisted() end
         check(texts[1]==REFUSED and texts[2]==REFUSED and rawequal(Raw(),newerRecord) and F.Serialize(Raw())==newerText
@@ -1089,7 +1173,7 @@ do
         Add(A);Count(A,1);NexusFlexiblePlanSave:Click()
         local saved=Literal({B,A},{1,2},{3,5},{9,7},{3,1})
         check(Persisted()==T.SAVED and F.Serialize(Raw())==saved,'RAISED CONTROL after the rebind Save pool saves 310002x3 310001x1')
-        Quiet(fx,'RAISED Save, the newer pool and the rebind')
+        Quiet(fx,'RAISED Save and removal, their retries, the newer pool and the rebind')
 
         local function Seed2(h) h.AddEcho(A,'Delta',3,4,8);h.AddEcho(B,'Epsilon',1,3,9) end
         fx=Open(F.Reload(Seed2))

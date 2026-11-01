@@ -417,6 +417,10 @@ function Factory.New(options)
         persistence = nil
     end
     local observed, latest, observedOnce, cleanBytes, staleFlag, restored
+    -- True while the stale mark rests only on a Save or removal whose facade
+    -- call raised or returned no result: nothing then shows that the saved
+    -- data changed. Every stale mark sets it; it is read only while marked.
+    local staleUnknown = false
     local cacheRevision, cacheBytes, cacheCode
     local phase, persistCode, phaseOp, phaseRevision, operation = "idle", nil, nil, nil, nil
     local loadRequest, clearRequest
@@ -492,8 +496,9 @@ function Factory.New(options)
         if not persistence then return PERSIST.NONE end
         local seen = latest or observed
         local mode, class = seen and seen.mode, seen and seen.class
+        local differs = Differs(latest, observed)
         local stale = observed ~= nil and observed.class ~= nil
-            and (staleFlag == true or Differs(latest, observed))
+            and (staleFlag == true or differs)
         local parts = {}
         if loadRequest then parts[1] = PERSIST.ASK_LOAD elseif clearRequest then parts[1] = PERSIST.ASK_CLEAR end
         local outcome, covers = Outcome(seen, stale)
@@ -531,7 +536,12 @@ function Factory.New(options)
                 parts[#parts + 1] = PERSIST.UNAVAILABLE
             end
         end
-        if stale and covers ~= "stale" and (mode == "durable" or mode == "readOnly") then
+        -- STALE says the saved pool changed and Save pool stays refused, so it
+        -- needs a shown change: a read that differs or a changed-data refusal.
+        -- After a call that raised or returned no result the unverified
+        -- sentence says the saved pool may have changed; a retry is checked.
+        if stale and covers ~= "stale" and (mode == "durable" or mode == "readOnly")
+            and (differs or not staleUnknown) then
             parts[#parts + 1] = PERSIST.STALE
         end
         if changedMembers > 0 and #ids > 0 then parts[#parts + 1] = CatalogNote(changedMembers) end
@@ -601,7 +611,9 @@ function Factory.New(options)
         if type(result) ~= "table" then
             -- Nothing is known about the write or restoration: that answer is dropped
             -- and the session is stale. The bound receipt stays (never a newer read),
-            -- so a later Save is still checked against it.
+            -- so a later Save is still checked against it. Nothing shows that the
+            -- saved data changed, unless an earlier refusal already did.
+            if staleFlag ~= true then staleUnknown = true end
             restored, staleFlag = nil, true
             return Persist("unverified", "SAVE_UNVERIFIED")
         end
@@ -620,7 +632,7 @@ function Factory.New(options)
         end
         local reason = result.reason or "SAVE_REFUSED"
         if reason == "SAVED_CHANGED" or reason == "OWNER_CHANGED" or reason == "ROOT_CHANGED" then
-            staleFlag = true
+            staleFlag, staleUnknown = true, false
         end
         return Persist("refused", reason)
     end
