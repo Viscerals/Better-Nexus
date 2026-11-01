@@ -1,11 +1,12 @@
--- #151 Stage A2: the private Store pool seam and FlexiblePlanStore.New
+-- #151: the private Store pool seam and FlexiblePlanStore.New
 -- Read/Save/Clear through actual F.Boot/F.Reload. Synthetic data only;
--- offline, not native SavedVariables or a client reload. The remaining Stage A
--- retention acceptance is tests/prototype/flexible_plan_persistence_retention.lua:
--- measured startup work of a maximal pool against the actual PumpCaps and
--- SourceBounds (edge division alone omits row, cursor, sort and comparison
--- work, so no fixed pump number is promised here), a maximal pool plus a
--- 28,672-byte sibling reaching READY/durable, and the released-peer round trip.
+-- offline, not native SavedVariables or a client reload. Related fixtures:
+-- tests/prototype/flexible_plan_persistence_retention.lua covers measured
+-- startup work of a maximal pool against the actual PumpCaps and SourceBounds
+-- (edge division alone omits row, cursor, sort and comparison work, so this
+-- file promises no fixed pump number), a maximal pool plus a 28,672-byte
+-- sibling reaching READY/durable, and the released-peer round trip;
+-- tests/prototype/flexible_plan_persistence_chooser.lua exercises the chooser UI.
 local F = dofile('tests/prototype/format5_support.lua')
 local checks = 0
 local function check(v, m) assert(v, m); checks = checks + 1 end
@@ -416,7 +417,7 @@ do -- 8. read-only format 6: Load allowed, Save and Clear refused, everything ke
     check(F.Serialize(NexusDB) == text and rawequal(NexusDB.chars[F.OWNER][KEY], pool), 'read-only root unchanged')
 end
 
-do -- 9. Review A2 guard proofs in one module generation. Each fault and binding is restored.
+do -- 9. Review A2 guard proofs in one module generation. Its end restores only the Store binding to the booted root.
     -- Nested read 2 (the one inside the write) alone returns other valid bytes; then the same facade
     -- reads a literal clone of the root, bound to a real coordinator through Store.Init and pumped to
     -- READY. Bootstrap writes to the clone are setup, outside every refusal comparison.
@@ -480,6 +481,6 @@ do -- 9. Review A2 guard proofs in one module generation. Each fault and binding
         'A2 the booted root and its real coordinator binding are restored')
 end
 
-print('REMAINING Stage A retention is measured in flexible_plan_persistence_retention (no fixed'
-    ..' pump number is claimed here); chooser UI, full CI/package and final reviews are later')
+print('COVERAGE maximal-pool retention and startup work are measured in flexible_plan_persistence_retention (no fixed'
+    ..' pump number is claimed here); the chooser UI is exercised by flexible_plan_persistence_chooser')
 print('PASS flexible_plan_persistence_store checks='..checks)
