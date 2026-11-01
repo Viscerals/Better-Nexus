@@ -5031,6 +5031,60 @@
         "decision": "legitimately_identical",
         "evidenceReference": "https://github.com/Viscerals/Better-Nexus/issues/148#issuecomment-6532515152",
         "status": "declared"
+      },
+      {
+        "productId": "frFR",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
+      },
+      {
+        "productId": "deDE",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
+      },
+      {
+        "productId": "esES",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
+      },
+      {
+        "productId": "plPL",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
+      },
+      {
+        "productId": "ptBR",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
+      },
+      {
+        "productId": "ruRU",
+        "key": "orb.assignment.identity_found_reason",
+        "translatedTextSha256": "04c74dc81035b63d65156f6027cfb8a4caecb8065b6690dc0587bf7af5eab4bf",
+        "reviewer": "Codex (independent automated structural review)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
+        "status": "declared"
       }
     ],
     "declarationFields": {
