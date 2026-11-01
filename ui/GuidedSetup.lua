@@ -1221,8 +1221,20 @@ function VIEW.assign(g, s, ctx, c, y)
     elseif state == 'unknown' then
         Result(COLOR.unavailable, {0.13, 0.1, 0.16}, t.unavailable, t.unavailableBody, {checkFirst})
     else
-        local body = Fmt((t.staleBody or {})[state] or (t.staleBody or {}).stale, dest,
-            Name(state == 'other' and st.name or st.readName))
+        -- Each result sentence gets only its own fields (GUIDE_FORMATS), so
+        -- its template stays exact: 'other' names the other Wishlist the
+        -- receipt reports (never the Saved Build), 'mismatch' the Saved Build
+        -- and the Wishlist read back, every other one the Saved Build only.
+        -- A surplus value would be refused by FormatCopy and show English.
+        local bodies = t.staleBody or {}
+        local body
+        if state == 'other' and bodies.other then
+            body = Fmt(bodies.other, Name(st.name))
+        elseif state == 'mismatch' and bodies.mismatch then
+            body = Fmt(bodies.mismatch, dest, Name(st.readName))
+        else
+            body = Fmt(bodies[state] or bodies.stale, dest)
+        end
         local recheck = state == 'stale' or state == 'changed'
         Result(COLOR.stale, {0.06, 0.13, 0.14}, t.stale, body, recheck and {checkFirst} or {check, again})
     end
