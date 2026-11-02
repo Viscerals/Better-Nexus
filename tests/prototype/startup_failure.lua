@@ -278,7 +278,8 @@ print('PASS B-12 controls: the ordinary coordinator and the absent public factor
 
 local c,errors=FactoryBoot('throwing')
 local storeInitAtFailure=c.storeInit
-assert(c.factory==1,'B-12 fixture: the original throwing factory was reached during start-up: '..c.factory)
+assert(c.factory>=1,'B-12 fixture: the original throwing factory was reached during start-up: '..c.factory)
+assert(c.factory==1,'B-12: the throwing factory is attempted exactly once during start-up: '..c.factory)
 errors=errors+Drive(400)
 st=Nexus.StartupStatus()
 assert(errors==0,'B-12: no error escapes start-up or a later turn: '..errors)
@@ -292,6 +293,7 @@ assert(type(st.failure)=='table' and st.failure.owner=='AuthorityBootstrap.New' 
  'B-12: the bounded report names the factory and its error: '..tostring(st.failure and st.failure.owner)..' '..tostring(st.failure and st.failure.error))
 list=Recorded('synthetic B12 authority factory failure')
 assert(#list==1 and list[1].source:find('AuthorityBootstrap.New',1,true),'B-12: one error recorded under the factory: '..#list)
+assert(#Nexus.Errors.History()==1,'B-12: exactly one total error row is retained: '..#Nexus.Errors.History())
 assert(c.sync==0 and c.panel==0 and c.adapter==0 and c.dps==0,
  'B-12: no dependent owner is initialized: '..c.sync..'/'..c.panel..'/'..c.adapter..'/'..c.dps)
 assert(Sentinel() and #H.actions==0,'B-12: the saved unknown sentinel is kept and no synthetic gameplay action ran')
@@ -312,6 +314,7 @@ assert(errors==0 and c.factory==1 and c.storeInit==storeInitAtFailure,
  'B-12: a later world entry or turn never retries the factory or Store.Init: '..errors..' '..c.factory..'/'..c.storeInit)
 assert(not st.coreReady and st.state=='failed' and st.failure.owner=='AuthorityBootstrap.New','B-12: the same terminal failure stands')
 assert(#Recorded('synthetic B12 authority factory failure')==1,'B-12: the same error is not recorded again')
+assert(#Nexus.Errors.History()==1,'B-12: later turns and world entry retain exactly one total error row: '..#Nexus.Errors.History())
 assert(c.sync==0 and c.panel==0 and c.adapter==0 and c.dps==0 and #H.actions==0 and Sentinel(),
  'B-12: dependents stay closed, no synthetic gameplay action ran and the sentinel is kept')
 print('PASS B-12 a throwing authority factory latches one terminal failed start-up without retries')
