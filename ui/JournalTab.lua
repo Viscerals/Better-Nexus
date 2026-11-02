@@ -1316,6 +1316,114 @@ local function ShortName(name, maxLen)
     return cut .. "..."
 end
 
+-- The strip (360 x 56, backdrop inset 3) and its label's side column: 145 px
+-- wide at (10, -9), left of the selector (x 160..329) and of New Wishlist
+-- (x 203..353), down to the strip's 5 px bottom padding: 56 - 9 - 5 = 42 px.
+local STRIP_H = 56
+local STRIP_LABEL_X, STRIP_LABEL_Y = 10, -9
+local STRIP_LABEL_W, STRIP_LABEL_MAX_H = 145, 42
+-- Scales tried, largest first. 0.75 is the hard floor: the lowest runtime
+-- font scale LayoutMetrics itself accepts. Only the label's holder is ever
+-- scaled (the strip stays at scale 1) and its font object is never changed,
+-- so the holder scale is the label's effective presentation scale.
+local STRIP_LABEL_SCALES = { 1, 0.9, 0.8, 0.75 }
+-- Stacked layout, for a state text the side column cannot show at any scale
+-- down to the floor: the label takes a band across the strip's inner width
+-- (x 10..350) above the unchanged control block, which moves down by the
+-- band. The band is at most 52 px tall plus a 6 px gap, so the strip is at
+-- most 56 + 58 = 114 px tall. Its width, TOP anchor and controls' sizes and
+-- relative places do not change.
+local STRIP_STACK_W, STRIP_STACK_MAX_H, STRIP_STACK_GAP = 340, 52, 6
+
+-- The label lives in a plain child frame of the strip (no name, no mouse,
+-- no scripts) at the label's own place. A scaled frame's offsets and size
+-- are in its own units, so they are divided by the scale: on the strip the
+-- holder's top left is always (10, -9) and its box width x height strip px.
+-- Scale 1 with the side column is the label's original place and size.
+local function PlaceStripLabel(host, scale, width, height)
+    local holder = host.labelHolder
+    holder:SetScale(scale)
+    holder:ClearAllPoints()
+    holder:SetPoint("TOPLEFT", STRIP_LABEL_X / scale, STRIP_LABEL_Y / scale)
+    holder:SetSize(width / scale, height / scale)
+end
+
+-- The strip's own layout for a label band of `band` strip px above the
+-- controls (0: the original layout). Only Nexus-owned frames move: the strip
+-- grows downward from its unchanged TOP anchor, the selector and Design keep
+-- their TOPRIGHT offsets shifted down by the band, New Wishlist keeps its
+-- BOTTOMRIGHT offset. Nothing of the game's own UI is touched.
+local function StripLayout(host, band)
+    band = band or 0
+    if host.stackBand == band then return end
+    host.stackBand = band
+    host:SetHeight(STRIP_H + band)
+    host.selector:ClearAllPoints()
+    host.selector:SetPoint("TOPRIGHT", -31, -5 - band)
+    host.design:ClearAllPoints()
+    host.design:SetPoint("TOPRIGHT", -7, -6 - band)
+end
+
+-- The label in a box of width x maxHeight strip px: for each scale in turn,
+-- WrapHeight at (width / s) x (maxHeight / s) label units. Returns the first
+-- scale whose wrapped height is not capped and that height (label units);
+-- false and the capped height when even the floor is capped (the label is
+-- left at the floor); nil when the helper failed.
+local function FitStripLabel(host, width, maxHeight, wrap)
+    local height
+    for i = 1, #STRIP_LABEL_SCALES do
+        local scale = STRIP_LABEL_SCALES[i]
+        PlaceStripLabel(host, scale, width, maxHeight)
+        local ok, h, capped = pcall(wrap, host.label, width / scale, 12, maxHeight / scale)
+        if not ok then return nil end
+        height = h
+        if not capped then
+            host.labelHolder:SetHeight(h)
+            return scale, h
+        end
+    end
+    host.labelHolder:SetHeight(height)
+    return false, height
+end
+
+-- A code-owned state label (the no-selection text) is shown whole and
+-- visible: its qualifier is its meaning, so it is never cut to a byte count
+-- or capped out of sight. It wraps and takes the height its text needs,
+-- measured by the client (LayoutMetrics.WrapHeight: height 0 at a fixed
+-- width, then GetStringHeight; its conservative model stands in without a
+-- measurement), at least one 12 px line. First the side column is tried,
+-- largest scale first down to the floor. When none fits (WrapHeight reports
+-- it capped), the stacked band is tried the same way and the strip takes its
+-- stacked layout. Returns true when the complete text fits; host.labelFits
+-- says the same. Only past the floor of the band is the text capped at the
+-- band's bound (a text no required case reaches); without the helper the side
+-- column is used at full size. Display only: nothing is written or sent.
+local function WrapStripStateLabel(host)
+    local label = host.label
+    label:SetJustifyV("TOP")
+    local metrics = Nexus.LayoutMetrics
+    local wrap = metrics and type(metrics.WrapHeight) == "function" and metrics.WrapHeight
+    if wrap then
+        StripLayout(host, 0)
+        local scale = FitStripLabel(host, STRIP_LABEL_W, STRIP_LABEL_MAX_H, wrap)
+        if scale then host.labelFits = true return true end
+        if scale == false then
+            local stackScale, height = FitStripLabel(host, STRIP_STACK_W, STRIP_STACK_MAX_H, wrap)
+            if stackScale ~= nil then
+                local shown = stackScale or STRIP_LABEL_SCALES[#STRIP_LABEL_SCALES]
+                StripLayout(host, height * shown + STRIP_STACK_GAP)
+                host.labelFits = stackScale and true or false
+                return host.labelFits
+            end
+        end
+    end
+    StripLayout(host, 0)
+    PlaceStripLabel(host, 1, STRIP_LABEL_W, STRIP_LABEL_MAX_H)
+    label:SetWidth(STRIP_LABEL_W)
+    label:SetHeight(STRIP_LABEL_MAX_H)
+    host.labelFits = false
+    return false
+end
 
 
 -- The selector sits in the Journal header near the screen top, so its tall
@@ -1389,9 +1497,13 @@ local function EnsureAssociationPanel(journal)
             associationPanel:SetBackdropBorderColor(0.28, 0.58, 0.76, 0.95)
         end
 
-        associationPanel.label = associationPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        associationPanel.label:SetPoint("TOPLEFT", 10, -9)
-        associationPanel.label:SetWidth(145)
+        -- The label's holder (PlaceStripLabel): at scale 1 the label is at
+        -- its original (10, -9) with its original 145 px width.
+        associationPanel.labelHolder = CreateFrame("Frame", nil, associationPanel)
+        PlaceStripLabel(associationPanel, 1, STRIP_LABEL_W, STRIP_LABEL_MAX_H)
+        associationPanel.label = associationPanel.labelHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        associationPanel.label:SetPoint("TOPLEFT", 0, 0)
+        associationPanel.label:SetWidth(STRIP_LABEL_W)
         associationPanel.label:SetJustifyH("LEFT")
         associationPanel.label:SetTextColor(0.72, 0.72, 0.72)
 
@@ -1814,7 +1926,10 @@ local function RefreshAssociationRows()
     -- `loadoutName` keeps its raw value (the editor receives it unchanged);
     -- `loadoutLabel` is what this strip and the picker show for it.
     local loadoutName, loadoutLabel
-    if active < 1 or active > maxSlots then
+    -- No Saved Build is selected: a code-owned state (from `active`, never
+    -- from a name).
+    local noSelection = active < 1 or active > maxSlots
+    if noSelection then
         loadoutName, loadoutLabel = "No Saved Build selected", T("journal.label.no_saved_build")
     elseif not populated then
         loadoutName, loadoutLabel = "Empty Saved Build slot", T("journal.label.empty_saved_build")
@@ -1826,7 +1941,26 @@ local function RefreshAssociationRows()
         loadoutName = "Saved Build " .. tostring(active)
         loadoutLabel = TF("journal.label.saved_build_number", {slot = tostring(active)}, loadoutName)
     end
-    host.label:SetText("|cffffffff" .. ShortName(loadoutLabel, 21) .. ":|r")
+    if noSelection then
+        -- The whole state text, wrapped in the label's column
+        -- (WrapStripStateLabel). A player's name that reads the same is still
+        -- a name and keeps the abbreviation below.
+        host.label:SetText("|cffffffff" .. loadoutLabel .. ":|r")
+        WrapStripStateLabel(host)
+        host.labelWrapped = true
+    else
+        -- Names and the other states: one line cut at 21 bytes as before;
+        -- after the wrapped state the label gets its original scale, width
+        -- and automatic height back, and the strip its original layout.
+        if host.labelWrapped then
+            host.labelWrapped, host.labelFits = nil, nil
+            PlaceStripLabel(host, 1, STRIP_LABEL_W, STRIP_LABEL_MAX_H)
+            StripLayout(host, 0)
+            host.label:SetWidth(STRIP_LABEL_W)
+            host.label:SetHeight(0)
+        end
+        host.label:SetText("|cffffffff" .. ShortName(loadoutLabel, 21) .. ":|r")
+    end
 
     local linkedName = linked and tostring(linked.name or "") or ""
     if linkedName ~= "" then

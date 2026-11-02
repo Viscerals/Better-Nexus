@@ -16,6 +16,11 @@
 --  ENGLISH no pack: exact English bytes for representative keys at their real
 --          receivers, unknown "?" vs zero "0", long and non-ASCII names
 --          inserted verbatim.
+-- STRIP STATE (#143) adds a French and a long boot and an English case: the
+--          no-selection strip label complete and visible at its real receiver
+--          under five stated synthetic font models, including tall measured
+--          and fallback ones up to the supported 24 px maximum (layout,
+--          scale >= 0.75, geometry, controls, hover, passive).
 -- Synthetic offline evidence only: no native font, glyph, layout or client
 -- behaviour is claimed (native NOT_RUN).
 local S=dofile('tests/prototype/l10n_pseudo_support.lua')
@@ -593,6 +598,279 @@ do
 end
 
 ------------------------------------------------------------------------
+-- STRIP STATE (#143): with no Saved Build selected, the strip label at its
+-- real receiver (NexusLoadoutAssociationPanel.label) shows the complete
+-- code-owned state text, selection qualifier and ":" separator included,
+-- never the 21-byte cut ("No Saved Build sel...:", "Aucun Saved Build ...:").
+-- Cases: exact English, the reviewed French value (31 UTF-8 bytes, installed
+-- only in this run's in-memory pack entries; no Packs file is read or
+-- written) and the long pseudo entry with its late selection suffix.
+-- SYNTHETIC font models, installed on this one label (and, for the fallback,
+-- on the NexusFontNormal global LayoutMetrics' RuntimeFontScale reads) and
+-- restored after each case, also on error. The stock harness answers
+-- #text*6 and a constant 14, which prove no layout; its no-op fallback for
+-- unknown methods proves no API.
+--   M12  measured: 6 px per UTF-8 character, 12 px lines, greedy word wrap
+--        at the label's width; GetStringWidth/GetStringHeight answer it.
+--   M18  measured, tall: the same with 18 px lines (a larger client font).
+--   F12  fallback: GetStringHeight answers 0 and NexusFontNormal is 12 px,
+--        so RuntimeFontScale is 12/12 = 1 and the conservative model is
+--        max(7, 7*1) = 7 px per character, max(17, ceil(12)) = 17 px lines.
+--   F18  fallback, tall: NexusFontNormal 18 px, scale 1.5: 10.5 px per
+--        character, 18 px lines.
+--   F24  fallback at the supported maximum: NexusFontNormal 24 px, so
+--        RuntimeFontScale is 24/12 = 2 (its clamp's top): 14 px per
+--        character, 24 px lines (the reproduced boundary case).
+-- Policy under test: the label wraps in the 145 x 42 side column, at the
+-- largest holder scale (1, 0.9, 0.8, 0.75) whose column (145/s x 42/s label
+-- units) holds it. When none does, it takes the stacked layout: a band
+-- across the strip (340 px from x 10, at most 52 px tall) above the
+-- unchanged control block, which moves down by the band plus a 6 px gap; the
+-- strip grows downward from its unchanged TOP anchor (at most 114 px). The
+-- holder scale (never below 0.75; the strip stays at scale 1) is the label's
+-- effective scale. Each case writes out the layout, scale and wrapped height
+-- expected under each model and requires every row of the complete text
+-- inside the label and the label inside its box (no cap-only case).
+-- Strip box from the strip's own anchors (x right, y down from its top left):
+-- 360 x 56, backdrop inset 3; side column x 10..155 from y 9 down to the
+-- 5 px bottom padding (42 px); selector 160..329 x 5..26; Design 333..353 x
+-- 6..26; New Wishlist 203..353 x 32..51. Stacked (band B): label x 10..350
+-- from y 9; selector y 5+B..26+B; Design 6+B..26+B; strip 56+B tall and New
+-- Wishlist 32+B..51+B. No native font, glyph, layout, frame-scale, free
+-- header space or input claim.
+------------------------------------------------------------------------
+local STRIP_W,STRIP_H,STRIP_INSET=360,56,3
+local LABEL_TOP,LABEL_COLUMN_H=9,56-9-5
+local NO_SEL_EN='No Saved Build selected'
+local NO_SEL_FR='Aucun Saved Build s\195\169lectionn\195\169'
+-- S.PseudoEntries('long') for the same key, written out.
+local NO_SEL_LONG=S.OPEN..'Nono Savedsaved Buildbuild selectedselected'..S.CLOSE
+local function Chars(t) return #(t:gsub('[\128-\191]','')) end
+local MODELS={
+ {id='M12',measured=true,char=6,line=12},
+ {id='M18',measured=true,char=6,line=18},
+ {id='F12',measured=false,size=12,char=7,line=17},
+ {id='F18',measured=false,size=18,char=10.5,line=18},
+ {id='F24',measured=false,size=24,char=14,line=24},
+}
+local STACK_W,STACK_MAX_H,STACK_GAP=340,52,6
+-- A model's greedy rows of a shown text at a width (a space is one
+-- character wide; colour codes are not shown; a UTF-8 character counts once).
+local function Lines(text,width,char)
+ local lines,cur,used={},nil,0
+ for word in Plain(text):gmatch('%S+') do
+  local w=Chars(word)*char
+  if cur and used+char+w>width then lines[#lines+1]=cur;cur,used=word,w
+  elseif cur then cur,used=cur..' '..word,used+char+w
+  else cur,used=word,w end
+ end
+ if cur then lines[#lines+1]=cur end
+ return lines
+end
+local function Widest(lines,char) local m=0 for _,l in ipairs(lines) do m=math.max(m,Chars(l)*char) end return m end
+-- Runs fn with the model on `label`; restores the raw originals (nil: the
+-- harness methods; the previous NexusFontNormal) also when fn fails.
+-- Returns pcall's result.
+local function WithModel(label,model,fn)
+ local savedW,savedH=rawget(label,'GetStringWidth'),rawget(label,'GetStringHeight')
+ local savedFont=rawget(_G,'NexusFontNormal')
+ rawset(label,'GetStringWidth',function(self) return Chars(Plain(self.text or ''))*model.char end)
+ rawset(label,'GetStringHeight',function(self)
+  if not model.measured then return 0 end
+  local w=tonumber(self.width) or 0
+  if w<=0 then return model.line end
+  return #Lines(self.text or '',w,model.char)*model.line
+ end)
+ if not model.measured then
+  local font=H.Region('Font')
+  rawset(font,'GetFont',function() return 'Fonts\\FRIZQT__.TTF',model.size,'' end)
+  rawset(_G,'NexusFontNormal',font)
+ end
+ local ok,err=pcall(fn)
+ rawset(label,'GetStringWidth',savedW);rawset(label,'GetStringHeight',savedH)
+ rawset(_G,'NexusFontNormal',savedFont)
+ return ok,err
+end
+-- The strip's current height (its width stays 360).
+local function StripHeight()
+ local strip=NexusLoadoutAssociationPanel
+ return strip and tonumber(strip.height) or STRIP_H
+end
+-- A strip frame's rectangle from the one anchor the strip code gives it, in
+-- the strip's current size.
+local function StripRect(f)
+ local p=f and f.points and f.points[1]
+ if not p or #f.points~=1 or type(p[2])~='number' or type(p[3])~='number' then return nil end
+ local w,h,x,y=tonumber(f.width) or 0,tonumber(f.height) or 0,p[2],p[3]
+ local sh=StripHeight()
+ if p[1]=='TOPLEFT' then return {l=x,t=-y,r=x+w,b=-y+h}
+ elseif p[1]=='TOPRIGHT' then return {l=STRIP_W+x-w,t=-y,r=STRIP_W+x,b=-y+h}
+ elseif p[1]=='BOTTOMRIGHT' then return {l=STRIP_W+x-w,t=sh-y-h,r=STRIP_W+x,b=sh-y} end
+end
+local function RectText(r) return r and ('%s,%s..%s,%s'):format(r.l,r.t,r.r,r.b) or 'nil' end
+local function Overlap(a,b) return a.l<b.r and b.l<a.r and a.t<b.b and b.t<a.b end
+local function InStrip(r)
+ return r~=nil and r.l>=STRIP_INSET and r.t>=STRIP_INSET and r.r<=STRIP_W-STRIP_INSET and r.b<=StripHeight()-STRIP_INSET+1e-6
+end
+local function SetSlot(slot) H.perks.serverActiveSlot=slot;H.Notify();Nexus.GameAdapter.Poll() end
+local function Near(a,b) return type(a)=='number' and type(b)=='number' and math.abs(a-b)<1e-6 end
+-- A frame's single TOPLEFT anchor relative to its parent, or nil.
+local function TopLeft(f)
+ local p=f and f.points and f.points[1]
+ if not p or #f.points~=1 or p[1]~='TOPLEFT' or type(p[2])~='number' or type(p[3])~='number' then return nil end
+ return p[2],p[3]
+end
+-- The label's and its holder's rectangles on the strip, and the holder's
+-- scale: a scaled frame's offsets and size are in its own units. A label
+-- anchored on the strip itself (no holder) is scale 1.
+local function LabelRects(strip,label)
+ local holder=label:GetParent()
+ if holder==strip then return StripRect(label),nil,1 end
+ if not holder or holder:GetParent()~=strip then return nil,nil,nil end
+ local s=tonumber(holder:GetScale())
+ local hx,hy=TopLeft(holder)
+ local lx,ly=TopLeft(label)
+ if not (s and hx and lx==0 and ly==0) then return nil,nil,s end
+ local x,y=hx*s,-hy*s
+ return {l=x,t=y,r=x+label.width*s,b=y+label.height*s},{l=x,t=y,r=x+holder.width*s,b=y+holder.height*s},s
+end
+local function InColumn(r)
+ return InStrip(r) and Near(r.l,10) and Near(r.t,LABEL_TOP) and r.r<=155+1e-6 and r.b<=LABEL_TOP+LABEL_COLUMN_H+1e-6
+end
+-- The stacked band: x 10..350 from y 9, at most 52 px tall.
+local function InBand(r)
+ return InStrip(r) and Near(r.l,10) and Near(r.t,LABEL_TOP) and r.r<=10+STACK_W+1e-6 and r.b<=LABEL_TOP+STACK_MAX_H+1e-6
+end
+-- One no-selection receiver under every model. expected[model id] =
+-- {scale, label height in label units, 'stack' for the stacked layout (else
+-- the side column)}, written out; hoverWant: the exact picker target hover
+-- line (else it must contain want).
+local function StripCase(tag,want,qualifier,expected,hoverWant)
+ local strip=NexusLoadoutAssociationPanel
+ local label=strip and strip.label
+ check(label~=nil and strip.width==STRIP_W and strip.height==STRIP_H,'STRIP SETUP '..tag..': the real strip (360 x 56) and its label')
+ if not label then return end
+ check(WellFormedUtf8(want) and want:find(qualifier,1,true)~=nil,'STRIP SETUP '..tag..': valid UTF-8 input with its qualifier',want)
+ for _,model in ipairs(MODELS) do
+  local where='STRIP '..tag..' '..model.id
+  local wantScale,wantH=expected[model.id][1],expected[model.id][2]
+  local stacked=expected[model.id][3]=='stack'
+  local boxW=stacked and STACK_W or 145
+  local band=stacked and (wantH*wantScale+STACK_GAP) or 0
+  SetSlot(0) -- fixture setup; the passive window starts after it
+  local before=Snapshot()
+  local savedW,savedH,savedFont=rawget(label,'GetStringWidth'),rawget(label,'GetStringHeight'),rawget(_G,'NexusFontNormal')
+  local ok,err=WithModel(label,model,function()
+   if not model.measured then
+    local _,size=NexusFontNormal:GetFont()
+    check(size==model.size and label:GetStringHeight()==0,where..' SETUP: explicit '..model.size..' px Nexus font and no client measurement',size)
+   end
+   J.RefreshAssociations()
+   local text=label:GetText()
+   check(text=='|cffffffff'..want..':|r',where..': the complete state text and separator at the real label',text)
+   check(WellFormedUtf8(Plain(text)) and not Plain(text):find('...',1,true),where..': well-formed UTF-8, nothing cut',text)
+   local rect,holderRect,scale=LabelRects(strip,label)
+   local inBox=stacked and InBand or InColumn
+   check(inBox(rect) and (holderRect==nil or inBox(holderRect)),
+    where..': the label (and its holder) stay in the '..(stacked and 'stacked band' or 'side column')..' of the strip',
+    RectText(rect)..' / '..RectText(holderRect))
+   -- The strip's own layout, written out: original, or stacked by the band;
+   -- bounded height, unchanged width, TOP anchor and scale 1; the controls
+   -- at their original sizes and places, shifted down by the band.
+   local anchor=strip.points and strip.points[1]
+   local sel,des,new=StripRect(strip.selector),StripRect(strip.design),StripRect(strip.newWishlist)
+   check(Near(strip.height,STRIP_H+band) and strip.height<=STRIP_H+STACK_MAX_H+STACK_GAP+1e-6 and strip.width==STRIP_W
+    and Near(strip:GetScale(),1) and #strip.points==1 and anchor[1]=='TOP' and anchor[2]==ProjectEbonholdEchoJournal
+    and anchor[3]=='TOP' and anchor[4]==85 and anchor[5]==2
+    and sel~=nil and Near(sel.l,160) and Near(sel.t,5+band) and Near(sel.r,329) and Near(sel.b,26+band)
+    and des~=nil and Near(des.l,333) and Near(des.t,6+band) and new~=nil and Near(new.l,203) and Near(new.t,32+band)
+    and Near(new.b,51+band),
+    where..': strip '..(STRIP_H+band)..' px tall, anchor TOP +85,+2, controls at their places shifted by '..band,
+    tostring(strip.height)..' / '..RectText(sel)..' / '..RectText(des)..' / '..RectText(new))
+   for _,name in ipairs({'selector','design','newWishlist'}) do
+    local r=StripRect(strip[name])
+    check(InStrip(r) and rect~=nil and not Overlap(rect,r) and not (holderRect and Overlap(holderRect,r)),
+     where..': the label does not overlap or cover '..name,RectText(rect)..' / '..RectText(r))
+   end
+   -- The chosen scale and wrapped height, written out for this model.
+   check(Near(scale,wantScale) and label.width==math.floor(boxW/wantScale) and label.height==wantH,
+    where..': scale '..wantScale..', label '..math.floor(boxW/wantScale)..' x '..wantH..' units',
+    tostring(scale)..' / '..tostring(label.width)..' x '..tostring(label.height))
+   -- Visible complete state under the same model: every row of the whole
+   -- text inside the label's width and height, the qualifier and separator
+   -- on the last shown row, at an effective scale (holder x strip) of at
+   -- least 0.75.
+   local lines=Lines(text,label.width,model.char)
+   check(#lines*model.line<=label.height and Widest(lines,model.char)<=label.width and table.concat(lines,' ')==Plain(text)
+    and lines[#lines]:find(qualifier..':',1,true)~=nil and scale~=nil and scale*(tonumber(strip:GetScale()) or 0)>=0.75,
+    where..': every row, the qualifier and the separator are visible inside the label at an effective scale >= 0.75',
+    #lines..' rows / '..table.concat(lines,' | '))
+   -- Controls stay usable: their hovers, the picker open and close.
+   local hovers=#Hover(where..' selector',NexusActiveWishlistSelector)*#Hover(where..' design',strip.design)
+    *#Hover(where..' new',strip.newWishlist)
+   check(hovers>0,where..': selector, Design and New Wishlist hovers stay reachable')
+   NexusActiveWishlistSelector:Click()
+   local picker=NexusWishlistOnlyPicker
+   check(picker~=nil and picker:IsShown(),where..': the selector opens the picker')
+   local full,rows=false,0
+   for _,r in ipairs(picker and picker.children or {}) do
+    if r.nameButton and r:IsVisible() then
+     rows=rows+1
+     for _,l in ipairs(Hover(where..' picker row',r.nameButton)) do
+      if (hoverWant and l==hoverWant) or (not hoverWant and l:find(want,1,true)) then full=true end
+     end
+    end
+   end
+   check(rows>0 and full,where..': the picker target hover keeps the complete label ('..rows..' rows)')
+   NexusActiveWishlistSelector:Click()
+   check(picker~=nil and not picker:IsShown(),where..': a second selector click closes the picker (nothing chosen)')
+  end)
+  check(ok,where..': the case ran',err)
+  check(rawget(_G,'NexusFontNormal')==savedFont and rawget(label,'GetStringWidth')==savedW
+   and rawget(label,'GetStringHeight')==savedH,where..': every model override restored')
+  check(SameSnapshot(before,Snapshot()),where..': refresh, layout, hovers and picker open/close wrote, sent and did nothing')
+ end
+ SetSlot(1);J.RefreshAssociations()
+ local _,_,scale=LabelRects(strip,label)
+ local sel,des=StripRect(strip.selector),StripRect(strip.design)
+ check(label:GetText()=='|cffffffffMain Build:|r' and label.height==0 and label.width==145 and Near(scale,1)
+  and strip.height==STRIP_H and sel~=nil and Near(sel.t,5) and Near(sel.l,160) and des~=nil and Near(des.t,6),
+  'STRIP '..tag..': a named Saved Build gets its one-line label, scale 1, width 145, automatic height (0) and the original strip layout back',
+  tostring(label:GetText())..' / '..tostring(scale)..' / '..tostring(label.width)..' x '..tostring(label.height)
+   ..' / '..tostring(strip.height)..' / '..RectText(sel))
+end
+do
+ local entries=S.PseudoEntries()
+ entries['journal.label.no_saved_build']=NO_SEL_FR
+ Boot('wrap',entries)
+ J=Nexus.JournalTab
+ local shown=(Nexus.Localization.Text('journal.label.no_saved_build'))
+ check(#NO_SEL_FR==31 and WellFormedUtf8(NO_SEL_FR) and shown==NO_SEL_FR,'STRIP SETUP FR: the reviewed 31-byte French value is the in-memory entry',shown)
+ J.RefreshAssociations()
+ -- F24: the side column needs 3 rows x 24 = 72 units even at 0.75 (> 56),
+ -- so the band: at scale 1, 340 px, "Aucun Saved Build" / "sélectionné:" =
+ -- 2 rows x 24 = 48 (<= 52); strip 56 + 48 + 6 = 110 px.
+ StripCase('FR',NO_SEL_FR,'s\195\169lectionn\195\169',{M12={1,24},M18={1,36},F12={1,34},F18={0.8,36},F24={1,48,'stack'}})
+end
+do
+ Boot('long')
+ J=Nexus.JournalTab
+ local shown=(Nexus.Localization.Text('journal.label.no_saved_build'))
+ check(shown==NO_SEL_LONG,'STRIP SETUP LONG: the long pseudo entry with its late selection suffix',shown)
+ J.RefreshAssociations()
+ -- The formerly capped case: under F12 the column needs 3 rows x 17 = 51 px
+ -- at 145 px (more than the strip's 50 px inside); at scale 0.8 the column is
+ -- 181 x 52.5 units and the same 3 rows fit (40.8 px on the strip).
+ -- The reproduced boundary F24 (correction 2): in the side column even 0.75
+ -- leaves 193 x 56 units for 4 rows x 24 = 96 and a 252-unit word. The band
+ -- at 1 (340) and 0.9 (377) still needs 3 rows = 72 units (> 52 and > 57.8);
+ -- at 0.8 it is 425 x 65 units: "«Nono Savedsaved Buildbuild" (378) /
+ -- "selectedselected»:" (252) = 2 rows x 24 = 48 units, 38.4 px on the strip;
+ -- strip 56 + 38.4 + 6 = 100.4 px.
+ StripCase('LONG',NO_SEL_LONG,'selectedselected'..S.CLOSE,{M12={1,36},M18={0.8,36},F12={0.8,51},F18={0.75,54},F24={0.8,48,'stack'}})
+end
+
+------------------------------------------------------------------------
 -- ENGLISH exact bytes at the real receivers
 ------------------------------------------------------------------------
 Boot(nil)
@@ -658,7 +936,7 @@ NexusActiveWishlistSelector:Click()
 check(NexusWishlistOnlyPicker.title:GetText()=='Assign to: Main Build','ENGLISH picker title')
 NexusActiveWishlistSelector:Click()
 for slot,want in pairs({[2]={'|cffffffffSaved Build 2:|r','Assign to: Saved Build 2'},[3]={'|cffffffffEmpty Saved Build ...:|r','Empty Saved Build: assigning is refused'},
- [0]={'|cffffffffNo Saved Build sel...:|r','Assign to: first-run target'}}) do
+ [0]={'|cffffffffNo Saved Build selected:|r','Assign to: first-run target'}}) do
  H.perks.serverActiveSlot=slot;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
  NexusActiveWishlistSelector:Click()
  check(NexusLoadoutAssociationPanel.label:GetText()==want[1] and NexusWishlistOnlyPicker.title:GetText()==want[2],
@@ -666,6 +944,35 @@ for slot,want in pairs({[2]={'|cffffffffSaved Build 2:|r','Assign to: Saved Buil
  NexusActiveWishlistSelector:Click()
 end
 H.perks.serverActiveSlot=1;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+-- STRIP STATE, English (see the STRIP STATE section): the complete state text
+-- under both font models, its geometry, controls, full hover and passivity.
+-- F24: the side column needs 3 rows x 24 = 72 units even at 0.75 (> 56); the
+-- band at scale 1 holds "No Saved Build selected:" in one 336-unit row of 24.
+StripCase('ENGLISH',NO_SEL_EN,'selected',{M12={1,12},M18={1,18},F12={1,34},F18={0.9,36},F24={1,24,'stack'}},'Target: '..NO_SEL_EN)
+-- A player's Saved Build name that reads like the state is still a name: it
+-- keeps the existing abbreviation (player text is never a state signal).
+do
+ local slot1=H.perks.serverBuildSlots[1];local realName=slot1.name
+ slot1.name=NO_SEL_EN;H.perks.serverActiveSlot=1;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+ local shown=NexusLoadoutAssociationPanel.label:GetText()
+ check(shown=='|cffffffffNo Saved Build sel...:|r','STRIP ENGLISH: a player name that reads like the state keeps the name abbreviation',shown)
+ slot1.name=realName;H.perks.serverActiveSlot=1;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+ check(NexusLoadoutAssociationPanel.label:GetText()=='|cffffffffMain Build:|r','STRIP ENGLISH SETUP: the fixture name is restored')
+end
+-- The page and its count controls are untouched by the strip and reachable.
+Render('valid',false)
+do
+ local countsHit
+ for _,f in ipairs(H.frames) do
+  if f.parent==Page() and f.kind=='Frame' and not f.label and f.offTip and f:IsShown() then countsHit=f end
+ end
+ local details=ButtonOn(Page(),function(f) return f:GetWidth()==112 end)
+ check(countsHit~=nil and #Hover('strip english counts',countsHit)>0 and details~=nil and #Hover('strip english details',details)>0,
+  'STRIP ENGLISH: the page counts hover and Show details stay reachable')
+end
+NexusJournalTab:Click();J.RefreshAssociations()
+check(NexusLoadoutAssociationPanel:IsShown() and NexusLoadoutAssociationPanel.label:GetText()=='|cffffffffMain Build:|r',
+ 'STRIP ENGLISH: back on the Journal the strip shows again')
 -- The consent question: exact original bytes, long and non-ASCII names verbatim.
 realAuto=J.AutoSelected;J.AutoSelected=function() return true end
 J.AssignWithConsent(LONG_NAME,"Saved Build '"..UNICODE.."'",true,function() error('must not assign') end)
