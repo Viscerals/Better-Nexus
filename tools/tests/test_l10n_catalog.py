@@ -360,11 +360,19 @@ NEUTRAL_TEMPLATE_DECLARATIONS = [
      "evidenceReference": NEUTRAL_TEMPLATE_REFERENCE, "status": "declared"}
     for pack_id in ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")
 ]
-# English-identical entries without a declaration: none. The eight Saved
-# Build labels now differ from their English, and the six neutral wrappers
-# are declared above; each pack's list stays present and empty.
-CURRENT_ENGLISH_PLACEHOLDER_KEYS = {pack_id: [] for pack_id in
-                                    ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")}
+# English-identical entries without a declaration, sorted per pack. The eight
+# Saved Build labels now differ from their English, and the six neutral
+# wrappers are declared above. The four frFR Echo quality names are the
+# unchanged, source-backed English code-owned labels chosen by the recorded
+# product decision; with no declaration they remain unqualified technical
+# deliberate_english_placeholder entries, neither reviewed translations nor
+# accidental English (frFR quality_rare is already declared). Every other
+# pack's list stays present and empty.
+CURRENT_ENGLISH_PLACEHOLDER_KEYS = {
+    "frFR": ["editor.value.quality_common", "editor.value.quality_epic",
+             "editor.value.quality_legendary", "editor.value.quality_uncommon"],
+    "deDE": [], "esES": [], "plPL": [], "ptBR": [], "ruRU": [],
+}
 CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
                              "m7Span": "PENDING", "fullUiCoverage": "PENDING",
                              "fluentHumanAcceptance": "UNASSIGNED",
@@ -3617,8 +3625,8 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
                          PACK_IDS)
         # The report states a category reason only for a pack whose list is
-        # not empty (as for every other entries- reason), so with no held
-        # placeholder there is none.
+        # not empty (as for every other entries- reason), so only frFR has one,
+        # for its four unqualified technical placeholders listed above.
         self.assertEqual([(r["subject"], r["keys"])
                           for r in report_reasons(report, "entries-deliberate-english-placeholder")],
                          [(pack_id, CURRENT_ENGLISH_PLACEHOLDER_KEYS[pack_id]) for pack_id in PACK_IDS
