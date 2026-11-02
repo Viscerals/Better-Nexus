@@ -212,3 +212,106 @@ for _,site in ipairs({false,'OnEvent','RequestSlots'})do
  end
 end
 print('PASS a world-entry adapter error is isolated, reported and cannot strand the shared entry')
+
+-- 5. B-12: the Store authority factory (Nexus.MainInternals.AuthorityBootstrap
+-- .New, owner-matched to the real Store) raises an error. Real TOC boot and the
+-- real Store; only the public factory lookup is wrapped or removed, and the
+-- Store is never replaced by a pending stub. Synthetic profile, sentinel and
+-- error. Two genuine positive controls come first: the ordinary coordinator,
+-- and the supported private-Store progression when the public factory lookup
+-- is absent. Neither pending results nor an absent factory are a failure.
+local function FactoryBoot(mode)
+ local c={factory=0,storeInit=0,pending=0,sync=0,panel=0,adapter=0,dps=0}
+ local errors=Boot(function()
+  NexusDB.startupFactoryUnknown={keep='synthetic unknown sentinel'}
+  local factory=assert(Nexus.MainInternals.AuthorityBootstrap,'fixture: the public factory exists')
+  assert(factory.owner==Nexus.Store and type(factory.New)=='function','fixture: the factory is bound to the real Store')
+  local realNew,realInit=factory.New,Nexus.Store.Init
+  Nexus.Store.Init=function(...)
+   c.storeInit=c.storeInit+1
+   local result=realInit(...)
+   if type(result)=='table' and result.state=='pending' then c.pending=c.pending+1 end
+   return result
+  end
+  if mode=='throwing' then
+   factory.New=function()c.factory=c.factory+1;error('synthetic B12 authority factory failure',0)end
+  elseif mode=='absent' then
+   -- Only Main's public lookup is gone; the real Store keeps its own handle.
+   Nexus.MainInternals.AuthorityBootstrap=nil
+  else
+   factory.New=function(...)c.factory=c.factory+1;return realNew(...)end
+  end
+  local sync,panel,adapter,dps=Nexus.Sync.Init,Nexus.Panel.Init,Nexus.GameAdapter.Init,Nexus.DpsCapture.Init
+  Nexus.Sync.Init=function(...)c.sync=c.sync+1;return sync(...)end
+  Nexus.Panel.Init=function(...)c.panel=c.panel+1;return panel(...)end
+  Nexus.GameAdapter.Init=function(...)c.adapter=c.adapter+1;return adapter(...)end
+  Nexus.DpsCapture.Init=function(...)c.dps=c.dps+1;return dps(...)end
+ end)
+ return c,errors
+end
+local function Sentinel()
+ return type(NexusDB)=='table' and type(NexusDB.startupFactoryUnknown)=='table'
+  and NexusDB.startupFactoryUnknown.keep=='synthetic unknown sentinel'
+end
+
+for _,mode in ipairs({'ordinary','absent'}) do
+ local label=mode=='ordinary' and 'control: ordinary coordinator' or 'control: absent public factory'
+ local c,errors=FactoryBoot(mode)
+ errors=errors+Drive(20000,function()return Nexus.StartupStatus().state~='pending' end)
+ errors=errors+Drive(200)
+ local s=Nexus.StartupStatus()
+ assert(errors==0,label..': no error escapes start-up or a later turn: '..errors)
+ assert(s.coreReady and s.state=='ready' and s.failure==nil,label..': start-up reaches ready: '..tostring(s.state)..' '..tostring(s.reason))
+ assert(c.pending>0,label..': actual pending results were exercised: '..c.pending)
+ if mode=='ordinary' then
+  assert(c.factory==1,label..': the real coordinator is created once: '..c.factory)
+ end
+ assert(#Nexus.Errors.History()==0,label..': nothing is recorded as an error: '..#Nexus.Errors.History())
+ assert(c.sync==1 and c.panel==1 and c.adapter==1 and c.dps==1,
+  label..': each dependent is initialized once: '..c.sync..'/'..c.panel..'/'..c.adapter..'/'..c.dps)
+ if not pcall(H.Fire,'PLAYER_ENTERING_WORLD') then errors=errors+1 end
+ errors=errors+Drive(200)
+ assert(errors==0 and c.sync==1 and c.panel==1 and c.adapter==1 and c.dps==1,label..': a later world entry initializes nothing twice')
+ assert(Sentinel() and #H.actions==0,label..': the saved unknown sentinel is kept and no synthetic gameplay action ran')
+end
+print('PASS B-12 controls: the ordinary coordinator and the absent public factory both progress to ready')
+
+local c,errors=FactoryBoot('throwing')
+local storeInitAtFailure=c.storeInit
+assert(c.factory==1,'B-12 fixture: the original throwing factory was reached during start-up: '..c.factory)
+errors=errors+Drive(400)
+st=Nexus.StartupStatus()
+assert(errors==0,'B-12: no error escapes start-up or a later turn: '..errors)
+assert(c.factory==1,'B-12: the throwing factory is attempted exactly once: '..c.factory)
+-- Store.Init may have been short-circuited by the failure; it is never retried.
+assert(c.storeInit==storeInitAtFailure,'B-12: Store.Init is not retried after the failure: '..storeInitAtFailure..' -> '..c.storeInit)
+assert(not st.coreReady and st.state=='failed' and type(st.reason)=='string' and st.reason~='',
+ 'B-12: a throwing factory is a terminal failed start-up: '..tostring(st.state)..' '..tostring(st.reason))
+assert(type(st.failure)=='table' and st.failure.owner=='AuthorityBootstrap.New' and type(st.failure.error)=='string'
+ and st.failure.error:find('synthetic B12 authority factory failure',1,true) and #st.failure.error<=163,
+ 'B-12: the bounded report names the factory and its error: '..tostring(st.failure and st.failure.owner)..' '..tostring(st.failure and st.failure.error))
+list=Recorded('synthetic B12 authority factory failure')
+assert(#list==1 and list[1].source:find('AuthorityBootstrap.New',1,true),'B-12: one error recorded under the factory: '..#list)
+assert(c.sync==0 and c.panel==0 and c.adapter==0 and c.dps==0,
+ 'B-12: no dependent owner is initialized: '..c.sync..'/'..c.panel..'/'..c.adapter..'/'..c.dps)
+assert(Sentinel() and #H.actions==0,'B-12: the saved unknown sentinel is kept and no synthetic gameplay action ran')
+-- Status reads are passive, and a write to a returned table changes nothing.
+for _=1,20 do Nexus.StartupStatus() end
+assert(c.factory==1 and c.storeInit==storeInitAtFailure,'B-12: status reads neither pump nor retry')
+holder=Nexus.StartupStatus()
+holder.state='ready';holder.coreReady=true;holder.reason=nil
+holder.failure.owner='edited';holder.failure.error='edited'
+st=Nexus.StartupStatus()
+assert(st.state=='failed' and not st.coreReady and st.failure.owner=='AuthorityBootstrap.New'
+ and st.failure.error:find('synthetic B12 authority factory failure',1,true),'B-12: a status write cannot grant readiness or rewrite the report')
+-- Later turns and another world entry keep the same terminal failure.
+if not pcall(H.Fire,'PLAYER_ENTERING_WORLD') then errors=errors+1 end
+errors=errors+Drive(400)
+st=Nexus.StartupStatus()
+assert(errors==0 and c.factory==1 and c.storeInit==storeInitAtFailure,
+ 'B-12: a later world entry or turn never retries the factory or Store.Init: '..errors..' '..c.factory..'/'..c.storeInit)
+assert(not st.coreReady and st.state=='failed' and st.failure.owner=='AuthorityBootstrap.New','B-12: the same terminal failure stands')
+assert(#Recorded('synthetic B12 authority factory failure')==1,'B-12: the same error is not recorded again')
+assert(c.sync==0 and c.panel==0 and c.adapter==0 and c.dps==0 and #H.actions==0 and Sentinel(),
+ 'B-12: dependents stay closed, no synthetic gameplay action ran and the sentinel is kept')
+print('PASS B-12 a throwing authority factory latches one terminal failed start-up without retries')

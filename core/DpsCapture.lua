@@ -1096,7 +1096,16 @@ local function NpcIdFromGUID(guid)
     if id then return tonumber(id) end
     -- Some 3.3.5 cores expose a simple Creature-<entry>-... form.
     id = guid:match("[Cc]reature[^%d]+(%d+)")
-    return tonumber(id)
+    if id then return tonumber(id) end
+    -- The legacy 3.3.5a hexadecimal form, creature units only: exactly "0x",
+    -- the F130 high part, a six-digit hexadecimal entry and a six-digit
+    -- counter (16 digits after "0x"), with nothing before or after. Only the
+    -- entry is converted; the 64-bit GUID never becomes a Lua number. Any
+    -- other prefix, length or digit is not an entry, and the name check below
+    -- still applies to it.
+    local entry = guid:match("^0x[Ff]130(%x%x%x%x%x%x)%x%x%x%x%x%x$")
+    if entry then return tonumber(entry, 16) end
+    return nil
 end
 
 local function ClassifyTarget(guid, name)

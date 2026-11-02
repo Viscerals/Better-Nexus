@@ -91,6 +91,19 @@ function Lifecycle.New(options)
     -- initialization stays closed. Session-only; never saved.
     local initFailure = nil
     local INIT_FAILURE_REASON = "CORE_INIT_FAILED"
+    -- B-12: the present, owner-matched Store authority factory
+    -- (Nexus.MainInternals.AuthorityBootstrap.New) raised an error while the
+    -- coordinator was being created: {owner=, error=} (bounded one-line
+    -- text). Latched for the session like initFailure: the factory is not
+    -- called again, Store.Init is not called after it (its private path would
+    -- call the same factory), the error is recorded once under the factory,
+    -- the start-up status is a terminal failure naming it, and every gate
+    -- that waits for initialization stays closed. A missing or non-matching
+    -- public factory is not this failure: Store.Init's private handle still
+    -- serves that case, and a pending result is never this failure either.
+    -- Session-only; never saved.
+    local factoryFailure = nil
+    local FACTORY_FAILURE_REASON = "AUTHORITY_BOOTSTRAP_FAILED"
     -- World entry can legitimately arrive while authority is still pending,
     -- because bootstrap advances bounded work across scheduler turns.
     local worldEntryPending = false
@@ -149,6 +162,10 @@ function Lifecycle.New(options)
         -- owner and its bounded error, recorded once when it failed.
         if initFailure then
             return {owner=initFailure.owner, error=initFailure.error}
+        end
+        -- B-12: the authority factory raised an error; recorded once.
+        if factoryFailure then
+            return {owner=factoryFailure.owner, error=factoryFailure.error}
         end
         local r = bootstrapTerminal
         if type(r) ~= "table" or r.state ~= "failed" then
@@ -214,6 +231,7 @@ function Lifecycle.New(options)
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
         local failure=initFailure and INIT_FAILURE_REASON
+            or factoryFailure and FACTORY_FAILURE_REASON
             or startupTiming.coreFailure or communityFailure
             or (bootstrapTerminal and bootstrapTerminal.state=="failed"
                 and (bootstrapTerminal.detail or bootstrapTerminal.reason or "STORE_INVALID"))
@@ -310,6 +328,8 @@ function Lifecycle.New(options)
     -- inside an event: continuation scheduling is the scheduler's.
     local function EnsureBootstrapCoordinator(Store)
         if bootstrapCoordinator ~= nil then return bootstrapCoordinator end
+        -- B-12: a factory that already raised an error is never called again.
+        if factoryFailure then return nil end
         if type(Store) ~= "table" then return nil end
         -- Line 1202: MainLifecycle creates the coordinator. Line 1912 keeps the
         -- public Store inventory at nine, so the factory is reached through the
@@ -324,7 +344,19 @@ function Lifecycle.New(options)
         local community=Nexus.CommunityBuilds
         local ok, coordinator = pcall(factory.New,{deferAutomaticMaintenance=
             type(community)=="table" and type(community.Init)=="function"})
-        if not ok or type(coordinator) ~= "table" then return nil end
+        if not ok then
+            -- B-12: the present, owner-matched factory raised an error. Latch
+            -- one terminal failure naming it and record the error once; see
+            -- factoryFailure above. Only this raised-error path is latched.
+            local okText, text = pcall(ErrorText, coordinator)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = (text:gsub("[%c|]", " "))
+            if #text > 160 then text = text:sub(1, 160) .. "..." end
+            factoryFailure = {owner="AuthorityBootstrap.New", error=text}
+            RecordError("AuthorityBootstrap.New", coordinator)
+            return nil
+        end
+        if type(coordinator) ~= "table" then return nil end
         bootstrapCoordinator = coordinator
         return coordinator
     end
@@ -478,6 +510,9 @@ function Lifecycle.New(options)
     -- only by StoreResultIsReady, never by the call having completed.
     local function BindStoreAuthority(Store)
         local coordinator = EnsureBootstrapCoordinator(Store)
+        -- B-12: after a factory failure Store.Init is not called: without a
+        -- coordinator its private path would call the same factory again.
+        if factoryFailure then return false, factoryFailure.error end
         local ok, result
         if coordinator ~= nil then
             ok, result = pcall(Store.Init, coordinator)
@@ -761,6 +796,8 @@ function Lifecycle.New(options)
         if initialized then return true end
         -- A required owner already failed: terminal for this session.
         if initFailure then return false end
+        -- B-12: the authority factory already failed: terminal as well.
+        if factoryFailure then return false end
         dependencies = BindDependencies()
         if not dependencies then return false end
 
@@ -770,6 +807,8 @@ function Lifecycle.New(options)
         local Model = dependencies.Model
 
         local okStore, storeResult = BindStoreAuthority(Store)
+        -- B-12: recorded once, under the factory, when it failed.
+        if factoryFailure then return false end
         if not okStore then
             RecordStoreError(storeResult)
             return false
@@ -1388,7 +1427,10 @@ function Lifecycle.New(options)
                     -- owns advancing it: with no coordinator, a pending result
                     -- never resolves and is still reported. Dependents stay
                     -- withheld in both cases.
-                    if not okStore then
+                    if factoryFailure then
+                        -- B-12: recorded once, under the factory owner.
+                        storeReady = false
+                    elseif not okStore then
                         RecordStoreError(storeResult)
                     elseif not storeReady
                         and not (StoreResultIsPending(storeResult)
@@ -1524,11 +1566,12 @@ function Lifecycle.New(options)
                             startupTiming.readySeconds = startupTiming.readyAt
                                 - startupTiming.worldEnteredAt
                         end
-                    elseif failed or initFailure then
-                        -- Terminal authority failure, or a required
-                        -- initialization owner failed. Initialize recorded the
-                        -- attributed reason once; dependents stay withheld and
-                        -- the coordinator never retries (line 1519).
+                    elseif failed or initFailure or factoryFailure then
+                        -- Terminal authority failure, a required
+                        -- initialization owner failed, or (B-12) the authority
+                        -- factory raised an error. The attributed reason was
+                        -- recorded once; dependents stay withheld and nothing
+                        -- retries (line 1519).
                         worldEntryPending = false
                     end
                 end

@@ -33,7 +33,17 @@ function Identity.TypedIdentity(value)
         if value ~= value then return "n:nan" end
         if value == math.huge then return "n:inf" end
         if value == -math.huge then return "n:-inf" end
-        if value % 1 == 0 then return "n:" .. string.format("%d", value) end
+        if value % 1 == 0 then
+            -- Integral decimal through "%.0f", not "%d". "%d" depends on a C
+            -- integer conversion; under a 32-bit conversion model distinct
+            -- integers outside the signed 32-bit range could share one
+            -- identity (offline conditional model only, not an observed native
+            -- failure). "%.0f" prints the exact decimal of every integral
+            -- double, so in-range values keep their identity. Zero of either
+            -- sign stays the canonical "n:0", as "%d" printed it.
+            if value == 0 then return "n:0" end
+            return "n:" .. string.format("%.0f", value)
+        end
         return "n:" .. string.format("%.17g", value)
     elseif kind == "string" then
         return "s:" .. #value .. ":" .. value
