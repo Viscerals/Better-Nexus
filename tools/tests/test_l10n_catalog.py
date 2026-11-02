@@ -288,10 +288,10 @@ REFERENCE_SUCCESSORS = {
 # the bytes under test.
 CURRENT_SUCCESSOR_INPUTS = {
     "data/LocalizationPacks.lua": {
-        "canonical": ("050f166cde8ba0f2b93bd4e74777599ce75124b92119802021e9f94229c6e2c4", 3316548),
-        "blob": "b7dbabe8ea84fa1ff51e079f272a7569631e61f4",
-        "firstCommit": "e562927c51099ef56516009d099a8d40d637eb97",
-        "physical": ("cd1a37879621d7596f93d6a00f718eec591ec23901a4121c4c24337a705f7ae4", 3341085)},
+        "canonical": ("8ab04e23bd772604a4371744645812f00688d2ace487d479d338f599646fd19c", 3316565),
+        "blob": "9564adffab70ebbec5831933b46bac7a3c21138c",
+        "firstCommit": "afa5e226946176ac44a736da2803ce76908461c5",
+        "physical": ("01e1b43b284a408efd3d0da7a6f1aae3b50496b67cfcdf889f5c518cf661fea7", 3341102)},
     "docs/localization/RELEASE_LANGUAGES.json": {
         "canonical": ("78628e4fd0cd70030ba40e5b62424492f27497590f0813e86c92fbf3bec2986c", 265898),
         "blob": "00fdd4fc3947b4dfaef84c2e4ab43d67502d651b",
@@ -328,7 +328,7 @@ HISTORICAL_SUCCESSOR_INPUTS = {
 CURRENT_PACK_VALUE_MAPS = {
     "frFR": "b769274bc66cc38542252725927ac69bee261c5d9f1b4b0a1526507f1da02f03",
     "deDE": "e1124f68173d6fa89c4564740c9b16b504d26f3ce6f35a4d4984904d19a73aa0",
-    "esES": "b361ef47eb8935dcc4a42302285991b1a48f521979a00b9b9645d0c48c40312d",
+    "esES": "ab1ee1232a5617f1a883c40eb345e5d5f6e77f0986571fdb8945080ec6bcf112",
     "plPL": "9d0e86860c6d11aca2cc73cf83273f77027bf61bfdf5162697b8c32866d4b5f7",
     "ptBR": "f9426a6de500da65a626f0489bf00cb948672f3bc0c048e22dd315a9885ee31e",
     "ruRU": "3f655bc3fa4a728fa43e1e750467c7b741275bc4df8d746db4f8470ff3f75e67",
