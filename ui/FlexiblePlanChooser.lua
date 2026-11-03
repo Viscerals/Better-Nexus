@@ -68,6 +68,29 @@ function Factory.New(options)
         if status then status:SetText(StatusText()) end
         return false, code
     end
+    -- Catalog rows are reused frames whose one-line labels recover their
+    -- complete text on hover (LayoutMetrics.OneLineLabel). A refresh that
+    -- rebinds or hides a row under the pointer (wheel, search) closes the
+    -- row's open tooltip, so it never keeps a previous item's text, and shows
+    -- the current complete ID, quality and name while that label is shortened.
+    local function CloseCatalogTip(row)
+        local tip = GameTooltip
+        if tip and tip:IsShown() and tip:IsOwned(row) then tip:Hide() end
+    end
+    -- A tooltip another frame has taken since this row showed its own is left
+    -- alone: never hidden, replaced or reclaimed by a rebind.
+    local function RecoverCatalogText(row)
+        local tip = GameTooltip
+        local external = tip and tip:IsShown() and not tip:IsOwned(row)
+        CloseCatalogTip(row)
+        if not row:IsShown() then row.pointer = nil;return end
+        if external then return end
+        local metrics = Nexus.LayoutMetrics
+        if not (tip and metrics and metrics.Shortened and metrics.Shortened(row.label)) then return end
+        tip:SetOwner(row,"ANCHOR_RIGHT")
+        tip:AddLine(tostring(row.label:GetText() or ""),1,1,1,true)
+        tip:Show()
+    end
     local function Refresh()
         if not frame then return end
         local catalog = options.catalog()
@@ -89,6 +112,7 @@ function Factory.New(options)
         catalogOffset, poolOffset = left.offset, right.offset
         for i=1,ROWS do
             local row, id = catalogRows[i], matches[left.first+i-1]
+            local before = row:IsShown() and row.label:GetText()
             row.spellId = id
             if id then
                 local value = catalog.rows[id]
@@ -97,6 +121,9 @@ function Factory.New(options)
                 if captured.rows[id] then row.action:Disable() else row.action:Enable() end
                 row:Show()
             else row:Hide() end
+            if row.pointer and before ~= (row:IsShown() and row.label:GetText()) then
+                RecoverCatalogText(row)
+            end
             row, id = poolRows[i], ids[right.first+i-1]
             row.spellId = id
             if id then
@@ -219,7 +246,15 @@ function Factory.New(options)
         for i=1,ROWS do
             local row=CreateFrame("Frame",nil,catalogArea)
             row:SetSize(460,HEIGHT);row:SetPoint("TOPLEFT",0,-(i-1)*HEIGHT)
-            row.label=Label(row,"",375,30,0,0)
+            row.label=Label(row,"",375,HEIGHT,0,0)
+            -- One line at the row height (docs/UI_TEXT_LAYOUT.md), as in the pool
+            -- row: while a long exact name is shortened, the row's tooltip shows the
+            -- complete current ID, quality and name, so the row takes mouse input.
+            -- The pointer state lets Refresh recover the text of a rebound row.
+            row:SetScript("OnEnter",function(self) self.pointer=true end)
+            row:SetScript("OnLeave",function(self) self.pointer=nil;CloseCatalogTip(self) end)
+            row:EnableMouse(true)
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.label,row,HEIGHT) end
             local catalogRow = row
             row.action=Button(row,nil,"Add",62,function() return Add(catalogRow.spellId) end)
             row.action:SetPoint("TOPRIGHT",0,-3)

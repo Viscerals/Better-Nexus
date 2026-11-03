@@ -263,6 +263,19 @@ function M.Shortened(fontString)
     return width == nil or width > (tonumber(fontString:GetWidth()) or 0)
 end
 
+-- True while GameTooltip still belongs to owner. Another frame may take the
+-- tooltip after owner showed it; that frame's tooltip is then left alone.
+-- Without an ownership query the previous behaviour (true) is kept.
+local function HoldsTooltip(owner)
+    if type(GameTooltip.IsOwned) == "function" then
+        return GameTooltip:IsOwned(owner) and true or false
+    end
+    if type(GameTooltip.GetOwner) == "function" then
+        return GameTooltip:GetOwner() == owner
+    end
+    return true
+end
+
 -- Fixed row labels keep one line at the row's height, so a long name never
 -- spills over the next row; the client shortens the rest. While shortened,
 -- the owner (the row or button) shows the complete text in a tooltip beside
@@ -286,7 +299,9 @@ function M.OneLineLabel(fontString, owner, height, anchor)
         self._nexusOneLineTip = true
     end)
     owner:HookScript("OnLeave", function(self)
-        if self._nexusOneLineTip and GameTooltip then GameTooltip:Hide() end
+        if self._nexusOneLineTip and GameTooltip and HoldsTooltip(self) then
+            GameTooltip:Hide()
+        end
         self._nexusOneLineTip = nil
     end)
 end
