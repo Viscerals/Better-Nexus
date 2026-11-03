@@ -8,6 +8,7 @@ H.Fire('PLAYER_ENTERING_WORLD');assert(Nexus.RecomputeStats().autoEnabled and H.
 H.Fire('PLAYER_ENTERING_WORLD')
 assert(not Nexus.RecomputeStats().autoEnabled,'reconnect without a leave notification is OFF')
 SlashCmdList.NEXUS('auto');H.Fire('PLAYER_LOGOUT');assert(not Nexus.RecomputeStats().autoEnabled,'logout revokes ordinary permission')
+H.Advance(3.1)
 H.OrbPlan();assert(M.Start(2));H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
 assert(not M.Status().running and M.Status().pending,'a loading screen leaves the interrupted Orb receipt passive')
 SlashCmdList.NEXUS('auto');assert(not Nexus.RecomputeStats().autoEnabled,'ordinary Auto stays OFF while the Orb receipt is unresolved')

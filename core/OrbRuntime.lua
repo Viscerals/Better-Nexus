@@ -24,7 +24,15 @@ local RECOVERY_FAST_WINDOW,RECOVERY_SLOW_INTERVAL=60,5
 -- After a loading screen, how long the game may still hold this action's
 -- choice before the status says so (its reply can still arrive late).
 local HELD_CHOICE_DELAY=5
+-- After PLAYER_ENTERING_WORLD, hold new Orb host calls (ConfirmSpend / Select)
+-- for this long. Matches AutomationRuntime's worldSettle: leave/enter already
+-- pause the run; this gate also refuses Start/Resume and new submits while
+-- leaving or during the post-enter settle (a spend already accepted before
+-- leave can still open the replace-without-grant hole).
+local WORLD_SETTLE=3
 local SESSION_INTERRUPTED="Session interrupted. Orb spending will not restart automatically."
+local WORLD_LOADING="A loading screen is in progress. Wait until the world is ready before Orb spending."
+local WORLD_SETTLING="The world just loaded. Wait a moment before Orb spending."
 -- Continue is a bounded class, not an exit for every unresolved receipt.
 local KEPT=" The record and its spending exposure are kept."
 local NO_EXIT=" Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself."
@@ -33,8 +41,9 @@ local UNOBSERVED=" This record contains no retained observation of one Orb fewer
 -- nothing about the server). epoch counts every loading transition (leave or
 -- enter). phase: "l" between leaving and entering a world, "r" from entering (and
 -- from this load) until a read succeeds, "w" afterwards. A phase is a label on the
--- evidence, never proof that the game is ready.
-local life={epoch=0,phase="r"}
+-- evidence, never proof that the game is ready. settleUntil: GetTime deadline
+-- after enter; nil/0 means no post-enter hold (fresh load has none).
+local life={epoch=0,phase="r",settleUntil=0}
 -- Session state of the continuation that must outlive the run table: M.Confirm replaces `run` when
 -- a new run starts, and the late events after an archive (the data phase two needs) arrive during
 -- that new run. serial: attempts counted; log: the last attempts; after: the archive entry that
@@ -48,6 +57,21 @@ local function copy(t)
     local r={};for k,v in pairs(t) do r[k]=copy(v) end;return r
 end
 local function now() return GetTime and GetTime() or 0 end
+-- True when a new Orb spend or choice must not be sent (loading or settle).
+-- Observation of an existing receipt still runs; only host submits are gated.
+-- phase "r" alone is not a block: a fresh load starts there with no settle,
+-- and Start after zoning must not wait for a Pump that is not running.
+local function worldUnstableReason()
+    if life.phase=="l" then return WORLD_LOADING end
+    local auto=Nexus.AutomationRuntime
+    if auto and type(auto.WorldLeaving)=="function" then
+        local ok,leaving=pcall(auto.WorldLeaving)
+        if ok and leaving==true then return WORLD_LOADING end
+    end
+    local untilAt=life.settleUntil
+    if type(untilAt)=="number" and untilAt>0 and now()<untilAt then return WORLD_SETTLING end
+    return nil
+end
 local function integer(n,min,max) return type(n)=="number" and n==math.floor(n) and n>=(min or 0) and n<=(max or 1000000) end
 local function owner()
     return Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
@@ -652,6 +676,8 @@ end
 local function preflight(automatic,m)
     local status=writeStatus()
     if status.mode~="durable" then return nil,writeRefusal(status) end
+    local unstable=worldUnstableReason()
+    if unstable then return nil,unstable end
     local err;if not m then m,err=inspect();if not m then return nil,err end end
     if not entriesStillMatch(m.assignment) then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
     if m.progress.rolledMissing==0 then
@@ -731,24 +757,34 @@ local function turnAutoOff()
     return true
 end
 
-ensureFrame=function()
-    if frame then frame:Show();return end
+local function applyWorldEvent(event)
+    init()
+    if event=="PLAYER_LEAVING_WORLD" then
+        life.epoch=(life.epoch+1)%65536;life.phase="l";life.settleUntil=0
+    elseif event=="PLAYER_ENTERING_WORLD" then
+        -- Post-enter settle: Resume and new host calls wait until this
+        -- deadline passes. phase "r" alone is not that hold.
+        life.epoch=(life.epoch+1)%65536;life.phase="r"
+        life.settleUntil=now()+WORLD_SETTLE
+    end
+    journalNote(event=="PLAYER_LEAVING_WORLD" and "leave" or event=="PLAYER_ENTERING_WORLD" and "enter" or "logout",nil,run.pending)
+    -- Evidence that could not be saved when it was seen is saved now: a
+    -- reload or a logout follows these events.
+    flushEvidence()
+    -- A restored receipt is already passive. Keep its recovery explanation.
+    -- Stop is not sent through this path; a deliberate Stop still completes.
+    if run.pending and run.pending.restored and not run.running then return end
+    if run.running or run.pending then
+        run.running=false;setState("PAUSED",SESSION_INTERRUPTED);run.worldPausedAt=now()
+        if run.pending then savePending() else release() end
+    end
+end
+local function installObserver()
+    if frame then return false end
     frame=CreateFrame("Frame","NexusOrbRuntime",UIParent)
     frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:SetScript("OnEvent",function(_,event)
-        init()
-        if event=="PLAYER_LEAVING_WORLD" then life.epoch=(life.epoch+1)%65536;life.phase="l"
-        elseif event=="PLAYER_ENTERING_WORLD" then life.epoch=(life.epoch+1)%65536;life.phase="r" end
-        journalNote(event=="PLAYER_LEAVING_WORLD" and "leave" or event=="PLAYER_ENTERING_WORLD" and "enter" or "logout",nil,run.pending)
-        -- Evidence that could not be saved when it was seen is saved now: a
-        -- reload or a logout follows these events.
-        flushEvidence()
-        -- A restored receipt is already passive. Keep its recovery explanation.
-        if run.pending and run.pending.restored and not run.running then return end
-        if run.running or run.pending then
-            run.running=false;setState("PAUSED",SESSION_INTERRUPTED);run.worldPausedAt=now()
-            if run.pending then savePending() else release() end
-        end
+        applyWorldEvent(event)
     end)
     local elapsed=0
     frame:SetScript("OnUpdate",function(_,dt)
@@ -762,6 +798,24 @@ ensureFrame=function()
         end
         if run and not run.running and not run.pending and not RS.after then frame:Hide() end
     end)
+    -- Hidden frames still receive lifecycle events. Stay hidden until a run
+    -- needs the pump, so an idle observer does not poll the host.
+    frame:Hide()
+    return true
+end
+ensureFrame=function()
+    installObserver()
+    frame:Show()
+end
+-- Passive registration. Lifecycle init calls this before the first spend so
+-- a world entry is not missed by a frame that does not exist yet. Returns
+-- true only when this call created the frame (that call cannot also receive
+-- the event that is already being dispatched).
+function M.ObserveLifecycle()
+    return installObserver()==true
+end
+function M.NoteWorldEnter()
+    applyWorldEvent("PLAYER_ENTERING_WORLD")
 end
 function M.Confirm(token)
     init();local a=approval
@@ -2084,6 +2138,8 @@ function M.Pump(passive)
                 setState("WAIT_RESULT","Waiting for a fresh server response confirming the selected replacement.")
             elseif s.offerPending and #s.board==3 and p.spendConfirmed and not s.hostPending then
                 if p.ambiguous then pause("The spend outcome is now visible. Review the offer and press Resume, or resolve it manually.");return end
+                local unstableSelect=worldUnstableReason()
+                if unstableSelect then pause(unstableSelect);return end
                 local decisionState={catalog=s.catalog,granted=copy(s.granted),locked=s.locked}
                 local original,afterRemoval={},{}
                 for k,n in pairs(p.before) do original[k]=n;afterRemoval[k]=n end
@@ -2109,7 +2165,7 @@ function M.Pump(passive)
                 p.selectionStamp=s.grantStamp;p.since=now();p.refreshRequested=false
                 local saved,e=savePending();if not saved then p.selectionAttempted=false;pause(e);return end
                 local accepted,kind,reason=B.Select(run.token,decision.index,s.boardKey,decision.spellId,function()
-                    return run.running and entriesStillMatch()
+                    return run.running and entriesStillMatch() and not worldUnstableReason()
                 end)
                 journalNote(accepted==true and "select_submitted" or kind=="REJECTED" and "select_rejected" or "select_ambiguous",nil,p)
                 -- An attempt rejected by the adapter before SelectPerk is not
@@ -2152,6 +2208,8 @@ function M.Pump(passive)
         if s.offerPending or #s.board>0 or s.hostPending then pause("Another Echo action is active. Resolve it first.");return end
         if s.autoAccept then pause("Turn off the game's automatic Echo acceptance before continuing.");return end
         if Nexus.GameAdapter.RivalDetected() then pause("Another Echo picker is active. Disable it before continuing.");return end
+        local unstableSpend=worldUnstableReason()
+        if unstableSpend then pause(unstableSpend);return end
         local source
         local safe=P.Sources(run.targets,s,run.excluded)
         for _,r in ipairs(safe) do if r.key==run.recycleKey then source=r;break end end
@@ -2184,7 +2242,7 @@ function M.Pump(passive)
         end
         if not recycle and not run.automatic then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
         local accepted,kind,reason=B.Spend(run.token,source.key,s,function(live)
-            if not run.running or not entriesStillMatch() then return false end
+            if not run.running or not entriesStillMatch() or worldUnstableReason() then return false end
             for _,r in ipairs(P.Sources(run.targets,live,run.excluded))do if r.key==source.key and r.excess>0 then return true end end
             return false
         end)
@@ -2245,7 +2303,13 @@ end
 function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end
     if run.pending and (run.pending.restored or run.pending.selectionAttempted) then return nil,"The submitted result is still unresolved. Recheck or finish the native offer manually; no repeat is allowed." end
+    local unstable=worldUnstableReason()
+    if unstable then return nil,unstable end
     local s,err=B.Read();if not s then return nil,err end
+    -- A successful read advances phase "r" -> "w"; re-check settle after it.
+    if life.phase=="r" then life.phase="w" end
+    unstable=worldUnstableReason()
+    if unstable then return nil,unstable end
     if not run.context or not B.SameOwner(run.context,s.context) then return nil,"The original character/run/service no longer matches. This run cannot resume." end
     local a=assigned()
     if run.pending and (run.targetChanged or not matches(run.binding,a) or not B.SameContext(run.context,s.context)) then
@@ -2502,6 +2566,7 @@ end
 -- a different ready, valid assignment only on the explicit action.
 local function resumeOffered(a,s)
     if run.state~="PAUSED" or not run.token or not run.context then return false end
+    if worldUnstableReason() then return false end
     local p=run.pending
     if p and (run.targetChanged or p.restored or p.selectionAttempted
         or (p.ambiguous and not p.spendConfirmed)) then return false end

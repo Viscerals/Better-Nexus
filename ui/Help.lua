@@ -92,7 +92,7 @@ Closing the window does not stop an approved run. Use Pause or Stop. The main Ne
 
 After a finished run: click Start new run, review the maximum, then click Confirm new run. If the maximum changes, review it and press Start new run again.
 
-When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions; Resume adopts the new target and keeps the same maximum. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
+When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions; Resume adopts the new target and keeps the same maximum. A loading screen pauses the run and blocks new Orb spends and choices until the world is ready again (and briefly after you enter); Resume stays off during that window. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
 
 Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.
 
