@@ -3827,7 +3827,7 @@ local function EnsureMinimapButton()
     btn:RegisterForDrag("LeftButton")
 
     local icon = btn:CreateTexture(nil, "BACKGROUND")
-    icon:SetSize(20, 20); icon:SetPoint("CENTER"); icon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+    icon:SetSize(20, 20); icon:SetPoint("CENTER"); icon:SetTexture("Interface\\AddOns\\Nexus\\ui\\Textures\\NexusMinimap.tga")
     pcall(function()
         local border = btn:CreateTexture(nil, "OVERLAY")
         border:SetSize(54,54); border:SetPoint("TOPLEFT",-3,3); border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
