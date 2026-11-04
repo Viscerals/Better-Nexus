@@ -545,4 +545,158 @@ do
  check(wish==PREFIX..REASON..'.'..ID_SUFFIX,'S16 opaque status English: /nexus wishlist exact English: '..tostring(wish))
 end
 
+-- Diagnostics caption: the competing 10-second watchdog lines from the real
+-- producer. A real full-TOC boot, one actual own Select, then one actual outside
+-- same-ID or nil-ID attempt: the service rejects it while the own pending flag is
+-- set, and the installed hook still records it, so it is not an accepted second
+-- selection. Expected captions are written out here, not read from MainRuntimeBook.
+-- The own record is captured after the one accepted take and before the outside
+-- attempt; only its identity is frozen, since observation fields may update.
+do
+ local R=dofile('tests/prototype/select_recovery_support.lua')
+ local KEY={seen='adapter.chat.select_unresolved_seen_competing',unseen='adapter.chat.select_unresolved_unseen_competing'}
+ local CAPTION={
+  seen="Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits; it cannot attribute a grant to this selection alone, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run.",
+  unseen="Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; it cannot attribute a grant to this selection alone, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run.",
+ }
+ local NEIGHBORS={
+  {key='adapter.chat.select_unresolved_seen',text="Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits for the flag to clear. The game gives no receipt for a selection, so this wait can last until a new run."},
+  {key='adapter.chat.select_unresolved_unseen',text="Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; while Auto is ON it re-reads the granted Echoes. The game gives no receipt for a selection, so this wait can last until a new run."},
+ }
+ local STALE='of the same Echo'
+ local function Plain(text) return text end
+ local function Marked(text) return S.OPEN..text..S.CLOSE end
+ local function Bare(line)
+  local body,n=line,1
+  while n>0 do body,n=body:gsub('^|c%x+Nexus:|r ','') end
+  return body
+ end
+ local IDENTITY={'ordinal','run','baseline','spellId','quality','sentAt'}
+ local function BoardView(board)
+  if board==nil then return 'nil' end
+  local parts={tostring(board.guaranteedIndex),tostring(board.signature),tostring(board.idSignature)}
+  for _,card in ipairs(board.cards) do
+   parts[#parts+1]=table.concat({tostring(card.spellId),tostring(card.quality),tostring(card.family),tostring(card.frozen),
+    tostring(card.carried),tostring(card.guaranteed),tostring(card.justFrozen)},'/')
+  end
+  return table.concat(parts,';')
+ end
+ -- entries: false boots plain English, nil the wrapped pseudo pack, a table that pack.
+ local function Drive(label,entries,state,outsideId,Target,Other)
+  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;EchoOptimizer=nil
+  if entries~=false then S.InstallBootHook(nil,entries) end
+  local W,A=R.Boot()
+  local caption=CAPTION[state]
+  local otherState=state=='seen' and 'unseen' or 'seen'
+  local function Emitted(want)
+   local n=0
+   for _,line in ipairs(W.chat) do if Bare(line)==want then n=n+1 end end
+   return n
+  end
+  local function Mentions(text)
+   for _,line in ipairs(W.chat) do if line:find(text,1,true) then return true end end
+   return false
+  end
+  W.Offer()
+  local offered=A.Board()
+  local offersOwn=false
+  for _,card in ipairs(offered and offered.cards or {}) do offersOwn=offersOwn or card.spellId==R.X end
+  check(offersOwn,label..': setup: a real offered board holds the own choice')
+  check(W.selectAttempts==0 and W.Count()==0,label..': setup: no Select before the own take')
+  local attempts=W.boardAttempts
+  check(type(attempts)=='number',label..': setup: board attempts are counted')
+  A.Take(R.X)
+  check(W.selectAttempts==1 and W.Count()==1,label..': setup: one accepted own take')
+  check(W.boardAttempts==attempts+1,label..': setup: the own take is one board attempt')
+  local taken=A.SelectRecoveryFacts()
+  local own=taken.unresolved
+  check(type(own)=='table',label..': setup: the accepted take holds a real own record')
+  check(type(own.ordinal)=='number' and own.ordinal>0 and own.ordinal==math.floor(own.ordinal),label..': setup: a positive integer ordinal: '..tostring(own.ordinal))
+  check(taken.submitted==own.ordinal,label..': setup: the submitted ordinal is the own record')
+  check(own.spellId==R.X and own.run~=nil and type(own.baseline)=='number' and own.quality~=nil and type(own.sentAt)=='number',label..': setup: the own record identity is bound')
+  check(own.phase=='latch' and own.wait=='latch' and own.competing==0,label..': setup: no competing evidence before the outside attempt')
+  local function CheckOwn(stage)
+   local facts=A.SelectRecoveryFacts()
+   local record=facts.unresolved
+   check(type(record)=='table',label..': the own record stays held '..stage)
+   check(facts.submitted==own.ordinal,label..': the submitted ordinal does not move '..stage)
+   for _,field in ipairs(IDENTITY) do
+    check(record[field]==own[field],label..': the own record keeps its '..field..' '..stage)
+   end
+   check(select('#',A.SelectUnresolved())==6,label..': the unresolved getter has six values '..stage)
+   local ordinal,phase,spellId,wait,rechecks,overdue=A.SelectUnresolved()
+   check(ordinal==own.ordinal and spellId==own.spellId,label..': the unresolved getter names the own record '..stage)
+   check(phase==record.phase and wait==record.wait and rechecks==record.rechecks,label..': the unresolved getter agrees with the facts '..stage)
+   check(A.SelectOutcome(own.ordinal)=='unresolved',label..': the captured ordinal stays unresolved '..stage)
+   return record,phase,overdue
+  end
+  local function CheckWaiting(stage)
+   local record,phase,overdue=CheckOwn(stage)
+   check(record.competing==1,label..': one competing record '..stage..': '..tostring(record.competing))
+   check(record.wait=='ambiguous',label..': the actual wait is ambiguous '..stage..': '..tostring(record.wait))
+   check(phase=='latch',label..': the own pending flag stays set '..stage..': '..tostring(phase))
+   check(overdue,label..': the own record is overdue '..stage)
+  end
+  local _,_,freshOverdue=CheckOwn('after the own take')
+  check(not freshOverdue,label..': setup: a new own record is not overdue')
+  local rolls=W.pendingRolls
+  check(type(rolls)=='number',label..': setup: pending rolls are numeric after the own take')
+  W.service.SelectPerk(outsideId)
+  check(W.selectAttempts==2 and W.Count()==1,label..': the outside attempt is counted and is not an accepted take')
+  check(W.boardAttempts==attempts+2,label..': the outside attempt is the only other board attempt')
+  check(W.pendingRolls==rolls,label..': the outside attempt spends no pending roll')
+  check(CheckOwn('after the outside attempt').competing==1,label..': the outside attempt is recorded as competing')
+  if state=='seen' then R.Grant(W,R.X) end
+  CheckOwn('after setup')
+  check(not Mentions(caption),label..': setup: no caption before the watchdog')
+  local function Invariant()
+   local charges=A.Charges()
+   check(type(charges.banish)=='number' and type(charges.freeze)=='number' and type(charges.reroll)=='number',label..': resource counts are numeric')
+   check(type(W.pendingRolls)=='number' and type(W.boardAttempts)=='number' and type(W.selectAttempts)=='number',label..': action counters are numeric')
+   return table.concat({'banish='..charges.banish,'freeze='..charges.freeze,'reroll='..charges.reroll,'pendingRolls='..W.pendingRolls,
+    'boardAttempts='..W.boardAttempts,'selectAttempts='..W.selectAttempts,'takes='..W.Count(),'board='..BoardView(A.Board())},' ')
+  end
+  local baseline=Invariant()
+  W.Advance(11)
+  check(Emitted(Target(caption))==1,label..': the actual watchdog emits the exact caption once: '..Joined(W.chat))
+  check(not Mentions(CAPTION[otherState]),label..': the other competing caption is not emitted')
+  for _,row in ipairs(NEIGHBORS) do
+   check(not Mentions(row.text),label..': no non-competing caption is emitted: '..row.key)
+  end
+  check(not Mentions(STALE),label..': no stale same-Echo claim in chat')
+  check(W.selectAttempts==2 and W.Count()==1,label..': the watchdog sends nothing new')
+  CheckWaiting('at the watchdog')
+  local atWatchdog=Invariant()
+  check(atWatchdog==baseline,label..': the watchdog moves no board, resource or action: '..baseline..' -> '..atWatchdog)
+  W.Advance(5)
+  check(W.selectAttempts==2 and W.Count()==1,label..': still nothing new after the watchdog')
+  check(W.Count(R.X)==1,label..': the one accepted take is the own choice')
+  CheckWaiting('after the watchdog')
+  local later=Invariant()
+  check(later==baseline,label..': later observation moves no board, resource or action: '..baseline..' -> '..later)
+  local book=Nexus.MainRuntimeBook()
+  check(book.exact[caption]==KEY[state] and book.exact[CAPTION[otherState]]==KEY[otherState],label..': the runtime book maps the new captions to the stable keys')
+  for raw in pairs(book.exact) do
+   check(not raw:find(STALE,1,true),label..': no stale same-Echo claim in the runtime book: '..raw)
+  end
+  check(Nexus.UserText.Message(caption)==Target(caption),label..': the caption through the seam')
+  check(Nexus.UserText.Message(CAPTION[otherState])==Other(CAPTION[otherState]),label..': the other competing key is unaffected')
+  for _,row in ipairs(NEIGHBORS) do
+   check(book.exact[row.text]==row.key and Nexus.UserText.Message(row.text)==Other(row.text),label..': the neighboring key is unaffected: '..row.key)
+  end
+ end
+ for _,state in ipairs({'seen','unseen'}) do
+  for _,outside in ipairs({'same','nil'}) do
+   local id=outside=='same' and R.X or nil
+   Drive('caption English '..state..'/'..outside,false,state,id,Plain,Plain)
+   Drive('caption pseudo '..state..'/'..outside,nil,state,id,Marked,Marked)
+  end
+  local entries=S.PseudoEntries();entries[KEY[state]]=nil
+  Drive('caption missing '..state,entries,state,R.X,Plain,Marked)
+  -- These keys are static block text: braces are valid there, a pipe is forbidden.
+  entries=S.PseudoEntries();entries[KEY[state]]='forbidden|pipe'
+  Drive('caption invalid '..state,entries,state,R.X,Plain,Marked)
+ end
+end
+
 print('l10n_ui_chat: '..checks..' checks')
