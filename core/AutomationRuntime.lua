@@ -4379,7 +4379,7 @@ actionHold.SelectWait = function()
     local why = wait == "latch_after_grant"
             and "a matching grant is visible, but the game still shows a selection pending"
         or wait == "ambiguous"
-            and "another selection of the same Echo was seen and the game does not say which one a grant answers, so no later grant can settle it"
+            and "Nexus cannot attribute a grant to this selection alone, and the game does not say which request a grant answers, so no later grant can settle it"
         or wait == "grant"
             and "the game's pending flag cleared, but no matching grant is visible yet"
         or wait == "latch_unknown"

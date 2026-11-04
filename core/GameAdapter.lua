@@ -4529,7 +4529,7 @@ local function WatchLatches()
                                 or " and its grant is not visible yet")
                             .. ". Nexus sends nothing new and waits"
                             .. ((own.competing or 0) > 0
-                                    and "; another selection of the same Echo was seen, so no grant can settle it"
+                                    and "; it cannot attribute a grant to this selection alone, so no grant can settle it"
                                 or seen and " for the flag to clear"
                                 or "; while Auto is ON it re-reads the granted Echoes")
                             .. ". The game gives no receipt for a selection, so this"
