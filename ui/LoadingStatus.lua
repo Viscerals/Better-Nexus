@@ -5,6 +5,10 @@ local M = {}
 Nexus.LoadingStatus = M
 local frame, lastSnapshot, startedAt, completedAt
 local lastUpdate, dismissed = -math.huge, false
+-- requested: the player asked for this window this session (/nexus loading,
+-- M.Show). Memory only, so a reload drops it. A forced Update is not a
+-- request. dismissed: the window's own X, until the next M.Show.
+local requested = false
 local buttons = setmetatable({}, {__mode="k"})
 -- Full UI localization (issues #143-#148): every sentence below comes from
 -- Nexus.Localization, looked up when it is shown. Numbers, times, reasons
@@ -63,6 +67,19 @@ end
 local function Snapshot()
     if type(Nexus.StartupStatus)=="function" then return Nexus.StartupStatus() end
     return {state="pending",coreReady=false,phase="store-validation"}
+end
+-- Whether the player wants the main panel shown (issue #164): its owner's
+-- own wanted visibility (Panel.VisibilityFacts, the saved Hide Nexus Panel
+-- choice read per saved root, session-only for a read-only root), never
+-- whether the panel is shown at this moment. Read only; it neither creates
+-- nor writes saved data. Without an answer the window keeps showing as
+-- before.
+local function PanelWanted()
+    local panel=Nexus.Panel
+    if not (panel and type(panel.VisibilityFacts)=="function") then return true end
+    local ok,facts=pcall(panel.VisibilityFacts)
+    if not ok or type(facts)~="table" then return true end
+    return facts.wanted~=false
 end
 -- Saved-capacity refusals of the shared catalog, stated plainly. The data is
 -- complete and unchanged; only the shared catalog cannot be opened.
@@ -275,6 +292,11 @@ function M.Update(status,force)
     PaintButtons(status)
     -- No status frame is allocated for a fully ready standalone consumer.
     if not frame and status.state=="ready" and not force then return end
+    -- Shown automatically only while the player wants the main panel; a
+    -- player who hid it sees progress only on request. Start-up work and the
+    -- buttons above are not affected. No frame is allocated while hidden.
+    local shown=not dismissed and (requested or PanelWanted())
+    if not frame and not shown then return end
     local f=EnsureFrame()
     local percent,progress=M.Progress(status)
     f.title:SetText(T(status.state=="ready" and "loading.title.ready"
@@ -302,10 +324,11 @@ function M.Update(status,force)
         completedAt=completedAt or now
         if not force and now-completedAt>=3 then f:Hide();return end
     else completedAt=nil end
-    if not dismissed then f:Show() end
+    if shown then f:Show() else f:Hide() end
 end
 function M.Show()
     dismissed=false
+    requested=true
     local status=Snapshot()
     if status.state=="ready" then completedAt=Now() end
     M.Update(status,true)
