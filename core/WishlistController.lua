@@ -6,6 +6,79 @@ Nexus.WishlistInternals = Nexus.WishlistInternals or {}
 
 local Controller = {}
 
+-- Strict, bounded validation for the ordinary planning handoff. Rebuild only
+-- the explicit choice with the accepted model, then compare its entire result;
+-- never feed the alternative pool to an import/evidence normalizer.
+local function PlanPlain(value)
+    return type(value) == "table" and getmetatable(value) == nil
+end
+local function PlanLength(value, bound)
+    if not PlanPlain(value) then return nil end
+    local count, highest = 0, 0
+    for key in next, value do
+        count = count + 1
+        if count > bound or type(key) ~= "number" or key ~= math.floor(key)
+            or key < 1 or key > bound then return nil end
+        highest = math.max(highest, key)
+    end
+    return count == highest and count or nil
+end
+local function PlanEqual(value, expected, depth)
+    if type(value) ~= type(expected) then return false end
+    if type(expected) ~= "table" then return value == expected end
+    if depth == 0 or not PlanPlain(value) then return false end
+    local count = 0
+    for key, field in next, value do
+        count = count + 1
+        if count > 256 or rawget(expected, key) == nil
+            or not PlanEqual(field, rawget(expected, key), depth - 1) then return false end
+    end
+    for key in next, expected do if rawget(value, key) == nil then return false end end
+    return true
+end
+local function ValidatePlanDraft(draft, alternatives, current)
+    local count = PlanLength(alternatives, 256)
+    if not count or count == 0 then return nil, "INVALID_ALTERNATIVES" end
+    if not PlanPlain(current) or not PlanPlain(rawget(current, "rows")) then
+        return nil, "CATALOG_UNAVAILABLE"
+    end
+    local ids, catalog = {}, {rows={}}
+    for i = 1, count do
+        local row = rawget(alternatives, i)
+        if not PlanPlain(row) then return nil, "INVALID_CATALOG" end
+        local id = rawget(row, "spellId")
+        if type(id) ~= "number" or id ~= id or id < 1 or id > 2147483647
+            or id ~= math.floor(id) or catalog.rows[id] then return nil, "INVALID_ALTERNATIVES" end
+        ids[i], catalog.rows[id] = id, row
+    end
+    local pool, why = Nexus.FlexiblePlanModel.New({alternativeSpellIds=ids, catalog=catalog})
+    if not pool then return nil, why end
+    if not PlanPlain(draft) then return nil, "INVALID_DRAFT" end
+    local echoes = rawget(draft, "echoes")
+    local length = PlanLength(echoes, 79)
+    if not length or length == 0 then return nil, "INVALID_SELECTION" end
+    local selection = {}
+    for i = 1, length do
+        local row = rawget(echoes, i)
+        if not PlanPlain(row) then return nil, "INVALID_SELECTION" end
+        selection[i] = {spellId=rawget(row, "spellId"), stacks=rawget(row, "stacks")}
+    end
+    local detached
+    detached, why = pool.Choose(selection)
+    if not detached then return nil, why end
+    if not PlanEqual(draft, detached, 4) then return nil, "INVALID_DRAFT" end
+    for _, echo in ipairs(detached.echoes) do
+        local captured = catalog.rows[echo.spellId]
+        local live = rawget(current.rows, echo.spellId)
+        if not PlanPlain(live) or rawget(live, "spellId") ~= captured.spellId
+            or rawget(live, "quality") ~= captured.quality
+            or rawget(live, "maxStack") ~= captured.maxStack
+            or rawget(live, "groupId") ~= captured.groupId
+            or rawget(live, "locked") ~= nil or rawget(live, "sourceRole") ~= nil
+            or rawget(live, "lockIntent") ~= nil then return nil, "CATALOG_CHANGED" end
+    end
+    return detached, nil, pool.Alternatives()
+end
 
 -- MASTER-RC-001 (amendment 10). Store.State() is a DURABLE_READ returning a
 -- defensive copy; writes must go through StoreAuthorityOwnerV1.UpdateStateV1,
@@ -1236,6 +1309,41 @@ function Controller.New(options)
             if name == "" then name = "Saved Build " .. tostring(active) end
             state.createTargetContext = {loadoutSlot = active, loadoutName = name}
         end
+    end
+
+    -- Preparing is read-only, including an existing save confirmation. The
+    -- returned closure owns detached inputs and can install at most once.
+    -- A later edit/context/confirmation makes it stale before any reset.
+    function M.PrepareNewExactDraft(draft, alternatives)
+        local detached, why, captured = ValidatePlanDraft(draft, alternatives, Catalog())
+        if not detached then return nil, why end
+        local adapter = Adapter
+        local pending, locked, fulfilled = state.pending, state.pendingLock, state.fulfilledDraftTargets
+        local editing, target, candidate = state.editingContext, state.createTargetContext, state.candidateContext
+        local awaiting, opening = state.awaitingWishlist, state.pendingLoadoutOpen
+        local confirmation, retry = state.applyConfirmation, state.applyRetry
+        local token, consumed = CurrentDraftToken(), false
+        local replaces = not DraftUntouched() or state.editingContext ~= nil
+            or state.createTargetContext ~= nil or state.candidateContext ~= nil
+            or state.awaitingWishlist ~= nil or confirmation ~= nil or retry ~= nil
+        return {replaces=replaces, Install=function()
+            if consumed or adapter ~= Adapter or pending ~= state.pending
+                or locked ~= state.pendingLock or fulfilled ~= state.fulfilledDraftTargets
+                or editing ~= state.editingContext or target ~= state.createTargetContext
+                or candidate ~= state.candidateContext or awaiting ~= state.awaitingWishlist
+                or opening ~= state.pendingLoadoutOpen
+                or token ~= CurrentDraftToken() or confirmation ~= state.applyConfirmation
+                or retry ~= state.applyRetry then return false, "EDITOR_CHANGED" end
+            local ready, reason = ValidatePlanDraft(detached, captured, Catalog())
+            if not ready then return false, reason end
+            M.BeginNewWishlist()
+            state.pending = ready.pending
+            state.pendingLock = ready.pendingLock
+            state.fulfilledDraftTargets = ready.fulfilledTargets
+            state.assigningLockSlot, state.replacingSpellId = false, nil
+            consumed = true
+            return true
+        end}
     end
 
     function M.BeginShow()
