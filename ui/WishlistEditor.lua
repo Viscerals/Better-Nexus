@@ -906,6 +906,10 @@ function M.OpenFlexiblePlanChooser()
     if not flexiblePlanChooser then
         flexiblePlanChooser = Nexus.FlexiblePlanChooser.New({
             catalog=wishlistController.CatalogProjection,
+            -- #151: the local pool owner; the chooser reads it only on first Show
+            -- and explicit Save/Load (no automatic Save or Load).
+            persistence=(Nexus.FlexiblePlanStore and Nexus.FlexiblePlanStore.New
+                and Nexus.FlexiblePlanStore.New({store=Nexus.Store})) or nil,
             openDraft=function(draft, alternatives, planCurrent, installed, refuse)
                 local renderer = RendererInstance()
                 local name = renderer.NameText()

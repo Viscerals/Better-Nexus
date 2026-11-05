@@ -43,6 +43,7 @@ core\Updates.lua
 core\Codec.lua
 core\WishlistModel.lua
 core\FlexiblePlanModel.lua
+core\FlexiblePlanStore.lua
 core\WishlistController.lua
 core\SyncProtocol.lua
 third_party\ChatThrottleLib.lua
