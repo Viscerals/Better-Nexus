@@ -83,12 +83,20 @@ for i=1,100 do local name=debug.getupvalue(renderDetail,i);if not name then brea
  if name=='EnsureCommunityProjection'then debug.setupvalue(renderDetail,i,function()return projection end)end
 end
 local dp=assert(NexusCommunityBuildsFrame._detailPanel)
-for _,case in ipairs({{'saved','Share Build','server Saved Build'},{'shared','Update Shared Build','Shared.'},
- {'locked','Copy into Editor','Echo list is read-only'},{'copy','Copy into Editor','You own this build'}})do
+-- A Saved Build mirror's projected Share action is on its own visible Share
+-- button and Copy is hidden there; an ordinary build keeps Copy on its button.
+for _,case in ipairs({{'saved','Share Build...',{'server Saved Build'},true},
+ {'shared','Update Shared Build...',{'Shared listing saved on this client','receipt by other players is not confirmed'},true},
+ {'locked','Copy into Editor',{'Echo list is read-only'}},{'copy','Copy into Editor',{'You own this build'}}})do
  local detail,e=projection.Detail(case[1],{ownerKey=owner,ownedBySpell={}});check(detail,e or 'real projection exists')
  renderDetail(case[1])
- check(dp.lockBtn:GetText()==case[2],'projected action reaches actual button')
- check(dp.editState:GetText():find(case[3],1,true),'projected edit status reaches actual fontstring')
+ local mirror=case[4]==true
+ local action,other
+ if mirror then action,other=dp.shareBtn,dp.lockBtn else action,other=dp.lockBtn,dp.shareBtn end
+ local projected=detail and (mirror and detail.shareText or detail.actionText)
+ check(action and action:IsShown() and action:GetText()==projected and action:GetText()==case[2],'projected action reaches actual visible button')
+ check(other and not other:IsShown(),mirror and 'a mirror offers no draft Copy' or 'an ordinary build offers no Saved Build Share')
+ for _,needle in ipairs(case[3])do check(dp.editState:GetText():find(needle,1,true),'projected edit status reaches actual fontstring') end
 end
 -- Empty evidence remains refused rather than weakening the guard to render a request.
 records.empty=H.Clone(record);records.empty.echoes=nil

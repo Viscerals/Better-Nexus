@@ -266,13 +266,37 @@ local function HasFutureSettingsOwner(db)
     return class == "future" or class == "unverified" or class == "malformed"
 end
 
--- Read-only: the saved Sync mode this build honors. Only an accepted saved
--- format 3-5 carries one ("off" or "manual"); every other profile, and an
--- absent or "automatic" value, keeps today's automatic behavior. The saved
--- value is never normalized or rewritten here. Internals seam, not a Store
--- export (the public Store inventory stays fixed).
+-- The player's own explicit Sync mode choice (Build Library "Sync mode...").
+-- An optional account-level preference, separate from the old `syncMode`
+-- field, and absent unless the player applied a choice. Not a default, not a
+-- migration and not part of any format marker or its classification.
+SavedFormat.CHOICE_KEY = "nexusSyncModeChoice"
+
+-- The valid explicit choice stored in a supported (format 2 or earlier) or
+-- accepted known (3-5) root, or nil. Any other root keeps its graph and its
+-- current behavior exactly, so a value there is not read.
+function SavedFormat.ExplicitSyncMode(db, class)
+    class = class or SavedFormat.Classify(db)
+    if (class ~= "supported" and class ~= "known") or type(db) ~= "table" then return nil end
+    local settings = rawget(db, "settings")
+    if type(settings) ~= "table" or getmetatable(settings) ~= nil then return nil end
+    local choice = rawget(settings, SavedFormat.CHOICE_KEY)
+    if SavedFormat.SYNC_MODES[choice] then return choice end
+    return nil
+end
+
+-- Read-only: the Sync mode this build honors. The player's own valid explicit
+-- choice comes first. Without one, today's rule applies unchanged: only an
+-- accepted saved format 3-5 carries an inherited choice ("off" or "manual");
+-- every other profile, including a dormant format-2 `syncMode`, and an absent
+-- or "automatic" value keep automatic behavior. Nothing is normalized or
+-- rewritten here. Internals seam, not a Store export (the public Store
+-- inventory stays fixed).
 function SavedFormat.SyncMode(db)
-    if SavedFormat.Classify(db) ~= "known" then return "automatic" end
+    local class = SavedFormat.Classify(db)
+    local explicit = SavedFormat.ExplicitSyncMode(db, class)
+    if explicit then return explicit end
+    if class ~= "known" then return "automatic" end
     local settings = rawget(db, "settings")
     local mode = type(settings) == "table" and rawget(settings, "syncMode") or nil
     if mode == "off" or mode == "manual" then return mode end
@@ -2643,9 +2667,90 @@ function Store.Settings()
     return transientSettings
 end
 
+-- Read-only status of the player's explicit Sync mode choice, for its one
+-- Build Library control and its one policy caller. Internals seam
+-- (Nexus.MainInternals.SyncModeChoiceV1), not a Store export. A choice can be
+-- written only into an initialized, supported or accepted known root whose
+-- live saved settings table is the one Store.Settings() serves; any other
+-- state is refused with its reason and never gets a session-only override.
+-- The token names the exact saved root and settings table (as identity text,
+-- not references), so a draft opened on another root is detected as stale.
+function SavedFormat.ChoiceStatus()
+    local db = NexusDB
+    local class, savedFormat = SavedFormat.Classify(db)
+    local settings
+    if type(db) == "table" then settings = rawget(db, "settings") end
+    local explicit = SavedFormat.ExplicitSyncMode(db, class)
+    -- Observation is separate from the applied choice: read-only formats can
+    -- contain a recognized value this build deliberately does not honor.
+    -- Only plain saved tables establish absence; never inspect through a
+    -- metatable or stringify arbitrary saved values, including for the token.
+    local dbPlain = type(db) == "table" and getmetatable(db) == nil
+    local settingsPlain = type(settings) == "table" and getmetatable(settings) == nil
+    local stored, storedChoice, storedChoicePresent
+    local storedChoiceState = "unknown"
+    if dbPlain and settingsPlain then
+        stored = rawget(settings, SavedFormat.CHOICE_KEY)
+        storedChoicePresent = stored ~= nil
+        if stored == nil then storedChoiceState = "absent"
+        elseif stored == "automatic" or stored == "manual" or stored == "off" then
+            storedChoiceState, storedChoice = "recognized", stored
+        else storedChoiceState = "invalid" end
+    end
+    local accepted = class == "supported" or class == "known"
+    local legacy = class == "known" and type(settings) == "table"
+        and rawget(settings, "syncMode") or nil
+    if legacy ~= "off" and legacy ~= "manual" then legacy = nil end
+    local status = {key=SavedFormat.CHOICE_KEY, effective=SavedFormat.SyncMode(db),
+        explicit=explicit, storedInvalid=accepted and stored ~= nil and explicit == nil,
+        storedChoiceState=storedChoiceState, storedChoicePresent=storedChoicePresent,
+        storedChoice=storedChoice,
+        inherited=legacy or "automatic", inheritedSource=legacy and "legacy" or "default",
+        format=class, savedFormat=savedFormat, writable=false,
+        token={db=dbPlain and tostring(db) or "uninspectable",
+            settings=settingsPlain and tostring(settings) or "uninspectable"}}
+    if type(db) ~= "table" then status.reason = "database"; return status end
+    if not accepted then status.reason = "saved-format"; return status end
+    local C = boundCoordinator
+    if type(C) ~= "table" or type(C.State) ~= "function" then
+        status.reason = "loading"; return status
+    end
+    local ok, state = pcall(C.State, C)
+    if not ok or (state ~= SS.READY and state ~= SS.MUTATION_BUILD
+        and state ~= SS.MUTATION_FINAL) then
+        status.reason = (state == SS.INVALID or state == SS.FUTURE_SCHEMA
+            or state == SS.DISPOSITION_FAILED or state == SS.DISPOSITION_REAUTH)
+            and "lifecycle" or "loading"
+        return status
+    end
+    -- The coordinator initialized exactly one saved root. Another table in
+    -- NexusDB, even a valid one, is a replaced root it never bound; it treats
+    -- that as drift too (BootstrapSlice, StartAutomaticMaintenance).
+    local boundOk, bound = false, nil
+    if type(C.Database) == "function" then boundOk, bound = pcall(C.Database, C) end
+    if not boundOk or bound ~= db then
+        status.reason = "replaced"; return status
+    end
+    if type(settings) ~= "table" or getmetatable(settings) ~= nil
+        or Store.Settings() ~= settings then
+        status.reason = "settings"; return status
+    end
+    status.writable = true
+    return status
+end
+Nexus.MainInternals.SyncModeChoiceV1 = function()
+    return SavedFormat.ChoiceStatus()
+end
+
 -- MASTER-RC-001, the counted private `UpdateSettingsV1` entry: a user control
 -- changes one setting through the Store owner instead of writing a settings
 -- table it found itself, and learns whether the change was saved.
+-- Static caller inventory: core/WishlistController.lua UpdateStoreSetting,
+-- ui/Theme.lua Choose, and core/SyncModePolicy.lua ApplyChoice (the explicit
+-- Sync mode choice, SavedFormat.CHOICE_KEY only). For that one key this entry
+-- validates first and writes only durably: an invalid value is refused, and a
+-- root that SavedFormat.ChoiceStatus does not report writable is refused with
+-- its reason, with no session settings or transient write.
 --   {mode="durable"}                      written into the saved settings
 --   {mode="session", format=, savedFormat=, note=} the saved root is
 --       read-only: the change applies to this session's settings only and the
@@ -2657,6 +2762,13 @@ end
 -- this entry is the route for the controls that must report the outcome.
 function StoreAuthorityOwner.UpdateSettingsV1(key, value)
     if type(key) ~= "string" or key == "" then return nil, "invalid-key" end
+    if key == SavedFormat.CHOICE_KEY then
+        if not SavedFormat.SYNC_MODES[value] then return nil, "invalid-value" end
+        local status = SavedFormat.ChoiceStatus()
+        if not status.writable then return nil, "unavailable", status.reason end
+        rawget(NexusDB, "settings")[key] = value
+        return {mode="durable"}
+    end
     local db = NexusDB
     local class = ReadOnlyRoot.Class(db)
     if class then

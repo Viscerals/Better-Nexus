@@ -1,7 +1,9 @@
 -- Nexus: the one outbound permission decision for a saved Sync mode.
 --
--- Saved formats 3-5 (Good Enough Nexus and the earlier Better Nexus test line)
--- can carry settings.syncMode "off" or "manual" (core/Store.lua
+-- The player's own explicit choice (Build Library "Sync mode...", saved as an
+-- optional account-level preference) comes first. Without one, accepted saved
+-- formats 3-5 (Good Enough Nexus and the earlier Better Nexus test line) can
+-- carry settings.syncMode "off" or "manual" (core/Store.lua
 -- SavedFormat.SyncMode). Every other profile is "automatic": this module then
 -- allows everything and nothing changes.
 --
@@ -46,6 +48,51 @@ function P.Text(mode)
     if mode == "off" then return OFF_TEXT end
     if mode == "manual" then return MANUAL_TEXT end
     return nil
+end
+
+local CHOICES = {automatic=true, manual=true, off=true}
+
+-- Read-only status of the explicit choice (core/Store.lua
+-- SavedFormat.ChoiceStatus): effective, explicit, inherited, writable,
+-- reason and the token a draft carries. nil when the Store seam is absent.
+function P.Choice()
+    local internals = Nexus.MainInternals
+    local read = type(internals) == "table" and internals.SyncModeChoiceV1 or nil
+    if type(read) ~= "function" then return nil end
+    local ok, status = pcall(read)
+    return ok and type(status) == "table" and status or nil
+end
+
+-- Apply one explicit choice from a draft opened with `token`. The only new
+-- caller of the counted-private Store entry UpdateSettingsV1. It validates
+-- first, refuses a stale draft or unwritable storage with the reason, does
+-- nothing when that exact explicit choice is already stored, and otherwise
+-- writes it and reads it back. It starts, flushes, pumps, resets and extends
+-- nothing: later traffic follows the new mode through the existing admission
+-- and final-submit checks above, and already sent messages stay sent.
+-- Returns ok, result ("saved" | "unchanged" | refusal reason), status after.
+function P.ApplyChoice(mode, token)
+    if not CHOICES[mode] then return false, "invalid-value", P.Choice() end
+    local status = P.Choice()
+    if not status then return false, "unavailable", nil end
+    if type(token) == "table" and type(status.token) == "table"
+        and (token.db ~= status.token.db or token.settings ~= status.token.settings) then
+        return false, "stale", status
+    end
+    if not status.writable then return false, status.reason or "unavailable", status end
+    if status.explicit == mode then return true, "unchanged", status end
+    local internals = Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner or nil
+    if type(owner) ~= "table" or type(owner.UpdateSettingsV1) ~= "function" then
+        return false, "unavailable", status
+    end
+    local called, result, why, detail = pcall(owner.UpdateSettingsV1, status.key, mode)
+    if not called or type(result) ~= "table" or result.mode ~= "durable" then
+        return false, called and (detail or why or "not saved") or "not saved", P.Choice()
+    end
+    local after = P.Choice()
+    if not after or after.explicit ~= mode then return false, "not read back", after end
+    return true, "saved", after
 end
 
 -- Sync binds the active manual Sync Now grant (a string or nil) and the local
