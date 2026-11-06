@@ -1,6 +1,7 @@
 -- Nexus: Orb of Lost Memories game boundary.
--- EchoWeaver Orb mode: only the public OrbService and PerkService calls listed
--- in THIRD_PARTY.md. Capability detection is read-only; no speculative spend/selection.
+-- EchoWeaver Orb mode uses the OrbService, PerkService and OptionsService
+-- contracts and secure SendAddonMessage post-hook described in THIRD_PARTY.md.
+-- Capability detection is read-only; no speculative spend/selection.
 Nexus = Nexus or {}
 local A = assert(Nexus.GameAdapter, "OrbAdapter requires GameAdapter")
 local O = {}
@@ -271,6 +272,22 @@ function O.Read(mode)
     local okB,rawB=call(svc,"GetCurrentChoice")
     if type(A.ObserveChoiceRead)=="function" then pcall(A.ObserveChoiceRead,okB,rawB,"orb_read") end
     if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable.","choice" end
+    -- This action read keeps nil distinct. The inert ProjectEbonhold metadata
+    -- v37 reference (perks_service.lua hash in THIRD_PARTY.md) clears its
+    -- cache to nil for an empty response AND for an unparseable response;
+    -- only the transport observation can distinguish those during recovery.
+    local choiceShape=rawB==nil and "unknown" or "checked"
+    if type(rawB)=="table" then
+        if getmetatable(rawB) then choiceShape="invalid"
+        else
+            local n=0
+            for k in pairs(rawB) do
+                n=n+1
+                if n>3 or not integer(k,1) or k>3 then choiceShape="invalid";break end
+            end
+            if n~=#rawB then choiceShape="invalid" end
+        end
+    end
     local board,parts={},{}
     for i,c in ipairs(rawB or {}) do
         if i>3 or type(c)~="table" or not integer(c.spellId,1) then return nil,"The current Echo offer is invalid.","choice" end
@@ -336,6 +353,7 @@ function O.Read(mode)
         local built=buildRow(id,row);rawset(t,id,built);return built
     end})
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
+        choiceShape=choiceShape,
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
         hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb,display),at=GetTime and GetTime() or 0,
         selectionSerial=selectionSerial,selection=copy(selection),
@@ -345,6 +363,12 @@ function O.Read(mode)
     return s
 end
 function O.SameContext(a,b) return same(a,b) end
+-- Pure scalar display check; no game getters, observers or reconciliation.
+-- Other eligibility facts are the last complete Pump observation. Resume reads
+-- all current authority again before any action.
+function O.OwedDisplayClear()
+    return hostPending(_G.ProjectEbonhold)==false
+end
 function O.SameOwner(a,b)
     return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc
         and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
@@ -529,15 +553,38 @@ function O.Release(token)
 end
 local function validate(token)
     if not owner or token~=owner then return nil,"Orb action ownership is unavailable." end
-    local s,err=O.Read();if not s then return nil,err end
+    local s,err=O.Read();if not s then return nil,err,"READ_UNAVAILABLE" end
     if not same(ownerContext,s.context) then return nil,"The character, loadout, or game service changed. Orb mode is paused." end
     if s.autoAccept or (A.RivalDetected and A.RivalDetected()) then return nil,"Another Echo picker may interfere. Orb mode is paused." end
     if A.DIAGNOSTIC_PASSIVE then return nil,"Actions are blocked in passive diagnostics." end
     return s
 end
+local function recordActionException(source,cause)
+    if type(Nexus.Errors)=="table" and type(Nexus.Errors.Record)=="function" then
+        pcall(Nexus.Errors.Record,source,cause)
+    end
+end
+local function checkedValidation(token,source,reason)
+    local ok,s,err,code=pcall(validate,token)
+    if not ok then
+        recordActionException(source,s)
+        return nil,reason,"VALIDATION_ERROR"
+    end
+    return s,err,code
+end
 function O.Spend(token,key,expected,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
-    if s.offerPending or #s.board>0 or s.hostPending or A.InFlight() or s.charges<1 then
+    local s,err,code=checkedValidation(token,"OrbAdapter.SpendValidation","The Orb state check failed. No Orb was sent.")
+    if not s then return nil,"REJECTED",err,code end
+    if s.choiceShape=="invalid" then
+        return nil,"REJECTED","The current Echo choices are malformed. No Orb was sent.","CHOICE_INVALID"
+    end
+    local checked,inFlight=true,false
+    if not s.offerPending and #s.board==0 and not s.hostPending then checked,inFlight=pcall(A.InFlight) end
+    if not checked then
+        recordActionException("OrbAdapter.SpendValidation",inFlight)
+        return nil,"REJECTED","The Orb state check failed. No Orb was sent.","VALIDATION_ERROR"
+    end
+    if s.offerPending or #s.board>0 or s.hostPending or inFlight or s.charges<1 then
         return nil,"REJECTED","Another choice is pending or no Orbs remain."
     end
     if not expected or s.grantedKey~=expected.grantedKey or s.lockedKey~=expected.lockedKey
@@ -545,16 +592,27 @@ function O.Spend(token,key,expected,guard)
         return nil,"REJECTED","The approved source or balance changed before spending."
     end
     local id=tonumber(tostring(key):match("^(%d+):%d+$"));if not id then return nil,"REJECTED","Invalid source." end
-    if guard and guard(s)~=true then return nil,"REJECTED","Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
-    boundary("host_call",s)
+    if guard then
+        local checked,allowed,why=pcall(guard,s)
+        if not checked then
+            recordActionException("OrbAdapter.SpendGuard",allowed)
+            return nil,"REJECTED","The final Orb protection check failed. No Orb was sent.","GUARD_ERROR"
+        end
+        if allowed~=true then return nil,"REJECTED",why or "Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
+    end
+    -- No diagnostic callback may intervene between the last guard and host.
+    -- Report crossing after the invocation (also when it throws), before its
+    -- typed return event; diagnostics never authorize or cancel this crossing.
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
+    boundary("host_call",s)
     boundary(not ok and "host_error" or value==false and "host_false" or value==true and "host_true" or "host_other",nil)
     if not ok then return nil,"AMBIGUOUS","The spend call failed; its server outcome is unknown. No repeat will be sent." end
-    if value==false then return nil,"REJECTED","The game refused the Orb spend." end
+    if value==false then return nil,"REJECTED","The game refused the Orb spend.","HOST_FALSE" end
     return true,"SUBMITTED"
 end
 function O.Select(token,index,expectedBoard,id,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
+    local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
+    if not s then return nil,"REJECTED",err,code end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
         if c and other.spellId==id and other.quality~=c.quality then
@@ -564,7 +622,14 @@ function O.Select(token,index,expectedBoard,id,guard)
     if not s.offerPending or s.hostPending or not c or not c.selectable or c.spellId~=id
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end
-    if guard and guard(s)~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    if guard then
+        local checked,allowed=pcall(guard,s)
+        if not checked then
+            recordActionException("OrbAdapter.SelectGuard",allowed)
+            return nil,"REJECTED","The final Echo protection check failed. No selection was sent. Resolve the original pending operation manually.","GUARD_ERROR"
+        end
+        if allowed~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    end
     selfSelecting=true
     boundary("pick_call",s)
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
@@ -583,8 +648,10 @@ do
     end
 end
 -- Passive transport observer (035) ---------------------------------------------
--- The audited client (the owner's installed bytes; the reporter's build is NOT
--- verified) delivers every server message through ONE CHAT_MSG_ADDON frame, keeps
+-- The owner's inspected inert snapshot reported delivery through ONE
+-- CHAT_MSG_ADDON frame. Its dispatcher artifact was not hash-pinned; the v37
+-- perks-service hash in THIRD_PARTY.md establishes only the listed cache/request
+-- facts, not the network dispatcher or installed tester bytes. That snapshot keeps
 -- one handler per opcode, and checks the prefix and the framing, not the sender or
 -- the channel. This observer therefore never registers an opcode handler: it
 -- listens to the same event in a frame of its own, which leaves the game's frame,
@@ -617,9 +684,44 @@ local TRANSPORT_PREFIX="AAM0x9"
 local TRANSPORT_OPS={[16]=true,[18]=true,[540]=true,[542]=true,[1000]=true,[1220]=true}
 local TRANSPORT_RING,COUNT_CAP=48,1000000
 local T={started=false,epoch=0,ord=0,ring={},requests=0,reqOrd=0,good={},bad={},
+    ownBare=0,ownFramed=0,
     counts={Q=0,A=0,R=0,echo=0,drop=0,other=0,seg=0},
     rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0,mixed=0}}
 local function bump(t,k) t[k]=math.min((t[k] or 0)+1,COUNT_CAP) end
+local function outgoingReady()
+    return T.outgoingFunction~=nil and _G.SendAddonMessage==T.outgoingFunction
+        and type(hooksecurefunc)=="function" and not T.outgoingOverflow
+end
+function O.RecoveryAvailable()
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestChoice)~="function" then return false,"choice_query_unavailable" end
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function"
+        or (T.outgoingAttempted and not outgoingReady()) then return false,"no_choice_observer" end
+    return true
+end
+local function observeOutgoing(prefix,payload)
+    if prefix~=TRANSPORT_PREFIX then return end
+    local key=payload=="16" and "ownBare" or payload=="16\t" and "ownFramed" or nil
+    if not key then return end
+    if T[key]>=COUNT_CAP then T.outgoingOverflow=true;return end
+    T[key]=T[key]+1
+    if key=="ownFramed" then T.ownFramedAt=GetTime and GetTime() or 0 end
+end
+function O.StartChoiceObserver()
+    if T.outgoingAttempted then return outgoingReady() end
+    -- An approved run observes outgoing framing even if the optional query
+    -- service appears later. Query capability is checked separately at use.
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function" then return false end
+    T.outgoingAttempted=true
+    local protected=pcall
+    local ok=protected(hooksecurefunc,"SendAddonMessage",function(prefix,payload)
+        if A.Orbs~=O then return end
+        if not protected(observeOutgoing,prefix,payload) then T.outgoingOverflow=true end
+    end)
+    if not ok then return false end
+    T.outgoingFunction=_G.SendAddonMessage
+    return outgoingReady()
+end
 -- A canonical whole number: digits only (a leading minus only where signed), no
 -- leading zero, no "-0", at most six digits.
 local function canonical(text,signed)
@@ -710,6 +812,9 @@ local function transportCapture(prefix,payload,dist,sender)
         if mid and op~=1220 then segmentNote(op,mid,idxText,totalText,true) end
     elseif op~=1220 then
         rec.cls="A"
+        -- Exact empty SS16 is the native handler's explicit no-choice reply.
+        -- Retain a boolean only. Nil cache alone remains unknown.
+        if op==16 and evt=="16" and rest=="" then rec.emptyChoice=true end
         if mid then
             local state=segmentNote(op,mid,idxText,totalText,false)
             if state=="partial" then bump(T.counts,"seg");return end
@@ -766,8 +871,17 @@ function O.TransportStatus()
     -- retained: how many records the ring holds now (never more than TRANSPORT_RING).
     local retained=0
     for _ in pairs(T.ring) do retained=retained+1 end
+    local pe=_G.ProjectEbonhold;local svc=type(pe)=="table" and pe.PerkService
     return {started=T.started,epoch=T.epoch,ord=T.ord,counts=copyNumbers(T.counts),rejects=copyNumbers(T.rejects),
+        choiceObserver=outgoingReady()==true,ownBare=T.ownBare,ownFramed=T.ownFramed,ownFramedAt=T.ownFramedAt,
+        choiceQuery=type(svc)=="table" and type(svc.RequestChoice)=="function",
+        outgoingAttempted=T.outgoingAttempted==true,
         good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd,retained=retained}
+end
+-- Passive cursor for compact affordances: no map copies, observer start,
+-- backlog classification or query. It is not an action authorization.
+function O.TransportCursor()
+    return T.ord,T.epoch
 end
 -- The relevant records that arrived after ordinal `since`, oldest first, or nil and
 -- "overflow" when the bounded ring no longer covers them.
@@ -783,16 +897,51 @@ function O.TransportSince(since)
     end
     return out
 end
-function O.RequestRefresh()
+-- A manual Recheck may still obtain the exact ownership result while a charge
+-- reply is outstanding. This sends no second charge request and no choice query.
+function O.RequestOwnershipRefresh()
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestGrantedPerks)~="function" then return false,"refresh_unavailable" end
+    if not pcall(svc.RequestGrantedPerks) then return false,"ownership_refresh_failed" end
+    return true
+end
+function O.RequestRefresh(withChoice)
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
-    if not a or not b then return false,"The client cannot request an Orb/ownership refresh." end
-    local okA=pcall(orb.RequestCharges);local okB=pcall(svc.RequestGrantedPerks)
-    -- The mark is the arrival ordinal at this moment. It is not a correlation: a
+    if not a or not b then return false,"refresh_unavailable" end
+    local choiceReady=type(svc.RequestChoice)=="function"
+    if withChoice and choiceReady and not outgoingReady() then return false,"no_choice_observer" end
+    if withChoice and choiceReady then
+        local opts=_G.ProjectEbonholdOptionsService
+        local ok,value=false,nil
+        if type(opts)=="table" and type(opts.GetSetting)=="function" then ok,value=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes") end
+        if not ok or value~=false then return false,"auto_accept" end
+    end
+    -- Keep the pre-existing charge/ownership refresh when the optional choice
+    -- query is missing, but report failure: partial facts authorize no recovery.
+    local ord=T.ord
+    local okA=pcall(orb.RequestCharges)
+    if not okA then return false,"charge_refresh_failed" end
+    -- Retain the sent request even when a later refresh throws. The mark starts
+    -- before the call, so a synchronous reply is included in serialization too.
+    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=ord
+    local mark={ord=ord,n=T.requests,epoch=T.epoch,ownBare=T.ownBare}
+    local okB=pcall(svc.RequestGrantedPerks)
+    if not okB then return false,"ownership_refresh_failed",mark end
+    local bareBefore,framedBefore=T.ownBare,T.ownFramed
+    local okCall=not withChoice or (choiceReady and pcall(svc.RequestChoice))
+    local okChoice=okCall
+    if withChoice and choiceReady then
+        okChoice=okChoice and outgoingReady() and T.ownBare>bareBefore and T.ownFramed==framedBefore
+    end
+    -- The mark is the arrival ordinal before the charge call. It is not a correlation: a
     -- reply that arrives later is "observed after refresh began", nothing more. A request
     -- that was not sent has no mark.
-    if not okA then return false end
-    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord
-    return okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
+    mark.ownBare=T.ownBare;mark.choiceUnverified=withChoice and choiceReady and not okChoice or nil
+    local why
+    if withChoice and not choiceReady then why="choice_query_unavailable"
+    elseif not okCall then why="choice_request_failed"
+    elseif not okChoice then why="own_choice_request" end
+    return okChoice,why,mark
 end

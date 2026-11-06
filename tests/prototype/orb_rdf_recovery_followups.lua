@@ -1,3 +1,5 @@
+-- EXPECT semantic replacements from a43cf27: loading holds session ownership,
+-- and deliberate Stop cannot drift to PAUSED; exact-result/no-repeat guards stay.
 -- Follow-ups from the second reported RDF case (test.9051): an Orb choice
 -- whose reply the game lost at a loading screen. Real Store, OrbRuntime,
 -- OrbAdapter, GameAdapter and SupportReport; only the game services are
@@ -169,10 +171,10 @@ do
  local H,M,A,O,source=LostReply()
  H.Advance(2)
  local s=M.Status()
- check(s.state=='PAUSED' and s.reason:find('Session interrupted',1,true)~=nil,'B1: right after the loading screen: '..s.reason)
+ check(s.state=='WAIT_WORLD' and s.running and s.pending and H.Count('orb-spend')==1 and H.Count('take')==1,'B1: approved session settles after loading without new sends: '..s.reason)
  H.Advance(6)
  s=M.Status()
- check(s.state=='PAUSED' and s.pending,'B1: still paused and unresolved')
+ check(s.state=='WAIT_RESULT' and s.running and s.pending,'B1: still waiting and unresolved')
  check(s.reason:find('still waiting for its reply',1,true)~=nil and s.reason:find('/reload',1,true)~=nil
   and s.reason:find('Desired A',1,true)~=nil and s.reason:find('different Echo',1,true)~=nil,
   'B1: the status names the waiting game choice, the Echo and /reload: '..s.reason)
@@ -196,7 +198,7 @@ do
  H.holdGrantedResponse=true
  H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false;H.Notify();A.Poll();H.Advance(1)
  local s=M.Status()
- check(s.pending and s.reason:find('/reload',1,true)==nil and s.reason:find('Session interrupted',1,true)~=nil,
+ check(s.pending and s.reason:find('/reload',1,true)==nil and s.state=='WAIT_RESULT',
   'B4: once the game no longer holds the choice, the /reload advice is gone: '..s.reason)
 end
 -- B5. Another pause reason is never replaced by the hint: the assigned

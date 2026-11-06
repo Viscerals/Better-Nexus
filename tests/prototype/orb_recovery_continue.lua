@@ -231,5 +231,268 @@ section('10 settings stay',function()
   'no other saved Orb setting was rebuilt or dropped')
 end)
 
+-- Late evidence has a finite envelope inside the unchanged durable caps.
+local function Bytes(v)
+ local n=0;for k,x in pairs(v)do n=n+#tostring(k)
+  if type(x)=='table'then n=n+Bytes(x)elseif type(x)=='string'then n=n+#x else n=n+8 end
+ end;return n
+end
+local function Padded(n,serial)
+ return World({latch=false,edit=function(row,state)
+  row.padding=string.rep('p',n);state.padding=row.padding
+  if serial then row.logSerial=serial;state.logSerial=serial end
+ end})
+end
+local function LateFour(H,M,server)
+ for _=1,4 do server.Push(1220,'bad',{sender='OtherSender'})end
+ M.Pump(true)
+end
+local function NewApproved(H,M,A)
+ assert(A.SetFirstLoadoutWishlistIdentity('Near cap follow-on',{{spellId=410002,quality=2,stacks=2}}))
+ assert(M.UseAssignedWishlist());local shown=M.Status();return M.Start(3,false,shown.historyReview)
+end
+-- Strict semantic replacement of the 290b02d reserve-refusal oracle: a
+-- pre-existing explicit receipt uses the original raw 6144-byte exit cap.
+-- Future late reservation remains mandatory for prospective/automatic work;
+-- true raw oversize still refuses without discarding any evidence.
+section('11 legacy entry keeps its original raw exit cap',function()
+ local H,M,A,O,server=Padded(3550);local original=H.Clone(R.Saved());local v=Ready(H,M)
+ local ok,why=M.ContinueConfirm(v.token)
+  check(ok==true,'EXPECT explicit legacy exit is not tightened by optional late headroom: '..tostring(why))
+  local entry=R.SavedRow('orbRecoveryArchive')[1]
+  check(Bytes(entry)>5700 and Bytes(entry)<=6144 and R.Same(entry.receipt,original)
+   and not R.Saved() and H.Count('orb-spend')==0 and H.Count('take')==0,
+   'GUARD original-cap exit retains exact evidence and performs no gameplay action')
+  H,M,A,O,server=Padded(4200);original=H.Clone(R.Saved());v=Ready(H,M)
+  ok,why=M.ContinueConfirm(v.token)
+  check(ok==nil and why=='entry_too_large' and R.Same(R.Saved(),original)
+   and R.SavedRow('orbRecoveryArchive')==nil,'GUARD true raw oversize still preserves and refuses the receipt')
+end)
+section('12 late evidence stays within caps',function()
+ local H,M,A,O,server=Padded(3000);local original=H.Clone(R.Saved());local v=Ready(H,M)
+ assert(M.ContinueConfirm(v.token),'SETUP real padded Continue archive')
+ local entry=R.SavedRow('orbRecoveryArchive')[1]
+ check(Bytes(entry)>5400 and Bytes(entry)<=6144,'SETUP real near-cap entry includes preserved unknown padding')
+ LateFour(H,M,server);entry=R.SavedRow('orbRecoveryArchive')[1]
+ check(entry.lateN==4 and #entry.late==4 and Bytes(entry)<=6144 and R.Same(entry.receipt,original),
+  'EXPECT four real late events remain bounded and preserve the exact receipt')
+ assert(NewApproved(H,M,A))
+ check(H.Count('orb-spend')==1,'EXPECT bounded late evidence does not poison retained history for a new approved action')
+end)
+-- Strict semantic replacement of the 290b02d reserved-total refusal: preserve
+-- the original raw 28672-byte explicit exit cap, plus an actual full control.
+section('13 legacy total keeps its original raw exit cap',function()
+ local entries={}
+ for i=1,4 do
+  local H,M,A,O,server=Padded(3000,i);local v=Ready(H,M)
+  assert(M.ContinueConfirm(v.token),'SETUP real distinct padded archive')
+  entries[i]=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ end
+ local H,M,A,O,server=Padded(3000,5)
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(entries)end))
+ local original=H.Clone(R.Saved());local v=Ready(H,M);local ok,why=M.ContinueConfirm(v.token)
+  check(ok==true,'EXPECT raw-bounded legacy explicit exit does not reserve optional future metadata: '..tostring(why))
+  local all=H.Clone(R.SavedRow('orbRecoveryArchive'));local total=0
+  for i,e in ipairs(all)do total=total+Bytes(e);if i<=4 then
+   check(R.Same(e,entries[i]),'GUARD explicit exit preserves each original history entry')
+  end end
+  check(#all==5 and total<=28672 and R.Same(all[5].receipt,original) and not R.Saved(),
+   'GUARD raw-bounded exit retains exact receipt and stays within original archive caps')
+  H,M,A,O,server=Padded(100,6)
+  assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(all)end))
+  original=H.Clone(R.Saved());v=Ready(H,M);ok,why=M.ContinueConfirm(v.token)
+  check(ok==nil and why=='archive_full' and R.Same(R.Saved(),original)
+   and R.Same(R.SavedRow('orbRecoveryArchive'),all),
+   'GUARD true raw archive exhaustion still refuses without eviction or receipt loss')
+end)
+section('14 legacy headroom cannot be overrun by diagnostics',function()
+ local H,M,A,O,server=Padded(3000);local v=Ready(H,M)
+ assert(M.ContinueConfirm(v.token),'SETUP actual valid Continue archive before a future envelope field')
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)
+  row.orbRecoveryArchive[1].futureEnvelope=string.rep('e',550)
+ end))
+ local original=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ check(Bytes(original)>6050 and Bytes(original)<=6144,'SETUP preserved future envelope leaves insufficient late headroom')
+ LateFour(H,M,server)
+ check(R.Same(R.SavedRow('orbRecoveryArchive')[1],original),
+  'EXPECT optional late metadata cannot overrun caps or drop an unknown envelope field')
+ assert(NewApproved(H,M,A))
+ check(H.Count('orb-spend')==1,'EXPECT refused optional metadata preserves readable bounded history and ordinary approval')
+end)
+
+section('15 legacy total headroom cannot be overrun',function()
+ local entries={}
+ for i=1,5 do
+  local H,M,A,O,server=Padded(2500,100+i)
+  if i>1 then assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(entries)end))end
+  local v=Ready(H,M);assert(M.ContinueConfirm(v.token),'SETUP real accumulated valid padded archives')
+  entries=H.Clone(R.SavedRow('orbRecoveryArchive'))
+  if i==5 then
+   local total=0;for _,e in ipairs(entries)do total=total+Bytes(e)end
+   local remaining=28630-total-5*#'futureEnvelope'
+   assert(remaining>0,'SETUP legacy total has room for preserved future fields')
+   for index,e in ipairs(entries)do
+    local n=math.floor(remaining/(6-index));e.futureEnvelope=string.rep('e',n);remaining=remaining-n
+    assert(Bytes(e)<=6144,'SETUP each future envelope remains below the entry cap')
+   end
+   assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(entries)end))
+   local original=H.Clone(entries);LateFour(H,M,server)
+   check(R.Same(R.SavedRow('orbRecoveryArchive'),original),'EXPECT optional late metadata respects the whole archive28672 byte cap')
+   local ok,why=NewApproved(H,M,A)
+   check(not ok and why:find('reserved space',1,true) and H.Count('orb-spend')==0 and not R.Saved(), 'EXPECT readable near-full legacy history refuses new authority without an exit reserve')
+   check(R.Same(R.SavedRow('orbRecoveryArchive'),original) and not M.BlocksOrdinary(),'GUARD capacity refusal preserves exact history and ordinary automation availability')
+  end
+ end
+end)
+
+-- policy A+D: exact retained history is acknowledged only by a NEW
+-- represented approval. All fixtures use real archived receipts and real owners.
+local function S01Archive(chosen)
+ local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(1))
+ local server=R.Server(H)
+ H.service.RequestChoice=function()SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}end
+ if chosen then H.Offer();H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false end
+ for _=1,180 do if M.Status().state=='FINISHED'then break end;H.Advance(.25)end
+ assert(M.Status().state=='FINISHED' and not R.Saved() and #R.SavedRow('orbRecoveryArchive')==1,'SETUP real bounded automatic UNKNOWN/NONE archive')
+ return H,M,A,O,server
+end
+section('hidden Start cannot acknowledge history',function()
+ local H,M,A,O=S01Archive(true);local old=H.Clone(R.SavedRow('orbRecoveryArchive'));local off=Nexus.DisableOrdinaryAutomation;local disables=0
+ Nexus.DisableOrdinaryAutomation=function(...)disables=disables+1;return off(...)end
+ local ok=M.Start(3)
+ check(not ok and H.Count('orb-spend')==1 and not R.Saved() and disables==0,'EXPECT history Start without represented review refuses before Auto/owner/pending')
+ check(R.Same(R.SavedRow('orbRecoveryArchive'),old) and not M.BlocksOrdinary(),'GUARD refused new approval preserves history and ordinary owner availability')
+end)
+section('prepared history requires represented acknowledgment',function()
+ local H,M,A,O=S01Archive(false);local plan=assert(M.Prepare('assigned',3))
+ check(plan.historyCount==1 and type(plan.historyRisk)=='string' and plan.historyAcknowledgment~=nil,'EXPECT Prepare exposes bounded history risk and explicit acknowledgment fact')
+ check(not M.Confirm(plan.token) and H.Count('orb-spend')==1 and not R.Saved(),'EXPECT Confirm cannot silently supply missing acknowledgment')
+end)
+for _,chosen in ipairs({false,true})do
+ section('actual Start callback acknowledges '..tostring(chosen),function()
+  local H,M,A,O=S01Archive(chosen);local old=H.Clone(R.SavedRow('orbRecoveryArchive'))
+  assert(M.SetLimit(3));Nexus.OrbPanel.Show();local panel=NexusOrbPanel
+  check(panel.approval:GetText():find('1 unconfirmed',1,true) and panel.approval:GetText():find('baseline',1,true),'EXPECT same Start area visibly discloses history risk/baseline')
+  local lines=0;for line in (panel.approval:GetText()..'\n'):gmatch('(.-)\n')do lines=lines+1;check(#line*7<=panel.approval:GetWidth(),'GUARD history disclosure fits its real width conservatively')end
+  check(lines==2 and lines*17<=panel.approval:GetHeight(),'GUARD complete history acknowledgment fits the actual approval area')
+   check(panel.approval:GetText():find('Start approves this maximum',1,true)
+    and panel.approval:GetText():find('within max',1,true),
+    'EXPECT retained-history Start explicitly approves the maximum and binds recovery checks to it')
+   local tooltip=GameTooltip;local captured;local spends=H.Count('orb-spend')
+   GameTooltip={SetOwner=function()end,AddLine=function(_,text)captured=text end,Show=function()end,Hide=function()end}
+   assert(panel.approvalHit,'SETUP actual approval has the existing full-text hover helper')
+   panel.approvalHit:GetScript('OnEnter')(panel.approvalHit);GameTooltip=tooltip
+   check(captured==panel.approval._nexusFullText and captured:find('current Echoes baseline',1,true)
+    and captured:find('Up to 2 recovery checks within this maximum',1,true) and H.Count('orb-spend')==spends,
+    'GUARD approval hover retains complete baseline/risk/maximum wording and submits nothing')
+  panel.start:GetScript('OnClick')(panel.start);panel.start:GetScript('OnClick')(panel.start)
+  check(H.Count('orb-spend')==2 and R.Saved().attributionFormat==1 and R.Saved().guid==nil and R.Saved().attributionOwner~=nil,'EXPECT real Start callback carries represented fact and creates older-reader-failclosed envelope')
+  H.Offer();assert(M.Stop());H.Result(410002,2);H.Advance(.5)
+  check(not R.Saved() and H.Count('orb-spend')==2 and M.Status().spent==1,'EXPECT acknowledged prior source/pair permits only observed exact new replacement, also after Stop')
+  check(M.Status().reason:find('no server action correlation',1,true),'GUARD stopped observed replacement exposes its attribution limit in public status')
+  check(R.Same(R.SavedRow('orbRecoveryArchive'),old) and old[1].resolution.confidence=='NONE','GUARD old UNKNOWN/NONE receipt remains exact and unattributed')
+ end)
+end
+section('stale rendered history cannot enroll a new receipt',function()
+ local H,M,A,O=S01Archive(true);local status=M.Status();assert(M.SetLimit(3))
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].futureSemantic={source='410001:1'}end))
+ check(not M.Start(3,false,status.historyReview) and H.Count('orb-spend')==1 and not R.Saved(),'EXPECT changed/unsupported semantic envelope invalidates represented history')
+end)
+local S01Full
+section('capacity refuses before acquiring new authority',function()
+ local entries={}
+ for i=1,8 do
+  local H,M,A,O=World({latch=false,edit=function(row,state)row.logSerial=i;state.logSerial=i end})
+  local ready=Ready(H,M);assert(M.ContinueConfirm(ready.token));entries[i]=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ end
+ S01Full=entries
+ local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(entries)end))
+ local disables=0;local off=Nexus.DisableOrdinaryAutomation;Nexus.DisableOrdinaryAutomation=function(...)disables=disables+1;return off(...)end
+ local status=M.Status();local ok=M.Start(3,false,status.historyReview)
+ check(not status.canStart and not ok and disables==0 and not R.Saved() and H.Count('orb-spend')==0,'EXPECT full valid archive refuses before Auto disable/acquire/new pending')
+ check(not M.BlocksOrdinary() and R.Same(R.SavedRow('orbRecoveryArchive'),entries),'GUARD full archive remains exact and refused unadmitted run does not own ordinary automation')
+end)
+
+section('seventh valid entry leaves exactly one last exit slot',function()
+ assert(S01Full and #S01Full==8,'SETUP distinct real Continue-produced entries')
+ local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};local seven=H.Clone(S01Full);seven[8]=nil
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=seven end))
+ local plan=assert(M.Prepare('assigned',3));assert(M.Confirm(plan.token,plan.historyAcknowledgment))
+ check(H.Count('orb-spend')==1 and R.Saved(),'EXPECT seven valid entries permit one operation with its reserved exit')
+ assert(M.Stop());H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ M=R.Reload(H);local server=R.Server(H);S.Pass(H,M,A,1);local ready=Ready(H,M)
+ check(M.ContinueConfirm(ready.token) and #R.SavedRow('orbRecoveryArchive')==8 and not R.Saved(),'EXPECT the admitted last operation retains its exact explicit exit in the last slot')
+ for i,e in ipairs(seven)do check(R.Same(R.SavedRow('orbRecoveryArchive')[i].receipt,e.receipt),'GUARD last exit never rewrites an old receipt')end
+ check(not M.Start(3,false,M.Status().historyReview) and H.Count('orb-spend')==1 and not M.BlocksOrdinary(),'EXPECT final full archive is a finite terminal refusal before another pending')
+end)
+for _,where in ipairs({'save','adapter','host_sink'})do
+ section('lost reserve at '..where,function()
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};local seven=H.Clone(assert(S01Full));seven[8]=nil
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1
+  assert(raw(function(row)row.orbRecoveryArchive=seven end));local shown=M.Status();local injected=false;local crossed,hostObservedAfterCall=false,false
+  local function fill(row)if not injected then row.orbRecoveryArchive=H.Clone(S01Full);injected=true end end
+  if where=='save'then
+   owner.UpdateStateV1=function(fn,...)
+    return raw(function(row)
+     if M.CompactStatus() and M.CompactStatus().pending and not row.orbRefinement.pending then fill(row)end
+     return fn(row)
+    end,...)
+   end
+  elseif where=='adapter'then
+   local spend=A.Orbs.Spend;A.Orbs.Spend=function(...)assert(raw(fill));return spend(...)end
+  else
+   local host=ProjectEbonhold.OrbService.ConfirmSpend
+   ProjectEbonhold.OrbService.ConfirmSpend=function(...)crossed=true;return host(...)end
+   A.Orbs.BoundarySink(function(event)if event=='host_call'then hostObservedAfterCall=crossed;assert(raw(fill))end end)
+  end
+  local ok=M.Start(3,false,shown.historyReview);owner.UpdateStateV1=raw
+  assert(ok and injected,'SETUP real approval reached the selected synchronous boundary')
+  if where=='host_sink'then
+   check(hostObservedAfterCall and H.Count('orb-spend')==1 and R.Saved(),'EXPECT host-call observers run only after actual host crossing; submitted receipt is retained')
+  else
+   check(H.Count('orb-spend')==0 and not R.Saved() and M.Status().reserved==0,'EXPECT lost headroom before submission leaves no new pending/exposure or host action')
+    check(M.Status().state=='STOPPED' and not M.BlocksOrdinary() and not A.Orbs.IsOwned(),
+     'EXPECT unadmitted capacity refusal stops and releases ordinary automation')
+  end
+  check(#R.SavedRow('orbRecoveryArchive')==8,'GUARD no archive eviction or retry-to-pass')
+ end)
+end
+section('late semantic identity cannot hide behind acknowledgment',function()
+ local H,M,A,O=S01Archive(true);local shown=M.Status();assert(M.Start(3,false,shown.historyReview))
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].late={{k='choice_push',selectedKey='410002:2'}}end))
+ H.Offer();assert(M.Stop());H.Result(410002,2);H.Advance(.5)
+ check(R.Saved() and R.Saved().attributionAmbiguous,'EXPECT unsupported late source/choice evidence invalidates the exact acknowledged baseline')
+end)
+
+for _,where in ipairs({'save','adapter'})do
+ section('Stop at new-receipt '..where,function()
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};local stopped=false
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1
+  if where=='save'then
+   owner.UpdateStateV1=function(fn,...)
+    return raw(function(row)
+     if not stopped and M.CompactStatus() and M.CompactStatus().pending then stopped=true;assert(M.Stop())end
+     return fn(row)
+    end,...)
+   end
+  else local spend=A.Orbs.Spend;A.Orbs.Spend=function(...)stopped=true;assert(M.Stop());return spend(...)end end
+  assert(M.Start(3));owner.UpdateStateV1=raw
+  assert(stopped,'SETUP explicit Stop reached real pre-submission boundary')
+  check(M.Status().state=='STOPPED' and not M.Status().pending and not M.Resume(),'EXPECT stopped new-receipt boundary preserves stopped state and revokes further authority')
+  check(H.Count('orb-spend')==0 and not R.Saved() and not M.BlocksOrdinary(),'GUARD known-unsent stop leaves no host action or blocker')
+   check(not A.Orbs.IsOwned(),'EXPECT known-unsent Stop releases the adapter owner')
+ end)
+end
+
+section('changed assignment still qualifies observed baseline result',function()
+ local H,M,A,O=S01Archive(true);assert(M.Start(3,false,M.Status().historyReview));H.Offer()
+ assert(A.SetLoadoutWishlistIdentity(1,'New assignment',{{spellId=410004,quality=3,stacks=2}}));M.Pump();assert(M.Stop())
+ H.Result(410002,2);H.Advance(.5)
+ check(not R.Saved() and H.Count('orb-spend')==2,'GUARD old exact observed replacement settles after assignment change without new spend')
+ check(M.Status().reason:find('no server action correlation',1,true),'EXPECT changed-assignment status also distinguishes observation from server attribution')
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery continue: strict state-bound check, explicit confirmation, archive, nothing sent, never automatic checks='..checks)
