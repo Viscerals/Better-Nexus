@@ -1,5 +1,8 @@
 -- Player-facing terminology only. Stable policy/reason codes and protocol data
 -- remain unchanged; diagnostics may retain original codes for support.
+-- Issue #123: three status reasons resolve their English text through the
+-- Nexus.Localization seam (localizedReasons below); every other text here is
+-- unchanged.
 Nexus=Nexus or {}
 local T={};Nexus.UserText=T
 local reasons={
@@ -28,10 +31,7 @@ local reasons={
     ["Take wanted Echo"]="Take a needed Echo",
     ["invalid wishlist"]="This Wishlist cannot be used yet. Open it in the editor to check its targets",
     ["invalid loadout"]="This Saved Build is unavailable or not valid for this action. Check My Builds",
-    ["ROOT_MUTATION_PENDING"]="Saving is still in progress; wait for its final result",
-    ["CURSOR_REQUIRED"]="This list is still being prepared",
     ["ROOT_PENDING"]="The build library is still being prepared",
-    ["STORE_PENDING"]="Reading your saved data",
     ["SOURCE_KEY_WIDTH_EXCEEDED"]="A saved record has an unsupported long key. Keep your backup and report this code",
     ["preparing"]="Preparing shared-build data",
     ["cleaning"]="Removing expired requests",
@@ -44,6 +44,14 @@ local reasons={
     ["Tome levers"]="Echo availability controls",
     ["flag demotions cleared (they re-arm on fresh evidence)"]="Temporary safety-assumption disablements cleared; new evidence can disable them again",
 }
+-- Reasons whose English text comes from Nexus.Localization (issue #123). The
+-- raw reason stays the lookup key and is never rewritten; the value is the
+-- stable semantic key of its reviewed text (data/LocalizationEnglish.lua).
+local localizedReasons={
+    ["ROOT_MUTATION_PENDING"]="reason.save_in_progress",
+    ["CURSOR_REQUIRED"]="reason.list_preparing",
+    ["STORE_PENDING"]="reason.saved_data_reading",
+}
 local function availabilityName(id)
     local a=Nexus.GameAdapter
     local catalog=a and a.Catalog and a.Catalog()
@@ -51,9 +59,25 @@ local function availabilityName(id)
     local name=lever and lever.tomeName
     return name and (tostring(name).." (control #"..id..")") or ("Echo-availability control #"..id)
 end
+-- One of those reasons through the seam. When the seam has no reviewed text
+-- for the key it returns its documented safe status and the raw code is kept
+-- as the support detail; without the seam the reason reads like any other
+-- unrecognized code (the generic line in T.Message below).
+local function LocalizedReason(key,code)
+    local localization=Nexus.Localization
+    if type(localization)=="table" and type(localization.Text)=="function" then
+        local text,source=localization.Text(key)
+        if type(text)=="string" and text~="" then
+            if source=="unavailable" then return text.." "..T.Details(code) end
+            return text
+        end
+    end
+    return "This action is not available yet. Check the status or diagnostics. Details: "..code
+end
 function T.Message(value)
     local s=tostring(value or "")
     if reasons[s] then return reasons[s] end
+    if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end
     local prefix,body=s:match("^(L%d+ %-%- )(.*)$")
     if prefix then return prefix..T.Message(body) end
     body=s:match("^waiting: (.*)$")
