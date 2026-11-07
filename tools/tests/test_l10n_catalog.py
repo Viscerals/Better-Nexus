@@ -288,10 +288,10 @@ REFERENCE_SUCCESSORS = {
 # the bytes under test.
 CURRENT_SUCCESSOR_INPUTS = {
     "data/LocalizationPacks.lua": {
-        "canonical": ("8ab04e23bd772604a4371744645812f00688d2ace487d479d338f599646fd19c", 3316565),
-        "blob": "9564adffab70ebbec5831933b46bac7a3c21138c",
-        "firstCommit": "afa5e226946176ac44a736da2803ce76908461c5",
-        "physical": ("01e1b43b284a408efd3d0da7a6f1aae3b50496b67cfcdf889f5c518cf661fea7", 3341102)},
+        "canonical": ("c4a1542a3cd5b7a695d2338ed7bbc7d02fdd5209bcadb51ccb7e307acc2d12a5", 3316775),
+        "blob": "44ff89b7b179586fd0193af50e0f51ea5196d20a",
+        "firstCommit": "193d9a1c993300f71ea72222bd8a937d51fbd301",
+        "physical": ("a4c6f22322f06228b51b1361e233526ddbbabe4bc71de3eddb173b832f3db790", 3341312)},
     "docs/localization/RELEASE_LANGUAGES.json": {
         "canonical": ("78628e4fd0cd70030ba40e5b62424492f27497590f0813e86c92fbf3bec2986c", 265898),
         "blob": "00fdd4fc3947b4dfaef84c2e4ab43d67502d651b",
@@ -323,15 +323,15 @@ HISTORICAL_SUCCESSOR_INPUTS = {
 }
 # The decoded entries of each current pack: SHA-256 of canonical JSON
 # (ensure_ascii false, sorted keys, separators "," and ":") of the key-to-text
-# map, as bound per language by the packs pinned at 351a83b5 (literal
-# operator facts; esES is unchanged by that commit).
+# map independently derived from six prior-map controls plus the 12 reviewed
+# caption literals accepted in 193d9a1c (derivation 0841e837; other values exact).
 CURRENT_PACK_VALUE_MAPS = {
-    "frFR": "b769274bc66cc38542252725927ac69bee261c5d9f1b4b0a1526507f1da02f03",
-    "deDE": "e1124f68173d6fa89c4564740c9b16b504d26f3ce6f35a4d4984904d19a73aa0",
-    "esES": "ab1ee1232a5617f1a883c40eb345e5d5f6e77f0986571fdb8945080ec6bcf112",
-    "plPL": "9d0e86860c6d11aca2cc73cf83273f77027bf61bfdf5162697b8c32866d4b5f7",
-    "ptBR": "f9426a6de500da65a626f0489bf00cb948672f3bc0c048e22dd315a9885ee31e",
-    "ruRU": "3f655bc3fa4a728fa43e1e750467c7b741275bc4df8d746db4f8470ff3f75e67",
+    "frFR": "e856aca5fae4dec6066c81499c4105502d440c1f7abed815c0e096d001ae3996",
+    "deDE": "e8c4a5170010e4b11f625b41c3e4fef2a3235839274d0c28e24dd751030a617c",
+    "esES": "92fe120f03d2e9f3241f43e428accdf93fecf401797d0f6dc1d51f07d1c638ad",
+    "plPL": "0ce81c78f9da63b8b2579b9f2e0ca6990f925ba3b5e1de0a327bc952a9fb3bd3",
+    "ptBR": "b61b494342b52b53156c7a3abf17f5d1eca9abcd453f1fd095261c93c38269d8",
+    "ruRU": "9cf9473df2185e847184a02ff1adb095e238441404d59377aa31e514eb075f49",
 }
 # The actual entry-review declarations: two distinct evidence cohorts, in
 # this order, all technical metadata, not fluent human, native, rights or

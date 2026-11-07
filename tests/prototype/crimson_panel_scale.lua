@@ -209,6 +209,13 @@ C.scenario('Z8 a drag at 150% saves UIParent units; a render during a drag keeps
  rawset(root,'GetCenter',function() return cx,cy end)
  rawset(UIParent,'GetCenter',function() return 960,540 end)
  local grip=root._dragGrip
+ -- Held-Shift scope (the accepted Shift start gate): this drag is the
+ -- intended real move, so Shift answers as held (the client's 1) from its
+ -- start through its saved centre. The exact previous query returns on every
+ -- exit; an error is raised again after that.
+ local shiftBefore=IsShiftKeyDown
+ IsShiftKeyDown=function() return 1 end
+ local heldOk,heldErr=pcall(function()
  grip:GetScript('OnDragStart')(grip,'LeftButton')
  cx,cy=600,420
  local n=#scaled
@@ -226,6 +233,11 @@ C.scenario('Z8 a drag at 150% saves UIParent units; a render during a drag keeps
  P.Render(Model())
  rawset(root,'GetCenter',nil);rawset(UIParent,'GetCenter',nil)
  Saved().panelX,Saved().panelY=nil,nil
+ end)
+ IsShiftKeyDown=shiftBefore
+ -- Cleanup only after an error: a move left active ends by the grip's real drag-stop.
+ if not heldOk and P._panelDrag then local stop=grip:GetScript('OnDragStop');if stop then pcall(stop,grip) end end
+ if not heldOk then error(heldErr,0) end
 end)
 
 C.scenario('Z9 only the main panel is scaled',function()

@@ -2096,9 +2096,36 @@ end
 function M.BeginPanelDrag(origin, button)
     if M._panelDrag or not frame or (button ~= nil and button ~= "LeftButton") then return false end
     if not frame:IsShown() then return false end
+    local shiftQuery = IsShiftKeyDown
+    if type(shiftQuery) ~= "function" then return false end
+    local okShift, shift = pcall(shiftQuery)
+    if not okShift or not (shift == 1 or shift == true) then return false end
     local x, y = M.PanelCenterOffset()
-    if not pcall(frame.StartMoving, frame) then return false end
-    M._panelDrag = {origin = origin or frame, x = x, y = y}
+    -- While this move is active, and only then, the root's OnUpdate also
+    -- watches Shift: any answer but 1 or true, a failing query or a missing
+    -- API finishes the move. The callback the root had before is still
+    -- called each frame and is put back when the move ends, unless another
+    -- owner has replaced the watch since; a watch left in another owner's
+    -- chain only forwards to that earlier callback.
+    local drag = {origin = origin or frame, x = x, y = y}
+    local okPrevious, previous = pcall(frame.GetScript, frame, "OnUpdate")
+    if not okPrevious then return false end
+    drag.previous = previous
+    drag.watch = function(self, elapsed)
+        if M._panelDrag == drag then
+            local query, okHeld, held = IsShiftKeyDown, false, nil
+            if type(query) == "function" then okHeld, held = pcall(query) end
+            if not okHeld or not (held == 1 or held == true) then M.FinishPanelDrag() end
+        end
+        if previous then return previous(self, elapsed) end
+    end
+    local okWatch = pcall(frame.SetScript, frame, "OnUpdate", drag.watch)
+    if not (okWatch and pcall(frame.StartMoving, frame)) then
+        local okCurrent, current = pcall(frame.GetScript, frame, "OnUpdate")
+        if okCurrent and rawequal(current, drag.watch) then pcall(frame.SetScript, frame, "OnUpdate", previous) end
+        return false
+    end
+    M._panelDrag = drag
     M._restorePlacement = nil
     M.HidePanelTooltip(origin)
     return true
@@ -2108,6 +2135,10 @@ function M.FinishPanelDrag()
     local drag = M._panelDrag
     if not drag then return false end
     M._panelDrag = nil
+    if frame and drag.watch then
+        local okCurrent, current = pcall(frame.GetScript, frame, "OnUpdate")
+        if okCurrent and rawequal(current, drag.watch) then pcall(frame.SetScript, frame, "OnUpdate", drag.previous) end
+    end
     if frame then pcall(frame.StopMovingOrSizing, frame) end
     local ok, x, y = pcall(M.PanelCenterOffset)
     if ok and x and y and (x ~= drag.x or y ~= drag.y) then
@@ -4444,6 +4475,51 @@ end
 -- text inset. One table: the main chunk's locals are counted too.
 local OFFER = {edge = {0.32, 0.32, 0.38}, mark = {1, 0.82, 0}, gap = 4, pad = 4}
 
+-- The empty slot before an offer's name (MI-F01: a verified item or spell
+-- icon, otherwise an empty slot in the card's own Echo quality colour). No
+-- verified offer icon reaches the panel: a model card's facts
+-- (Readout.CardFacts) hold its name, its own quality and, for a generated
+-- name, a spell id, so every shown card has the empty slot. It is made once
+-- per card on its first need, as plain textures of the card (a dark interior
+-- and a 1-unit outline; no frame, mouse, file or icon id), and afterwards is
+-- only repainted and placed. `r, g, b` (optional) repaint the outline;
+-- `rowHeight` (optional) places the square in a row of that height, at the
+-- text inset and clear of the widest (marked, 2-unit) status edge, and the
+-- width it then takes with its gap before the name is returned (else 0).
+function M.OfferSlot(card, rowHeight, r, g, b)
+    if not card then return 0 end
+    local slot = card._nexusSlot
+    if not slot then
+        slot = {interior = card:CreateTexture(nil, "BORDER"), edges = {}}
+        slot.interior:SetTexture(0, 0, 0, 0.45)
+        for edge = 1, 4 do slot.edges[edge] = card:CreateTexture(nil, "ARTWORK") end
+        card._nexusSlot = slot
+    end
+    local e = slot.edges
+    if r and g and b then
+        for edge = 1, 4 do e[edge]:SetTexture(r, g, b, 1) end
+    end
+    local height = tonumber(rowHeight)
+    if not height then return 0 end
+    local margin = 2
+    local side = math.max(1, math.floor(height) - margin * 2)
+    local x, y = OFFER.pad, margin
+    e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y); e[1]:SetSize(side, 1)
+    e[2]:ClearAllPoints(); e[2]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -(y + side - 1)); e[2]:SetSize(side, 1)
+    e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y); e[3]:SetSize(1, side)
+    e[4]:ClearAllPoints(); e[4]:SetPoint("TOPLEFT", card, "TOPLEFT", x + side - 1, -y); e[4]:SetSize(1, side)
+    local inside = slot.interior
+    inside:ClearAllPoints()
+    if side > 2 then
+        inside:SetPoint("TOPLEFT", card, "TOPLEFT", x + 1, -(y + 1))
+        inside:SetSize(side - 2, side - 2)
+        inside:Show()
+    else
+        inside:Hide()
+    end
+    return side + OFFER.gap
+end
+
 function M.EnsureOfferCards()
     if not frame then return nil end
     if frame._offerCards then return frame._offerCards end
@@ -4540,7 +4616,12 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             local history = Nexus.OrbHistory
             local q = own and tonumber(own.quality)
             local qc = q and history and type(history.QUALITY_COLORS) == "table" and history.QUALITY_COLORS[q] or nil
-            card.name:SetTextColor(qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1)
+            -- The same colour for the name and the empty slot before it
+            -- (M.OfferSlot), repainted on every render so a reused card keeps
+            -- no earlier card's tint: white (1, 1, 1) when the quality is unknown.
+            local r, g, b = qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1
+            card.name:SetTextColor(r, g, b)
+            M.OfferSlot(card, nil, r, g, b)
             card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
             card.tag:SetText(shown.shown or shown.tag)
@@ -4617,7 +4698,8 @@ end
 -- without room, is shortened, complete on the card's hover), the name in the
 -- rest (shortened there, complete on the hover and named in the
 -- recommendation). The band, the roll box and the panel keep their size.
--- No Echo icon is drawn: no verified icon source exists in this source.
+-- No verified Echo icon reaches an offer (the model's card facts carry none),
+-- so each row starts with its empty quality slot (M.OfferSlot).
 -- Returns "rows".
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
@@ -4631,15 +4713,19 @@ function M.PlaceOfferCards(layout, box, inset)
         do
             card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (layout.small + rowGap)))
             card:SetSize(width, layout.small)
-            -- The status words first: the tag up to half the row, the quality
-            -- up to what leaves the name a sixth of it; the name takes the rest.
+            -- The empty slot first, at the text inset (M.OfferSlot). Then, in
+            -- the rest of the row, the status words: the tag up to half of it,
+            -- the quality up to what leaves the name a sixth of it; the name
+            -- takes what is left.
             local inner = math.max(1, width - OFFER.pad * 2)
+            local slotW = M.OfferSlot(card, layout.small)
+            local rest = math.max(1, inner - slotW)
             local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
-            local tagW = tag ~= "" and math.min(math.floor(inner / 2), math.ceil(M.LineWidth(card.tag, tag))) or 0
-            local room = inner - tagW - 2 * OFFER.gap - math.floor(inner / 6)
+            local tagW = tag ~= "" and math.min(math.floor(rest / 2), math.ceil(M.LineWidth(card.tag, tag))) or 0
+            local room = rest - tagW - 2 * OFFER.gap - math.floor(rest / 6)
             local qualityW = quality ~= "" and math.max(1, math.min(room, math.ceil(M.LineWidth(card.quality, quality)))) or 0
-            local nameW = math.max(1, inner - tagW - qualityW - (tagW > 0 and OFFER.gap or 0) - (qualityW > 0 and OFFER.gap or 0))
-            local x = OFFER.pad
+            local nameW = math.max(1, rest - tagW - qualityW - (tagW > 0 and OFFER.gap or 0) - (qualityW > 0 and OFFER.gap or 0))
+            local x = OFFER.pad + slotW
             for _, part in ipairs({{card.name, nameW}, {card.quality, qualityW}, {card.tag, tagW}}) do
                 local text = part[1]
                 text:ClearAllPoints()

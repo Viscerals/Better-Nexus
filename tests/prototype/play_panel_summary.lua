@@ -378,11 +378,12 @@ C.scenario('S8 the difficulty card: hover facts, Hardcore click route, and no ca
  C.expect(card:IsShown() and NexusPanel:GetHeight()==withCard,'S8: with the Nexus HUD again the card is back',NexusPanel:GetHeight())
 end)
 
--- The visible drag grip (design/current, D1-D4; issue #168 made plain-left
--- dragging the contract): a plain click does nothing; a plain left drag, with
--- or without Shift, moves the panel through its one drag owner and saves
--- panelX / panelY. Native pointer capture is NOT RUN.
-C.scenario('S9 the drag grip: visible, apart from the title and controls; a plain left drag moves',function()
+-- The visible drag grip (design/current, D1-D4; issue #168 with the
+-- requested Shift gate): a plain click does nothing; a left drag without
+-- Shift starts no move and leaves panelX / panelY as they were; a left drag
+-- while Shift is held moves the panel once through its one drag owner and
+-- saves panelX / panelY. Native pointer capture is NOT RUN.
+C.scenario('S9 the drag grip: visible, apart from the title and controls; only a Shift-held left drag moves',function()
  P.Render(Model())
  local grip=NexusPanel._dragGrip
  if not C.setup(grip~=nil and grip:IsShown(),'S9: fixture: the grip is shown') then return end
@@ -394,24 +395,30 @@ C.scenario('S9 the drag grip: visible, apart from the title and controls; a plai
   end
  end
  local tip=table.concat(V.TooltipLines(grip:GetScript('OnEnter'),grip),' ')
- C.expect(tip:find('Drag to move',1,true)~=nil and tip:find('Shift',1,true)==nil,'S9: its hover says Drag to move, without Shift',tip)
+ C.expect(tip:find('Hold Shift and drag to move',1,true)~=nil
+  and tip:find('Hold Shift and drag this grip, or any part of the panel that is not a button, to move it.',1,true)~=nil
+  and tip:find('Release Shift to stop.',1,true)~=nil,
+  'S9: its hover requires holding Shift to drag and says releasing Shift stops the move',tip)
  C.expect(grip:GetScript('OnClick')==nil,'S9: a plain click on the grip has no action')
  local moves,stops,cx=0,0,100
  NexusPanel.StartMoving=function() moves=moves+1 end
  NexusPanel.StopMovingOrSizing=function() stops=stops+1 end
  NexusPanel.GetCenter=function() return cx,50 end
+ -- The saved position before the drags, read only, for the refusal below.
+ local priorX,priorY=P.SavedLayoutRoot().panelX,P.SavedLayoutRoot().panelY
  local shift=IsShiftKeyDown
  IsShiftKeyDown=function() return false end
  grip:GetScript('OnDragStart')(grip,'LeftButton');cx=140;grip:GetScript('OnDragStop')(grip)
- C.expect(moves==1 and stops==1,'S9: a plain left drag moves the panel',moves..'/'..stops)
+ C.expect(moves==0 and stops==0 and P._panelDrag==nil,'S9: a left drag without Shift neither moves the panel nor leaves a drag owner',moves..'/'..stops)
  local saved=P.SavedLayoutRoot()
- C.expect(tonumber(saved.panelX)==140 and tonumber(saved.panelY)==50,'S9: the position is saved as panelX / panelY',
-  tostring(saved.panelX)..','..tostring(saved.panelY))
+ C.expect(saved.panelX==priorX and saved.panelY==priorY,'S9: a left drag without Shift leaves panelX / panelY as they were',
+  tostring(saved.panelX)..','..tostring(saved.panelY)..' (was '..tostring(priorX)..','..tostring(priorY)..')')
  IsShiftKeyDown=function() return true end
  grip:GetScript('OnDragStart')(grip,'LeftButton');cx=150;grip:GetScript('OnDragStop')(grip)
  IsShiftKeyDown=shift
  NexusPanel.StartMoving,NexusPanel.StopMovingOrSizing,NexusPanel.GetCenter=nil,nil,nil
- C.expect(moves==2 and stops==2 and tonumber(saved.panelX)==150,'S9: a Shift-drag still moves it',moves..'/'..stops)
+ C.expect(moves==1 and stops==1 and P._panelDrag==nil and tonumber(saved.panelX)==150 and tonumber(saved.panelY)==50,
+  'S9: a Shift-held left drag moves it once and saves panelX / panelY',moves..'/'..stops..' '..tostring(saved.panelX)..','..tostring(saved.panelY))
  saved.panelX,saved.panelY=nil,nil
 end)
 

@@ -187,7 +187,7 @@ def main() -> int:
     ns.output.parent.mkdir(parents=True, exist_ok=True)
     if ns.output.exists():
         ns.output.unlink()
-    run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace')
     # The runner's own exit status is kept apart from its report: a nonzero exit fails the check even when
     # every report row is a PASS, and exit 0 alone proves nothing without a complete report.
     runner_exit = run.returncode

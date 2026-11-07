@@ -159,7 +159,14 @@ C.scenario('C2 a click on Options straddling an ordinary render is delivered: cl
  CloseDropDownMenus()
 end)
 
-C.scenario('C3 a plain-left move keeps moving across ordinary renders and saves once',function()
+C.scenario('C3 a Shift-held left move keeps moving across ordinary renders and saves once',function()
+ -- Held-Shift scope (the accepted Shift start gate): these moves are the
+ -- intended real ones, so Shift answers as held (the client's 1) through the
+ -- loop. The exact previous query returns on every exit; an error is raised
+ -- again after that.
+ local shiftBefore=IsShiftKeyDown
+ IsShiftKeyDown=function() return 1 end
+ local heldOk,heldErr=pcall(function()
  local surfaces={{'Build line',root._contextBuildHit},{'Wishlist line',root._contextWishlistHit},
   {'grip',root._dragGrip},{'background',root}}
  for _,s in ipairs(surfaces) do
@@ -185,9 +192,19 @@ C.scenario('C3 a plain-left move keeps moving across ordinary renders and saves 
   end
  end
  P.Render(Model())
+ end)
+ IsShiftKeyDown=shiftBefore
+ -- Cleanup only after an error: a move left active ends by the root's real mouse-up.
+ if not heldOk and P._panelDrag then local up=root:GetScript('OnMouseUp');if up then pcall(up,root) end end
+ if not heldOk then error(heldErr,0) end
 end)
 
 C.scenario('C4 a failing render still hides the root, keeps it hidden and ends a move once',function()
+ -- Held-Shift scope for this real move (as in C3), through the failing
+ -- render, its cleanup and the recovery render.
+ local shiftBefore=IsShiftKeyDown
+ IsShiftKeyDown=function() return 1 end
+ local heldOk,heldErr=pcall(function()
  ResetMove()
  local build=root._contextBuildHit
  build:GetScript('OnDragStart')(build,'LeftButton')
@@ -199,6 +216,11 @@ C.scenario('C4 a failing render still hides the root, keeps it hidden and ends a
  C.guard(not ok and not root:IsShown(),'C4: the failing render leaves the root hidden')
  C.guard(P._panelDrag==nil and Move.stops==1 and Saved()==420-960,'C4: the move ended once and saved its position once',Move.stops)
  C.guard(P.Render(Model())==true and root:IsShown(),'C4: the next good render shows the panel again')
+ end)
+ IsShiftKeyDown=shiftBefore
+ -- Cleanup only after an error: a move left active ends by the root's real mouse-up.
+ if not heldOk and P._panelDrag then local up=root:GetScript('OnMouseUp');if up then pcall(up,root) end end
+ if not heldOk then error(heldErr,0) end
 end)
 
 C.scenario('C5 a hidden panel stays hidden through renders; a first render shows it after its commit',function()

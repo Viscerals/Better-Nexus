@@ -7599,7 +7599,7 @@
     {
       "key": "help.body.faq_panel_size_answer",
       "kind": "block",
-      "english": "Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Drag any part of the panel that is not a button to move it; Options > Reset Panel Position puts it back.",
+      "english": "Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Hold Shift and drag any part of the panel that is not a button to move it. Release Shift to stop. Options > Reset Panel Position puts it back.",
       "placeholders": [],
       "group": "help",
       "meaning": "The answer under its FAQ question (help.label.faq_panel_size_question), shown in white. Do not add blank lines (a blank line would start a new question). Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -29462,7 +29462,7 @@
     {
       "key": "panel.tooltip.drag_explained",
       "kind": "text",
-      "english": "Drag this grip, or any part of the panel that is not a button, to move it. A plain click does nothing. Options > Reset Panel Position puts the panel back.",
+      "english": "Hold Shift and drag this grip, or any part of the panel that is not a button, to move it. Release Shift to stop. A plain click does nothing. Options > Reset Panel Position puts the panel back.",
       "placeholders": [],
       "group": "panel",
       "meaning": "How to move the panel. \"Options > Reset Panel Position\" must match panel.button.options and panel.menu.reset_position.",
@@ -29473,7 +29473,7 @@
     {
       "key": "panel.tooltip.drag_title",
       "kind": "text",
-      "english": "Drag to move",
+      "english": "Hold Shift and drag to move",
       "placeholders": [],
       "group": "panel",
       "meaning": "Hover title of the six-dot grip.",

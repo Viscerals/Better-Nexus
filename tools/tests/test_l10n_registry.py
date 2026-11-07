@@ -1001,7 +1001,47 @@ class DiagnosticTests(unittest.TestCase):
                                                   if key in retired))
 
     def test_d3_active_keys_partition_once_and_bad_extras_do_not_count(self):
-        data = multi_error_inputs(self.inputs)
+        # A deliberately partial frFR pack: its one entries block keeps only
+        # the dated cohort without panel.button.options, selected by key, one
+        # line per entry; every other byte of the five inputs is kept.
+        keep = set(CURRENT_KEYS) - {"panel.button.options"}
+        source = self.inputs[1]
+        block = list(re.finditer(
+            rb"\n    frFR = \{\r?\n        name = \"[^\"\r\n]*\",\r?\n        entries = \{\r?\n"
+            rb"((?: {12}\[\"[^\"\r\n]+\"\] = [^\r\n]*\r?\n)*)", source))
+        self.assertEqual(len(block), 1)
+        lines = block[0].group(1).splitlines(keepends=True)
+        self.assertEqual(len(lines), len(self.catalog.parse_packs(source)["frFR"]["entries"]))
+        kept = [line for line in lines
+                if re.match(rb' {12}\["([^"\r\n]+)"\]', line).group(1).decode("utf-8") in keep]
+        self.assertEqual(len(kept), len(keep))
+        start, end = block[0].span(1)
+        partial = list(self.inputs)
+        # A controlled draft value: the one kept panel.button.my_builds row
+        # takes a synthetic, plainly non-English test literal instead of the
+        # corpus value, keeping its key, indentation and line break. It is
+        # fixture text, not a translation; D4 makes this key English-identical.
+        draft = "Lorem ipsum"
+        english = self.catalog.parse_english(self.inputs[0])
+        self.assertNotEqual(draft, english["panel.button.my_builds"])
+        keys = [re.match(rb' {12}\["([^"\r\n]+)"\]', line).group(1) for line in kept]
+        self.assertEqual(keys.count(b"panel.button.my_builds"), 1)
+        index = keys.index(b"panel.button.my_builds")
+        ending = kept[index][len(kept[index].rstrip(b"\r\n")):]
+        kept[index] = (b'            ["panel.button.my_builds"] = "%s",' % draft.encode("utf-8")
+                       + ending)
+        partial[1] = source[:start] + b"".join(kept) + source[end:]
+        self.assertEqual(set(self.catalog.parse_packs(partial[1])["frFR"]["entries"]), keep)
+        # A controlled review baseline for this synthetic product: no existing
+        # frFR entry-review declaration is inherited (some name entries that
+        # the partial pack no longer has); every other product's declarations
+        # and the rest of the document stay.
+        document = json.loads(partial[3].decode("utf-8"))
+        document["entryReview"]["declarations"] = [
+            declaration for declaration in document["entryReview"]["declarations"]
+            if declaration["productId"] != "frFR"]
+        partial[3] = json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+        data = multi_error_inputs(partial)
         # A synthetic qualified declaration on an invalid entry must not make
         # it reviewed.
         text = "L'enregistrement|"
@@ -1013,7 +1053,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(receipt["collection"]["state"], "COMPLETE")
         rows = {row["productId"]: row for row in receipt["coverage"]["products"]}
         french = rows["frFR"]
-        packed = self.catalog.parse_packs(self.inputs[1])["frFR"]["entries"]
+        packed = self.catalog.parse_packs(partial[1])["frFR"]["entries"]
         self.assertEqual(french["denominator"], CURRENT_FULL_UI_KEYS)
         self.assertEqual(french["keys"]["invalid"], [CHARGE, "reason.save_in_progress"])
         self.assertEqual(french["keys"]["missing"], sorted(set(full_keys()) - set(packed)))
@@ -1038,31 +1078,77 @@ class DiagnosticTests(unittest.TestCase):
         self.assertNotIn("100%", json.dumps(receipt))
 
     def test_d4_valid_partial_input_keeps_the_strict_report(self):
-        receipt = self.diagnose(*self.inputs)
+        # The same deliberately partial frFR pack as in D3, selected by key;
+        # the strict report and the diagnosis read these same bytes.
+        def entry_block(packs, pack_id):
+            """The span of pack_id's one entries block and its entry lines,
+            one line per parsed entry."""
+            block = list(re.finditer(
+                rb"\n    " + pack_id.encode() + rb" = \{\r?\n        name = \"[^\"\r\n]*\",\r?\n"
+                rb"        entries = \{\r?\n"
+                rb"((?: {12}\[\"[^\"\r\n]+\"\] = [^\r\n]*\r?\n)*)", packs))
+            self.assertEqual(len(block), 1, pack_id)
+            lines = block[0].group(1).splitlines(keepends=True)
+            parsed = self.catalog.parse_packs(packs)[pack_id]["entries"]
+            self.assertEqual(len(lines), len(parsed), pack_id)
+            return block[0].span(1), lines
+
+        def key_of(line):
+            return re.match(rb' {12}\["([^"\r\n]+)"\]', line).group(1).decode("utf-8")
+
+        keep = set(CURRENT_KEYS) - {"panel.button.options"}
+        (start, end), lines = entry_block(self.inputs[1], "frFR")
+        kept = [line for line in lines if key_of(line) in keep]
+        self.assertEqual(len(kept), len(keep))
+        partial = list(self.inputs)
+        partial[1] = self.inputs[1][:start] + b"".join(kept) + self.inputs[1][end:]
+        self.assertEqual(set(self.catalog.parse_packs(partial[1])["frFR"]["entries"]), keep)
+        # A controlled review baseline for the two products of the controlled
+        # examples below: no existing frFR or deDE entry-review declaration is
+        # inherited; every other product's declarations and the rest of the
+        # document stay. The one deDE declaration below is the only one.
+        document = json.loads(partial[3].decode("utf-8"))
+        document["entryReview"]["declarations"] = [
+            declaration for declaration in document["entryReview"]["declarations"]
+            if declaration["productId"] not in ("frFR", "deDE")]
+        partial[3] = json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+        strict = self.catalog.registry_catalog_report(*partial)
+        receipt = self.diagnose(*partial)
         self.assertIs(receipt["valid"], True)
         self.assertEqual(receipt["strictVerdict"], {"result": "valid"})
         self.assertEqual(receipt["collection"], {"state": "COMPLETE", "boundary": None,
                                                  "rule": receipt["collection"]["rule"]})
         self.assertEqual(receipt["entryProblems"], [])
         self.assertEqual(receipt["problemCounts"], {"invalid": 0, "obsolete": 0, "orphan": 0})
-        self.assertEqual(receipt["coverage"], self.strict_report)
+        self.assertEqual(receipt["coverage"], strict)
         self.assertIs(receipt["completeness"]["established"], False)
         self.assertEqual(receipt["gate"], "NOT_A_GATE")
         # A synthetic declaration and an English-identical entry keep their
         # existing categories; fallback English is never an entry.
-        english = self.catalog.parse_english(self.inputs[0])
-        packs = replace_once(self.inputs[1], b'"Mes builds"',
-                             b'"%s"' % english["panel.button.my_builds"].encode("utf-8"))
-        release = with_declaration(self.inputs[3], "deDE", "panel.button.my_builds",
+        english = self.catalog.parse_english(partial[0])
+        packs = partial[1]
+        # By key and in place: frFR's my_builds row takes the English text and
+        # deDE's the synthetic text that the synthetic declaration names.
+        for pack_id, text in (("frFR", english["panel.button.my_builds"]),
+                              ("deDE", "Meine Builds")):
+            (start, end), lines = entry_block(packs, pack_id)
+            keys = [key_of(line) for line in lines]
+            self.assertEqual(keys.count("panel.button.my_builds"), 1, pack_id)
+            index = keys.index("panel.button.my_builds")
+            ending = lines[index][len(lines[index].rstrip(b"\r\n")):]
+            lines[index] = (b'            ["panel.button.my_builds"] = "%s",'
+                            % text.encode("utf-8") + ending)
+            packs = packs[:start] + b"".join(lines) + packs[end:]
+        release = with_declaration(partial[3], "deDE", "panel.button.my_builds",
                                    "Meine Builds")
-        data = [self.inputs[0], packs, self.inputs[2], release, self.inputs[4]]
+        data = [partial[0], packs, partial[2], release, partial[4]]
         receipt = self.diagnose(*data)
         report = self.catalog.registry_catalog_report(*data)
         self.assertEqual(receipt["coverage"], report)
         rows = {row["productId"]: row["counts"] for row in report["products"]}
         self.assertEqual(rows["frFR"]["deliberate_english_placeholder"], 1)
         self.assertEqual(rows["deDE"]["translated_and_reviewed"], 1)
-        packed = self.catalog.parse_packs(self.inputs[1])["frFR"]["entries"]
+        packed = self.catalog.parse_packs(partial[1])["frFR"]["entries"]
         self.assertEqual(rows["frFR"]["missing"], len(set(full_keys()) - set(packed)))
         self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
 

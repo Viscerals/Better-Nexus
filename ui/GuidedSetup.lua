@@ -58,25 +58,26 @@
 -- The design's round radio marks are the client's own UIRadioButtonTemplate
 -- (NewRow), not a drawn shape.
 --
--- The footer follows the design's three treatments. Continue is the one
--- filled action (amber fill, light gold edge, dark label; while it waits, the
--- design's dark fill, grey edge and grey label), Skip for now is an
--- underlined text action with no fill or edge, and Back is the window's
--- secondary button, the themed look of Help and Close. Continue and Skip
--- are drawn here and kept out of the Theme, whose buttons share one look and
--- repaint their label on enable. Their colours are the design's own, fixed,
--- never from the palette. Client limits, not choices: the stock 3.3.5a fonts
--- have one weight, so Continue's bold label is a 1 px shadow in the label's
--- colour; a FontString has no underline, so Skip's is a 1 px texture under
--- its text; buttons take no keyboard focus, so the design's focus outline
--- has no counterpart, and a hover highlight is given instead. Adaptations:
+-- The footer has three treatments. Continue is the window's one primary
+-- action, a Theme button marked primary (Theme.SetPrimary): while usable it
+-- is filled with the chosen palette's hover colour and labelled in the
+-- style's text; while it waits it is drawn as any disabled button of the
+-- style; the Theme gives its hover and press and repaints it when the player
+-- changes the style or colour. Skip for now is an underlined text action
+-- with no fill or edge, and Back is the window's secondary button, the
+-- themed look of Help and Close. Skip is drawn here and kept out of the
+-- Theme; its colours are the design's own, fixed. Client limits, not
+-- choices: the stock 3.3.5a fonts have one weight, as on every Theme button;
+-- a FontString has no underline, so Skip's is a 1 px texture under its text;
+-- buttons take no keyboard focus, so the design's focus outline has no
+-- counterpart, and a hover highlight is given instead. Adaptations:
 -- Continue keeps the 22 px row height (the design pads it a little taller)
 -- and its wider side padding is a fixed 10 px. A step card's one main action
 -- (Try again, Replace and continue, the Wishlist chooser and its again, Check
--- again where the design fills it, Keep or Leave Auto) is the design's same
--- filled action, drawn as Continue is, at the 22 px row and without the
--- extra padding; the card's other actions (Choose another, Review, the links
--- to earlier steps, Help, replay) stay the themed secondary button. Native
+-- again where the design fills it, Keep or Leave Auto) is the same Theme
+-- primary, drawn as Continue is, at the 22 px row and without the extra
+-- padding; the card's other actions (Choose another, Review, the links to
+-- earlier steps, Help, replay) stay the themed secondary button. Native
 -- pixels and font rendering of all of this are NOT RUN.
 Nexus = Nexus or {}
 local U = {}
@@ -521,47 +522,41 @@ local function NewButton()
     return b
 end
 
--- The footer's own looks (file header), converted from the design's oklch
--- values: Continue usable (on) and waiting (off), and Skip for now (link).
--- A step card's main action is the design's same fill, edge and label.
+-- Skip for now's own look (file header), converted from the design's oklch
+-- values: its text and underline, brighter on hover. Continue and a step
+-- card's main action take the active Theme's primary look instead.
 local FOOT = {
-    on = {fill = {0.8, 0.45, 0.16}, edge = {0.91, 0.63, 0.3}, text = {0.06, 0.04, 0.03}},
-    off = {fill = {0.06, 0.04, 0.03}, edge = {0.21, 0.17, 0.15}, text = {0.47, 0.44, 0.42}},
     link = {text = {0.77, 0.74, 0.71}, hover = {1, 0.84, 0.57}},
 }
 
--- A footer action outside the Theme: 'primary' (Continue, and a step card's
--- main action) draws a fill, four 1 px edges and a hover highlight; 'link'
--- (Skip for now) draws only an underline, brighter on hover. FooterPaint
--- colours it for its state.
+-- A footer action. 'primary' (Continue, and a step card's main action) is a
+-- Theme button marked as the window's primary action (Theme.SetPrimary): the
+-- Theme owns its fill, edge, label colour, hover, press and its enabled and
+-- disabled looks (its OnEnable / OnDisable hooks), and repaints it when the
+-- player changes the style or colour. 'link' (Skip for now) stays outside
+-- the Theme and draws only an underline, brighter on hover. Both bind their
+-- own label as the button's FontString, which the Theme colours.
 local function FooterAction(look)
     local b = CreateFrame('Button', nil, frame)
     b:SetSize(100, 22)
     Wire(b)
     local theme = Nexus.Theme
-    if theme and theme.Exempt then theme.Exempt(b) else b._nexusThemeExempt = true end
+    if look ~= 'primary' then
+        if theme and theme.Exempt then theme.Exempt(b) else b._nexusThemeExempt = true end
+    end
     b.look = look
     b.label = b:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
     b.label:SetPoint('CENTER', b, 'CENTER', 0, 0)
     b:SetFontString(b.label)
-    local function Part(layer)
-        local t = b:CreateTexture(nil, layer)
-        t:SetTexture(WHITE)
-        return t
-    end
     if look == 'primary' then
-        b.fill = Part('BACKGROUND'); b.fill:SetAllPoints(b)
-        b.edges = {}
-        local sides = {{'TOPLEFT', 'TOPRIGHT'}, {'BOTTOMLEFT', 'BOTTOMRIGHT'}, {'TOPLEFT', 'BOTTOMLEFT'}, {'TOPRIGHT', 'BOTTOMRIGHT'}}
-        for i, side in ipairs(sides) do
-            local e = Part('BORDER')
-            e:SetPoint(side[1], b, side[1], 0, 0); e:SetPoint(side[2], b, side[2], 0, 0)
-            if i <= 2 then e:SetHeight(1) else e:SetWidth(1) end
-            b.edges[i] = e
-        end
-        local hover = Part('HIGHLIGHT'); hover:SetAllPoints(b)
-        hover:SetVertexColor(1, 1, 1, 0.12)
+        if theme and theme.SetPrimary then theme.SetPrimary(b, true)
+        elseif theme and theme.StyleButton then theme.StyleButton(b) end
     else
+        local function Part(layer)
+            local t = b:CreateTexture(nil, layer)
+            t:SetTexture(WHITE)
+            return t
+        end
         -- About the design's 3 px underline offset below the text's baseline.
         b.underline = Part('ARTWORK'); b.underline:SetHeight(1)
         b.underline:SetPoint('BOTTOM', b, 'BOTTOM', 0, 4)
@@ -574,17 +569,15 @@ local function FooterAction(look)
     return b
 end
 
--- Colours a footer action for its state; b.painted names what was drawn.
+-- Colours Skip for now; a primary action's colours are the Theme's, set by
+-- its state hooks as Arm enables or disables it. b.painted names the state.
 local function FooterPaint(b, enabled)
-    local c = b.look == 'link' and FOOT.link or (enabled and FOOT.on or FOOT.off)
-    b.label:SetTextColor(c.text[1], c.text[2], c.text[3])
-    if b.look ~= 'primary' then b.painted = 'link'; return end
-    Paint(b.fill, c.fill)
-    for _, e in ipairs(b.edges) do Paint(e, c.edge) end
-    -- One font weight: a shadow one pixel to the right in the label's own
-    -- colour thickens its strokes in place of the design's bold.
-    b.label:SetShadowColor(c.text[1], c.text[2], c.text[3], 1)
-    b.label:SetShadowOffset(1, 0)
+    if b.look ~= 'primary' then
+        local c = FOOT.link
+        b.label:SetTextColor(c.text[1], c.text[2], c.text[3])
+        b.painted = 'link'
+        return
+    end
     b.painted = enabled and 'primary' or 'waiting'
 end
 
@@ -2117,7 +2110,7 @@ local function RenderPass()
     if pos > 1 then
         links[#links + 1] = {f.back, FooterButton(f.back, {label = b.back, act = function() note = nil; g.Back() end}, 70, rowW)}
     else f.back:Hide() end
-    if g.SKIPPABLE[id] and not canNext then
+    if g.SKIPPABLE[id] then
         links[#links + 1] = {f.skip, FooterButton(f.skip, {label = b.skip, act = function() note = nil; g.Skip() end}, 60, rowW)}
     else f.skip:Hide() end
     links[#links + 1] = {f.later, FooterButton(f.later, {label = b.later, tip = ctx.kept == 'saved' and b.closeTip

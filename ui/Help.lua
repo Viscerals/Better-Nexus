@@ -217,7 +217,7 @@ Pause, hide or Auto OFF?
 Auto OFF stops automatic actions only. Hide Nexus Panel only hides the panel. Pause Nexus for this session (Options) holds Auto, Orb actions, sharing and DPS recording until you choose Resume Nexus, reload or log out. It is kept in memory only. Your windows, status and the checks on an action already sent stay available. An action already sent may still finish: pausing cancels nothing that was sent, Nexus stays loaded, and it does not stop all of its work on your computer. A reload does not decide a result that is still unknown. After Resume Nexus, Auto can continue if it was already on; Orb runs stay paused until you continue them in the Orb window.
 
 Can I make the panel smaller or move it?
-Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Drag any part of the panel that is not a button to move it; Options > Reset Panel Position puts it back.
+Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Hold Shift and drag any part of the panel that is not a button to move it. Release Shift to stop. Options > Reset Panel Position puts it back.
 
 How do I get back to what I was doing?
 Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.]]},

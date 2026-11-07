@@ -34,11 +34,151 @@ local NAMES={'ProjectEbonholdEchoJournal','EchoJournalMicroButton','NexusEditorF
 local LONG='Wunschliste \195\156ber-Gr\195\182\195\159e \226\128\148 \240\159\148\165 sehr lange Namen f\195\188r den F\195\188hrer und noch mehr Text'
 local CONSENT='NEXUS_ASSIGN_WISHLIST_AUTO_ON'
 
+-- Host model (Boot{host=true}): the client's Button boundary that the generic
+-- harness answers with no-ops. A Button keeps the FontString given to
+-- SetFontString and returns it from GetFontString; SetText also sets that
+-- FontString's text; Enable and Disable run its OnEnable or OnDisable script
+-- when the state changes. Colour calls on such a button's backdrop and on the
+-- textures and FontStrings it creates are recorded as they are made, after
+-- the harness's own method runs: the model answers nothing for the code under
+-- test and paints nothing itself. Boot installs it only when asked and the
+-- next Boot removes it. Offline assumptions, NOT RUN natively: OnEnable and
+-- OnDisable fire on a change only; a shown BACKGROUND texture covers the
+-- backdrop; an unpainted white texture shows white; a template button's own
+-- label is not modelled.
+local HOST={paint={},layer={},made={}}
+local HOST_COLOURS={'SetVertexColor','SetTextColor','SetShadowColor','SetShadowOffset'}
+local function HostRecord(r,key)
+ local base=r[key]
+ r[key]=function(self,...)
+  local p=HOST.paint[self];if not p then p={};HOST.paint[self]=p end
+  p[key]={...}
+  if type(base)=='function' then return base(self,...) end
+ end
+end
+local function HostSeen(r,key) local p=r and HOST.paint[r];return p and p[key] or nil end
+local function HostButton(b)
+ local fs
+ local setFont,setText=b.SetFontString,b.SetText
+ b.SetFontString=function(self,f,...) fs=f;if type(setFont)=='function' then return setFont(self,f,...) end end
+ b.GetFontString=function() return fs end
+ b.SetText=function(self,t,...)
+  local r=setText(self,t,...)
+  if fs and fs.SetText then fs:SetText(t) end
+  return r
+ end
+ for name,on in pairs({Enable=true,Disable=false}) do
+  local base=b[name]
+  b[name]=function(self,...)
+   local was=self.enabled
+   local r=base(self,...)
+   local run=was~=on and self:GetScript(on and 'OnEnable' or 'OnDisable')
+   if run then run(self) end
+   return r
+  end
+ end
+ for _,k in ipairs({'CreateTexture','CreateFontString'}) do
+  local base=b[k]
+  b[k]=function(self,name,layer,...)
+   local r=base(self,name,layer,...)
+   HOST.layer[r]=layer
+   local list=HOST.made[self];if not list then list={};HOST.made[self]=list end
+   list[#list+1]=r
+   for _,m in ipairs(HOST_COLOURS) do HostRecord(r,m) end
+   return r
+  end
+ end
+ for _,m in ipairs({'SetBackdrop','SetBackdropColor','SetBackdropBorderColor'}) do HostRecord(b,m) end
+end
+-- Wraps the harness's CreateFrame once per Boot (again only if it was
+-- replaced); every Button made through it carries the host model.
+local function HostOn()
+ local base=CreateFrame
+ if type(base)~='function' or base==HOST.create then return end
+ HOST.base=base
+ HOST.create=function(kind,...)
+  local f=base(kind,...)
+  if kind=='Button' and type(f)=='table' then HostButton(f) end
+  return f
+ end
+ CreateFrame=HOST.create
+end
+local function HostSame(c,ref)
+ if type(c)~='table' or type(ref)~='table' then return false end
+ for i=1,3 do
+  if type(c[i])~='number' or type(ref[i])~='number' or math.abs(c[i]-ref[i])>1e-6 then return false end
+ end
+ return true
+end
+local function HostTint(c)
+ if not HostSame(c,c) then return 'none' end
+ return string.format('%.3f,%.3f,%.3f',c[1],c[2],c[3])
+end
+-- What a host button shows (offline): its fill is the colour of its last
+-- shown BACKGROUND texture, else of its backdrop; its edge, of its shown
+-- BORDER textures when they agree, else of its backdrop border; its label
+-- and shadow, of its registered FontString. Only recorded calls are read.
+local function HostShows(b)
+ local out={}
+ if type(b)~='table' then return out end
+ local edges={}
+ for _,t in ipairs(HOST.made[b] or {}) do
+  if t.kind=='Texture' and t:IsShown() then
+   local c=HostSeen(t,'SetVertexColor') or {1,1,1}
+   if not (type(c[4])=='number' and c[4]<=0) then
+    if HOST.layer[t]=='BACKGROUND' then out.fill=c elseif HOST.layer[t]=='BORDER' then edges[#edges+1]=c end
+   end
+  end
+ end
+ local backdrop=HostSeen(b,'SetBackdrop')
+ backdrop=backdrop~=nil and backdrop[1]~=nil
+ if not out.fill and backdrop then out.fill=HostSeen(b,'SetBackdropColor') end
+ if #edges>0 then
+  out.edge=edges[1]
+  for i=2,#edges do if not HostSame(edges[i],edges[1]) then out.edge=false end end
+ elseif backdrop then out.edge=HostSeen(b,'SetBackdropBorderColor') end
+ local fs=b.GetFontString and b:GetFontString()
+ if type(fs)=='table' then out.label=HostSeen(fs,'SetTextColor');out.shadow=HostSeen(fs,'SetShadowColor') end
+ return out
+end
+-- The Theme's own resolution of a skin (ui/Theme.lua T.Resolve); with no
+-- ids, the default that nothing has changed.
+local function ActiveSkin(style,palette)
+ local T=Nexus and Nexus.Theme
+ local skin=T and type(T.Resolve)=='function' and T.Resolve(style,palette) or nil
+ if type(skin)=='table' and type(skin.style)=='table' and type(skin.palette)=='table' then return skin end
+end
+local function HostDetail(s)
+ return 'fill '..HostTint(s.fill)..' edge '..HostTint(s.edge)..' label '..HostTint(s.label)..' shadow '..HostTint(s.shadow)
+end
+-- The skin's primary action (ui/Theme.lua ButtonFill / ButtonState) as
+-- shown: usable, the palette's hover fill, a palette edge and the style's
+-- text; a shadow the coach sets is in the label's own colour, never a dark one.
+local function SkinPrimary(b,skin)
+ local s=HostShows(b)
+ local ok=skin~=nil and HostSame(s.fill,skin.palette.hover) and HostSame(s.label,skin.style.text)
+  and (HostSame(s.edge,skin.palette.border) or HostSame(s.edge,skin.palette.accent))
+  and (s.shadow==nil or HostSame(s.shadow,s.label))
+ return ok,HostDetail(s)
+end
+-- Waiting, it is drawn as any disabled button of the skin.
+local function SkinWaiting(b,skin)
+ local s=HostShows(b)
+ local p=skin and skin.palette
+ local edge=p and (p.disabledBorder or {p.border[1]*0.5,p.border[2]*0.5,p.border[3]*0.5})
+ local ok=skin~=nil and HostSame(s.fill,skin.style.buttonBg) and HostSame(s.label,skin.style.disabledText)
+  and HostSame(s.edge,edge) and (s.shadow==nil or HostSame(s.shadow,s.label))
+ return ok,HostDetail(s)
+end
 local function Boot(o)
  o=o or {}
+ -- The previous Boot's host model ends here; a host Boot installs a new one.
+ if HOST.create and CreateFrame==HOST.create then CreateFrame=HOST.base end
+ HOST={paint={},layer={},made={}}
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
  for _,n in ipairs(NAMES) do _G[n]=nil end
  H=dofile('tests/prototype/harness.lua');H.playerLevel=80;wipe(H.db)
+ if o.host then HostOn() end
  H.AddEcho(201172,'Echo One',0,5);H.AddEcho(201173,'Echo Six',0,5)
  H.AddEcho(201174,'Echo Free',0,5);H.AddEcho(201175,'Echo Fire',0,5)
  H.service.GetServerMaxSlots=function() return 6 end
@@ -53,7 +193,8 @@ local function Boot(o)
  ProjectEbonhold.OrbService={IsStateKnown=function() return true end,GetCharges=function() return 0 end,
   IsOfferPending=function() return false end,RequestCharges=function() end,
   ConfirmSpend=function() spends=spends+1;return false end}
- H.Boot();A=Nexus.GameAdapter;H.Notify();A.Poll();H.Advance(1)
+ H.Boot();if o.host then HostOn() end
+ A=Nexus.GameAdapter;H.Notify();A.Poll();H.Advance(1)
  writes={}
  for _,k in ipairs(WRITERS) do local real=A[k]
   if type(real)=='function' then writes[k]=0;A[k]=function(...) writes[k]=writes[k]+1;return real(...) end end end
@@ -630,17 +771,22 @@ C.scenario('F10 a receipt or an editor closing while full Help is open does not 
   'F10: besides that one choice nothing was written, spent, toggled or recorded, and no frame of the flow sent',Quiet()..' '..Tallied(tally,sent))
 end)
 
--- F11: the design's footer (ui/GuidedSetup.lua file header): Continue the one
--- filled action with a thickened label, Skip for now underlined text with no
--- fill or edge, Back the themed secondary button; in the compact 420 px
--- window at 125% text, also with 35% longer labels. Colours are read from the
--- paint calls of the two drawn buttons; the values are the design's oklch
--- colours as converted in ui/GuidedSetup.lua FOOT. Native pixels, the faux
+-- F11: the footer (ui/GuidedSetup.lua file header): Continue the one filled
+-- action, Skip for now underlined text with no fill or edge, Back the themed
+-- secondary button; in the compact 420 px window at 125% text, also with 35%
+-- longer labels. Continue follows the active Theme as its primary action
+-- (ui/Theme.lua ButtonFill / ButtonState): usable, the palette's hover fill,
+-- a palette edge and the style's readable text; waiting, drawn as any
+-- disabled button of the skin. Colours are the host model's record of the
+-- paint calls (Boot{host=true}) compared with the Theme's own resolved skin
+-- (ActiveSkin); Skip for now keeps the design's fixed link colour from
+-- ui/GuidedSetup.lua FOOT. DESIGN's other entries, the former fixed footer
+-- colours, are left unchanged for any later reader. Native pixels, any faux
 -- bold and the underline against real glyphs are NOT RUN.
 local DESIGN={amber={0.8,0.45,0.16},gold={0.91,0.63,0.3},ink={0.06,0.04,0.03},
  waitFill={0.06,0.04,0.03},waitEdge={0.21,0.17,0.15},waitInk={0.47,0.44,0.42},link={0.77,0.74,0.71}}
 C.scenario('F11 the footer: Continue filled, Skip for now underlined text, Back secondary; 420 px, 125%, long labels',function()
- Boot()
+ Boot({host=true})
  local T=Nexus.UserText.Guide
  local keep=T.buttons
  L.UseFont({name='125%',char=8.75,line=15,size=15})
@@ -651,30 +797,20 @@ C.scenario('F11 the footer: Continue filled, Skip for now underlined text, Back 
   if not C.setup(Step()=='wishlist' and g:GetWidth()==420,'F11: fixture: the Wishlist step in the compact window',g:GetWidth()) then return end
   local before=Effects()
   local nxt,skip,back=g.next,g.skip,g.back
-  local function Spy(r) local f=function(self,...) self.drawn={...} end;r.SetVertexColor=f;r.SetTextColor=f end
-  Spy(nxt.label);Spy(skip.label)
-  if nxt.fill then Spy(nxt.fill) end
-  for _,e in ipairs(nxt.edges or {}) do Spy(e) end
-  nxt.label.SetShadowOffset=function(self,x,y) self.shadow={x,y} end
+  local skin=ActiveSkin()
   Nexus.GuidedSetupUI.Render()
-  local function Is(r,c)
-   local d=r and r.drawn
-   return d~=nil and math.abs(d[1]-c[1])<1e-6 and math.abs(d[2]-c[2])<1e-6 and math.abs(d[3]-c[3])<1e-6
-  end
-  local function Edges(c)
-   for _,e in ipairs(nxt.edges or {}) do if not Is(e,c) then return false end end
-   return #(nxt.edges or {})==4
-  end
-  C.expect(nxt.look=='primary' and nxt._nexusThemeExempt==true and not nxt._nexusDarkStyled,
-   'F11: Continue is drawn by the coach, outside the Theme')
-  C.expect(not On(nxt) and nxt.painted=='waiting' and Is(nxt.fill,DESIGN.waitFill) and Edges(DESIGN.waitEdge)
-   and Is(nxt.label,DESIGN.waitInk),'F11: a waiting Continue has the design\'s dark fill, grey edge and grey label',nxt.painted)
+  C.expect(nxt.look=='primary' and HostShows(nxt).fill~=nil and HostShows(skip).fill==nil and HostShows(back).fill==nil,
+   'F11: Continue is the footer\'s one filled action')
+  local themed,why=SkinWaiting(nxt,skin)
+  C.expect(not On(nxt) and nxt.painted=='waiting' and themed,
+   'F11: a waiting Continue is drawn as the active skin\'s disabled button',why..' painted '..tostring(nxt.painted))
   C.expect(skip:IsShown() and skip.look=='link' and skip.fill==nil and skip.edges==nil and skip._nexusThemeExempt==true
-   and not skip._nexusDarkStyled and skip.underline and skip.underline:IsShown() and Is(skip.label,DESIGN.link),
+   and not skip._nexusDarkStyled and skip.underline and skip.underline:IsShown() and HostSame(HostShows(skip).label,DESIGN.link),
    'F11: Skip for now is underlined text with no fill or edge')
-  -- This harness's buttons have no font string, so the Theme styles none of
-  -- them here (ui_theme_* tests cover its painting); what the coach decides
-  -- is which buttons it leaves to the Theme.
+  -- The host model holds only a FontString given by SetFontString; a
+  -- template button's own label is not modelled, so the Theme styles none
+  -- of the secondary buttons here (ui_theme_* tests cover its painting);
+  -- what the coach decides is which buttons it leaves to the Theme.
   C.expect(back:IsShown() and back.look==nil and not back._nexusThemeExempt and g.help.look==nil and not g.help._nexusThemeExempt,
    'F11: Back is left to the Theme as the secondary button, like Help')
   local rowW=420-32
@@ -699,9 +835,9 @@ C.scenario('F11 the footer: Continue filled, Skip for now underlined text, Back 
   end
   Footer('F11')
   Press(Opt('W-Free'))
-  C.expect(On(nxt) and nxt.painted=='primary' and Is(nxt.fill,DESIGN.amber) and Edges(DESIGN.gold) and Is(nxt.label,DESIGN.ink)
-   and nxt.label.shadow~=nil and nxt.label.shadow[1]==1 and nxt.label.shadow[2]==0,
-   'F11: a usable Continue is the filled amber action with a dark, thickened label',nxt.painted)
+  themed,why=SkinPrimary(nxt,skin)
+  C.expect(On(nxt) and nxt.painted=='primary' and themed,
+   'F11: a usable Continue is the active skin\'s filled primary with its readable label',why..' painted '..tostring(nxt.painted))
   Footer('F11 ready')
   Press(Btn('Continue'))
   if not C.setup(Step()=='target' and skip:IsShown(),'F11: fixture: the Saved Build step offers Skip for now',Step()) then return end
@@ -722,21 +858,22 @@ C.scenario('F11 the footer: Continue filled, Skip for now underlined text, Back 
  C.setup(ok,'F11: fixture: the scenario ran',err)
 end)
 
--- F12: a step card's one main action is the design's filled action (the
--- same fill, edge and thickened dark label as a usable Continue, drawn
--- outside the Theme); its other actions stay the themed secondary button.
+-- F12: a step card's one main action is the coach's filled action, drawn as
+-- a usable Continue is: the active skin's primary colours with its readable
+-- label (F11); its other actions stay the themed secondary button.
 -- Through the replace card, the Assign card ready, pending (a request armed,
 -- nothing chosen), confirmed, with no answer and after a later change, and
--- the Auto card; in the compact 420 px window at 125% text with 35% longer
--- labels. While a step action is filled, Continue waits. Colours are read
--- from the paint calls (as F11). An unreadable target before any assignment
+-- the Auto card with its exact Keep Auto OFF label; in the compact 420 px
+-- window at 125% text with 35% longer labels. While a step action is filled,
+-- Continue waits. Colours are the host model's paint record compared with
+-- the Theme's resolved skin (as F11). An unreadable target before any assignment
 -- is the prerequisite card; the same failing read back after the assignment
 -- is the design's No answer card, whose one action (as on the stale card) is
 -- Check again: no chooser, no new request, and a later fresh read back
 -- confirms it. The effect guards are unchanged: only the one explicit
 -- chooser choice writes. Native pixels are NOT RUN.
 C.scenario('F12 step actions: the main one filled like Continue, the others secondary; pending, no answer, stale; 420 px, 125%, long labels',function()
- Boot()
+ Boot({host=true})
  C.setup(A.SetLoadoutWishlist(2,106)==true,'F12: fixture: Fire PvE follows W-Six');writes.SetLoadoutWishlist=0
  local T=Nexus.UserText.Guide
  local keep=T.buttons
@@ -762,32 +899,18 @@ C.scenario('F12 step actions: the main one filled like Continue, the others seco
    end
    return list
   end
-  local function Spy(r) local f=function(self,...) self.drawn={...} end;r.SetVertexColor=f;r.SetTextColor=f end
-  local function Is(r,c)
-   local d=r and r.drawn
-   return d~=nil and math.abs(d[1]-c[1])<1e-6 and math.abs(d[2]-c[2])<1e-6 and math.abs(d[3]-c[3])<1e-6
-  end
-  local function Edges(b,c)
-   for _,e in ipairs(b.edges or {}) do if not Is(e,c) then return false end end
-   return #(b.edges or {})==4
-  end
-  -- Spies on every drawn step action made so far, then a render to read.
-  local function Paint()
-   for _,c in ipairs(g.children) do
-    if c.kind=='Button' and c.look=='primary' and not OWN[c] and not c.spied then
-     c.spied=true;Spy(c.label);Spy(c.fill);for _,e in ipairs(c.edges) do Spy(e) end
-     c.label.SetShadowOffset=function(self,x,y) self.shadow={x,y} end
-    end
-   end
-   Nexus.GuidedSetupUI.Render()
-  end
+  -- The skin nothing has changed: the default the Theme resolves.
+  local skin=ActiveSkin()
+  -- The host model records every paint from a button's creation; a render
+  -- to read.
+  local function Paint() Nexus.GuidedSetupUI.Render() end
   local function Card(tag,main,other)
    Paint()
    local p,s,filled=Btn(main),other and Btn(other),0
-   C.expect(p~=nil and p.look=='primary' and p._nexusThemeExempt==true and not p._nexusDarkStyled and On(p) and p.painted=='primary'
-    and Is(p.fill,DESIGN.amber) and Edges(p,DESIGN.gold) and Is(p.label,DESIGN.ink)
-    and p.label.shadow~=nil and p.label.shadow[1]==1 and p.label.shadow[2]==0,
-    tag..': '..main..' is the filled amber action with a dark, thickened label',p and p.painted)
+   local themed,why=SkinPrimary(p,skin)
+   C.expect(p~=nil and p.look=='primary' and On(p) and p.painted=='primary' and themed,
+    tag..': '..main..' is the filled action in the active skin\'s primary colours with its readable label',
+    why..' painted '..tostring(p and p.painted))
    if other then
     C.expect(s~=nil and s.look==nil and not s._nexusThemeExempt and On(s),tag..': '..other..' is left to the Theme as the secondary button')
    end
@@ -2132,5 +2255,672 @@ C.scenario('F20 a tall step in the 640 px window: pinned footer, scrolling body,
  L.UseFont(L.MODELS.default)
  C.setup(ok,'F20: fixture: the scenario ran',err)
 end)
+
+-- F21: the theme tracer. Continue, the coach's primary action, follows the
+-- skin the player chooses (ui/Theme.lua SetStyle / SetPalette): usable, the
+-- palette's hover fill, a palette edge and the style's readable text;
+-- waiting, drawn as any disabled button of the skin (ui/Theme.lua
+-- ButtonFill / ButtonState). One deliberate change, from the default Nexus
+-- Vista with Amethyst to Nexus Slate with Sapphire, while the coach is open;
+-- then a move to a step where Continue waits and is made usable again, and
+-- a close and reopen. Colours are what the host model recorded
+-- (Boot{host=true}), compared with the Theme's own resolved skin
+-- (ActiveSkin). The guide's moves, close and reopen write, act, send, spend
+-- and toggle nothing. Every other skin, hover, press and the step cards'
+-- actions under a change follow in later slices. Native pixels and
+-- readability are NOT RUN.
+C.scenario('F21 theme: Continue follows a chosen skin, repainted on the change, after a wait and after a reopen',function()
+ Boot({host=true})
+ local TH=Nexus.Theme
+ if not C.setup(TH and TH.SetStyle and TH.SetPalette and TH.Resolve,'F21: fixture: the Theme is loaded') then return end
+ if not Open('F21') then return end
+ Start('I already have')
+ local nxt=Btn('Continue')
+ if not C.setup(Step()=='wishlist' and nxt~=nil and nxt:GetFontString()~=nil,
+  'F21: fixture: the Wishlist step; the host model holds Continue\'s registered label',Step()) then return end
+ -- Relative luminance and contrast of the label on its fill, as shown.
+ local function Lum(c)
+  local sum=0
+  for i,w in ipairs({0.2126,0.7152,0.0722}) do
+   local v=c[i];v=v<=0.03928 and v/12.92 or ((v+0.055)/1.055)^2.4
+   sum=sum+w*v
+  end
+  return sum
+ end
+ local function Readable(b)
+  local s=HostShows(b)
+  if not (HostSame(s.fill,s.fill) and HostSame(s.label,s.label)) then return false,'no fill or label' end
+  local a,z=Lum(s.label),Lum(s.fill)
+  local ratio=(math.max(a,z)+0.05)/(math.min(a,z)+0.05)
+  return ratio>=4.5,string.format('%.2f:1',ratio)
+ end
+ local vista=ActiveSkin()
+ C.setup(vista~=nil and vista.style.id=='vista' and vista.palette.id=='amethyst',
+  'F21: fixture: nothing chosen yet is Nexus Vista with Amethyst',vista and (tostring(vista.style.id)..'/'..tostring(vista.palette.id)))
+ local themed,why=SkinWaiting(nxt,vista)
+ C.expect(not On(nxt) and themed,'F21: a waiting Continue is the default skin\'s disabled button',why)
+ Press(Opt('W-Free'))
+ themed,why=SkinPrimary(nxt,vista)
+ C.expect(On(nxt) and themed,'F21: a usable Continue is the default skin\'s primary: Amethyst fill, Vista text',why)
+ local so,sw=TH.SetStyle('slate')
+ local po,pw=TH.SetPalette('sapphire')
+ if not C.setup(so~=nil and po~=nil,'F21: fixture: the player chooses Nexus Slate with Sapphire',tostring(sw)..' / '..tostring(pw)) then return end
+ local slate=ActiveSkin('slate','sapphire')
+ local before=Effects()
+ themed,why=SkinPrimary(nxt,slate)
+ C.expect(Shown() and On(nxt) and themed,'F21: the open coach\'s usable Continue is repainted in Sapphire with Slate text',why)
+ local readable,ratio=Readable(nxt)
+ C.expect(readable,'F21: its label stays readable on its fill',ratio)
+ Press(Btn('Continue'))
+ nxt=Btn('Continue')
+ if not C.setup(Step()=='target' and nxt~=nil,'F21: fixture: the Saved Build step',Step()) then return end
+ themed,why=SkinWaiting(nxt,slate)
+ C.expect(not On(nxt) and themed,'F21: on the next step a waiting Continue is the chosen skin\'s disabled button',why)
+ Press(Opt('Fire PvE'))
+ themed,why=SkinPrimary(nxt,slate)
+ C.expect(On(nxt) and themed,'F21: usable again, Continue is the chosen skin\'s primary, not the default\'s',why)
+ Press(Btn('X'))
+ if not C.setup(not Shown(),'F21: fixture: X closes the coach') then return end
+ Nexus.GuidedSetupUI.Show()
+ local again=Btn('Continue')
+ if not C.setup(Shown() and Step()=='target' and again~=nil,'F21: fixture: reopening resumes the Saved Build step',Step()) then return end
+ if On(again) then themed,why=SkinPrimary(again,slate) else themed,why=SkinWaiting(again,slate) end
+ C.expect(themed,'F21: after a reopen Continue still shows the chosen skin for its state, not the default\'s',why)
+ C.guard(Effects()==before and Step()=='target',
+  'F21: the repaint, the moves, close and reopen wrote, acted, sent, spent and toggled nothing',Effects())
+end)
+
+-- F22: every existing skin, Nexus Vista and Nexus Slate with each of the six
+-- palettes, on the coach's primary actions: Continue and the step cards' main
+-- actions (the Assign card's and the exact Keep Auto OFF). Per skin, the
+-- player's explicit choice through Theme.SetStyle / SetPalette while the coach
+-- is open; Continue waiting, made usable, pressed and released, hovered,
+-- waiting again on the next step and re-enabled; repeated renders; the Assign
+-- card; the Keep Auto OFF card repainted to the style's own colours and back
+-- while open; a close and reopen; Keep Auto OFF pressed and taken; Finish on
+-- the summary. Expected colours are the skin's own tables as the Theme
+-- resolves them (ActiveSkin, the skin contract of ui/Theme.lua STYLES and
+-- PALETTES); what is shown is the host model's record of the actual paint
+-- calls (HostShows). Mouse input reaches only enabled buttons, through their
+-- registered OnMouseDown / OnMouseUp / OnEnter / OnLeave scripts, as the
+-- client delivers it; a waiting button gets none. Contrast is the offline
+-- WCAG ratio of the recorded label on the recorded fill (F22.Contrast, as
+-- F21 computes it); F21 keeps its own 4.5:1 check. Here 4.5:1 is a named
+-- offline benchmark only (F22.benchmark): every measured sample (waiting,
+-- usable and pressed Continue, enabled Keep Auto OFF) prints one diagnostic
+-- line with its skin, control, state, recorded colours, ratio and meets /
+-- SHORTFALL / MISSING, and the usable Continue and Keep Auto OFF
+-- expectations require that the measurement is available and valid. A
+-- printed shortfall is an unresolved native readability observation, neither
+-- a pass nor a native verdict; the waiting and pressed lines set no
+-- requirement for those states. NOT RUN natively: fonts, pixels, the
+-- client's own highlight display over the fill, and the tooltip's shown text
+-- (the harness's tooltip is not read here).
+local F22={styles={'vista','slate'},palettes={'sapphire','emerald','amethyst','ember','auric','graphite'}}
+function F22.Contrast(s)
+ if not (HostSame(s.fill,s.fill) and HostSame(s.label,s.label)) then return nil end
+ local function Lum(c)
+  local sum=0
+  for i,w in ipairs({0.2126,0.7152,0.0722}) do
+   local v=c[i];v=v<=0.03928 and v/12.92 or ((v+0.055)/1.055)^2.4
+   sum=sum+w*v
+  end
+  return sum
+ end
+ local a,z=Lum(s.label),Lum(s.fill)
+ return (math.max(a,z)+0.05)/(math.min(a,z)+0.05)
+end
+function F22.Ratio(r) return r and string.format('%.2f:1',r) or 'none' end
+-- The offline contrast benchmark, reported, not required (file comment above).
+F22.benchmark=4.5
+-- A measured ratio is a finite WCAG ratio (1 or more); anything else is missing.
+function F22.Measured(r) return type(r)=='number' and r==r and r>=1 and r<math.huge end
+function F22.Rgb(c)
+ if not HostSame(c,c) then return 'none' end
+ local t=string.format('%.6g,%.6g,%.6g',c[1],c[2],c[3])
+ if type(c[4])=='number' then t=t..' a='..string.format('%.6g',c[4]) end
+ return t
+end
+-- Measures one recorded sample with F22.Contrast and prints a plain diagnostic
+-- line for it whatever the expectations print; returns the measured ratio
+-- (nil when missing). Reads the given HostShows record only.
+function F22.Diagnose(tag,control,state,s)
+ s=s or {}
+ local ratio=F22.Contrast(s)
+ local measured=F22.Measured(ratio)
+ local class=not measured and 'MISSING' or (ratio>=F22.benchmark and 'meets' or 'SHORTFALL')
+ local required=state=='usable' or state=='enabled'
+ local note=class=='MISSING' and 'no recorded label or fill to measure'
+  or class=='SHORTFALL' and (required and 'unresolved native readability observation (offline heuristic, not a native verdict)'
+   or 'below the benchmark; informational for this state, not a universal native requirement')
+  or (required and 'at or above the offline benchmark; not a native readability verdict'
+   or 'informational for this state, not a universal native requirement')
+ print(string.format('%s [%s] control="%s" state=%s label=%s fill=%s ratio=%s (%s) benchmark=%s:1 result=%s; %s',
+  class=='meets' and 'F22 contrast diagnostic' or 'F22 CONTRAST '..class,tag,tostring(control),tostring(state),
+  F22.Rgb(s.label),F22.Rgb(s.fill),measured and string.format('%.17g',ratio) or 'none',F22.Ratio(measured and ratio or nil),
+  tostring(F22.benchmark),class,note))
+ return ratio
+end
+-- The recorded colour of the HIGHLIGHT texture a button carries (its hover).
+function F22.Hover(b)
+ for _,t in ipairs(HOST.made[b] or {}) do
+  if t.kind=='Texture' and HOST.layer[t]=='HIGHLIGHT' then return HostSeen(t,'SetVertexColor') end
+ end
+end
+-- One input event through the button's registered script; false when none.
+function F22.Input(b,kind,arg)
+ local f=b and b:GetScript(kind)
+ if not f then return false,'no '..kind..' script' end
+ return pcall(f,b,arg)
+end
+for _,style in ipairs(F22.styles) do for _,palette in ipairs(F22.palettes) do
+ local tag='F22 '..style..'/'..palette
+ C.scenario(tag..': the chosen skin on Continue and the step cards\' main actions through wait, press, hover, moves, repaint and reopen',function()
+  Boot({host=true})
+  local TH,G,T=Nexus.Theme,Nexus.GuidedSetup,Nexus.UserText.Guide
+  if not C.setup(TH and TH.SetStyle and TH.SetPalette and TH.Resolve and T and T.buttons,
+   tag..': fixture: the Theme and the guide text are loaded') then return end
+  if not Open(tag) then return end
+  Start('I already have')
+  local g,nxt=Guide(),Btn('Continue')
+  if not C.setup(Step()=='wishlist' and nxt~=nil and nxt:GetFontString()~=nil and not On(nxt),
+   tag..': fixture: the Wishlist step with a waiting Continue',Step()) then return end
+  -- The player's explicit choice, made while the coach is open.
+  local so,sw=TH.SetStyle(style)
+  local po,pw=TH.SetPalette(palette)
+  if not C.setup(so~=nil and po~=nil,tag..': fixture: the player chooses the skin',tostring(sw)..' / '..tostring(pw)) then return end
+  local skin=ActiveSkin(style,palette)
+  if not C.setup(skin~=nil and skin.style.id==style and skin.palette.id==palette,
+   tag..': fixture: the Theme resolves the chosen style and palette') then return end
+  local before=Effects()
+  local ok,why=SkinWaiting(nxt,skin)
+  C.expect(Shown() and not On(nxt) and ok,tag..': the open coach repaints its waiting Continue as the skin\'s disabled button',
+   why..' contrast '..F22.Ratio(F22.Diagnose(tag,'Continue','waiting',HostShows(nxt))))
+  local skip,back=Btn('Skip for now'),Btn('Back')
+  C.expect(skip~=nil and HostShows(skip).fill==nil and HostSame(HostShows(skip).label,DESIGN.link)
+   and back~=nil and HostShows(back).fill==nil,
+   tag..': Skip for now keeps its fixed link look and Back stays unfilled under the skin')
+  Press(Opt('W-Free'))
+  ok,why=SkinPrimary(nxt,skin)
+  C.expect(On(nxt) and ok,tag..': a usable Continue is the skin\'s primary',why)
+  local ratio=F22.Diagnose(tag,'Continue','usable',HostShows(nxt))
+  C.expect(F22.Measured(ratio),tag..': usable Continue: its label-on-fill contrast is measurable from the recorded paint (4.5:1 benchmark printed as a diagnostic)',F22.Ratio(ratio))
+  local hv=F22.Hover(nxt)
+  C.expect(HostSame(hv,skin.palette.accent) and type(hv[4])=='number' and hv[4]>0 and hv[4]<1,
+   tag..': usable Continue: its recorded hover highlight is the palette accent, translucent over the fill',HostTint(hv))
+  local label=HostShows(nxt).label
+  local entered,eerr=F22.Input(nxt,'OnEnter',true)
+  local held=HostShows(nxt)
+  local left,lerr=F22.Input(nxt,'OnLeave',true)
+  ok,why=SkinPrimary(nxt,skin)
+  C.expect(entered and left and HostSame(held.label,label) and ok and V.Plain(nxt:GetText() or '')=='Continue',
+   tag..': hovering Continue runs its callbacks and keeps its presentation and full label',tostring(eerr or lerr)..' '..why)
+  local down,derr=F22.Input(nxt,'OnMouseDown','LeftButton')
+  local pressed=HostShows(nxt)
+  C.expect(down and HostSame(pressed.fill,skin.style.pressedBg) and HostSame(pressed.label,skin.style.text),
+   tag..': pressing Continue shows the skin\'s pressed fill under its label',
+   tostring(derr)..' '..HostDetail(pressed)..' contrast '..F22.Ratio(F22.Diagnose(tag,'Continue','pressed',pressed)))
+  local up,uerr=F22.Input(nxt,'OnMouseUp','LeftButton')
+  ok,why=SkinPrimary(nxt,skin)
+  C.expect(up and ok and Step()=='wishlist',tag..': releasing restores the usable primary; a press alone does not move on',
+   tostring(uerr)..' '..why)
+  Press(Btn('Continue'))
+  nxt=Btn('Continue')
+  if not C.setup(Step()=='target' and nxt~=nil,tag..': fixture: the Saved Build step',Step()) then return end
+  ok,why=SkinWaiting(nxt,skin)
+  C.expect(not On(nxt) and ok,tag..': on the next step Continue waits in the skin\'s disabled look',why)
+  Press(Opt('Fire PvE'))
+  ok,why=SkinPrimary(nxt,skin)
+  C.expect(On(nxt) and ok,tag..': re-enabled, Continue is the skin\'s primary again',why)
+  Nexus.GuidedSetupUI.Render();Nexus.GuidedSetupUI.Render()
+  ok,why=SkinPrimary(Btn('Continue'),skin)
+  C.expect(ok,tag..': repeated renders keep the usable Continue in the skin',why)
+  Laid(tag..' target',g)
+  Press(Btn('Continue'))
+  local open=T.buttons.open
+  if C.setup(Step()=='assign' and Btn(open)~=nil,tag..': fixture: the Assign card offers its main action',Step()) then
+   local p=Btn(open)
+   ok,why=SkinPrimary(p,skin)
+   C.expect(On(p) and ok and not On(Btn('Continue')),tag..': the Assign card\'s main action is the skin\'s primary while Continue waits',why)
+  end
+  Press(Btn('All steps v'));Press(Opt('Auto (optional)'))
+  local kept=T.buttons.keep:format('OFF')
+  if not C.setup(Step()=='auto' and not Auto() and Btn(kept)~=nil and G.State().autoKept==nil,
+   tag..': fixture: the Auto step with Auto OFF offers Keep Auto OFF',Step()) then return end
+  local kb=Btn(kept)
+  ok,why=SkinPrimary(kb,skin)
+  C.expect(On(kb) and ok and not On(Btn('Continue')),tag..': Keep Auto OFF is the skin\'s primary while Continue waits',why)
+  local kr=F22.Diagnose(tag,kept,'enabled',HostShows(kb))
+  C.expect(F22.Measured(kr),tag..': Keep Auto OFF: its label-on-fill contrast is measurable from the recorded paint (4.5:1 benchmark printed as a diagnostic)',F22.Ratio(kr))
+  Laid(tag..' auto',g)
+  C.guard(Effects()==before,tag..': the hovers, presses, renders and moves wrote, acted, sent, spent and toggled nothing',Effects())
+  -- Repaint while the card is open: the style's own colours, then the palette again.
+  local no,nw=TH.SetPalette(nil)
+  ok,why=SkinPrimary(Btn(kept),ActiveSkin(style,nil))
+  C.expect(no~=nil and ok,tag..': returning to the style\'s own colours repaints the open Keep Auto OFF',tostring(nw)..' '..why)
+  local ro,rw=TH.SetPalette(palette)
+  ok,why=SkinPrimary(Btn(kept),skin)
+  C.expect(ro~=nil and ok,tag..': choosing the palette again repaints it back',tostring(rw)..' '..why)
+  before=Effects()
+  Press(Btn('X'))
+  if not C.setup(not Shown(),tag..': fixture: X closes the coach') then return end
+  Nexus.GuidedSetupUI.Show()
+  kb=Btn(kept)
+  if not C.setup(Shown() and Step()=='auto' and kb~=nil,tag..': fixture: reopening resumes the Auto step',Step()) then return end
+  local fs=kb:GetFontString()
+  ok,why=SkinPrimary(kb,skin)
+  C.expect(ok and fs~=nil and V.Plain(fs:GetText() or '')==kept and V.Plain(kb:GetText() or '')==kept,
+   tag..': after a reopen Keep Auto OFF keeps the skin and its exact full label',why)
+  local kd=F22.Input(kb,'OnMouseDown','LeftButton')
+  local kp=HostShows(kb)
+  local ku=F22.Input(kb,'OnMouseUp','LeftButton')
+  ok,why=SkinPrimary(kb,skin)
+  C.expect(kd and ku and HostSame(kp.fill,skin.style.pressedBg) and ok and Step()=='auto' and G.State().autoKept==nil,
+   tag..': pressing and releasing Keep Auto OFF shows the pressed fill, then the primary; nothing is kept yet',HostDetail(kp))
+  Press(kb)
+  C.expect(Step()=='summary' and G.State().autoKept=='off' and not Auto(),tag..': Keep Auto OFF keeps Auto OFF and moves on',Step())
+  local fin=type(T.buttons.finish)=='string' and Btn(V.Plain(T.buttons.finish)) or nil
+  if C.setup(fin~=nil,tag..': fixture: the summary offers Finish') then
+   Nexus.GuidedSetupUI.Render()
+   ok,why=SkinPrimary(fin,skin)
+   C.expect(On(fin) and ok,tag..': on the summary the usable Finish is the skin\'s primary',why)
+  end
+  C.guard(Effects()==before and not Auto(),
+   tag..': the close, reopen, press and Keep Auto OFF wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+end end
+
+-- F23: Skip for now on every step the player may skip (core G.SKIPPABLE:
+-- wishlist, target, assign, manual, auto), whether the step waits or is
+-- ready. core G.Skip records the mark, moves along the path and keeps every
+-- result whatever CanNext says, so the footer link is the player's way to
+-- move on from a ready step without Continue too. Each case starts from its
+-- own Boot and reaches its step through the visible controls only (Welcome
+-- path, Wishlist choice, Saved Build choice, the real chooser row, a sample
+-- card, Keep Auto OFF, Back, the checklist); nothing is set in the guide
+-- state and no core navigation stands in for a missing link. Every input
+-- goes through F23.Use: the control must be shown, visible and enabled
+-- (true or 1; 0 is never enabled) before the existing Press. SETUP is the
+-- step, its eligibility, Core CanNext and Continue agreeing; EXPECT is the
+-- visible, enabled link, the move with its mark, and the results kept after
+-- it (a chosen Wishlist and target stay done, a confirmed assignment stays
+-- verified and complete, an observed link stays observed and true now but
+-- never confirmed, a tried lesson stays a lesson, a kept Auto OFF stays kept
+-- with its skip mark). GUARD: the Skip adds no adapter write, host action,
+-- send, Orb spend or Auto change, and leaves the receipts and the read back
+-- of the destination as they were. Welcome (before and after the path
+-- choice) and the summary offer no Skip; Finish closes. The guide's own
+-- place and Changed notification are bookkeeping, not counted here.
+do
+ local F23={NEXT={wishlist='target',target='assign',assign='manual',manual='auto',auto='summary'},
+  STEPS={'wishlist','target','assign','manual','auto'}}
+ function F23.Yes(v) return v==true or v==1 end
+ -- One player input: only a shown, visible and enabled control is used.
+ function F23.Use(b)
+  if not (b and F23.Yes(b:IsShown()) and F23.Yes(b:IsVisible()) and F23.Yes(b:IsEnabled())) then return false end
+  return Press(b)
+ end
+ function F23.Has(t) return type(t)=='string' and t~='' and Text():find(V.Plain(t),1,true)~=nil end
+ -- The summary's completed rows as the coach shows them. VIEW.summary draws
+ -- each row as four text regions in render order: the status word, the icon
+ -- glyph, the row label and its detail. Only shown and visible FontStrings
+ -- from GuidedSetupUI.TextRegions are read, each compared by its full plain
+ -- text. Every row of the confirmed route must appear exactly once as those
+ -- four regions, from the guide copy and the fixture's W-Free and Saved Build
+ -- 2 (Fire PvE): Chosen, Chosen, Done - confirmed, Tried and Left OFF. No
+ -- shown region may be a standalone skipped status word or skipped row detail.
+ -- The summary's own outcome sentence, which merely contains the word, is a
+ -- different region and is not a skipped row. Missing copy, too few regions,
+ -- or a missing, repeated or altered row fails.
+ -- The shown and visible coach text regions now (GuidedSetupUI.TextRegions,
+ -- render order), each as its full plain text in a dense array; nil when the
+ -- observer or any listed region cannot be read, so an unreadable region is
+ -- never passed over.
+ function F23.Observe()
+  local U=Nexus.GuidedSetupUI
+  if not (U and type(U.TextRegions)=='function') then return nil end
+  local ok,list=pcall(U.TextRegions)
+  if not ok or type(list)~='table' then return nil end
+  local out={}
+  for i=1,#list do
+   local fs=list[i]
+   if type(fs)~='table' or type(fs.IsShown)~='function' or type(fs.IsVisible)~='function'
+    or type(fs.GetText)~='function' then return nil end
+   if F23.Yes(fs:IsShown()) and F23.Yes(fs:IsVisible()) then out[#out+1]=V.Plain(fs:GetText() or '') end
+  end
+  return out
+ end
+ -- F23.Done(F) reads the real coach now through F23.Observe; a failed read
+ -- fails and is never replaced. Only the declared test-observer controls pass
+ -- `derivedForControl`, a dense array of plain texts derived from
+ -- F23.Observe; it is not a product interface. Returns true, or false and the
+ -- first rule that failed. The five skipped fields and the five rows are
+ -- checked at fixed positions, so a missing field is a failure and never the
+ -- end of a shorter list. Each row's identity (its label) must be shown
+ -- exactly once, with its own word, glyph and detail around it: a second row
+ -- of the same identity, whatever it says, is ambiguous and fails.
+ function F23.Done(F,derivedForControl)
+  local T,P=Nexus.UserText.Guide,V.Plain
+  if not (type(T)=='table' and type(F)=='table') then return false,'copy-missing' end
+  local st,wd,rows,tg=T.status or {},T.words or {},F.rows or {},T.target or {}
+  local function Say(fmt,...)
+   if type(fmt)~='string' then return nil end
+   local ok,s=pcall(string.format,fmt,...)
+   return ok and s or nil
+  end
+  local function Filled(v) return type(v)=='string' and v~='' and P(v)~='' end
+  local glyph=st.verified and st.verified.glyph
+  local dest=Say(tg.slot,2,'Fire PvE')
+  local want={
+   {wd.chosen,glyph,rows.wishlist,Say(F.wishDone,'W-Free')},
+   {wd.chosen,glyph,rows.target,dest},
+   {st.verified and st.verified.word,glyph,rows.assign,dest and Say(F.assignDone,dest,'W-Free')},
+   {wd.tried,glyph,rows.manual,F.manualDone},
+   {wd.leftOff,glyph,rows.auto,Say(F.autoMode,'OFF')},
+  }
+  local skipped={}
+  skipped[1]=st.skipped and st.skipped.word
+  skipped[2],skipped[3],skipped[4],skipped[5]=F.wishSkipped,F.targetSkipped,F.assignSkipped,F.manualSkipped
+  for i=1,5 do if not Filled(skipped[i]) then return false,'skipped-copy:'..i end end
+  for r=1,5 do
+   for i=1,4 do if not Filled(want[r][i]) then return false,'row-copy:'..r..':'..i end end
+  end
+  for r=1,5 do
+   for q=r+1,5 do if P(want[r][3])==P(want[q][3]) then return false,'identity-copy-repeated:'..P(want[r][3]) end end
+  end
+  local shown=derivedForControl
+  if shown==nil then
+   shown=F23.Observe()
+   if shown==nil then return false,'observation-unavailable' end
+  else
+   if type(shown)~='table' then return false,'derived-observation-invalid' end
+   local n,entries=#shown,0
+   for key,value in pairs(shown) do
+    entries=entries+1
+    if type(key)~='number' or key%1~=0 or key<1 or key>n or type(value)~='string' then
+     return false,'derived-observation-invalid'
+    end
+   end
+   if entries~=n then return false,'derived-observation-invalid' end
+  end
+  if #shown<4*5 then return false,'too-few-regions:'..#shown end
+  for i=1,#shown do
+   for s=1,5 do if shown[i]==P(skipped[s]) then return false,'skipped-region:'..i end end
+  end
+  local at={}
+  for r=1,5 do
+   local id,count,pos=P(want[r][3]),0,nil
+   for i=1,#shown do if shown[i]==id then count,pos=count+1,i end end
+   if count~=1 then return false,'identity-count:'..id..':'..count end
+   if pos<3 or pos+1>#shown or shown[pos-2]~=P(want[r][1]) or shown[pos-1]~=P(want[r][2])
+    or shown[pos+1]~=P(want[r][4]) then return false,'row-mismatch:'..id end
+   for q=1,r-1 do if math.abs(pos-at[q])<4 then return false,'rows-overlap:'..id end end
+   at[r]=pos
+  end
+  return true
+ end
+ -- The real receipts, as the guide lists them.
+ function F23.Receipts()
+  local out={}
+  for i,r in ipairs(Nexus.GuidedSetup.Receipts()) do
+   out[i]=table.concat({tostring(r.kind),tostring(r.serial),tostring(r.ok),tostring(r.destination),
+    tostring(r.key),tostring(r.token),tostring(r.origin)},':')
+  end
+  return #out..'|'..table.concat(out,';')
+ end
+ -- The chosen destination and its read back identity now.
+ function F23.Read()
+  local f=Nexus.GuidedSetup.TargetFacts()
+  if not f then return 'none' end
+  return tostring(f.destination)..'/'..tostring(f.read and f.read.state)..'/'..tostring(f.read and f.read.key)
+   ..'/'..tostring(f.read and f.read.action)
+ end
+ -- The existing path with every step done, up to `stop` (ready there).
+ function F23.Route(tag,stop)
+  local G=Nexus.GuidedSetup
+  if not Open(tag) then return false end
+  F23.Use(Opt('I already have'));F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='wishlist' and Opt('W-Free')~=nil,tag..': fixture: the Wishlist step lists W-Free',Step()) then return false end
+  F23.Use(Opt('W-Free'))
+  if stop=='wishlist' then return true end
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='target' and Opt('Fire PvE')~=nil,tag..': fixture: the Saved Build step lists Fire PvE',Step()) then return false end
+  F23.Use(Opt('Fire PvE'))
+  if stop=='target' then return true end
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='assign' and Btn('Open the Wishlist chooser')~=nil,tag..': fixture: the Assign step offers the chooser',Step()) then return false end
+  F23.Use(Btn('Open the Wishlist chooser'))
+  local row=Row('W-Free')
+  if not C.setup(not Shown() and row~=nil,tag..': fixture: the coach stepped aside for the real chooser listing W-Free') then return false end
+  F23.Use(row.nameButton)
+  C.guard(writes.SetLoadoutWishlist==1 and Writes()==1,tag..': the explicit chooser choice makes exactly one assignment write',Writes())
+  if not C.setup(Shown() and Step()=='assign' and G.AssignStatus().state=='verified',
+   tag..': fixture: the coach returns with the assignment confirmed by read back',G.AssignStatus().state) then return false end
+  if stop=='assign' then return true end
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='manual' and Opt('Sample Frost')~=nil,tag..': fixture: the lesson offers its sample cards',Step()) then return false end
+  F23.Use(Opt('Sample Frost'))
+  if stop=='manual' then return true end
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='auto' and Btn('Keep Auto OFF')~=nil and not Auto(),tag..': fixture: the Auto step with Auto OFF',Step()) then return false end
+  F23.Use(Btn('Keep Auto OFF'))
+  if not C.setup(Step()=='summary' and G.State().autoKept=='off',tag..': fixture: Keep Auto OFF keeps it and reaches the summary',Step()) then return false end
+  F23.Use(Btn('Back'))
+  return C.setup(Step()=='auto',tag..': fixture: Back returns to the Auto step with Auto OFF kept',Step())
+ end
+ -- The existing path up to `id` with that step still waiting.
+ function F23.Waiting(tag,id)
+  if not Open(tag) then return false end
+  F23.Use(Opt('I already have'));F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='wishlist',tag..': fixture: the Wishlist step',Step()) then return false end
+  if id=='wishlist' then return true end
+  if id=='manual' or id=='auto' then
+   F23.Use(Btn('All steps v'))
+   F23.Use(Opt(id=='manual' and 'Read a recommendation' or 'Auto (optional)'))
+   return C.setup(Step()==id,tag..': fixture: the checklist row opens the '..id..' step',Step())
+  end
+  F23.Use(Opt('W-Free'));F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='target',tag..': fixture: the Saved Build step',Step()) then return false end
+  if id=='target' then return true end
+  F23.Use(Opt('Fire PvE'));F23.Use(Btn('Continue'))
+  return C.setup(Step()=='assign' and Nexus.GuidedSetup.AssignStatus().state=='ready',
+   tag..': fixture: the Assign step waits for the player action',Step())
+ end
+ -- The step healthy as SETUP, then the visible link, the move and what it kept.
+ function F23.Check(tag,id,ready,label,evidence)
+  local G=Nexus.GuidedSetup
+  local nxt,state=Btn('Continue'),ready and 'ready' or 'waiting'
+  if not C.setup(Step()==id and G.SKIPPABLE[id]==true and (G.CanNext() and true or false)==ready
+   and nxt~=nil and F23.Yes(nxt:IsEnabled())==ready and not Auto(),
+   tag..': fixture: the '..id..' step is '..state..' (Core CanNext and Continue agree), may be skipped, Auto OFF',Step()) then return false end
+  local before,receipts,read=Effects(),F23.Receipts(),F23.Read()
+  local skip=Btn('Skip for now')
+  local offered=skip~=nil and F23.Yes(skip:IsShown()) and F23.Yes(skip:IsVisible()) and F23.Yes(skip:IsEnabled())
+   and skip.look=='link'
+  C.expect(offered,tag..': the '..state..' '..id..' step shows an enabled Skip for now link',Text())
+  local moved=offered and F23.Use(skip) and Step()==F23.NEXT[id] and G.State().skipped[id]==true or false
+  C.expect(moved,tag..': Skip for now moves on to '..F23.NEXT[id]..' and records '..id..' as skipped',Step())
+  C.expect(moved and evidence(),tag..': after the '..state..' Skip '..label)
+  C.guard(Effects()==before and not Auto(),tag..': Skip for now wrote, acted, sent, spent and toggled nothing; Auto stays OFF',Effects())
+  C.guard(F23.Receipts()==receipts and F23.Read()==read,
+   tag..': navigation leaves every receipt and the destination read back as they were',read)
+  return moved
+ end
+ for _,id in ipairs(F23.STEPS) do
+  local tag='F23 waiting '..id
+  C.scenario(tag..': a waiting step offers Skip for now; it moves on and reads skipped',function()
+   Boot()
+   local G=Nexus.GuidedSetup
+   if not F23.Waiting(tag,id) then return end
+   F23.Check(tag,id,false,'the step reads skipped in the summary',function()
+    local sm=G.Summary()
+    if id=='auto' then return sm.autoSkipped==true and sm.autoKept==nil and sm.auto=='off' end
+    return sm[id]=='skipped'
+   end)
+  end)
+ end
+ F23.READY={
+  wishlist={'the chosen W-Free stays chosen and done',function(G,k)
+   local w=G.State().wishlist;return w~=nil and w.key==k.key and G.Summary().wishlist=='done' end},
+  target={'the reachable Fire PvE stays chosen and done',function(G,k)
+   local f=G.TargetFacts();return f~=nil and f.canContinue==true and f.destination==k.dest and G.Summary().target=='done' end},
+  assign={'the confirmed assignment stays verified and the setup complete',function(G)
+   local sm=G.Summary();return G.AssignStatus().state=='verified' and sm.assign=='verified' and sm.complete==true end},
+  manual={'the tried lesson stays a lesson and the assignment verified',function(G)
+   local sm=G.Summary();return G.State().manualAck==true and sm.manual=='lesson' and sm.assign=='verified' end},
+  auto={'Auto OFF stays kept with its skip mark, the setup complete',function(G)
+   local sm=G.Summary()
+   return G.State().autoKept=='off' and sm.autoKept=='off' and sm.autoSkipped==true and sm.auto=='off'
+    and sm.complete==true and sm.manual=='lesson' end},
+ }
+ for _,id in ipairs(F23.STEPS) do
+  local tag='F23 ready '..id
+  C.scenario(tag..': a ready step offers Skip for now; it moves on and keeps what was done',function()
+   Boot()
+   local G=Nexus.GuidedSetup
+   if not F23.Route(tag,id) then return end
+   local w,f=G.State().wishlist,G.TargetFacts()
+   local k={key=w and w.key,dest=f and f.destination}
+   local spec=F23.READY[id]
+   local moved=F23.Check(tag,id,true,spec[1],function() return spec[2](G,k) end)
+   if id=='auto' then
+    local F=Nexus.UserText.Guide.finish or {}
+    C.expect(moved and Step()=='summary' and Btn('Skip for now')==nil and F23.Has(F.titleDone) and F23.Has(F.subDone)
+     and F23.Has(F.manualDone) and F23.Done(F),
+     tag..': after the ready Skip the summary shows the setup done and the tried lesson, nothing done as skipped, and no Skip',Text())
+    -- Declared test-observer controls: test-only and counterfactual, never a
+    -- product, native or rendered failure. At the real completed summary
+    -- reached above, the real observation is read once into a dense array
+    -- (F23.Observe) and the finish copy is shallow-copied; only those copies
+    -- are altered. First the healthy baselines: the real default, the
+    -- unmodified derived observation and an unmodified copy all pass. Then the
+    -- matcher must reject a finish copy missing only its fifth required skipped
+    -- field (manualSkipped), and, for each of the five row identities, the real
+    -- observation plus one added contradictory, non-skipped row of that same
+    -- identity (the guide's own Not started word and glyph with that row's
+    -- not-done detail). Each rejection must name the rule that fired. After,
+    -- the real copy, observer and summary are unchanged and still pass, and
+    -- effects, receipts and the read back are as they were.
+    local cBefore,cReceipts,cRead=Effects(),F23.Receipts(),F23.Read()
+    local cT,cObserver,cFifth=Nexus.UserText.Guide,Nexus.GuidedSetupUI.TextRegions,F.manualSkipped
+    local P=V.Plain
+    local seen=F23.Observe()
+    local copy={}
+    for key,value in pairs(F) do copy[key]=value end
+    local healthy=Step()=='summary' and seen~=nil and F23.Done(F)==true and F23.Done(F,seen)==true
+     and F23.Done(copy,seen)==true
+    C.expect(healthy,tag..': test-observer control: the real summary, its unmodified derived observation and an unmodified'
+     ..' copy of the finish copy all pass the row matcher',seen and #seen)
+    local four,others={},true
+    for key,value in pairs(F) do four[key]=value end
+    four.manualSkipped=nil
+    for key,value in pairs(F) do if key~='manualSkipped' and four[key]~=value then others=false end end
+    for key in pairs(four) do if F[key]==nil then others=false end end
+    local okFour,whyFour=F23.Done(four,seen)
+    C.expect(healthy and others and four.manualSkipped==nil and type(cFifth)=='string' and cFifth~=''
+     and okFour==false and whyFour=='skipped-copy:5',
+     tag..': test-observer counterfactual control: a finish copy missing only manualSkipped, the fifth required skipped'
+     ..' field, is rejected',tostring(whyFour))
+    local skippedPlain={}
+    skippedPlain[1]=P(cT.status and cT.status.skipped and cT.status.skipped.word)
+    skippedPlain[2],skippedPlain[3]=P(F.wishSkipped),P(F.targetSkipped)
+    skippedPlain[4],skippedPlain[5]=P(F.assignSkipped),P(F.manualSkipped)
+    local notDone,rowsCopy=(cT.status or {})['not'] or {},F.rows or {}
+    local counter={
+     {rowsCopy.wishlist,F.wishNot},{rowsCopy.target,F.targetNot},{rowsCopy.assign,F.assignNot},
+     {rowsCopy.manual,F.manualNot},{rowsCopy.auto,F.autoUnknown},
+    }
+    for r=1,5 do
+     local added,valid,clean={notDone.word,notDone.glyph,counter[r][1],counter[r][2]},true,true
+     for i=1,4 do
+      if type(added[i])~='string' or P(added[i])=='' then valid=false
+      else
+       added[i]=P(added[i])
+       for s=1,5 do if added[i]==skippedPlain[s] then clean=false end end
+      end
+     end
+     local dup={}
+     for i=1,#(seen or {}) do dup[i]=seen[i] end
+     if valid then for i=1,4 do dup[#dup+1]=added[i] end end
+     local okDup,whyDup=F23.Done(F,dup)
+     C.expect(healthy and valid and clean and #dup==#seen+4 and okDup==false
+      and whyDup=='identity-count:'..tostring(added[3])..':2',
+      tag..': test-observer counterfactual control: the real summary plus a contradictory, non-skipped '
+      ..tostring(added[3])..' row is rejected as an ambiguous row identity',tostring(whyDup))
+    end
+    local again=F23.Observe()
+    local same=seen~=nil and again~=nil and #again==#seen
+    if same then for i=1,#seen do if again[i]~=seen[i] then same=false end end end
+    C.expect(healthy and same and F23.Done(F)==true and Nexus.UserText.Guide==cT and cT.finish==F
+     and F.manualSkipped==cFifth and Nexus.GuidedSetupUI.TextRegions==cObserver and Step()=='summary',
+     tag..': after the test-observer controls the real summary, the guide copy and the observer are unchanged and the'
+     ..' real rows still pass')
+    C.guard(Effects()==cBefore and F23.Receipts()==cReceipts and F23.Read()==cRead and not Auto(),
+     tag..': the test-observer controls wrote, acted, sent, spent and toggled nothing; receipts and read back are unchanged',
+     Effects())
+   end
+  end)
+ end
+ C.scenario('F23 ready assign observed: an already linked Saved Build offers Skip for now; the link stays observed, never confirmed',function()
+  Boot()
+  local tag,G='F23 ready assign observed',Nexus.GuidedSetup
+  if not C.setup(A.SetLoadoutWishlist(1,107)==true and writes.SetLoadoutWishlist==1 and Writes()==1,
+   tag..': fixture: Saved Build 1 already follows W-Free (one declared setup write, kept in the count)',Writes()) then return end
+  if not Open(tag) then return end
+  F23.Use(Opt('I already have'));F23.Use(Btn('Continue'))
+  F23.Use(Opt('W-Free'));F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='target' and Opt('Slot 1 - One')~=nil,tag..': fixture: the Saved Build step lists Slot 1 - One',Step()) then return end
+  F23.Use(Opt('Slot 1 - One'))
+  local f=G.TargetFacts()
+  if not C.setup(f~=nil and f.already==true and f.canContinue==true,
+   tag..': fixture: the linked Saved Build continues; the Assign step only reads it',f and tostring(f.route)) then return end
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='assign' and G.AssignStatus().state=='observed',
+   tag..': fixture: the Assign step reads the existing link (observed)',G.AssignStatus().state) then return end
+  C.guard(writes.SetLoadoutWishlist==1 and Writes()==1,tag..': the guide added no write to the declared setup write',Writes())
+  local moved=F23.Check(tag,'assign',true,'the link stays observed and true now, never promoted to confirmed',function()
+   local sm=G.Summary()
+   return G.AssignStatus().state=='observed' and sm.assign=='observed' and sm.trueNow==true and sm.complete==false
+  end)
+  local base=Effects()
+  -- On to the summary by the ordinary controls: Continue if the step stayed,
+  -- then the lesson and Keep Auto OFF.
+  if Step()=='assign' then F23.Use(Btn('Continue')) end
+  F23.Use(Opt('Sample Frost'));F23.Use(Btn('Continue'));F23.Use(Btn('Keep Auto OFF'))
+  if not C.setup(Step()=='summary',tag..': fixture: the lesson and Keep Auto OFF reach the summary',Step()) then return end
+  local F=Nexus.UserText.Guide.finish or {}
+  local sm=G.Summary()
+  C.expect(moved and G.State().skipped.assign==true and sm.assign=='observed' and sm.trueNow==true and sm.complete==false
+   and F23.Has(F.titleDone) and F23.Has(F.subTrue) and not F23.Has(F.subDone) and not F23.Has(F.assignSkipped),
+   tag..': after the ready Skip the summary shows the link true now (observed), not a confirmed setup and not skipped',Text())
+  C.guard(Effects()==base and writes.SetLoadoutWishlist==1 and Writes()==1 and not Auto(),
+   tag..': after the declared setup write the moves and the summary wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+ C.scenario('F23 Welcome and summary: no Skip for now before or after the path choice, nor on the summary; Finish closes',function()
+  Boot()
+  local tag,G,T='F23 negatives',Nexus.GuidedSetup,Nexus.UserText.Guide
+  local before=Effects()
+  if not Open(tag) then return end
+  if not C.setup(Step()=='welcome' and not G.SKIPPABLE.welcome and not G.SKIPPABLE.summary,
+   tag..': fixture: the coach opens at Welcome; Welcome and the summary are not skippable',Step()) then return end
+  C.guard(Btn('Skip for now')==nil and not On(Btn('Continue')),tag..': Welcome before a path choice offers no Skip for now')
+  F23.Use(Opt('Just look around'))
+  C.guard(Step()=='welcome' and G.CanNext()==true and On(Btn('Continue')) and Btn('Skip for now')==nil,
+   tag..': Welcome after the path choice is ready and still offers no Skip for now')
+  F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='manual' and Opt('Sample Frost')~=nil,tag..': fixture: the look-around lesson',Step()) then return end
+  F23.Use(Opt('Sample Frost'));F23.Use(Btn('Continue'))
+  if not C.setup(Step()=='auto' and Btn('Keep Auto OFF')~=nil,tag..': fixture: the Auto step',Step()) then return end
+  F23.Use(Btn('Keep Auto OFF'))
+  local fin=type(T.buttons.finish)=='string' and Btn(V.Plain(T.buttons.finish)) or nil
+  if not C.setup(Step()=='summary' and fin~=nil,tag..': fixture: the summary offers Finish',Step()) then return end
+  C.guard(Btn('Skip for now')==nil and F23.Yes(fin:IsEnabled()),tag..': the summary offers no Skip for now; its Finish is enabled')
+  Nexus.GuidedSetupUI.Render()
+  C.guard(Btn('Skip for now')==nil,tag..': a render of the summary still offers no Skip for now')
+  F23.Use(fin)
+  C.guard(not Shown(),tag..': Finish closes the coach')
+  C.guard(Effects()==before and not Auto(),tag..': Welcome, the lesson, Keep Auto OFF and Finish wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+end
 
 C.finish('(guided coach: one step at a time; navigation changes nothing; confirmed only after read back)')

@@ -10,7 +10,12 @@ replaced by controlled stand-ins. No Lua runtime is started and nothing waits fo
 a timeout is a raised subprocess.TimeoutExpired, and elapsed time is a fake clock that each
 stand-in process advances. It calls tools/ci_check.py's main() with every process replaced
 by a stand-in: the runner writes a controlled report (or none) and exits with a chosen code,
-and a registered Python test exits with a chosen code, times out or fails to start. No Python test file is run. Each case
+and a registered Python test exits with a chosen code, times out or fails to start. No Python
+test file is run. The only real processes are tiny byte-emitter children of this interpreter
+(-c, at most 45 s each), which write known UTF-8 bytes to stdout and stderr and exit with a
+chosen code: one stands in for a Lua test process and one for the Lua runner process, and the
+captured output must decode to the expected text. Text capture that names no encoding is
+decoded as cp1252 at this test's process boundary, also under python -X utf8. Each case
 prints one "ok" line; any wrong result prints WRONG and the exit status is 1.
 """
 from __future__ import annotations
@@ -665,11 +670,114 @@ def main() -> int:
                        unlisted],
                    f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
 
+    # UTF-8 capture at both capture seams. Tiny children of this interpreter write known UTF-8
+    # bytes (the continuation byte 0x81 in both streams) straight to stdout and stderr and exit
+    # with the stand-in's code; one stands in for a Lua test process, one for the Lua runner
+    # process. The capture keywords of the code under test reach subprocess.run unchanged, except
+    # that a child is bounded to 45 s and text capture that names no encoding decodes as cp1252
+    # at this boundary: a missing encoding fails on every host, also under python -X utf8, and an
+    # explicit encoding of the code under test wins. Nothing here sets an environment variable.
+    byte_out = b'diagnostic \xc5\x81\xc3\xb3d\xc5\xba'
+    byte_err = b'error \xe2\x82\xac \xc5\x81'
+    # The expected text, written as code points apart from the bytes above.
+    text_out = 'diagnostic Łódź'
+    text_err = 'error € Ł'
+    emitter = ('import sys; out, err, code = sys.argv[1:]; sys.stdout.buffer.write(bytes.fromhex(out));'
+               ' sys.stderr.buffer.write(bytes.fromhex(err)); sys.exit(int(code))')
+
+    def byte_child(stand_in, started: list):
+        """A subprocess.run for the code under test: stand_in keeps its bookkeeping and chooses the
+        exit code, then a real byte-emitter child runs with the caller's capture keywords."""
+        def run(command, **kwargs):
+            planned = stand_in(command, **kwargs)
+            forwarded = dict(kwargs)
+            if forwarded.get('encoding') is None and (forwarded.get('text') or forwarded.get('universal_newlines')
+                                                      or forwarded.get('errors') is not None):
+                forwarded['encoding'] = 'cp1252'
+            forwarded['timeout'] = min(45, forwarded.get('timeout') or 45)
+            started.append(forwarded.get('encoding'))
+            return subprocess.run([sys.executable, '-I', '-X', 'utf8=0', '-c', emitter, byte_out.hex(),
+                                   byte_err.hex(), str(planned.returncode)], **forwarded)
+        return run
+
+    started = []
+    direct = byte_child(lambda command, **kwargs: subprocess.CompletedProcess(command, 7), started)
+    try:
+        proc = direct(['stand-in'], capture_output=True)
+        raw = (proc.returncode, proc.stdout, proc.stderr)
+    except Exception as exc:
+        raw = f'raised {exc!r}'
+    expect('control: a byte child writes exactly the known bytes to stdout and stderr and exits with the'
+           ' stand-in code 7', raw == (7, byte_out, byte_err), f'got {raw!r}')
+    try:
+        proc = direct(['stand-in'], capture_output=True, encoding='utf-8')
+        explicit = (proc.returncode, proc.stdout, proc.stderr)
+    except Exception as exc:
+        explicit = f'raised {exc!r}'
+    expect('control: an explicit utf-8 of the caller wins at this boundary and decodes both streams to exactly'
+           ' the expected text', explicit == (7, text_out, text_err), f'got {explicit!r}')
+    # Without an encoding the cp1252 decoder refuses byte 0x81: subprocess.run raises on POSIX; on
+    # Windows its reader thread fails (reported on stderr, captured here) and leaves no output.
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            proc = direct(['stand-in'], capture_output=True, text=True)
+            legacy = (proc.returncode, proc.stdout, proc.stderr)
+        except UnicodeDecodeError:
+            legacy = 'UnicodeDecodeError'
+        except Exception as exc:
+            legacy = f'raised {exc!r}'
+    expect('control: text capture that names no encoding decodes as cp1252 at this boundary and cannot give'
+           ' the expected text',
+           started == [None, 'utf-8', 'cp1252'] and (legacy == 'UnicodeDecodeError' or (
+               isinstance(legacy, tuple) and legacy[0] == 7 and legacy[1:] != (text_out, text_err))),
+           f'got {legacy!r}, decoders {started!r}')
+
+    # The runner: one existing test, whose process is a byte child that exits 1.
+    runner = load_runner()
+    fake = FakeProcesses(outcomes={'parse': 1})
+    started = []
+    boundary = types.SimpleNamespace(run=byte_child(fake.run, started), monotonic=fake.monotonic)
+    try:
+        code, report, err = run_main(runner, boundary, '--only', 'parse')
+    except Exception as exc:   # a decoding error is a wrong result, never a pass
+        code, report, err = f'raised {exc!r}', None, ''
+    report = report or {}
+    row = (report.get('results') or [{}])[0]
+    expect('a Lua test whose process writes UTF-8 bytes and exits 1 is one FAIL row (exit 1, 0.5 s of 45 s)'
+           ' holding exactly the decoded stdout and stderr; one byte child ran instead of Lua, exit 1',
+           code == 1 and err == '' and fake.calls == [('parse', 45)] and len(started) == 1
+           and fake.commands == [['/stand-in/luajit', 'tests/prototype/parse.lua']]
+           and len(report.get('results') or []) == 1 and report.get('failed') == 1 and report.get('passed') == 0
+           and row.get('status') == 'FAIL' and row.get('exit') == 1 and row.get('seconds') == 0.5
+           and row.get('timeout_seconds') == 45 and row.get('stdout') == text_out and row.get('stderr') == text_err,
+           f'exit {code!r}, stdout {row.get("stdout")!r}, stderr {row.get("stderr")!r}, decoders {started!r},'
+           f' runner stderr {err.strip().splitlines()[-1:]!r}')
+
+    # tools/ci_check.py: its Lua runner process is a byte child that exits 17 and writes no report.
+    started = []
+    runner_exit_17 = ('LUA RUNNER FAILED: tools/run_prototype_tests.py exited 17; the run is not accepted,'
+                      ' whatever its report shows')
+    no_report_line = 'RESULT: the runner wrote no report; nothing is counted as passed'
+
+    def byte_runner(ci):
+        ci.subprocess.run = byte_child(ci.subprocess.run, started)
+
+    result = ci_check_call(None, prepare=byte_runner, runner_exit=17)
+    expect('a Lua runner whose process writes UTF-8 bytes, exits 17 and writes no report: ci_check prints'
+           ' exactly its decoded stdout and stderr, then the runner failure and the no-report result; one byte'
+           ' child ran, no Python test started and nothing counts as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1 and len(started) == 1 and result.report is None
+           and result.out[-4:] == [text_out, text_err, runner_exit_17, no_report_line]
+           and not any(line.startswith(('python: ', 'passed ')) or line in ('runner out', 'runner err')
+                       for line in result.out),
+           f'exit {result.code!r}, last {result.out[-4:]!r}, decoders {started!r}')
+
     if failures:
         print('RESULT: FAILED:', '; '.join(failures))
         return 1
-    print('RESULT: per-test timeouts, result rows, counts, exit status, ci_check timing lines and the registered'
-          ' Python tests behave as declared; no Lua runtime or Python test file was started')
+    print('RESULT: per-test timeouts, result rows, counts, exit status, ci_check timing lines, the registered'
+          ' Python tests and the UTF-8 decoding of captured runner and ci_check output behave as declared; no'
+          ' Lua runtime or Python test file was started, only tiny byte-emitter children')
     return 0
 
 

@@ -507,7 +507,7 @@ def main() -> int:
         # 'seconds' is the measured elapsed time, also for TIMEOUT; 'timeout_seconds' is the configured limit.
         timeout=timeout_for(name);start=time.monotonic()
         try:
-            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
+            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,encoding='utf-8',errors='replace',capture_output=True,timeout=timeout)
             row={'test':name,'status':'PASS' if p.returncode==0 else 'FAIL','exit':p.returncode,
                  'seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,'stdout':p.stdout,'stderr':p.stderr}
         except subprocess.TimeoutExpired as exc:
