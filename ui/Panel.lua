@@ -769,12 +769,21 @@ end
 -- the right, with 8 px between the three controls (4 px before) so each is a
 -- distinct target; Close is the design's square-ish 24 px. The title starts
 -- after the grip (titleLeft) and keeps the rest: 150 px at 420 px.
+-- The grip is the at-least-24 x 24 UI-unit target the maintainer chose on
+-- 2026-11-08 (native checks pending): GRIP_SIZE square UI units, centred on
+-- the 22 px row (one unit above and below it) and 4 px before the title, so
+-- titleLeft, the title's 150 px and every right-hand slot are unchanged; it
+-- ends 4 px before the title's hover and 2 px above the Build line's. Nominal
+-- frame geometry (SetSize); the effective native target at the client's scale
+-- is not measured here.
 do
     local EDGE, TOP, HEIGHT, GAP, CAPS = 10, 7, 22, 8, 12
     local CLOSE_W, OPTIONS_W, AUTO_W = 24, 92, 84
-    local GRIP_X, GRIP_W = 8, 22
+    local GRIP_X, GRIP_SIZE = 8, 24
+    local GRIP_TOP = TOP - math.floor((GRIP_SIZE - HEIGHT) / 2)
     local SLOTS = {top = TOP, height = HEIGHT, gap = GAP, caps = CAPS, edge = EDGE, closeWidth = CLOSE_W,
-        gripX = GRIP_X, gripWidth = GRIP_W, titleLeft = GRIP_X + GRIP_W + 6,
+        gripX = GRIP_X, gripWidth = GRIP_SIZE, gripHeight = GRIP_SIZE, gripTop = GRIP_TOP,
+        titleLeft = GRIP_X + GRIP_SIZE + 4,
         options = EDGE + CLOSE_W + GAP, optionsWidth = OPTIONS_W,
         auto = EDGE + CLOSE_W + GAP + OPTIONS_W + GAP, autoWidth = AUTO_W}
     -- The width line 1 keeps for its right-hand controls, gap included.
@@ -3399,10 +3408,14 @@ end
 -- The visible drag grip (design/current "Nexus Main Panel - Compact
 -- Redesign"; design/PANEL_DIFFICULTY_SOURCE_REFERENCE.md "Discoverable panel
 -- drag handle"): six dots in the header's left corner with a hover highlight
--- and a "Drag to move" tooltip. A plain left drag moves the panel through its
--- one drag owner (issue #168: M.BeginPanelDrag, clamped to the screen;
--- panelX / panelY saved as before), like the background and every passive
--- label; Shift is not needed. A plain click does nothing. Built lazily
+-- and a "Drag to move" tooltip, on a 24 x 24 UI-unit target (M.HeaderSlots
+-- gripWidth x gripHeight: the maintainer's 2026-11-08 choice of at least
+-- 24 x 24 UI units, centred on the 22 px row). A left drag with Shift held
+-- moves the panel through its one drag owner (issue #168: M.BeginPanelDrag,
+-- clamped to the screen; panelX / panelY saved as before), like the
+-- background and every passive label; releasing Shift ends the move
+-- (M.FinishPanelDrag, through the root's OnUpdate watch), as does the
+-- drag's release. A plain click or an unmodified drag does nothing. Built lazily
 -- (EnsureFrame is at the upvalue ceiling). Its dots are fixed colours, never
 -- from the palette. Native pointer capture while dragging is NOT RUN.
 function M.EnsureHeaderGrip()
@@ -3422,11 +3435,15 @@ function M.EnsureHeaderGrip()
         grip.fill:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1)
         grip.fill:SetTexture(0.03, 0.03, 0.05, 0.9)
         grip.dots = {}
+        -- The 9 x 13 dot cluster centred in the grip, in whole units.
+        local slots = M.HeaderSlots()
+        local dotLeft = math.floor((slots.gripWidth - 9) / 2)
+        local dotTop = math.floor((slots.gripHeight - 13) / 2)
         for row = 1, 3 do
             for column = 1, 2 do
                 local dot = grip:CreateTexture(nil, "OVERLAY")
                 dot:SetSize(3, 3)
-                dot:SetPoint("TOPLEFT", grip, "TOPLEFT", 6 + (column - 1) * 6, -5 - (row - 1) * 5)
+                dot:SetPoint("TOPLEFT", grip, "TOPLEFT", dotLeft + (column - 1) * 6, -(dotTop + (row - 1) * 5))
                 dot:SetTexture(0.72, 0.72, 0.78, 1)
                 grip.dots[#grip.dots + 1] = dot
             end
@@ -3449,8 +3466,8 @@ function M.EnsureHeaderGrip()
     end
     local slots = M.HeaderSlots()
     grip:ClearAllPoints()
-    grip:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.gripX, -slots.top)
-    grip:SetSize(slots.gripWidth, slots.height)
+    grip:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.gripX, -slots.gripTop)
+    grip:SetSize(slots.gripWidth, slots.gripHeight)
     grip:Show()
     return grip
 end

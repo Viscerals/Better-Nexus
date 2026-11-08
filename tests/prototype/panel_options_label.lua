@@ -143,8 +143,8 @@ local function CheckHeader(W,why)
   wishlist=Rect(f._contextWishlist,W),change=Rect(f._contextChange,W),grip=Rect(f._dragGrip,W)}
  -- The visible drag grip (design/current) is a distinct target at the
  -- left of line 1, before the title; the pairwise check below keeps it clear.
- assert(f._dragGrip:IsShown() and r.grip.x+r.grip.w<=r.title.x and r.grip.w>=22 and r.grip.h>=22,
-  why..': the grip sits before the title as a 22 px target')
+ assert(f._dragGrip:IsShown() and r.grip.x+r.grip.w<=r.title.x and r.grip.w>=24 and r.grip.h>=24,
+  why..': the grip sits before the title as an at-least-24 x 24 UI-unit target')
  -- Distinct, spaced targets on line 1 (design: no clumped Auto/Options/X).
  assert(r.auto.x+r.auto.w+slots.gap<=r.options.x+0.001 and r.options.x+r.options.w+slots.gap<=r.close.x+0.001,
   why..': Auto, Options and Close keep the design gap between them')
@@ -546,10 +546,11 @@ do
  end
  -- The literal header line 1 slots (Panel M.HeaderSlots: Close 24 px at the
  -- 10 px edge, Options 92 px with an 80 px label, Auto 84 px, 8 px gaps,
- -- the 22 px grip at 8 and the title from 36), as {left, top, right, bottom}.
+ -- the 24 x 24 grip at (8, 6), centred on the 22 px row, and the title from
+ -- 36), as {left, top, right, bottom}.
  local function Slots(W)
   return {options={W-134,7,W-42,29},label={W-128,7,W-48,29},close={W-34,7,W-10,29},
-   auto={W-226,7,W-142,29},state={W-226,9,W-142,27},grip={8,7,30,29},title={36,8,W-234,28}}
+   auto={W-226,7,W-142,29},state={W-226,9,W-142,27},grip={8,6,32,30},title={36,8,W-234,28}}
  end
  local function Header(W,why,want,expectShort,notice)
   local f,P=NexusPanel,Nexus.Panel
