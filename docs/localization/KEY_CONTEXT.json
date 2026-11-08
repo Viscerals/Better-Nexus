@@ -51829,7 +51829,7 @@
       "english": "Common",
       "placeholders": [],
       "group": "editor",
-      "meaning": "Echo quality name 0. Should match the game client's own quality wording.",
+      "meaning": "Echo quality name 0. Should match the game client's own quality wording. frFR-only exception: the frFR presentation deliberately keeps the English caption Common under the recorded product decision of 2026-11-08 (schema nexus.frFR.four_quality_wording_decision/1, SHA-256 fca7226dc7a85c54f233aa0c827d3274ad3f668d341c0c36700d422e6f94315e; entry review https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794), independent of the unknown game-client language; this exception covers only frFR and these four Echo quality names, verifies no client locale or terminology, and leaves every other pack's intent unchanged.",
       "consumer": "Echo catalog status column and the locked-target chooser value",
       "familySurface": "wishlist: Echo catalog status column and the locked-target chooser (value); family coverage PENDING review",
       "cohort": "fullui:wishlist"
@@ -51840,7 +51840,7 @@
       "english": "Epic",
       "placeholders": [],
       "group": "editor",
-      "meaning": "Echo quality name 3. Should match the game client's own quality wording.",
+      "meaning": "Echo quality name 3. Should match the game client's own quality wording. frFR-only exception: the frFR presentation deliberately keeps the English caption Epic under the recorded product decision of 2026-11-08 (schema nexus.frFR.four_quality_wording_decision/1, SHA-256 fca7226dc7a85c54f233aa0c827d3274ad3f668d341c0c36700d422e6f94315e; entry review https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794), independent of the unknown game-client language; this exception covers only frFR and these four Echo quality names, verifies no client locale or terminology, and leaves every other pack's intent unchanged.",
       "consumer": "Echo catalog status column and the locked-target chooser value",
       "familySurface": "wishlist: Echo catalog status column and the locked-target chooser (value); family coverage PENDING review",
       "cohort": "fullui:wishlist"
@@ -51862,7 +51862,7 @@
       "english": "Legendary",
       "placeholders": [],
       "group": "editor",
-      "meaning": "Echo quality name 4. Should match the game client's own quality wording.",
+      "meaning": "Echo quality name 4. Should match the game client's own quality wording. frFR-only exception: the frFR presentation deliberately keeps the English caption Legendary under the recorded product decision of 2026-11-08 (schema nexus.frFR.four_quality_wording_decision/1, SHA-256 fca7226dc7a85c54f233aa0c827d3274ad3f668d341c0c36700d422e6f94315e; entry review https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794), independent of the unknown game-client language; this exception covers only frFR and these four Echo quality names, verifies no client locale or terminology, and leaves every other pack's intent unchanged.",
       "consumer": "Echo catalog status column and the locked-target chooser value",
       "familySurface": "wishlist: Echo catalog status column and the locked-target chooser (value); family coverage PENDING review",
       "cohort": "fullui:wishlist"
@@ -51884,7 +51884,7 @@
       "english": "Uncommon",
       "placeholders": [],
       "group": "editor",
-      "meaning": "Echo quality name 1. Should match the game client's own quality wording.",
+      "meaning": "Echo quality name 1. Should match the game client's own quality wording. frFR-only exception: the frFR presentation deliberately keeps the English caption Uncommon under the recorded product decision of 2026-11-08 (schema nexus.frFR.four_quality_wording_decision/1, SHA-256 fca7226dc7a85c54f233aa0c827d3274ad3f668d341c0c36700d422e6f94315e; entry review https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794), independent of the unknown game-client language; this exception covers only frFR and these four Echo quality names, verifies no client locale or terminology, and leaves every other pack's intent unchanged. Comprehension note: unlike Common, Epic and Legendary, Uncommon is not a French cognate, so this caption carries the highest comprehension risk for a French reader; the explicit product choice retains this English caption, and it is not a translation.",
       "consumer": "Echo catalog status column and the locked-target chooser value",
       "familySurface": "wishlist: Echo catalog status column and the locked-target chooser (value); family coverage PENDING review",
       "cohort": "fullui:wishlist"

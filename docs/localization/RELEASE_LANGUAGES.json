@@ -5085,6 +5085,42 @@
         "decision": "legitimately_identical",
         "evidenceReference": "https://chatgpt.com/space/page_f0b6446364f08191b862a37611e463ab",
         "status": "declared"
+      },
+      {
+        "productId": "frFR",
+        "key": "editor.value.quality_common",
+        "translatedTextSha256": "309955e00850b8afeb148450c7208585a85f8b652d5c625c777726f44837f69c",
+        "reviewer": "Independent automated Nexus quality-name entry review (Claude Fable 5.1; Root 01a1b7c5; session 0fb51a00) (automated)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794",
+        "status": "declared"
+      },
+      {
+        "productId": "frFR",
+        "key": "editor.value.quality_epic",
+        "translatedTextSha256": "a93d389804ee0490f1903ab26500a66a695ce65fa7ecb074d79771857d074355",
+        "reviewer": "Independent automated Nexus quality-name entry review (Claude Fable 5.1; Root 01a1b7c5; session 0fb51a00) (automated)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794",
+        "status": "declared"
+      },
+      {
+        "productId": "frFR",
+        "key": "editor.value.quality_legendary",
+        "translatedTextSha256": "c80b041f5d1d11574f40bd79c2ea8f64cfc47a49c6b8846abed3c294931a7946",
+        "reviewer": "Independent automated Nexus quality-name entry review (Claude Fable 5.1; Root 01a1b7c5; session 0fb51a00) (automated)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794",
+        "status": "declared"
+      },
+      {
+        "productId": "frFR",
+        "key": "editor.value.quality_uncommon",
+        "translatedTextSha256": "ce9b9e6a2b753fcc9983ec052783411178629695a448d9b8cb4e0f5e5afef843",
+        "reviewer": "Independent automated Nexus quality-name entry review (Claude Fable 5.1; Root 01a1b7c5; session 0fb51a00) (automated)",
+        "decision": "legitimately_identical",
+        "evidenceReference": "https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794",
+        "status": "declared"
       }
     ],
     "declarationFields": {
