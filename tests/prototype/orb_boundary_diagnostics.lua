@@ -17,8 +17,9 @@ local stable=R.Saved();local retained=v.retained
 for i=1,30 do M.Status(false);M.Pump()end
 check(writes==0 and M.BoundaryDiagnostics().retained==retained and R.Same(R.Saved(),stable),'stable reads do not write or append repeated evidence')
 owner.UpdateStateV1=raw
+local epochBefore=M.BoundaryDiagnostics().epoch
 H.Fire('PLAYER_LEAVING_WORLD');v=M.BoundaryDiagnostics()
-check(v.phase=='l' and v.epoch==1 and not M.Status().running and M.Status().pending,'loading only pauses; exposure retained')
+check(v.phase=='l' and v.epoch==epochBefore+1 and not M.Status().running and M.Status().pending,'loading only pauses; exposure retained')
 check(v.unsaved==false and v.durableRetained==v.retained,'live lifecycle write includes diagnostic boundary')
 H.Fire('PLAYER_ENTERING_WORLD');M.Pump()
 -- Vary only observed balance while spending is paused; no action repeats.
