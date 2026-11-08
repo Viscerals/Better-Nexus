@@ -64,6 +64,7 @@ NAMES += ['sync_dps_correlation_wire','sync_correlation_limits','sync_claim_corr
 NAMES += ['sync_requester_filter']
 NAMES += ['sync_dps_bare_native_context','sync_dps_bare_native_paced']
 NAMES += ['sync_dps_bare_requester_route']
+NAMES += ['dps_lookup_fixed_key']
 NAMES += ['startup_build_identity']
 NAMES += ['community_cursor_readers','community_failure_hold','sync_locked_roles_request','leaderboard_roles_names']
 NAMES += ['sync_dps_native_relay_scan']

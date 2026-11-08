@@ -3496,9 +3496,13 @@ local function FindCharacterRow(rows, name)
     -- Some legacy/UI callers know only the displayed name. Realm-qualified
     -- storage remains collision-free; the read fallback selects the strongest
     -- matching row when that caller cannot express a realm.
+    -- The fixed name's key is computed once for the whole scan; equality with
+    -- a non-nil key is exactly Identity.SamePlayer's contract.
+    local nameKey = Identity.PlayerKey(name)
     for _, candidate in pairs(rows) do
         if type(candidate) == "table"
-            and Identity.SamePlayer(candidate.player, name)
+            and nameKey ~= nil
+            and Identity.PlayerKey(candidate.player) == nameKey
             and BetterRow(candidate, row) then
             row = candidate
         end
