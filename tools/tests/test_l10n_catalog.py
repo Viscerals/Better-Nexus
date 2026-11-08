@@ -277,8 +277,9 @@ REFERENCE_SUCCESSORS = {
 # Full visible-UI scope: unlike the English successor, the composed packs and
 # the release metadata carry a strong current identity. Packs: the eight
 # Saved Build label translations first committed in 351a83b5; release
-# metadata: the 529 original entry-review declarations followed by the six
-# neutral-template declarations, first committed in 23d61936. Canonical Git
+# metadata: 539 entry-review declarations in three cohorts (the 529 original
+# records, the six neutral-template records and the four frFR Echo quality
+# records), first committed in 046c71cc. Canonical Git
 # (LF) SHA-256 and length and the Git blob are compared with canonical
 # bytes. Only *.lua is checked out with a fixed eol=crlf, so only the packs
 # also record their physical checkout bytes; RELEASE_LANGUAGES.json is
@@ -293,9 +294,9 @@ CURRENT_SUCCESSOR_INPUTS = {
         "firstCommit": "193d9a1c993300f71ea72222bd8a937d51fbd301",
         "physical": ("a4c6f22322f06228b51b1361e233526ddbbabe4bc71de3eddb173b832f3db790", 3341312)},
     "docs/localization/RELEASE_LANGUAGES.json": {
-        "canonical": ("78628e4fd0cd70030ba40e5b62424492f27497590f0813e86c92fbf3bec2986c", 265898),
-        "blob": "00fdd4fc3947b4dfaef84c2e4ab43d67502d651b",
-        "firstCommit": "23d619366a02fe59e43e47e7842a1423189190fb"},
+        "canonical": ("5a36b22476f9f99342e43c612c8e2c1a1958e3c38544f6010469ee096a8c0462", 267917),
+        "blob": "f127ce0a02992f55aeba845b1a4ca414087cff65",
+        "firstCommit": "046c71ccfe9c7aa34ff5517ef3879f83d3823ccd"},
 }
 # The superseded strong identities of the same two files, kept as history and
 # never refreshed: the truthful-header packs first committed in 31272db6 and
@@ -333,11 +334,11 @@ CURRENT_PACK_VALUE_MAPS = {
     "ptBR": "b61b494342b52b53156c7a3abf17f5d1eca9abcd453f1fd095261c93c38269d8",
     "ruRU": "9cf9473df2185e847184a02ff1adb095e238441404d59377aa31e514eb075f49",
 }
-# The actual entry-review declarations: two distinct evidence cohorts, in
+# The actual entry-review declarations: three distinct evidence cohorts, in
 # this order, all technical metadata, not fluent human, native, rights or
 # whole-pack acceptance. The digest and counts cover the whole list.
-CURRENT_DECLARATIONS_SHA256 = "a1bb0991b5c737c8a348277dea8168e33afa5001874727b32946548cbb90374a"
-CURRENT_DECLARED_COUNTS = {"frFR": 106, "deDE": 108, "esES": 90, "plPL": 89, "ptBR": 92, "ruRU": 50}
+CURRENT_DECLARATIONS_SHA256 = "1185f4f7e38c8959f6b155d5df6d2fb3202cc3326d7963d8957108ccaa5198e0"
+CURRENT_DECLARED_COUNTS = {"frFR": 110, "deDE": 108, "esES": 90, "plPL": 89, "ptBR": 92, "ruRU": 50}
 # Cohort 1, first and unchanged: 529 automated, source-paired
 # legitimately_identical records bound to one persisted public review.
 ORIGINAL_DECLARATION_COUNT = 529
@@ -360,18 +361,44 @@ NEUTRAL_TEMPLATE_DECLARATIONS = [
      "evidenceReference": NEUTRAL_TEMPLATE_REFERENCE, "status": "declared"}
     for pack_id in ("frFR", "deDE", "esES", "plPL", "ptBR", "ruRU")
 ]
+# Cohort 3, appended: the four frFR Echo quality names stay English by the
+# recorded product decision of 2026-11-08 (keep the four labels English;
+# nexus.frFR.four_quality_wording_decision/1, SHA-256 fca7226d...), recorded
+# as an frFR-only exception in the KEY_CONTEXT.json meaning of each key,
+# independent of the unknown client language. Each is declared
+# legitimately_identical by the independent entry review named below,
+# against the entry-review record referenced below, binding the current
+# text hash to that judgment. A declaration is a documented claim only: not
+# fluent, native, rights or product-level acceptance.
+# Its evidence reference is a private, owner-only retrievable record
+# (personal scope, no shares); the catalog checks its https form only and
+# never fetches it.
+ECHO_QUALITY_REVIEWER = ("Independent automated Nexus quality-name entry review (Claude "
+                         "Fable 5.1; Root 01a1b7c5; session 0fb51a00) (automated)")
+ECHO_QUALITY_REFERENCE = "https://chatgpt.com/space/page_203bc8a964b88191b2294b8ebab9e794"
+ECHO_QUALITY_TEXTS = (
+    ("editor.value.quality_common", "Common",
+     "309955e00850b8afeb148450c7208585a85f8b652d5c625c777726f44837f69c"),
+    ("editor.value.quality_epic", "Epic",
+     "a93d389804ee0490f1903ab26500a66a695ce65fa7ecb074d79771857d074355"),
+    ("editor.value.quality_legendary", "Legendary",
+     "c80b041f5d1d11574f40bd79c2ea8f64cfc47a49c6b8846abed3c294931a7946"),
+    ("editor.value.quality_uncommon", "Uncommon",
+     "ce9b9e6a2b753fcc9983ec052783411178629695a448d9b8cb4e0f5e5afef843"))
+ECHO_QUALITY_DECLARATIONS = [
+    {"productId": "frFR", "key": key, "translatedTextSha256": digest,
+     "reviewer": ECHO_QUALITY_REVIEWER, "decision": "legitimately_identical",
+     "evidenceReference": ECHO_QUALITY_REFERENCE, "status": "declared"}
+    for key, _, digest in ECHO_QUALITY_TEXTS
+]
 # English-identical entries without a declaration, sorted per pack. The eight
-# Saved Build labels now differ from their English, and the six neutral
-# wrappers are declared above. The four frFR Echo quality names are the
-# unchanged, source-backed English code-owned labels chosen by the recorded
-# product decision; with no declaration they remain unqualified technical
-# deliberate_english_placeholder entries, neither reviewed translations nor
-# accidental English (frFR quality_rare is already declared). Every other
-# pack's list stays present and empty.
+# Saved Build labels now differ from their English, the six neutral wrappers
+# are declared above, and the four frFR Echo quality names keep their English
+# text under the cohort 3 declarations, so no undeclared
+# deliberate_english_placeholder entry remains (frFR quality_rare is already
+# declared). Every pack's list stays present and empty.
 CURRENT_ENGLISH_PLACEHOLDER_KEYS = {
-    "frFR": ["editor.value.quality_common", "editor.value.quality_epic",
-             "editor.value.quality_legendary", "editor.value.quality_uncommon"],
-    "deDE": [], "esES": [], "plPL": [], "ptBR": [], "ruRU": [],
+    "frFR": [], "deDE": [], "esES": [], "plPL": [], "ptBR": [], "ruRU": [],
 }
 CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
                              "m7Span": "PENDING", "fullUiCoverage": "PENDING",
@@ -2401,12 +2428,15 @@ class CatalogCoverageReport(unittest.TestCase):
         for row in declarations:
             self.assertEqual(list(row), ["productId", "key", "translatedTextSha256", "reviewer",
                                          "decision", "evidenceReference", "status"])
-        # Two distinct evidence cohorts, each bound to its own reviewer and
+        # Three distinct evidence cohorts, each bound to its own reviewer and
         # reference: the 529 original records stay first and byte-for-value
-        # unchanged; exactly the six neutral-template records follow. Neither
-        # cohort's reviewer or reference may stand in for the other's.
+        # unchanged; exactly the six neutral-template records follow; then
+        # exactly the four frFR Echo quality records. No cohort's reviewer
+        # or reference may stand in for another's.
         original = declarations[:ORIGINAL_DECLARATION_COUNT]
-        neutral = declarations[ORIGINAL_DECLARATION_COUNT:]
+        neutral_end = ORIGINAL_DECLARATION_COUNT + len(NEUTRAL_TEMPLATE_DECLARATIONS)
+        neutral = declarations[ORIGINAL_DECLARATION_COUNT:neutral_end]
+        echo = declarations[neutral_end:]
         self.assertEqual(len(original), ORIGINAL_DECLARATION_COUNT)
         self.assertEqual(pack_value_map_sha256(original), ORIGINAL_DECLARATIONS_SHA256)
         for row in original:
@@ -2422,6 +2452,16 @@ class CatalogCoverageReport(unittest.TestCase):
                          {report_sha(NEUTRAL_TEMPLATE_TEXT)})
         self.assertNotEqual((NEUTRAL_TEMPLATE_REVIEWER, NEUTRAL_TEMPLATE_REFERENCE),
                             (CURRENT_DECLARATION_REVIEWER, CURRENT_DECLARATION_REFERENCE))
+        # Cohort 3 binds each record to the literal English text its frFR entry
+        # keeps, by its own reviewer and reference; no frFR key is declared twice.
+        self.assertEqual(echo, ECHO_QUALITY_DECLARATIONS)
+        self.assertEqual([row["translatedTextSha256"] for row in echo],
+                         [report_sha(text) for _, text, _ in ECHO_QUALITY_TEXTS])
+        self.assertNotIn((ECHO_QUALITY_REVIEWER, ECHO_QUALITY_REFERENCE),
+                         {(CURRENT_DECLARATION_REVIEWER, CURRENT_DECLARATION_REFERENCE),
+                          (NEUTRAL_TEMPLATE_REVIEWER, NEUTRAL_TEMPLATE_REFERENCE)})
+        self.assertTrue({row["key"] for row in echo}.isdisjoint(
+            {row["key"] for row in original + neutral if row["productId"] == "frFR"}))
         # The historical fixture view stays declaration-free.
         self.assertEqual(self.release["entryReview"]["declarations"], [])
         self.assertEqual({k: v for k, v in actual.items() if k != "entryReview"},
@@ -3625,8 +3665,8 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
                          PACK_IDS)
         # The report states a category reason only for a pack whose list is
-        # not empty (as for every other entries- reason), so only frFR has one,
-        # for its four unqualified technical placeholders listed above.
+        # not empty (as for every other entries- reason); with the four frFR
+        # Echo quality names declared in cohort 3, no pack has one.
         self.assertEqual([(r["subject"], r["keys"])
                           for r in report_reasons(report, "entries-deliberate-english-placeholder")],
                          [(pack_id, CURRENT_ENGLISH_PLACEHOLDER_KEYS[pack_id]) for pack_id in PACK_IDS
