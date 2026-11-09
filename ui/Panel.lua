@@ -920,10 +920,20 @@ function M.UpdateContextHeader(model, settled)
     local key = table.concat({tostring(width), tostring(titleWidth), tostring(labelWidth),
         lines[1][3], lines[2][3], lines[3][3], tostring(tooltip[1]), tostring(tooltip[2]),
         tostring(tooltip[3]), tostring(tooltip[4]), tostring(autoState)}, "\031")
-    if settled and frame._nexusHeaderKey == key then return true end
+    -- The title keeps line 1's literal 20 px row beside the controls. The
+    -- Build and Wishlist rows are 20 px for the 12 px owned font; when the
+    -- layout's font scale makes its normal row taller they take that height
+    -- and the Wishlist line (with its button) moves down by the difference,
+    -- inside the header the layout already reserves.
+    local held = frame._responsiveLayout
+    local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
+    local grow = lineH - 20
+    if settled and frame._nexusHeaderKey == key and frame._nexusHeaderLine == lineH then return true end
     frame._nexusHeaderKey = nil
     frame._contextTitle:ClearAllPoints()
     frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -8)
+    frame._contextWishlist:ClearAllPoints()
+    frame._contextWishlist:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(57 + grow))
     M.EnsureHeaderGrip()
     for index = 1, #lines do
         local line = lines[index]
@@ -932,14 +942,14 @@ function M.UpdateContextHeader(model, settled)
         line[2]._nexusFull = index == 1
             and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index]
         if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
-            Nexus.LayoutMetrics.OneLineLabel(line[1], nil, 20)
+            Nexus.LayoutMetrics.OneLineLabel(line[1], nil, index == 1 and 20 or lineH)
         end
     end
     frame._switchBtn:ClearAllPoints()
     frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
     frame._switchBtn:SetSize(106, 22)
     frame._contextChange:ClearAllPoints()
-    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -55)
+    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -(55 + grow))
     frame._contextChange:SetSize(106, 22)
     local switchLabel = frame._switchBtn:GetFontString()
     if switchLabel and Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
@@ -955,6 +965,7 @@ function M.UpdateContextHeader(model, settled)
         state:Show()
     end
     frame._nexusHeaderKey = key
+    frame._nexusHeaderLine = lineH
     return true
 end
 
@@ -4663,8 +4674,14 @@ end
 -- measurement when it reports one, else the conservative text model at the
 -- runtime font scale. Leaves `line` as the text's text.
 function M.LineWidth(text, line)
+    -- Measured with the box released, then restored: a client that reports a
+    -- one-line string no wider than its set box would otherwise cap every
+    -- later measurement at an earlier, narrower text's width.
+    local held = tonumber(text:GetWidth())
+    text:SetWidth(0)
     text:SetText(line)
     local ok, measured = pcall(text.GetStringWidth, text)
+    if held and held > 0 then text:SetWidth(held) end
     measured = ok and tonumber(measured) or nil
     if measured and measured > 0 and measured < math.huge then return measured end
     local metrics = Nexus.LayoutMetrics
@@ -4676,18 +4693,22 @@ end
 
 -- The offer heading (Readout.OfferHeadingForms: whose choice the offer is),
 -- with the established state words and the destination, in the first of its
--- forms that fits the heading row on one line (its width less the charges,
--- as ApplyPanelLayout sets it): "Current offer - you choose", then "Offer -
--- you choose", then "You choose". Every form keeps who chooses, the Auto
--- state and the destination in the row itself; nothing moves to a hover.
+-- forms that fits the heading row on one line (its width less the charges
+-- cell's 72 px minimum and its gap, LayoutMetrics.Panel): "Current offer -
+-- you choose", then "Offer - you choose", then "You choose". Every form
+-- keeps who chooses, the Auto state and the destination in the row itself;
+-- nothing moves to a hover. The chosen form and the width it was measured
+-- at stay on the text for the charges cell (M.ChargesCell), which takes
+-- only the room that form leaves: a wider cell never costs a longer form.
 -- Without a layout the full form stays. Text only.
 function M.SetOfferHeading(text, model, activeSlot, layout)
     local readout = Nexus.Readout
     local forms = readout.OfferHeadingForms and readout.OfferHeadingForms(model.auto)
         or {readout.OfferHeading(model.auto)}
     local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.roll or nil
-    local width = box and (box.w - 4 - (SafeText(model._nexusChargeLine) ~= "" and 76 or 0)) or nil
-    local chosen = ""
+    local width = box and (box.w - 4 - (SafeText(model._nexusChargeLine) ~= ""
+        and (tonumber(layout.chargesMinW) or 72) + (tonumber(layout.chargesGap) or 4) or 0)) or nil
+    local chosen, measured = "", nil
     for _, form in ipairs(forms) do
         -- The " · " separators and colours are code-owned; each word group is
         -- one reviewed meaning.
@@ -4701,10 +4722,39 @@ function M.SetOfferHeading(text, model, activeSlot, layout)
         else
             chosen = "|cff888888" .. form .. "|r · " .. LT("panel.label.preview_tag")
         end
-        if not width or M.LineWidth(text, chosen) <= width then break end
+        if not width then break end
+        measured = M.LineWidth(text, chosen)
+        if measured <= width then break end
     end
     text:SetText(chosen)
+    text._nexusFitted, text._nexusFittedW = chosen, measured
     return chosen
+end
+
+-- The width of the charges cell beside `heading` in the roll area's heading
+-- row: the cell the layout sizes for the font scale (LayoutMetrics.Panel:
+-- 72 px at scale 1, in step with the scale above it), bounded by the room
+-- the shown heading leaves after the gap, and never under 72 px. A fitted
+-- offer heading needs the width its form was chosen at (M.SetOfferHeading);
+-- any other heading also keeps its line under the conservative text model,
+-- as its row did before. At font scale 1 and below nothing is measured and
+-- the cell is 72 px, as before. The charges text keeps its font: a row
+-- wider than its cell is shortened there and complete on its hover.
+function M.ChargesCell(layout, heading)
+    local minimum = tonumber(layout.chargesMinW) or 72
+    local wanted = tonumber(layout.chargesW) or minimum
+    local box = type(layout.boxes) == "table" and layout.boxes.roll or nil
+    if wanted <= minimum or not (box and heading) then return minimum end
+    local line = heading:GetText() or ""
+    local need = heading._nexusFitted == line and tonumber(heading._nexusFittedW) or nil
+    if not need then
+        local metrics = Nexus.LayoutMetrics
+        local char = metrics and metrics.ConservativeText and metrics.ConservativeText(layout.scale) or 7
+        local visible = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        need = math.max(M.LineWidth(heading, line), #(visible:gsub("[\128-\191]", "")) * char)
+    end
+    local room = box.w - 4 - (tonumber(layout.chargesGap) or 4) - math.ceil(need)
+    return math.max(minimum, math.min(wanted, room))
 end
 
 -- Geometry of the cards inside the roll box (design/current "Nexus Main
@@ -5540,7 +5590,16 @@ function M.Toggle()
     if f:IsShown() then M.Hide() else M.Show() end
 end
 
-local function LayoutServerStatus(completed)
+local function LayoutServerStatus(completed, layout)
+    -- The card's text boxes are sized for the 10 / 12 px owned fonts. With a
+    -- responsive layout they grow in step with its font scale (the same
+    -- sizes at scale 1), inside the status box that layout reserves; the
+    -- first line leaves the multiplier its own cell. Each size is rounded in
+    -- place: nothing is allocated on this render path.
+    local scale = type(layout) == "table" and tonumber(layout.scale) or 1
+    local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.status or nil
+    local inner = (box and box.w or 400) - 18
+    local floor = math.floor
     worldStatusBox:ClearAllPoints()
     worldStatusText:ClearAllPoints()
     worldStatusAsh:ClearAllPoints()
@@ -5553,20 +5612,21 @@ local function LayoutServerStatus(completed)
         worldStatusBox:SetHeight(66)
 
         worldStatusText:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", 9, -5)
-        worldStatusText:SetSize(156, 18)
+        worldStatusText:SetSize(math.min(floor(156 * scale + 0.5), inner - floor(66 * scale + 0.5) - 4),
+            floor(18 * scale + 0.5))
         worldStatusText:SetJustifyH("LEFT")
 
         worldStatusAsh:SetPoint("BOTTOMLEFT", worldStatusBox, "BOTTOMLEFT", 9, 5)
-        worldStatusAsh:SetSize(164, 17)
+        worldStatusAsh:SetSize(math.min(floor(164 * scale + 0.5), inner), floor(17 * scale + 0.5))
         worldStatusAsh:SetJustifyH("LEFT")
 
         worldStatusGain:SetPoint("TOPRIGHT", worldStatusBox, "TOPRIGHT", -9, -7)
-        worldStatusGain:SetSize(66, 13)
+        worldStatusGain:SetSize(floor(66 * scale + 0.5), floor(13 * scale + 0.5))
         worldStatusGain:SetJustifyH("RIGHT")
 
         worldStatusAsh:ClearAllPoints()
         worldStatusAsh:SetPoint("TOPLEFT", worldStatusText, "BOTTOMLEFT", 0, -1)
-        worldStatusAsh:SetSize(188, 17)
+        worldStatusAsh:SetSize(math.min(floor(188 * scale + 0.5), inner), floor(17 * scale + 0.5))
 
         worldStatusBox.intensityBar:ClearAllPoints()
         worldStatusBox.intensityBar:SetPoint("BOTTOMLEFT", worldStatusBox, "BOTTOMLEFT", 9, 5)
@@ -5582,15 +5642,16 @@ local function LayoutServerStatus(completed)
         worldStatusBox:SetHeight(56)
 
         worldStatusText:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", 9, -5)
-        worldStatusText:SetSize(104, 16)
+        worldStatusText:SetSize(math.min(floor(104 * scale + 0.5), inner - floor(70 * scale + 0.5) - 4),
+            floor(16 * scale + 0.5))
         worldStatusText:SetJustifyH("LEFT")
 
         worldStatusAsh:SetPoint("TOPLEFT", worldStatusText, "BOTTOMLEFT", 0, -2)
-        worldStatusAsh:SetSize(172, 17)
+        worldStatusAsh:SetSize(math.min(floor(172 * scale + 0.5), inner), floor(17 * scale + 0.5))
         worldStatusAsh:SetJustifyH("LEFT")
 
         worldStatusGain:SetPoint("TOPRIGHT", worldStatusBox, "TOPRIGHT", -9, -7)
-        worldStatusGain:SetSize(70, 14)
+        worldStatusGain:SetSize(floor(70 * scale + 0.5), floor(14 * scale + 0.5))
         worldStatusGain:SetJustifyH("RIGHT")
 
         worldStatusBox.intensityBar:ClearAllPoints()
@@ -5671,11 +5732,19 @@ local function ApplyPanelLayout(layout, completed)
         statusText:SetSize(boxes.roll.w-inset*2, layout.small)
         local charges = frame._chargesText
         if charges then
+            -- The cell the layout sizes for the font scale, in the room the
+            -- shown heading leaves (M.ChargesCell); its 72 px minimum while
+            -- hidden and in the collapsed block, which has no heading row.
+            local cell = charges:IsShown() and not layout.noOffer and M.ChargesCell(layout, statusText)
+                or tonumber(layout.chargesMinW) or 72
             charges:ClearAllPoints()
             charges:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -inset, -y)
-            charges:SetSize(72, layout.small)
-            -- The heading keeps the rest of its row while charges are shown.
-            if charges:IsShown() then statusText:SetWidth(boxes.roll.w-inset*2-76) end
+            charges:SetSize(cell, layout.small)
+            -- The heading keeps the rest of its row, less the cell and its
+            -- gap, while charges are shown.
+            if charges:IsShown() then
+                statusText:SetWidth(boxes.roll.w-inset*2-cell-(tonumber(layout.chargesGap) or 4))
+            end
         end
         y = y + layout.small + math.max(3,math.floor(layout.gap/2))
         for index = 1, 3 do
@@ -6326,7 +6395,7 @@ local function ApplyModel(model, signatures, roll)
 
     if not noBuild then RenderPerformanceState(pr, complete, showPerformance) end
 
-    LayoutServerStatus(complete and not noBuild)
+    LayoutServerStatus(complete and not noBuild, responsiveLayout)
     -- The words and hover facts (M.RenderServerStatusValues, shared with a
     -- settled render's value pass); the hover keeps the full unformatted ash.
     if M.RenderServerStatusValues(ss, complete) then

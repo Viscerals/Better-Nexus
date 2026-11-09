@@ -37,6 +37,16 @@ local FONT_NAMES = {
     large="NexusFontLarge",
 }
 local FONT_SIZES = {small=10,normal=12,large=14}
+-- The owned sizes follow the client's own small text: the native font object
+-- the loading overlay's detail line is drawn in. Its reported height becomes
+-- the owned small size and the 10 / 12 / 14 hierarchy keeps its proportions,
+-- up to the largest font scale the layouts support (2). The owned sizes
+-- never fall below 10 / 12 / 14: a client whose small font is 10 or smaller
+-- keeps exactly those. The font object itself is read, so no loading frame
+-- has to exist or be shown; only the owned objects are ever set, never a
+-- game font or a UI scale.
+local FONT_REFERENCE = "GameFontHighlightSmall"
+local fontReference
 
 local function Clamp(value, low, high)
     value = tonumber(value) or low
@@ -84,9 +94,28 @@ local function Remember(cache, order, key, value)
     return value
 end
 
+-- The reference's scale against the owned small size, from 1 (the fixed
+-- sizes, as before; also without a readable reference) to 2.
+local function ReferenceScale()
+    local font = _G[FONT_REFERENCE]
+    if font and type(font.GetFont) == "function" then
+        local ok, _, size = pcall(font.GetFont, font)
+        size = ok and tonumber(size) or nil
+        if size and size > 0 and size < math.huge then
+            return Clamp(Round(size, 2) / FONT_SIZES.small, 1, 2)
+        end
+    end
+    return 1
+end
+
+-- Builds the owned fonts once, and again only when the reference's height
+-- has changed since (a client that sets its fonts after this file first
+-- ran). The runtime font scale below then differs, which advances the
+-- runtime revision every layout cache is keyed by.
 function M.EnsureFonts()
-    if fontsReady then return FONT_NAMES end
-    fontsReady = true
+    local reference = ReferenceScale()
+    if fontsReady and reference == fontReference then return FONT_NAMES end
+    fontsReady, fontReference = true, reference
     if type(CreateFont) ~= "function" then return FONT_NAMES end
     local path = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT
         or "Fonts\\FRIZQT__.TTF"
@@ -97,7 +126,7 @@ function M.EnsureFonts()
             if ok then font = created end
         end
         if font and type(font.SetFont) == "function" then
-            pcall(font.SetFont, font, path, FONT_SIZES[kind], "")
+            pcall(font.SetFont, font, path, Round(FONT_SIZES[kind] * reference, 2), "")
         end
     end
     stats.fontBuilds = stats.fontBuilds + 1
@@ -447,6 +476,14 @@ function M.Panel(spec)
         kind="panel",width=width,boxes={},required={},scale=scale,
         key=key,small=small,normal=normal,large=large,gap=gap,
     }
+    -- The charges cell of the offer heading row. 72 px holds the compact row
+    -- at the 10 px small size, so the cell follows the font scale and is
+    -- never narrower than that; chargesGap separates it from the heading.
+    -- The heading forms are fitted beside the 72 px minimum, and the cell is
+    -- given its width only in the room the shown heading then leaves
+    -- (Panel.SetOfferHeading, Panel.ChargesCell).
+    layout.chargesMinW, layout.chargesGap = 72, 4
+    layout.chargesW = math.max(72, math.floor(72 * scale + 0.5))
     local cursor = 6
     local headerHeight = math.max(82, large * 3 + 14)
     Add(layout,"header",8,cursor,width-16,headerHeight)

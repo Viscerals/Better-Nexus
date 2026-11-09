@@ -1340,6 +1340,16 @@ do
  local P={}
  local function Child(i)return NexusPanel.children[i]end
  local function Region(i)return NexusPanel.regions[i]end
+ -- Typography R1: the charge cell is 72 px at font scale 1 and below. Above
+ -- it the cell is 72 x the layout's font scale, in the room the shown offer
+ -- heading leaves after the 4 px gap, and never under 72 px. Derived here
+ -- from the layout's scale, the roll box and the heading's own measured
+ -- line, not read from the panel. Returns the cell and that font scale.
+ local function ChargeCell()
+  local layout,heading=NexusPanel._responsiveLayout,NexusPanel._rollStatus
+  local scaled=math.max(72,math.floor(72*layout.scale+0.5))
+  return math.max(72,math.min(scaled,layout.boxes.roll.w-4-4-math.ceil(heading:GetStringWidth()))),layout.scale
+ end
  local function Sets(widget)
   local out={};for _,entry in ipairs(log)do if entry[1]==widget then out[#out+1]=entry[2] end end;return out
  end
@@ -1492,7 +1502,9 @@ do
    for _,value in ipairs(sets)do all=all and value==T(w[2]) end
    check(all and #sets>=w[3],tag..': every creation and render-reset SetText of '..w[2]..' shows it ('..#sets..' calls)')
   end
-  check(NexusPanel._chargesText:IsShown() and NexusPanel._chargesText:GetWidth()==72,tag..': the compact charge row is shown in its 72 px box')
+  local cell,cellScale=ChargeCell()
+  check(NexusPanel._chargesText:IsShown() and NexusPanel._chargesText:GetWidth()==cell and (cellScale>1 or NexusPanel._chargesText:GetWidth()==72),
+   tag..': the compact charge row is shown in its cell: 72 px at font scale 1, the layout-derived width above it ('..cell..' px at font scale '..cellScale..')')
  end
  local function Effects()
   local id,initialized=Nexus.Localization.ActiveLanguage()
@@ -1695,8 +1707,10 @@ do
     end
    end
    local charges=NexusPanel._chargesText
-   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==72 and charges:GetHeight()==layout.small
-    and Nexus.LayoutMetrics.Shortened(charges) and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),tag..': the long valid charge row stays in its unchanged 72 px box')
+   local cell=ChargeCell()
+   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==cell and (layout.scale>1 or charges:GetWidth()==72) and charges:GetHeight()==layout.small
+    and Nexus.LayoutMetrics.Shortened(charges) and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),
+    tag..': the long valid charge row stays in its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px), shortened there')
    local lines=Lines(NexusPanel._chargesHover)
    check(same(lines[1],{'Charges',1,1,1}) and same(lines[2],{LONGROW,1,1,1,true}),tag..': the actual charge hover recovers the complete row')
   end
@@ -1814,7 +1828,9 @@ do
    'GUARD #143 real '..id..': the actual locked-target row takes the tooltip once and keeps all 11 locked-target lines in the pack text'
    ..(#lockWant>#lockBody and ', after the complete heading' or ', with no added heading'))
   local charges=NexusPanel._chargesText
-  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==72 and charges:GetHeight()==NexusPanel._responsiveLayout.small,'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its unchanged 72 px box')
+  local cell,cellScale=ChargeCell()
+  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==cell and (cellScale>1 or charges:GetWidth()==72) and charges:GetHeight()==NexusPanel._responsiveLayout.small,
+   'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px)')
   -- The legend in this pack's own input entries (as for the locked-target lines above), with
   -- the code-owned "?: " and "~: " markers; Readout.ChargesLegend must give the same lines.
   local legend={entries['readout.tooltip.charges_legend_letters'],'?: '..entries['readout.tooltip.charges_legend_unknown'],

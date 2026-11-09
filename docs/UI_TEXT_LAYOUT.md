@@ -44,6 +44,17 @@ could be cut, overlap a neighbour or leave the window.
 - One-line boxes are at least one 17 px line tall. That is the conservative
   line of a replacement face; the face measured natively for the Quick Start
   fit had 16.1 px lines.
+- **Owned fonts follow the native small font** (`LayoutMetrics.Panel`). The
+  three Nexus-owned font sizes are 10 / 12 / 14 at native 10 and scale with
+  `GameFontHighlightSmall` from 1x to 2x; the reference scale is held in that
+  range, so a native small font under 10 keeps exactly 10 / 12 / 14, and the
+  sizes never fall below them. Offline font models only; native NOT RUN.
+- **The charges cell follows the font.** The heading row's compact charges
+  cell is 72 px times the font scale (`chargesW`, never under 72), given only
+  in the room the shown heading leaves beside its 4 px gap; the heading form
+  is still fitted beside the 72 px minimum, so the chosen form is unchanged.
+  While the cell is narrower than the charges row, the row is shortened and
+  its hover shows the complete text. Offline font models only; native NOT RUN.
 
 Spell, identity and full-title tooltips are unchanged. Text is not sanitised
 any differently. Data, identity, Sync, selection, request counts, button
