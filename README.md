@@ -30,7 +30,7 @@ Set the qualities and copies you want, assign your Wishlist to a Saved Build, an
 
 ## Download & status
 
-The current public download is **[1.20.0-beta.1 · test.9093](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9093)**. Choose **`Better-Nexus-test.9093-adc75a6.zip`** under that release's Assets; `SHA256SUMS.txt` is available beside it. This is an experimental prerelease.
+The current public download is the **latest published build** on the **[Releases](https://github.com/Viscerals/Better-Nexus/releases)** page: open the newest entry (its tag has the form `v<version>-test.<number>`) and choose the packaged **`Better-Nexus-test.<number>-<commit>.zip`** under its Assets; `SHA256SUMS.txt` is available beside it. Every public build is an experimental prerelease; GitHub marks a release as “Latest” only when it is not a prerelease, so use the Releases list rather than that shortcut.
 
 Check [Releases](https://github.com/Viscerals/Better-Nexus/releases) for newer public tests and their specific limitations. The `main` branch is the maintained development line and may differ from a published package; a source checkout is not a player release. Download the packaged ZIP rather than GitHub's automatic source archives.
 
@@ -86,7 +86,7 @@ The **[documentation website](https://viscerals.github.io/Better-Nexus/)** cover
 | `/nexus auto` | Toggle the master Automation permission. |
 | `/nexus orbs` | Open Orbs / Lost Memories; opening the window does not start a run. |
 | `/nexus log` | Open diagnostic logs. |
-| `/nexus report` | Open the support-report window in public test.9093. |
+| `/nexus report` | Open the support-report window. |
 
 The source repository also contains the [experimental player guide](README-PROTOTYPE.md) and [update-notice documentation](docs/UPDATE_NOTICES.md). Source documentation may describe a different development snapshot.
 
@@ -101,7 +101,7 @@ Support is limited and provided as time allows. There is no guaranteed response 
 If the addon is missing, check the two folder paths above and confirm that you installed the release asset. If a feature stalls or behaves unexpectedly, stop the affected automation and preserve your saved data instead of resetting it.
 
 1. Search [existing issues](https://github.com/Viscerals/Better-Nexus/issues) and choose the appropriate [Bug, Performance / Stutter, or Sync / Multiplayer form](https://github.com/Viscerals/Better-Nexus/issues/new/choose).
-2. Include the **exact version and build label** from `/nexus status` or the ZIP filename, for example `1.20.0-beta.1 · test.9093-f95f68f`. “Latest” alone is not enough.
+2. Include the **exact version and build label**: the `<version> test.<number>` line from `/nexus status`, or the ZIP filename `Better-Nexus-test.<number>-<commit>.zip`. “Latest” alone is not enough.
 3. Describe the smallest reproduction, **what you observed versus what you expected**, whether it recurs after a reload, and relevant addons or existing-data upgrades. Include the complete Lua error if one appeared.
 4. Open **`/nexus report`**. Use **Copy summary** and review the text before putting it in a public issue. **Prepare report file** stores a report for WoW to write at the next reload or logout; the window provides the file path and status. Preparing it does not prove the file is already on disk.
 
