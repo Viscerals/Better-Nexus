@@ -880,7 +880,7 @@ local function AutoAllowed()
         -- sends none while Auto is OFF or another pause holds. Text only.
         local ownSelect, _, _, wait = nil, nil, nil, nil
         if Adapter.SelectUnresolved then ownSelect, _, _, wait = Adapter.SelectUnresolved() end
-        local noGrant = wait == "ambiguous" or wait == "run"
+        local noGrant = wait == "ambiguous" or wait == "unread" or wait == "run"
         return false, "no confirmed result for "
             .. actionHold.worldPending.label
             .. " sent before the loading screen -- "
@@ -2964,6 +2964,21 @@ local function PreauthorizeActionIntent(intent, settings)
             return false, "target_changed_before_submit"
         end
     end
+    -- A leveling intent: mode, autoPick, live level, the fresh board's
+    -- winner (identity, index AND observed rarity: the signature omits
+    -- rarity) and the known-unassigned target, read again.
+    if intent.leveling then
+        local why = actionHold.LevelingRecheck(intent, fresh)
+        if why then
+            actionLifecycleStats.preauthFailed =
+                actionLifecycleStats.preauthFailed + 1
+            -- Only this captured intent: one a reentrant read already
+            -- superseded (or replaced) keeps its own lifecycle record.
+            if actionIntent == intent then FinishActionIntent("superseded", why, false) end
+            RequestStepAt(GetTime() + cadence.poll)
+            return false, why
+        end
+    end
     -- The reads above can run other code: a Pause, or a Pause and Resume,
     -- since this intent was decided still supersedes it.
     if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then
@@ -2980,6 +2995,96 @@ local function MarkIntentSubmitted(intent)
     intent.expiresAt = intent.submittedAt + cadence.actionConfirmTimeout
     RecordActionLifecycle(intent, "submitted", "adapter_accepted")
     RequestStepAt(intent.expiresAt)
+end
+
+-- Optional "Auto-pick while leveling" (settings.autoPickLeveling): fields of
+-- actionHold, not locals (New is at Lua 5.1's 200-local ceiling). Authority
+-- is the exact opt-in, a compiled advisor plan with no Wishlist and the
+-- adapter's positive known-unassigned projection; master Auto, the exact
+-- autoPick permission and every existing gate still apply in StepRun and
+-- PreauthorizeActionIntent. A thrown or malformed read grants nothing.
+actionHold.LevelingAssignment = function()
+    if type(Adapter.AssignedWishlist) ~= "function" then return nil, "assignment unreadable" end
+    local ok, a = pcall(Adapter.AssignedWishlist)
+    if not ok or type(a) ~= "table" then return nil, "assignment unreadable" end
+    if a.knownUnassigned ~= true or type(a.unassignedKey) ~= "string" then
+        return nil, "no Wishlist is not positively known (" .. tostring(a.state) .. ")"
+    end
+    return a.unassignedKey
+end
+actionHold.LevelingAuthority = function(plan, static, settings)
+    if type(settings) ~= "table" or settings.autoPickLeveling ~= true then return nil, "off" end
+    if type(plan) ~= "table" or plan.advisorOnly ~= true
+        or type(static) ~= "table" or static.wishlist ~= nil then return nil, "wishlist" end
+    if not (Policy.LevelingLevel and Policy.DecideLevelingRarity) then
+        return nil, "selector unavailable"
+    end
+    return actionHold.LevelingAssignment()
+end
+-- Every fact a prepared leveling intent was decided on, read again: nil when
+-- all still hold, else the refusing reason. `fresh` is the board to re-run the
+-- whole-board choice on: preauthorization's read, or Adapter.Take's own FINAL
+-- read (R2-SPEC-02). The reads that can run other code come first (settings,
+-- level, horizon, assignment, Orb gate, level again); the final authority
+-- after them is memory only and cannot change while it is checked
+-- (R2-SPEC-01): master Auto, this exact prepared intent, pause, world holds.
+actionHold.LevelingRecheck = function(intent, fresh)
+    local lv = type(intent) == "table" and intent.leveling or nil
+    if type(lv) ~= "table" then return "leveling_intent_invalid" end
+    local settings = Store.Settings()
+    if type(settings) ~= "table" or settings.autoPickLeveling ~= true
+        or settings.autoPick ~= true then
+        return "leveling_setting_changed"
+    end
+    local okLevel, level = pcall(Adapter.Level)
+    if not okLevel or not Policy.LevelingLevel(level) then return "leveling_level_changed" end
+    if fresh ~= nil then
+        local okH, horizon = pcall(Adapter.Horizon)
+        local again = Policy.DecideLevelingRarity({board = fresh, level = level,
+            horizon = okH and horizon or nil, ordinaryBoardAllowed = true})
+        if again.type ~= "take" or again.index ~= lv.index
+            or again.spellId ~= lv.spellId or again.quality ~= lv.quality then
+            return "leveling_offer_changed"
+        end
+    end
+    -- Ownership readiness (R4C): current-run synchronized ownership, as the
+    -- Wishlist planner requires. Adapter.Take additionally needs a readable
+    -- exact granted baseline, since this flag can outlive a later nil read.
+    local okOwned, ownedNow = pcall(Adapter.Owned)
+    if not okOwned or type(ownedNow) ~= "table" or ownedNow.synced ~= true then
+        return "leveling_owned_unsynced"
+    end
+    if actionHold.LevelingAssignment() ~= lv.key then return "leveling_assignment_changed" end
+    if type(Adapter.OrdinaryBoardAllowed) == "function" then
+        local okGate, gate = pcall(Adapter.OrdinaryBoardAllowed)
+        if not okGate or gate ~= true then return "leveling_orb_gate_changed" end
+    end
+    local okFinal, finalLevel = pcall(Adapter.Level)
+    if not okFinal or not Policy.LevelingLevel(finalLevel) then return "leveling_level_changed" end
+    return actionHold.LevelingFinal(intent)
+end
+-- Memory only: nothing here calls out, so a callback during any earlier read
+-- (Auto OFF, a supersede, a loading screen, a pause, the mode or autoPick
+-- turned off) is seen. Adapter.Take calls it again (expect.final) after its
+-- own last service reads, right before the native Select.
+actionHold.LevelingFinal = function(intent)
+    if type(intent) ~= "table" or type(intent.leveling) ~= "table" then return "leveling_intent_invalid" end
+    local final = Store.Settings()
+    if type(final) ~= "table" or final.autoPickLeveling ~= true or final.autoPick ~= true then
+        return "leveling_setting_changed"
+    end
+    if actionIntent ~= intent or intent.state ~= "prepared" then return "leveling_intent_superseded" end
+    if sched.autoEnabled ~= true then return "authorization_changed" end
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then
+        return "session_pause"
+    end
+    if actionHold.worldLeaving or actionHold.worldPending ~= nil
+        or actionHold.worldSettleUntil ~= nil then
+        return "leveling_world_hold"
+    end
+    if GetTime() < (tonumber(actionHold.externalUntil) or 0) then return "user acting" end
+    return nil
 end
 
 
@@ -3148,6 +3253,25 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     }
     FinishPhase(preparePerformance, "boardPrepare", prepareStarted)
     local action = MeasurePhase("policy", Policy.Decide, state)
+    -- Optional leveling pick: only where the planner waits with no Wishlist
+    -- and the adapter positively knows nothing is assigned. Any assigned
+    -- Wishlist (fulfilled included) keeps the planner's decision.
+    local levelingKey = nil
+    if action.type == "wait" and settings.autoPickLeveling == true then
+        local key, why = actionHold.LevelingAuthority(plan, static, settings)
+        if key and Policy.LevelingLevel(level)
+            and not (type(owned) == "table" and owned.synced == true) then
+            -- Unsynchronized ownership is not "owns nothing": wait, as the
+            -- Wishlist planner does (R4C).
+            action.reason = "Random Roll waits: owned Echoes not synchronized"
+        elseif key and Policy.LevelingLevel(level) then
+            action = Policy.DecideLevelingRarity(state)
+            if action.type == "take" then levelingKey = key end
+        elseif why ~= "off" and why ~= "wishlist" then
+            action.reason = "Random Roll waits: "
+                .. tostring(why or "level is not 2 to 79")
+        end
+    end
     actionHold.rolling.lastPolicy = action.policyId
     actionHold.rolling.lastFallback = action.fallbackReason
 
@@ -3380,7 +3504,8 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         return
     end
     SetStatus("L" .. level .. " -- " .. (action.reason or action.type))
-    if not (okAuto and settings.autoPick) then
+    if not (okAuto and settings.autoPick
+        and (not levelingKey or settings.autoPick == true)) then
         if actionIntent and actionIntent.boardSignature == board.signature
             and actionIntent.state == "prepared" then
             FinishActionIntent("superseded", (Nexus.SessionPause and Nexus.SessionPause.IsPaused())
@@ -3407,7 +3532,11 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     end
     local intent = actionIntent
     if not intent then
-        PrepareActionIntent(board, action)
+        local prepared = PrepareActionIntent(board, action)
+        if levelingKey then
+            prepared.leveling = {key = levelingKey, index = action.index,
+                spellId = action.spellId, quality = action.quality}
+        end
         return -- show the immutable intent one beat before acting
     end
     local authorized = PreauthorizeActionIntent(intent, settings)
@@ -3426,12 +3555,30 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         -- This Take's result is the adapter's exact settlement of its
         -- Select, found by the adapter's local ordinal (not a server token);
         -- the adapter keeps that Select's pre-send count with it.
-        local ok, err = Adapter.Take(immutable.spellId)
+        -- A leveling Take re-checks its card (index, observed rarity) and its
+        -- authority after the adapter's own last board read, before sending.
+        -- verify gets the adapter's FINAL board read and re-runs the whole
+        -- choice and the final authority on it (R2-SPEC-01/02).
+        local expect = intent.leveling and {index = intent.leveling.index,
+            quality = intent.leveling.quality,
+            verify = function(finalBoard)
+                return type(finalBoard) == "table"
+                    and actionHold.LevelingRecheck(intent, finalBoard) == nil
+            end,
+            -- Memory-only final authority, after the adapter's last reads.
+            final = function() return actionHold.LevelingFinal(intent) == nil end} or nil
+        local ok, err = Adapter.Take(immutable.spellId, expect)
         if ok then
             lastDecision = immutable
             intent.selectOrdinal = Adapter.SelectUnresolved
                 and Adapter.SelectUnresolved() or nil
             MarkIntentSubmitted(intent)
+        elseif expect and (err == "leveling_offer_changed"
+            or err == "leveling_authority_changed") then
+            -- Nothing was sent: superseded, and a fresh decision follows.
+            -- A captured intent another owner already ended stays as recorded.
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
         else
             intent.mutationAttempted = true
             FinishActionIntent("rejected", err or "adapter_refused", true)
@@ -3979,7 +4126,22 @@ local function DispatchLevelStep(level, plan, slots, owned, flags,
             FinishActionIntent("confirmed", "reroll_run_data_observed", false)
         end
     end
-    if level == 1 then
+    -- R6 (A06): a non-number live level (for example a string) decides nothing.
+    if type(level) ~= "number" then
+        SetStatus("waiting: the character level is unknown")
+        MeasurePhase("overlayRender", RenderIdlePanel,
+            plan, owned, slots, static.catalog, static, locked)
+        return
+    end
+    -- Optional leveling pick with a positively known unassigned target: idle
+    -- at level 1 (no tome setup) and stopped at 80 and above (no new pick, no
+    -- Save, no level-80 search). A sent action still settles exactly below.
+    local levelingKey = actionHold.LevelingAuthority(plan, static, Store.Settings())
+    if level == 1 and levelingKey then
+        SetStatus("Random Roll: idle at level 1 (no level-up offer yet; no tome setup)")
+        MeasurePhase("overlayRender", RenderIdlePanel,
+            plan, owned, slots, static.catalog, static, locked)
+    elseif level == 1 then
         StepArm(level, plan, owned, slots, disabledLevers, static, locked)
         if plan.advisorOnly then
             SetStatus("No wishlist set -- advisor only")
@@ -3992,7 +4154,20 @@ local function DispatchLevelStep(level, plan, slots, owned, flags,
         end
         Level1TomeProgressHide()
     end
-    if level >= 2 and level < 80 then
+    if levelingKey and type(level) == "number" and level >= 80 then
+        -- Exact settlement only: the existing board rule resolves a sent
+        -- intent; a prepared one is superseded. Nothing is decided or sent.
+        ResolveActionIntent(Adapter.Board())
+        if actionIntent and actionIntent.state == "prepared" then
+            FinishActionIntent("superseded", "level_cap", false)
+        end
+        local pending = actionIntent and actionIntent.state
+        SetStatus((pending == "submitted" or pending == "uncertain" or pending == "expired")
+            and "Random Roll: stopped at level 80; the Echo selection already sent still waits for its result (nothing is resent)"
+            or "Random Roll: stopped at level 80 (it picks only at levels 2-79; no save or search)")
+        MeasurePhase("overlayRender", RenderIdlePanel,
+            plan, owned, slots, static.catalog, static, locked)
+    elseif level >= 2 and level < 80 then
         StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             locked)
     elseif level == 80 then
@@ -4380,6 +4555,8 @@ actionHold.SelectWait = function()
             and "a matching grant is visible, but the game still shows a selection pending"
         or wait == "ambiguous"
             and "Nexus cannot attribute a grant to this selection alone, and the game does not say which request a grant answers, so no later grant can settle it"
+        or wait == "unread"
+            and "Nexus could not read the granted Echoes right after sending it, so it cannot tell whether a later grant comes from this selection and no later grant can settle it"
         or wait == "grant"
             and "the game's pending flag cleared, but no matching grant is visible yet"
         or wait == "latch_unknown"
@@ -4387,7 +4564,7 @@ actionHold.SelectWait = function()
         or wait == "run"
             and "it was sent before a run boundary, so no grant of this run can settle it"
         or "the game shows a selection pending and no result yet"
-    local limit = (wait == "ambiguous" or wait == "run")
+    local limit = (wait == "ambiguous" or wait == "unread" or wait == "run")
             and "Nexus keeps this wait until a new run"
         or wait == "latch_after_grant"
             and "The game gives Nexus no receipt for a selection; while it shows one pending, this wait can last until a new run"
@@ -4556,7 +4733,7 @@ actionHold.Effective = function()
         state = (sel.blocked == nil and (rechecks or 0) > 0
             and (kind == "grant" or kind == "latch")) and "rechecking" or "waiting"
         reason = wait
-        hold = overdue == true or kind == "ambiguous" or kind == "run"
+        hold = overdue == true or kind == "ambiguous" or kind == "unread" or kind == "run"
     elseif actionHold.worldPending then
         -- No grant path ends this hold; player input does: a pause.
         state, reason, hold = "paused", "no confirmed result for "

@@ -116,6 +116,12 @@ function Commands.New(options)
             Invoke("trace", context, normalized, traceValue)
             return
         end
+        -- Optional rarity-first pick while leveling with no Wishlist.
+        local levelingValue = normalized:match("^leveling%s+(%a+)$")
+        if normalized == "leveling" or levelingValue then
+            Invoke("leveling", context, normalized, levelingValue)
+            return
+        end
         if normalized == "prototype" then Invoke("prototype",context,normalized);return end
         if normalized:sub(1, 6) == "probe " then
             local target = normalized:sub(7):match("^%s*(.-)%s*$")

@@ -1567,6 +1567,17 @@ local function CommandReference()
     SayFormat("command.chat.reference_rolling_strategy",
         {policy="/nexus policy adaptive|released", trace="/nexus trace"})
     Say("command.chat.reference_session_pause")
+    -- Random Roll: said through its key; its rule and limits are two reviewed
+    -- texts passed as text slots and the command syntax is a code-owned slot
+    -- like the lines above. The legacy line keeps the exact English when the
+    -- seam cannot carry it. Passive: it reads and changes nothing.
+    local randomRollRule = UiText("command.chat.reference_random_roll_rule")
+    local randomRollLimits = UiText("command.chat.reference_random_roll_limits")
+    SayFormat("command.chat.reference_random_roll",
+        {command="/nexus leveling on|off", rule=randomRollRule, limits=randomRollLimits},
+        "/nexus leveling on|off -- Random Roll: optional, off by default. With no Wishlist at levels 2-79 "
+        .."Auto takes the highest-rarity offer (first current offer on a tie); needs Auto ON and autoPick; "
+        .."no reroll or spending; no new pick at level 80.")
 end
 
 -- /nexus help and /nexus tutorial (design/current "Nexus Setup Alternative":
@@ -1794,6 +1805,31 @@ EnsureMainCommands = function()
                         {option=argument.option, value=argument.value})
                 end
                 SayWithSessionNote(text, source, sessionOnly)
+            end,
+            -- Optional "Auto-pick while leveling": the explicit on/off setter
+            -- and its status. It writes one exact boolean into the settings
+            -- this session runs with (the saved settings, or a read-only
+            -- root's session view), and never selects Auto, resumes a pause
+            -- or grants a resource. English only: no translation key has
+            -- this meaning yet.
+            leveling=function(settings,_,value)
+                if value=="on" or value=="off" then
+                    settings.autoPickLeveling=(value=="on")
+                    RequestRecompute()
+                elseif value~=nil then
+                    Print("usage: /nexus leveling on|off")
+                    return
+                end
+                local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                local sessionOnly=type(readOnly)=="function" and readOnly() and true or false
+                local on=type(settings)=="table" and settings.autoPickLeveling==true
+                Print("Random Roll: "..(on and "ON" or "OFF")
+                    ..((value and sessionOnly) and " (this session only: saved data is read-only)" or ""))
+                Print("Random Roll (optional, off by default) picks by rarity, not at random: with no Wishlist "
+                    .."assigned, at levels 2 to 79, Auto takes the highest-rarity Echo offered, the first current "
+                    .."offer on a tie. It needs Auto ON and autoPick; turning it on does not turn Auto ON. It never "
+                    .."rerolls, banishes, freezes, spends, saves or uses Orbs, and makes no new pick at level 80. "
+                    .."/nexus leveling on|off")
             end,
             prototype=function()
                 Say("command.chat.prototype_intro")

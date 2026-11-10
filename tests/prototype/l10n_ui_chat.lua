@@ -107,11 +107,12 @@ check(english.wishlist[1]==PREFIX.."reading |cff7fff7f'"..WISHLIST_NAME.."'|r (f
 english.progress=Run('progress')
 check(english.progress[1]==PREFIX..'this run: |cff7fff7f0/2|r echoes (0%) -- 1 still short','progress line exact: '..tostring(english.progress[1]))
 english.reference=Run('reference')
-check(#english.reference==4
+check(#english.reference==5
  and english.reference[1]==PREFIX..'Nexus reference: /nexus help | guide | reference | editor | panel | status | loading | orbs | policy | trace'
  and english.reference[2]==PREFIX..'Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.'
  and english.reference[3]==PREFIX..'Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.'
- and english.reference[4]==PREFIX..'Session pause: /nexus pause, /nexus resume, /nexus paused. Pauses Auto, Orb actions, sharing and DPS recording until Resume or reload.',
+ and english.reference[4]==PREFIX..'Session pause: /nexus pause, /nexus resume, /nexus paused. Pauses Auto, Orb actions, sharing and DPS recording until Resume or reload.'
+ and english.reference[5]==PREFIX..'/nexus leveling on|off -- Random Roll: optional, off by default. With no Wishlist at levels 2-79 Auto takes the highest-rarity offer (first current offer on a tie); needs Auto ON and autoPick; no reroll or spending; no new pick at level 80.',
  'reference lines exact')
 check(Joined(Run('reroll bogus'))==PREFIX..'Use /nexus reroll on|off, /nexus freeze on|off, or /nexus currentlocks on|off','usage line exact')
 check(Joined(Run('pause'))==PREFIX..'Nexus paused for this session. Auto, Orb actions, sharing and DPS recording are held. An action already sent may still finish. Type /nexus resume to continue.','pause line exact')
@@ -143,9 +144,11 @@ for key,text in pairs(catalog) do
  end
 end
 -- 160 reviewed (v2) keys plus the 8 of the v3 supplemental cohort
--- (remainder_misc: the /nexus status WISHLIST: and Rolled Echoes lines) and
--- 1 of the v5 supplemental cohort (main.value.unknown_tome, Source86 P73).
-check(familyKeys==160+8+1,'the 169 chat-family keys (160 v2 + 8 v3 + 1 v5 supplemental) are in the English catalog: '..familyKeys)
+-- (remainder_misc: the /nexus status WISHLIST: and Rolled Echoes lines),
+-- 1 of the v5 supplemental cohort (main.value.unknown_tome, Source86 P73) and
+-- the 3 Random Roll reference keys (command.chat.reference_random_roll, its
+-- _rule and _limits detail texts).
+check(familyKeys==160+8+1+3,'the 172 chat-family keys (160 v2 + 8 v3 + 1 v5 supplemental + 3 Random Roll) are in the English catalog: '..familyKeys)
 
 ------------------------------------------------------------------------------
 -- 2. Pseudo pack: real commands

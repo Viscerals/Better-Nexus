@@ -41,6 +41,64 @@ This file has two parts.
   Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
   actual charges and the per-action permissions are its inputs. Actions:
   `take`, `freeze`, `banish`, `reroll`, `wait`. Action `index` is 1-based.
+- **Optional leveling pick (`settings.autoPickLeveling`).** Off unless exactly
+  `true` (absent is not a default; read-only roots adopt only a saved `true`).
+  Set only by `/nexus leveling on|off` or its Automation settings row; it never
+  turns Auto ON. It decides only where the planner waits with an advisor plan,
+  no Wishlist, and `AssignedWishlist().knownUnassigned == true` (no Saved Build
+  in use and no first-run plan, or a populated Saved Build with no association;
+  every loading, restoring, unavailable, empty-slot or unknown state refuses).
+  `Policy.DecideLevelingRarity` takes the highest `observedQuality` (exact
+  integer 0..4 from `GameAdapter.Board`; any card without one refuses the whole
+  board) at live level 2..79, first card on a tie. The intent uses the existing
+  prepare/preauthorize/submit/settle lifecycle; preauthorization re-runs the
+  selector on the fresh board and re-reads mode, `autoPick == true`, live level
+  and the unassigned key, and `GameAdapter.Take(spellId, expect)` checks index,
+  rarity and authority after its own board read. Ownership readiness: the
+  mode decides only with `owned.synced == true` and preauthorization re-reads
+  it; at submission `Take` needs a readable granted mirror for the exact
+  pre-send count (nil, non-table or a throwing read is unknown, never zero) and
+  `ownedConfirmedGeneration == ownedGeneration`. User-facing name: Random Roll
+  (it picks by highest rarity, never at random; the key, command and policy ID
+  are unchanged). Final admission (R5), callouts first in a fixed bounded
+  order: `raw1` (the strict whole raw choice, exactly three tables with numeric
+  integer spellId and quality 0..4, is the selector's actual input), the
+  runtime verifier, owner identity, granted `g1`, a strict typed choice key
+  `raw2 == raw1`, granted `g2` with the same signature as `g1` (the exact
+  baseline), R6: a third strict choice key `raw3 == raw1` after `g2`, the Orb
+  gate, live level 2..79; then memory-only checks: current
+  `Perks` table with `pendingSelectSpellId == nil`, unchanged
+  `wishlistProjectionRevision`, current-run generation, and `expect.final`
+  (same prepared intent, master Auto, mode, `autoPick`, pause epoch, world and
+  user holds); then the pause boundary; then R17 (C02): the last memory-only
+  observation, phase `mirror`, immediately before the native Select: the strict
+  typed key of the current `Perks.currentChoice` field (`rawget`, no metamethod,
+  no callout; the field the provider publishes wholesale and that
+  `GetCurrentChoice` returns by reference) must equal the admitted `raw1` key. A
+  republished table with changed values, an in-place mutation, a cleared or
+  malformed mirror refuses with `leveling_offer_changed`; a distinct
+  value-identical republication passes (a value key, never an identity
+  refusal). The decision-time board carries `strictObservation`; a filtered
+  subset is refused. Any failure sends nothing. R6 settlement: right after a
+  successful leveling Select, one granted read compares the spell's exact count
+  with the captured baseline; an unreadable mirror or a different count marks
+  the adapter's own record `competing`, so `ConfirmAwaitingGrant` holds it
+  `ambiguous` (never proven, never replayed, cancelled or refunded).
+  `GameAdapter.LevelingAdmissionPhase` is a memory-only diagnostic naming the
+  current admission step. Trust boundary (BLOCKED, not
+  claimed safe): the source has no atomic or memory-mirrored native
+  observation, so a change made inside the last callouts (`g2`, Orb gate,
+  level) to native Orb or level facts is not detected, and a change to the
+  choice between the `mirror` read and the native Select is not detected
+  either (no callout separates them in this source; Lua event preemption is
+  neither asserted nor excluded). Loaded provider identity, archive precedence
+  and server cadence are not established by this source. The
+  missing contract is a precondition-carrying native Select or event-maintained
+  revisions of those facts. Level 1 is idle (no tome
+  setup); at 80 and above nothing new is decided and nothing is saved or
+  searched, while a sent intent settles by the existing rules. No reroll,
+  banish, freeze, Orb, tome, lock, activation, save or load is added. Offline
+  evidence only; native offer origin and rarity range are not established.
 - **Ordinary-board gate.** `GameAdapter.OrdinaryBoardAllowed()` guards `Take`,
   `Banish`, `Reroll`, `Freeze` and automatic rolling. It blocks while Orb mode
   owns or has an unresolved action. When an `OrbService` exists it also requires

@@ -674,6 +674,18 @@ function M.AutomationScopeLines(facts)
     local v = OnOff(s, "autoPick")
     lines[#lines + 1] = "- " .. Permission("readout.body.scope_take", "autoPick", v,
         "Take needed Echoes (autoPick): " .. v)
+    v = OnOff(s, "autoPickLeveling")
+    -- Its rule and limits are two reviewed texts passed as text slots (as the
+    -- shown OnOff word is), so each part stays within the single-line contract.
+    lines[#lines + 1] = "- " .. TF("readout.body.scope_random_roll", {value = v, command = "/nexus leveling on|off",
+            rule = T("readout.body.scope_random_roll_rule", "with no Wishlist at levels 2-79 it takes the"
+                .. " highest-rarity offer (first current offer on a tie), not a random one"),
+            limits = T("readout.body.scope_random_roll_limits", "needs Auto ON and autoPick; no reroll or"
+                .. " spending; no new pick at level 80")},
+        "Random Roll: " .. v
+        .. "; optional; with no Wishlist at levels 2-79 it takes the highest-rarity offer (first current"
+        .. " offer on a tie), not a random one; needs Auto ON and autoPick; no reroll or spending; no new"
+        .. " pick at level 80; change with /nexus leveling on|off")
     v = OnOff(s, "autoBanish")
     lines[#lines + 1] = "- " .. Permission("readout.body.scope_banish", "autoBanish", v, "Banish (autoBanish): " .. v)
     v = OnOff(s, "autoReroll")
@@ -742,6 +754,22 @@ function M.AutomationSettingsRows(facts)
         local v = OnOff(s, item[1])
         Add("toggle", Permission(item[4], item[1], v, item[2] .. " (" .. item[1] .. "): " .. v),
             {key = item[1], checked = on, command = item[3] .. (on and " off" or " on")})
+    end
+    -- The optional leveling pick: off unless saved exactly on. Its caption is
+    -- shown through its own key over the shown value and its two reviewed
+    -- detail texts (text slots); the English is the legacy row.
+    do
+        local on = Value("autoPickLeveling") == true
+        local lv = OnOff(s, "autoPickLeveling")
+        Add("toggle", TF("readout.menu.random_roll", {value = lv,
+                rule = T("readout.menu.random_roll_rule", "no Wishlist, levels 2-79: takes the highest-rarity"
+                    .. " offer (first current offer on a tie)"),
+                limits = T("readout.menu.random_roll_limits", "needs Auto ON and autoPick; optional, off by"
+                    .. " default; no new pick at 80; no reroll or spending")},
+            "Random Roll: " .. lv
+            .. "; no Wishlist, levels 2-79: takes the highest-rarity offer (first current offer on a tie);"
+            .. " needs Auto ON and autoPick; optional, off by default; no new pick at 80; no reroll or spending"),
+            {key = "autoPickLeveling", checked = on, command = on and "leveling off" or "leveling on"})
     end
     local v = OnOff(s, "autoPick")
     Add("info", Permission("readout.menu.take_needed", "autoPick", v,

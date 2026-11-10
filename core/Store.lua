@@ -418,6 +418,9 @@ local ReadOnlyRoot = {
         autoPick=true, autoActivate=true, autoDisable=true, autoSave=true,
         autoBanish=true, autoReroll=true, autoFreeze=true,
         autoLockEchoes=true, communityRetentionEnabled=true,
+        -- Optional leveling pick (/nexus leveling on|off). Not a shipped
+        -- default: absent stays absent (OFF) and no profile is rewritten.
+        autoPickLeveling=true,
     },
     -- Known settings outside the permissions whose meaning this build owns,
     -- beyond the numeric and list defaults. Anything else in the saved

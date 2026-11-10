@@ -49,6 +49,38 @@ for _,row in ipairs(automation) do
     if row.text:find('Auto',1,true) then foundAuto=true end
 end
 check(foundAuto,'Automation uses current owned rows')
+-- Optional leveling pick: a discoverable plain-English row; reading it acts
+-- and writes nothing; only its explicit click runs the /nexus leveling setter,
+-- and that never turns Auto ON.
+local levelingRow
+for i,row in ipairs(automation) do
+    if row.text:find('Random Roll',1,true) then levelingRow=i end
+end
+-- R5: the user-facing name is Random Roll; it explains highest rarity first,
+-- the first current offer on a tie, no Wishlist, levels 2-79, Auto ON and
+-- autoPick, optional and off by default, no new pick at 80, no reroll/spend.
+check(levelingRow and automation[levelingRow].text:find('highest-rarity',1,true)
+    and automation[levelingRow].text:find('first current offer on a tie',1,true)
+    and automation[levelingRow].text:find('no Wishlist',1,true)
+    and automation[levelingRow].text:find('2-79',1,true) and automation[levelingRow].text:find('Auto ON',1,true)
+    and automation[levelingRow].text:find('autoPick',1,true) and automation[levelingRow].text:find('off by default',1,true)
+    and automation[levelingRow].text:find('no new pick at 80',1,true)
+    and automation[levelingRow].text:find('not set (acts as off)',1,true),'the Random Roll row explains itself and reads OFF when absent')
+check(not automation[levelingRow].text:find('Auto-pick while leveling',1,true),'the old label is gone from the row')
+do
+    local scope=table.concat(Nexus.Readout.AutomationScopeLines({selected=false,settings=Nexus.Store.Settings()}),'\n')
+    check(scope:find('Random Roll',1,true) and scope:find('not a random one',1,true),
+        'the Auto reference scope names Random Roll and says it is not random')
+    check(F.Serialize(NexusDB)==baseline and #H.actions==actions,'reading the scope lines writes and does nothing')
+end
+check(F.Serialize(NexusDB)==baseline and #H.actions==actions,'reading the leveling row writes and does nothing')
+settings.Select('automation')
+check(settings.Activate(levelingRow,automation[levelingRow].text),'the explicit row click runs its setter')
+check(Nexus.Store.Settings().autoPickLeveling==true and not Nexus.RecomputeStats().autoEnabled and #H.actions==actions,
+    'the leveling row turns only that option on; Auto stays OFF and nothing is performed')
+SlashCmdList.NEXUS('leveling off')
+check(Nexus.Store.Settings().autoPickLeveling==false,'the command turns it off again')
+baseline=F.Serialize(NexusDB)
 local appearance=settings.Rows('appearance')
 local selected
 for i,row in ipairs(appearance) do
@@ -114,4 +146,103 @@ check(captured[1]==shown[2]._nexusFullText and captured[2]==longDetail,
 Nexus.Panel.LanguageMenuItems=previousLanguage
 settings.Hide()
 check(not settings.IsShown(),'Settings closes without resetting state')
+-- R5 (A24): the Random Roll key in future, unverified and malformed (read-only)
+-- roots: only an exact saved true is adopted; the command changes the session
+-- only; the whole saved root stays byte-identical; another root drops it.
+for _,case in ipairs({{'future 6',function(d)d.settingsVersion=6 end},
+    {'unverified 5',function(d)d.settings.syncMode='sometimes' end},
+    {'malformed 6.5',function(d)d.settingsVersion=6.5 end}}) do
+    for _,saved in ipairs({{true,true},{false,false},{'yes',false},{nil,false}}) do
+        local db=F.Database({mutate=function(d)d.settings.autoPickLeveling=saved[1];case[2](d)end})
+        local before=F.Serialize(db)
+        F.Boot(db)
+        local label=case[1]..' saved '..tostring(saved[1])
+        local S=Nexus.Store.Settings()
+        check(S~=NexusDB.settings and S.autoPickLeveling==saved[2],label..': adopted '..tostring(S.autoPickLeveling))
+        SlashCmdList.NEXUS('leveling '..(saved[2] and 'off' or 'on'))
+        check(Nexus.Store.Settings().autoPickLeveling==(not saved[2]),label..': the command changes this session')
+        check(F.Serialize(NexusDB)==before,label..': the saved root is unchanged')
+        check(not Nexus.RecomputeStats().autoEnabled,label..': the command never turns Auto ON')
+        local other=F.Database({version=7,mutate=function(d)d.settings.autoPickLeveling=nil end})
+        NexusDB=other
+        check(Nexus.Store.Settings().autoPickLeveling==false,label..': another (stale/replaced) root drops the session override')
+    end
+end
+do -- supported root: the explicit setter writes only the existing boolean key.
+    local db=F.Database({version=2})
+    F.Boot(db)
+    SlashCmdList.NEXUS('leveling on')
+    check(rawget(NexusDB.settings,'autoPickLeveling')==true and NexusDB.settings.customGenSetting.keep=='settings',
+        'supported root: saved exactly true; unknown fields kept')
+end
+-- R6 A01: a writable root with the key absent, false or malformed: startup
+-- keeps the saved value as it is (no rewrite), Random Roll stays OFF, Auto
+-- stays OFF, and the whole root is unchanged from its post-boot baseline.
+for _,saved in ipairs({{'absent',nil},{'false',false},{'malformed',"yes"}}) do
+    local db=F.Database({version=2,mutate=function(d)d.settings.autoPickLeveling=saved[2] end})
+    local L=F.Boot(db)
+    check(rawget(NexusDB.settings,'autoPickLeveling')==saved[2],'A01 '..saved[1]..': startup does not rewrite the saved key')
+    check(Nexus.Store.Settings().autoPickLeveling~=true and not Nexus.RecomputeStats().autoEnabled,'A01 '..saved[1]..': mode and Auto OFF')
+    local label='A01 '..saved[1]
+    check(#L.actions==0,label..': startup takes no action')
+    -- Startup is not over when F.Boot returns: deferred maintenance bookkeeping
+    -- still runs, and the Changelog marker is stamped on one of ten attempts two
+    -- simulated seconds apart. The proper post-boot baseline is the root once
+    -- that window has passed and it has stopped changing. While it settles, the
+    -- saved settings may only ever hold one of the two values fixed here, at
+    -- boot return: exactly as booted, or exactly as booted plus the known
+    -- marker (the Changelog module's current release key). Both are serialized
+    -- now so that nested values cannot change unnoticed later.
+    local marker='prototype-P1.6-assigned-orbs'
+    local settingsAtBoot=F.Serialize(NexusDB.settings)
+    local stamped={}
+    for k,v in pairs(NexusDB.settings) do stamped[k]=v end
+    stamped.lastChangelogSeen=marker
+    local settingsStamped=F.Serialize(stamped)
+    local previous=F.Serialize(NexusDB)
+    local t,lastChange,settledAt=0,0,nil
+    while settledAt==nil and t<30 do
+        L.Advance(0.5)
+        t=t+0.5
+        local at=label..' at t='..tostring(t)
+        check(rawget(NexusDB.settings,'autoPickLeveling')==saved[2],at..': the saved key is untouched while startup settles')
+        check(#L.actions==0,at..': no action while startup settles')
+        local s=F.Serialize(NexusDB.settings)
+        check(s==settingsAtBoot or s==settingsStamped,at..': settings are either as booted or as booted plus the Changelog marker')
+        local root=F.Serialize(NexusDB)
+        if root~=previous then lastChange=t;previous=root
+        elseif t>=20 then settledAt=t end
+    end
+    check(settledAt~=nil,label..': the root settles within 30 simulated seconds (last change at t='..tostring(lastChange)..')')
+    check(rawget(NexusDB.settings,'lastChangelogSeen')==marker and F.Serialize(NexusDB.settings)==settingsStamped,label..': startup ends with exactly the known Changelog marker added to the saved settings')
+    local postBoot=F.Serialize(NexusDB);local acted=#L.actions
+    L.Advance(5)
+    check(F.Serialize(NexusDB)==postBoot and #L.actions==acted,'A01 '..saved[1]..': the whole root and actions stay unchanged after boot')
+    check(rawget(NexusDB.settings,'autoPickLeveling')==saved[2] and #L.actions==0,label..': the saved key and zero actions hold after the baseline')
+    check(Nexus.Store.Settings().autoPickLeveling~=true and not Nexus.RecomputeStats().autoEnabled,label..': mode and Auto stay OFF after the baseline')
+end
+-- R6 A24: the explicit setter is a whole-root delta of exactly one boolean key.
+do
+    local db=F.Database({version=2})
+    F.Boot(db)
+    local before=F.Serialize(NexusDB)
+    SlashCmdList.NEXUS('leveling on')
+    check(rawget(NexusDB.settings,'autoPickLeveling')==true,'A24: saved exactly true')
+    NexusDB.settings.autoPickLeveling=nil
+    check(F.Serialize(NexusDB)==before,'A24: nothing else in the whole root changed')
+    NexusDB.settings.autoPickLeveling=true
+end
+-- R6 A23: /nexus reference and /nexus leveling (status) are passive and name
+-- Random Roll; opening them changes no saved data, Auto or action.
+do
+    local db=F.Database({version=2})
+    local L=F.Boot(db)
+    local before,acted,mark=F.Serialize(NexusDB),#L.actions,#L.chat
+    SlashCmdList.NEXUS('reference');SlashCmdList.NEXUS('leveling')
+    local said=table.concat(L.chat,'\n',mark+1)
+    check(said:find('Random Roll',1,true) and said:find('highest-rarity',1,true) and said:find('/nexus leveling on|off',1,true),
+        'A23: reference and status name Random Roll and explain it')
+    check(F.Serialize(NexusDB)==before and #L.actions==acted and not Nexus.RecomputeStats().autoEnabled,
+        'A23: reading them changes no saved data, action or Auto')
+end
 print('PASS full UI Settings owner routes and passive navigation')
