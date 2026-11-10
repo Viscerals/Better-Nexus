@@ -905,11 +905,17 @@ function M.UpdateContextHeader(model, settled)
     local build = facts.preview and facts.kind == "none" and LT("panel.value.build_none_captured")
         or (facts.slot and fields[2].compact) or fields[2].value
     local wishlist = facts.empty and fields[3].compact or fields[3].value
+    -- With no Wishlist, while Random Roll is what picks (M.RandomRollShown):
+    -- its own words instead of "None assigned". The hover then gives the
+    -- line whole and keeps that fact below it.
+    local rolling = M.RandomRollShown(model)
+    if rolling then wishlist = LT("panel.value.wishlist_random_rolling") end
     local lines = {
         {frame._contextTitle, frame._contextTitleHit, title},
         {frame._contextBuild, frame._contextBuildHit, LF("panel.label.context_build", {build = SafeText(build)})},
         {frame._contextWishlist, frame._contextWishlistHit, LF("panel.label.context_wishlist", {wishlist = SafeText(wishlist)})},
     }
+    if rolling then lines[3][4] = lines[3][3] .. "\n" .. tostring(tooltip[3]) end
     -- C-03 (as M.UpdateDestinationRow): on a settled render (no layout pass)
     -- whose header words, hovers, widths and Auto state are the ones already
     -- applied, nothing is re-anchored, refitted or set again. A layout pass
@@ -939,8 +945,8 @@ function M.UpdateContextHeader(model, settled)
         local line = lines[index]
         line[1]:SetWidth(index == 1 and titleWidth or labelWidth)
         line[1]:SetText(line[3])
-        line[2]._nexusFull = index == 1
-            and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index]
+        line[2]._nexusFull = line[4] or (index == 1
+            and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index])
         if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
             Nexus.LayoutMetrics.OneLineLabel(line[1], nil, index == 1 and 20 or lineH)
         end
@@ -1365,6 +1371,12 @@ local function ModelSignatures(model)
             charges=model.charges, chargeLine=model._nexusChargeLine,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
+            -- With no Wishlist (no Wishlist name) the Auto button follows Random
+            -- Roll's option and a selected Auto (M.RandomRollAutoControl): true
+            -- only while that view shows the button, nil otherwise and for
+            -- every named Wishlist, with or without targets.
+            autoControl=(not source.wishlistName)
+                and M.RandomRollAutoControl(model.auto, tonumber(model.level) or 0) or nil,
             -- The Play summary's rows: Details open (memory only) and whether
             -- an Orb run line is shown; the line's words refresh on every
             -- render (M.RefreshOrbLine).
@@ -1473,9 +1485,12 @@ local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
 -- Auto OFF releases a roll-block reservation at once. The runtime does not
 -- render for a toggle, so the last committed model is rendered again with
 -- the new selection (the ordinary render transaction). Nothing else changes.
+-- The same render ends the no-Wishlist line's "Random rolling" at once
+-- (M.RandomRollShown): Random Roll does not pick while Auto is OFF.
 local function ReleaseRollOnAutoOff(auto)
     local roll = renderState.roll
-    if auto or not (roll and roll.reserved) or type(M._lastModel) ~= "table" then
+    if auto or type(M._lastModel) ~= "table"
+        or not ((roll and roll.reserved) or M.RandomRollShown(M._lastModel)) then
         return
     end
     local model = DefensiveCopy(M._lastModel)
@@ -5662,6 +5677,45 @@ local function LayoutServerStatus(completed, layout)
     end
 end
 
+-- Random Roll (settings.autoPickLeveling, exactly true) picks with no Wishlist
+-- at Policy.LevelingLevel's levels and needs the master Auto, so the view with
+-- no Wishlist (no Wishlist name) keeps the same Auto button there. An Auto
+-- already selected ON keeps it in that view at any level and whatever the
+-- option, so it can be turned OFF. A named Wishlist is never this view.
+-- Reads Store.Settings as M.AutoDetailLines does; it shows a button, no more.
+function M.RandomRollAutoControl(auto, level)
+    if auto == true then return true end
+    local store, policy = Nexus.Store, Nexus.Policy
+    if not (store and type(store.Settings) == "function"
+        and policy and type(policy.LevelingLevel) == "function") then return false end
+    local ok, settings = pcall(store.Settings)
+    return ok and type(settings) == "table" and settings.autoPickLeveling == true
+        and policy.LevelingLevel(level) == true
+end
+
+-- With no Wishlist, the Play header's Wishlist line (M.UpdateContextHeader)
+-- says Random Roll is picking only from the runtime's own display fact
+-- (model.randomRoll, exactly true: AutomationRuntime's StepRun) and only
+-- while what this view shows agrees: a selected Auto that no pause, hold or
+-- session pause stops, no Wishlist name, a destination positively known as
+-- unassigned (not loading, restoring, unavailable or an empty Saved Build)
+-- and Random Roll's option and levels (M.RandomRollAutoControl). The option,
+-- a selected Auto, a recommendation or a missing name never do alone. Reads
+-- the model and that option. It words that line and its hover, and Auto
+-- turned OFF renders the line again (ReleaseRollOnAutoOff); no action,
+-- permission or setting follows from it.
+function M.RandomRollShown(model)
+    if type(model) ~= "table" or model.randomRoll ~= true or model.auto ~= true
+        or model.paused or model._nexusSessionPaused then return false end
+    if type(model.effective) == "table" and model.effective.hold == true then return false end
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local assignment = type(model.assignment) == "table" and model.assignment or {}
+    if pr.wishlistName or assignment.state ~= "unassigned" or assignment.emptySlot == true then
+        return false
+    end
+    return M.RandomRollAutoControl(false, tonumber(model.level) or 0) == true
+end
+
 -- Auto keeps its existing consentful click handler, now in the header. The
 -- footer contains navigation only; moving between hubs never toggles Auto.
 local function LayoutFooter(showAuto)
@@ -6002,6 +6056,9 @@ local function ApplyModel(model, signatures, roll)
     -- including level 80 and completed-target boards. Toggling Auto off must
     -- never make the control used to turn it back on disappear.
     local showAutoControl = not noBuild and (rollBlock or (not complete and playerLevel < 80))
+    -- With no Wishlist (no Wishlist name) the button is Random Roll's control
+    -- (M.RandomRollAutoControl). A named Wishlist without targets keeps the line above.
+    if not name then showAutoControl = M.RandomRollAutoControl(model.auto, playerLevel) end
     local callboardSummary = Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary
         and Nexus.CallboardStatus.GetSummary() or nil
     -- Callboard belongs with the difficulty / Soul Ash HUD, not the wishlist

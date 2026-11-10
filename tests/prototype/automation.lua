@@ -144,6 +144,97 @@ do
  L.Board(LBOARD);L.Notify();SlashCmdList.NEXUS('auto');L.Advance(3)
  check(#TakeIds(L)==0,'a non-boolean option value is OFF')
 end
+-- RANDOM_ROLL_SHOWN: the panel model's display-only randomRoll fact and the
+-- Play header's Wishlist line that words it, from the real runtime, Main and
+-- panel. The fact is exactly true only while Random Roll is what picks now
+-- (the exact option, Auto ON, autoPick, no Wishlist, levels 2-79, nothing
+-- pausing or holding it) and absent otherwise; it changes nothing that is taken.
+do
+ local ACTIVE,NONE='Wishlist: Random rolling','Wishlist: None assigned'
+ local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
+ local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
+ local function Is(want,label)
+  check(Shown()==(want and true or nil) and Line()==(want and ACTIVE or NONE),
+   'Random rolling shown, '..label..': '..tostring(Shown())..' / '..tostring(Line()))
+ end
+ -- Between boards: every fact is needed, and each one taken away ends it.
+ local L=LBoot(10);L.Advance(.5)
+ Is(false,'first install, Auto OFF, option absent')
+ SlashCmdList.NEXUS('auto');L.Advance(.5)
+ Is(false,'Auto ON, option absent')
+ SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('leveling on');L.Advance(.5)
+ Is(false,'option on, Auto OFF')
+ SlashCmdList.NEXUS('auto');L.Advance(.5)
+ Is(true,'option on, Auto ON, between boards')
+ SlashCmdList.NEXUS('pause');L.Advance(.5)
+ check(Nexus.SessionPause.IsPaused()==true and Line()==NONE,'Random rolling shown, session pause: '..tostring(Line()))
+ Nexus.SessionPause.Resume();L.Advance(.5)
+ check(Nexus.SessionPause.IsPaused()~=true,'fixture: the session pause ended')
+ Is(true,'after Resume')
+ local orb=ProjectEbonhold.OrbService
+ ProjectEbonhold.OrbService={IsStateKnown=function()return true end,IsOfferPending=function()return true end};L.Advance(.5)
+ Is(false,'an Orb offer pending')
+ ProjectEbonhold.OrbService={};L.Advance(.5)
+ Is(false,'an unknown Orb state')
+ ProjectEbonhold.OrbService=orb;L.Advance(.5)
+ Is(true,'the Orb state idle again')
+ -- autoPick has no in-game switch: the fixture writes it, and the option's
+ -- own setter (already on) requests the next step.
+ Nexus.Store.Settings().autoPick=false;SlashCmdList.NEXUS('leveling on');L.Advance(.5)
+ Is(false,'autoPick false')
+ Nexus.Store.Settings().autoPick=true;SlashCmdList.NEXUS('leveling on');L.Advance(.5)
+ Is(true,'autoPick true again')
+ SlashCmdList.NEXUS('leveling off');L.Advance(.5)
+ Is(false,'option OFF')
+ SlashCmdList.NEXUS('leveling on');L.Advance(.5)
+ Is(true,'option on again')
+ L.playerLevel=80;L.Fire('PLAYER_LEVEL_UP',80);L.Advance(.5)
+ Is(false,'level 80')
+ L.playerLevel=79;L.Fire('PLAYER_LEVEL_UP',79);L.Advance(.5)
+ Is(true,'level 79')
+ -- The runtime renders nothing for a toggle: the panel renders its last
+ -- model again with the new selection, at once.
+ SlashCmdList.NEXUS('auto')
+ check(not Nexus.RecomputeStats().autoEnabled and Line()==NONE and Nexus.Panel._lastModel.auto==false,
+  'Random rolling shown, Auto OFF again: the line says None assigned at once: '..tostring(Line()))
+ L.Advance(.5)
+ check(Line()==NONE,'Random rolling shown, Auto OFF again, later: '..tostring(Line()))
+ check(#L.actions==0,'Random rolling shown: no action without a board')
+ -- A board: Random Roll's recommendation with Auto OFF is a recommendation
+ -- only; with Auto ON it is Random Roll's own Take, from the prepared beat.
+ L.Board(LBOARD);L.Notify();L.Advance(.5)
+ Is(false,'a board with Auto OFF (a recommendation only)')
+ SlashCmdList.NEXUS('auto');L.Advance(.25)
+ check(Nexus.RecomputeStats().lastActionLifecycle.state=='prepared' and #TakeIds(L)==0,'fixture: one prepared beat first')
+ Is(true,'a board with Auto ON, prepared')
+ L.Advance(1)
+ local ids=TakeIds(L)
+ check(#ids==1 and ids[1]==200004 and #L.actions==1,'Random rolling shown: the same one Take of the highest rarity, nothing else')
+end
+-- A board Random Roll refuses, an assigned Wishlist and the level limits.
+do
+ local ACTIVE='Wishlist: Random rolling'
+ local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
+ local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
+ local function Never(label) check(Shown()==nil and Line()~=ACTIVE,'Random rolling not shown, '..label..': '..tostring(Shown())..' / '..tostring(Line())) end
+ local L=LBoot(10);SlashCmdList.NEXUS('leveling on')
+ L.Board({{spellId=200001,quality=1},{spellId=200004},{spellId=200002,quality=2}});L.Notify()
+ SlashCmdList.NEXUS('auto');L.Advance(1)
+ Never('a board with an unknown rarity (pick manually)')
+ check(#TakeIds(L)==0,'fixture: the refused board takes nothing')
+ L=LBoot(10);SlashCmdList.NEXUS('leveling on');SlashCmdList.NEXUS('auto');L.Advance(.5)
+ check(Shown()==true and Line()==ACTIVE,'fixture: Random rolling is shown before a Wishlist is assigned: '..tostring(Line()))
+ check(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Late plan',{{spellId=200001,quality=1,stacks=2}}),'fixture: a Wishlist is assigned')
+ L.Notify();L.Advance(1)
+ Never('after a Wishlist is assigned')
+ check(tostring(Line()):find('Late plan',1,true)~=nil,'the Wishlist line names the assigned Wishlist: '..tostring(Line()))
+ for _,lv in ipairs({1,80,81}) do
+  L=LBoot(lv);SlashCmdList.NEXUS('leveling on');SlashCmdList.NEXUS('auto');L.Advance(1)
+  Never('level '..lv..' between boards')
+  L.Board(LBOARD);L.Notify();L.Advance(1)
+  Never('level '..lv..' with a board')
+ end
+end
 -- LEVELING_RARITY3 (R2-SPEC-01/02): the FINAL adapter Take-read phase, after
 -- ordinary preauthorization. Callbacks fire only while Adapter.Take runs:
 -- onAssigned after its verifier's AssignedWishlist read (same key returned),

@@ -2490,6 +2490,7 @@ Nexus.LocalizationEnglish = {
     ["panel.value.target_lich_king"] = "Lich King",
     ["panel.value.target_training_dummy"] = "Training Dummy",
     ["panel.value.unknown_player"] = "Unknown",
+    ["panel.value.wishlist_random_rolling"] = "Random rolling",
     -- records (276)
     ["leaderboard.body.both_records_order"] = "Both-record builds are ordered by their highest valid single DPS result. The displayed average does not determine this rank.",
     ["leaderboard.body.no_both_records"] = "No builds have both Training Dummy and Lich King records yet.",

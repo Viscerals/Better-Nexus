@@ -3136,6 +3136,18 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             elseif selectWait then model.paused = selectWait
             elseif model.effective.hold then model.paused = model.effective.reason end
         end
+        -- Display only (Panel.RandomRollShown, the no-Wishlist line): between
+        -- boards Random Roll is what picks next while its authority and level
+        -- hold, owned Echoes are synchronized, Auto and the exact autoPick
+        -- are on and nothing above or the session pause holds it. Read by no
+        -- gate, intent or action; it grants and changes nothing.
+        if sched.autoEnabled and not model.paused and settings.autoPick == true
+            and not (Nexus.SessionPause and Nexus.SessionPause.IsPaused())
+            and type(owned) == "table" and owned.synced == true
+            and actionHold.LevelingAuthority(plan, static, settings)
+            and Policy.LevelingLevel(level) then
+            model.randomRoll = true
+        end
         if Nexus.OrbGuidance then
             model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
                 model.progress, (actionIntent and (actionIntent.state == "submitted"
@@ -3482,6 +3494,14 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     -- normal answer window of a sent action keeps the active heading.
     if sched.autoEnabled and not panelModel.paused and panelModel.effective.hold then
         panelModel.paused = panelModel.effective.reason
+    end
+    -- Display only (Panel.RandomRollShown, the no-Wishlist line): this board's
+    -- Take is Random Roll's own (levelingKey), Auto and the exact autoPick are
+    -- on and nothing above pauses or holds it. Read by no gate, intent or
+    -- action; it grants and changes nothing.
+    if levelingKey and sched.autoEnabled and settings.autoPick == true
+        and not panelModel.paused then
+        panelModel.randomRoll = true
     end
     if Nexus.OrbGuidance then
         panelModel.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(

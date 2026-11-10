@@ -2782,6 +2782,7 @@ local DECLARATIONS = {
     ["panel.value.target_lich_king"] = {kind = "text"},
     ["panel.value.target_training_dummy"] = {kind = "text"},
     ["panel.value.unknown_player"] = {kind = "text"},
+    ["panel.value.wishlist_random_rolling"] = {kind = "text"},
     -- records (276)
     ["leaderboard.body.both_records_order"] = {kind = "text"},
     ["leaderboard.body.no_both_records"] = {kind = "text"},
