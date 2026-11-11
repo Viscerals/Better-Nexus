@@ -215,15 +215,18 @@ end
 M.QualityToken = QualityToken
 
 -- The facts a CardLine is written from, for a display model to carry beside
--- its text: the whole name it prints and the card's own quality (nil when
--- unknown, as CardLine then prints none).
+-- its text: the whole name it prints, the card's own quality (nil when
+-- unknown, as CardLine then prints none) and the card's own spell id exactly
+-- as the board gave it (nil when it gave none), by which the panel looks up
+-- the offer's icon (Panel.OfferIcon).
 function M.CardFacts(card)
     if type(card) ~= "table" then return nil end
     -- generated: the card had no name, so NameOf wrote its fallback; the
-    -- display says that fallback through its key (DisplayName).
+    -- display says that fallback through its key (DisplayName). The spell id
+    -- beside a supplied name names nothing: `generated` alone decides that.
     local generated = card.name == nil and card.spellId ~= nil or nil
     return {name = NameOf(card), quality = QUALITY_NAMES[card.quality] and card.quality or nil,
-        generated = generated, spellId = generated and card.spellId or nil}
+        generated = generated, spellId = card.spellId}
 end
 
 -- A CardLine body (without the guarantee prefix) split with the card's own

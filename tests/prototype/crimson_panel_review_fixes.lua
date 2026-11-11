@@ -428,7 +428,8 @@ end)
 -- verified icon shows an EMPTY slot before its name, inside its own compact
 -- row, tinted with the Echo rarity colour of the card's own quality
 -- (OrbHistory.QUALITY_COLORS); an unknown own quality, a name ending in
--- "(Rare)" included, stays neutral (white, as the name). No icon path or id.
+-- "(Rare)" included, stays neutral (white, as the name). No icon path or id
+-- (these model cards carry no spell id; REG-ICON below covers those that do).
 -- The slot is what the card's real region tree shows apart from its fill,
 -- edges and three texts; its tint is what SetTexture / SetVertexColor
 -- received (SlotSpy). EXPECT: the slot, its tint and its geometry (absent at
@@ -890,6 +891,283 @@ C.scenario('REG-SLOT-4 the visible card stays passive: a click does nothing; the
  C.guard(Effects()==before,'REG-SLOT: the card checks change no action, send, ownership or slot request, saved data or Auto',Effects())
  S.Restore()
 end)
+
+-- REG-ICON (MI-F01, the verified half): an offer whose model card carries its
+-- exact spell id shows the client's own texture for that id in the same slot
+-- (GetSpellInfo's third return, as GameAdapter.TomeStateObservation reads it;
+-- mocked here with invented paths). The id is the board card's, carried by
+-- Readout.CardFacts for named and nameless offers alike; the icon is never
+-- taken from a name, a text or another row. Without an id, with an id that is
+-- not a positive whole number, or with a lookup that fails, raises or answers
+-- anything but a texture, the empty rarity slot of REG-SLOT stays. A reused,
+-- replaced or hidden card keeps no earlier texture. One lookup per shown
+-- offer per layout pass; none on a settled render; no failure is remembered.
+-- EXPECT: the id in the facts and the icon (absent at 4ab0b525). GUARD: names,
+-- the generated flag, text, hover, band, edges, the empty slot and passive
+-- input. Model geometry only: the native icon render is NOT RUN.
+S.icon={real=GetSpellInfo,calls={},map={}}
+function S.icon.Lookup(id,...)
+ S.icon.calls[#S.icon.calls+1]=id
+ local v=S.icon.map[id]
+ if type(v)=='function' then return v(id) end
+ if v~=nil then return 'Fixture spell '..tostring(id),nil,v end
+ return S.icon.real(id,...)
+end
+function S.icon.Use(map) S.icon.calls,S.icon.map={},map or {};GetSpellInfo=S.icon.Lookup end
+function S.icon.Restore() GetSpellInfo=S.icon.real;S.icon.calls,S.icon.map={},{} end
+function S.icon.Path(id) return 'Interface\\Icons\\Fixture_Echo_'..tostring(id) end
+function S.icon.Asked(id) local n=0;for _,v in ipairs(S.icon.calls) do if v==id then n=n+1 end end return n end
+-- A model card as the runtime builds it: the CardLine text and the CardFacts of
+-- one board card (name, own quality, exact spell id).
+function S.Echo(name,q,id,note)
+ local card={name=name,quality=q,spellId=id}
+ return {text=Nexus.Readout.CardLine(card,nil,nil)..(note and (' '..note) or ''),facts=Nexus.Readout.CardFacts(card)}
+end
+function S.Paths(o) local out={};for _,p in ipairs(o and o.paths or {}) do out[#out+1]=tostring(p) end return '['..table.concat(out,' ')..']' end
+-- The slot of a card that shows an icon: its slot visuals hold exactly one
+-- texture, `path`, inside the slot; the slot is inside the row, before the
+-- name and apart from the texts; the outline still bears the card's own
+-- rarity colour and no other (white 1,1,1 when the quality is unknown).
+function S.IconShown(o,path,q)
+ if not (o and o.visible and o.rect) then return false,'card not visible' end
+ if #o.paths~=1 or o.paths[1]~=path then return false,'slot textures '..S.Paths(o)..', want '..tostring(path) end
+ local s,icon=o.slot,nil
+ if not (s and G.Inside(s,o.rect,0.01)) then return false,'slot outside its row' end
+ for _,v in ipairs(o.visuals) do if v.path==path then icon=S.Rect(v.region) end end
+ if not (icon and icon[3]-icon[1]>0 and icon[4]-icon[2]>0 and G.Inside(icon,s,0.01)) then return false,'icon outside the slot' end
+ local name=o.texts.name.rect
+ if not (name and s[3]<=name[1]+0.01) then return false,'slot '..G.Text(s)..' leaves no space before the name' end
+ for _,k in ipairs({'name','quality','tag'}) do
+  local t=o.texts[k]
+  if t.text~='' and t.rect and not G.Apart(s,t.rect) then return false,'slot '..G.Text(s)..' overlaps the '..k end
+ end
+ if q and not (S.Only(o,q) and #S.Bearing(o,S.QC[q])>0) then return false,'rarity outline: '..S.Tints(o) end
+ if not q and not (S.Rarity(o)==nil and #S.Bearing(o,S.WHITE)>0) then return false,'neutral outline: '..S.Tints(o) end
+ return true,'icon '..G.Text(icon)..' in slot '..G.Text(s)
+end
+-- Whether any region of the card still holds a texture path or id.
+function S.Stale(card) for _,p in ipairs(S.Parts(card)) do if SlotSpy.path[p]~=nil then return true end end return false end
+
+C.scenario('REG-ICON-1 the producer keeps the exact spell id of every offer; names and the generated flag are unchanged',function()
+ local R=Nexus.Readout
+ local board={name='Frostwake Sigil',quality=2,spellId=200001}
+ local named=R.CardFacts(board)
+ C.expect(type(named)=='table' and named.spellId==200001,'REG-ICON: a named offer\'s facts carry its exact spell id',tostring(type(named)=='table' and named.spellId))
+ C.guard(type(named)=='table' and named.name=='Frostwake Sigil' and named.quality==2 and named.generated==nil,'REG-ICON: a named offer keeps its name and quality and is not a generated name')
+ local shown=R.OfferCard(R.CardLine(board),false,false,named,false)
+ C.guard(shown.name=='Frostwake Sigil' and shown.quality=='Rare','REG-ICON: its card still shows its own name and quality, never its id',tostring(shown.name)..' | '..tostring(shown.quality))
+ local nameless=R.CardFacts({quality=2,spellId=200002})
+ C.guard(nameless.generated==true and nameless.spellId==200002 and nameless.name=='spell 200002','REG-ICON: a nameless offer keeps its generated name, flag and id')
+ local bare=R.CardFacts({name='Hollow Bell',quality=3})
+ C.guard(bare.spellId==nil and bare.generated==nil and bare.name=='Hollow Bell','REG-ICON: an offer without a spell id carries none')
+ local alike={name='spell 200003',quality=2,spellId=200003}
+ local alikeFacts=R.CardFacts(alike)
+ C.guard(alikeFacts.generated==nil and R.OfferCard(R.CardLine(alike),false,false,alikeFacts,false).name=='spell 200003',
+  'REG-ICON: a supplied name that reads like the fallback is still a supplied name')
+end)
+
+C.scenario('REG-ICON-2 an offer with an exact spell id and a verified texture shows that icon; a neighbour without an id borrows none',function()
+ local A,B=S.icon.Path(200001),S.icon.Path(200002)
+ S.icon.Use({[200001]=A,[200002]=B})
+ local m=Model({cards={S.Echo('Frostwake Sigil',2,200001),S.Echo(nil,3,200002,'Owned 1 of 2'),S.Echo('Ashen Crown',4,nil)}})
+ P.Render(m)
+ for i,want in ipairs({{A,2,'a named offer'},{B,3,'a nameless offer'}}) do
+  local o=S.Observe(i)
+  if C.setup(o~=nil and o.visible,'REG-ICON: fixture: offer card '..i..' is shown') then
+   local ok,why=S.IconShown(o,want[1],want[2])
+   C.expect(ok,'REG-ICON: card '..i..' ('..want[3]..') shows the texture of its own spell id inside its slot, before the name, in its rarity outline',why)
+   local same,shown,detail=S.Meaning(m,i,o)
+   C.guard(same,'REG-ICON: card '..i..' keeps the Readout name, quality and tag',detail)
+   local band,bwhy=S.Band(o)
+   C.guard(band,'REG-ICON: card '..i..' keeps its compact row in the roll box, its texts inside and apart',bwhy)
+   C.guard(S.Edges(o),'REG-ICON: card '..i..' keeps its fixed status edges')
+   local tip=V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' '))
+   C.guard(tip:find(V.Plain(shown.full),1,true)~=nil,'REG-ICON: card '..i..'\'s hover still shows its complete line',tip)
+  end
+ end
+ local third=S.Observe(3)
+ if C.setup(third~=nil and third.visible,'REG-ICON: fixture: offer card 3 is shown') then
+  local fine,why=S.Fallback(third,4)
+  C.guard(fine,'REG-ICON: card 3, without a spell id, keeps its empty rarity slot and shows no neighbour\'s icon',why..' '..S.Paths(third))
+ end
+ C.expect(S.icon.Asked(200001)==1 and S.icon.Asked(200002)==1,'REG-ICON: each shown offer\'s exact id was looked up once',S.icon.Asked(200001)..'/'..S.icon.Asked(200002))
+ S.icon.Restore()
+end)
+
+C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its slot and row beside long names and tags',function()
+ S.icon.Use({[200001]=S.icon.Path(200001),[200002]=S.icon.Path(200002),[200003]=S.icon.Path(200003)})
+ for _,scale in ipairs({0.5,1,1.25,1.5}) do
+  local pct=string.format('%d%%',math.floor(scale*100+0.5))
+  P.SetPanelScale(scale)
+  P.Render(Model({cards={S.Echo(string.rep('Cinderbound ',8)..'Lattice',2,200001,'Owned 2 of 3'),
+   S.Echo('Hollow Bell of the '..string.rep('Ashen ',8)..'Choir',4,200002,'Owned 0 of 1'),
+   S.Echo(string.rep('Gravecall ',6)..'Chorus (Rare)',nil,200003,'Owned 1 of 1')}}))
+  for i,q in ipairs({2,4,false}) do
+   local o=S.Observe(i)
+   if C.setup(o~=nil and o.visible,'REG-ICON: fixture: at '..pct..' long card '..i..' is shown') then
+    local band,why=S.Band(o)
+    C.guard(band,'REG-ICON: at '..pct..' long card '..i..' keeps its compact row with its texts inside and apart',why)
+    local ok,iwhy=S.IconShown(o,S.icon.Path(200000+i),q or nil)
+    C.expect(ok,'REG-ICON: at '..pct..' long card '..i..' shows its icon inside its slot and row, before the name and apart from its texts',iwhy)
+   end
+  end
+ end
+ S.icon.Restore()
+ S.Restore()
+end)
+
+C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lookup without a texture keeps the empty slot',function()
+ local A=S.icon.Path(200001)
+ local first=root._offerCards and root._offerCards[1]
+ local answers={
+  {'no texture in the answer',200011,function() return 'Fixture spell',nil,nil end},
+  {'an empty texture',200012,function() return 'Fixture spell',nil,'' end},
+  {'false for a texture',200013,function() return 'Fixture spell',nil,false end},
+  {'a table for a texture',200014,function() return 'Fixture spell',nil,{} end},
+  {'no answer at all',200015,function() return nil end},
+  {'a lookup that raises',200016,function() error('fixture: the client lookup failed') end},
+ }
+ for _,a in ipairs(answers) do
+  S.icon.Use({[a[2]]=a[3]})
+  local okRender=pcall(P.Render,Model({cards={S.Echo('Frostwake Sigil',2,a[2])}}))
+  local o=S.Observe(1)
+  if C.setup(okRender and o~=nil and o.visible and o.card==first,'REG-ICON: fixture: the first card is shown after '..a[1]) then
+   local fine,why=S.Fallback(o,2)
+   C.guard(fine,'REG-ICON: '..a[1]..' keeps the empty rarity slot',why..' '..S.Paths(o))
+   C.expect(S.icon.Asked(a[2])==1,'REG-ICON: '..a[1]..': the exact id was asked once, and its failure guessed nothing',S.icon.Asked(a[2]))
+  end
+ end
+ -- An id the client must never be asked about: a texture is on offer for each, so only the refusal keeps the slot empty.
+ local huge=2^40
+ for _,bad in ipairs({{'zero',0},{'a negative number',-200001},{'a fraction',200001.5},{'a string','200001'},{'a number above the 32-bit range',huge},{'a boolean',true}}) do
+  S.icon.Use({[bad[2]]=A,[200001]=A})
+  local okRender=pcall(P.Render,Model({cards={S.Echo('Frostwake Sigil',3,bad[2])}}))
+  local o=S.Observe(1)
+  if C.setup(okRender and o~=nil and o.visible and o.card==first,'REG-ICON: fixture: the first card is shown with '..bad[1]..' as its spell id') then
+   local fine,why=S.Fallback(o,3)
+   C.guard(fine and #S.icon.calls==0,'REG-ICON: '..bad[1]..' as a spell id is never looked up and keeps the empty rarity slot',why..' '..S.Paths(o)..' lookups '..#S.icon.calls)
+  end
+ end
+ S.icon.Use({[200001]=A})
+ P.Render(Model({cards={{text='Frostwake Sigil (Rare)'}}}))
+ local plain=S.Observe(1)
+ C.guard(plain~=nil and plain.visible and (S.Fallback(plain,nil)) and #S.icon.calls==0,'REG-ICON: a card without facts is never looked up, whatever its text names',S.Paths(plain))
+ GetSpellInfo=nil
+ local okNone=pcall(P.Render,Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
+ GetSpellInfo=S.icon.Lookup
+ local none=S.Observe(1)
+ C.guard(okNone and none~=nil and none.visible and (S.Fallback(none,2)),'REG-ICON: a client without the lookup renders the empty rarity slot',S.Paths(none))
+ S.icon.Restore()
+end)
+
+C.scenario('REG-ICON-5 one reused card: another id under the same name, a failed lookup, no offer and a returning offer keep no earlier texture',function()
+ local A,B=S.icon.Path(200001),S.icon.Path(200002)
+ S.icon.Use({[200001]=A,[200002]=B})
+ local first=root._offerCards and root._offerCards[1]
+ -- Another board first: the scenario before this one ended on this same offer
+ -- with no lookup available, and a settled render asks nothing (REG-ICON-6).
+ P.Render(Model())
+ P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
+ local o1=S.Observe(1)
+ if not C.setup(o1~=nil and o1.visible and o1.card==first,'REG-ICON: fixture: the first card is shown') then S.icon.Restore();return end
+ local a,awhy=S.IconShown(o1,A,2)
+ local parts=#S.Parts(first)
+ C.expect(a,'REG-ICON: the first card shows the texture of spell 200001',awhy)
+ P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200002)}}))
+ local o2=S.Observe(1)
+ local b,bwhy=S.IconShown(o2,B,2)
+ C.guard(o2.card==first and o2.texts.name.text==o1.texts.name.text and o2.texts.quality.text==o1.texts.quality.text and o2.texts.tag.text==o1.texts.tag.text,
+  'REG-ICON: fixture: the second offer reads exactly like the first (same name, quality and tag)')
+ C.expect(b,'REG-ICON: the same visible name with another spell id shows that id\'s texture, not the earlier one',bwhy)
+ P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200019)}}))
+ local o3=S.Observe(1)
+ local c,cwhy=S.Fallback(o3,2)
+ C.expect(a and b and c and S.icon.Asked(200019)==1,'REG-ICON: after two icons, an id without a texture puts the empty rarity slot back on the same card',cwhy..' '..S.Paths(o3))
+ P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
+ local again=S.IconShown(S.Observe(1),A,2)
+ P.Render(Model({cards={},recommendation=''}))
+ C.expect(again and not first:IsVisible() and not S.AnyVisible(first) and not S.Stale(first),
+  'REG-ICON: with no offer the card that showed an icon is hidden with everything in it and holds no texture')
+ P.Render(Model({cards={S.Offer('Hollow Bell',3)}}))
+ local o5=S.Observe(1)
+ local e,ewhy=S.Fallback(o5,3)
+ C.guard(o5.card==first and e and not S.Stale(first),'REG-ICON: a returning offer without a spell id shows its empty rarity slot, no earlier icon',ewhy..' '..S.Paths(o5))
+ P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
+ local f,fwhy=S.IconShown(S.Observe(1),A,2)
+ C.expect(f,'REG-ICON: a returning offer with a spell id shows its texture again',fwhy)
+ C.guard(#S.Parts(first)==parts,'REG-ICON: the reused card keeps the same slot regions (none added per render)',parts..' -> '..#S.Parts(first))
+ S.icon.Restore()
+end)
+
+C.scenario('REG-ICON-6 one lookup per shown offer per layout pass, none on a settled render, and no failure is remembered',function()
+ local D=S.icon.Path(200004)
+ S.icon.Use({[200001]=S.icon.Path(200001),[200002]=S.icon.Path(200002),[200003]=S.icon.Path(200003)})
+ local function Three() return Model({cards={S.Echo('Frostwake Sigil',2,200001),S.Echo('Hollow Bell',3,200002),S.Echo('Ashen Crown',4,200003)}}) end
+ local function Asked() return S.icon.Asked(200001)..'/'..S.icon.Asked(200002)..'/'..S.icon.Asked(200003)..' of '..#S.icon.calls end
+ P.Render(Model())
+ S.icon.calls={}
+ local l0=P.RenderStats().layouts
+ P.Render(Three())
+ C.expect(P.RenderStats().layouts==l0+1 and Asked()=='1/1/1 of 3','REG-ICON: the layout pass that shows three offers asks once for each exact id and for nothing else',Asked())
+ S.icon.calls={}
+ local l1=P.RenderStats().layouts
+ P.Render(Three());P.Render(Three())
+ local shown=true
+ for i=1,3 do shown=shown and (S.IconShown(S.Observe(i),S.icon.Path(200000+i),({2,3,4})[i])) end
+ C.expect(shown and P.RenderStats().layouts==l1 and #S.icon.calls==0,'REG-ICON: two settled renders of the same offers keep the three icons and look nothing up',Asked())
+ local function Late(rec) return Model({cards={S.Echo('Cinder Lattice',1,200004)},recommendation=rec}) end
+ S.icon.calls={}
+ P.Render(Late())
+ local o=S.Observe(1)
+ local empty,why=S.Fallback(o,1)
+ C.expect(empty and S.icon.Asked(200004)==1,'REG-ICON: an id the client has no texture for is asked once and keeps the empty rarity slot',why..' asked '..S.icon.Asked(200004))
+ S.icon.map[200004]=D
+ S.icon.calls={}
+ P.Render(Late())
+ C.guard((S.Fallback(S.Observe(1),1)) and #S.icon.calls==0,'REG-ICON: a settled render of that offer asks nothing more',#S.icon.calls)
+ P.Render(Late('Take Cinder Lattice.'))
+ local late,lwhy=S.IconShown(S.Observe(1),D,1)
+ C.expect(late and S.icon.Asked(200004)==1,'REG-ICON: the next layout pass asks again and shows the texture: the earlier failure was not kept',lwhy..' asked '..S.icon.Asked(200004))
+ S.icon.Restore()
+end)
+
+C.scenario('REG-ICON-7 a card that shows an icon stays passive: no handler of its own, a click does nothing, the Shift drag still works',function()
+ S.icon.Use({[200001]=S.icon.Path(200001)})
+ local m=Model({cards={S.Echo('Frostwake Sigil',2,200001)}})
+ P.Render(m)
+ local card=root._offerCards and root._offerCards[1]
+ if not C.setup(card~=nil and card:IsVisible() and P._panelDrag==nil,'REG-ICON: fixture: a visible offer card and no active move') then S.icon.Restore();return end
+ local o=S.Observe(1)
+ C.expect((S.IconShown(o,S.icon.Path(200001),2)),'REG-ICON: fixture: the card shows its icon')
+ local up=root:GetScript('OnMouseUp')
+ Reset()
+ local before=Effects()
+ local plain=true
+ for _,p in ipairs(S.Parts(card)) do
+  local kind=p.GetObjectType and p:GetObjectType()
+  if kind~='Texture' then plain=false end
+ end
+ C.guard(plain,'REG-ICON: the slot and its icon are plain textures of the card: no frame, button or mouse region of their own')
+ C.guard(card:GetScript('OnClick')==nil and card:GetScript('OnMouseUp')==nil and card._nexusPassiveDrag==true,
+  'REG-ICON: the card chooses nothing: no click or mouse-up of its own; it is a passive drag surface')
+ local okClick=pcall(function() card:Click('LeftButton');if up then up(root,'LeftButton') end end)
+ C.guard(okClick and Move.starts==0 and Move.stops==0 and P._panelDrag==nil and Effects()==before,'REG-ICON: an ordinary click on the card moves, saves and sends nothing',Effects())
+ ShiftHeld.value=true
+ local start=card:GetScript('OnDragStart')
+ local stop=card:GetScript('OnDragStop')
+ local okA=start~=nil and (pcall(start,card,'LeftButton'))
+ local active=P._panelDrag~=nil and P._panelDrag.origin==card and Move.starts==1
+ local okB=stop~=nil and (pcall(stop,card))
+ C.guard(okA and okB and active and P._panelDrag==nil and Move.stops==1,'REG-ICON: with Shift held a left drag from the card starts and its release ends one move')
+ if P._panelDrag and up then pcall(up,root,'LeftButton') end
+ ShiftHeld.value=1
+ Reset()
+ C.guard(Effects()==before,'REG-ICON: the icon checks change no action, send, ownership or slot request, saved data or Auto',Effects())
+ S.icon.Restore()
+ S.Restore()
+end)
+-- Whatever a REG-ICON scenario left: the client lookup is the harness's again.
+S.icon.Restore()
 
 C.scenario('REG-SLOT-5 after the offer checks: nothing else changed and unrelated textures keep their identity',function()
  S.Restore()

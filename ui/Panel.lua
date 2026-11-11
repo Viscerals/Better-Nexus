@@ -4518,18 +4518,39 @@ end
 -- text inset. One table: the main chunk's locals are counted too.
 local OFFER = {edge = {0.32, 0.32, 0.38}, mark = {1, 0.82, 0}, gap = 4, pad = 4}
 
--- The empty slot before an offer's name (MI-F01: a verified item or spell
--- icon, otherwise an empty slot in the card's own Echo quality colour). No
--- verified offer icon reaches the panel: a model card's facts
--- (Readout.CardFacts) hold its name, its own quality and, for a generated
--- name, a spell id, so every shown card has the empty slot. It is made once
--- per card on its first need, as plain textures of the card (a dark interior
--- and a 1-unit outline; no frame, mouse, file or icon id), and afterwards is
--- only repainted and placed. `r, g, b` (optional) repaint the outline;
--- `rowHeight` (optional) places the square in a row of that height, at the
--- text inset and clear of the widest (marked, 2-unit) status edge, and the
--- width it then takes with its gap before the name is returned (else 0).
-function M.OfferSlot(card, rowHeight, r, g, b)
+-- The verified icon of an offer (MI-F01): the client's own texture for the
+-- card's exact spell id, the third return of GetSpellInfo, as
+-- GameAdapter.TomeStateObservation reads it (a non-empty path, or a number).
+-- The id is the board card's own, carried by Readout.CardFacts; it must be a
+-- positive whole number in the client's 32-bit range. Anything else, a client
+-- without the lookup, a lookup that raises or an answer without a texture
+-- gives nil: the empty slot. Nothing is guessed from a name, a text or
+-- another card, and nothing is remembered: M.RenderOfferCards asks once per
+-- shown card in a layout pass and a settled render asks nothing.
+function M.OfferIcon(facts)
+    local id = type(facts) == "table" and facts.spellId or nil
+    if type(id) ~= "number" or id ~= math.floor(id) or id < 1 or id > 2147483647
+        or type(GetSpellInfo) ~= "function" then return nil end
+    local ok, _, _, texture = pcall(GetSpellInfo, id)
+    if ok and ((type(texture) == "string" and texture ~= "") or type(texture) == "number") then
+        return texture
+    end
+    return nil
+end
+
+-- The slot before an offer's name (MI-F01: a verified item or spell icon,
+-- otherwise an empty slot in the card's own Echo quality colour). It is made
+-- once per card on its first need, as plain textures of the card (an interior
+-- and a 1-unit outline; no frame or mouse), and afterwards is only repainted
+-- and placed. `r, g, b` (optional) repaint the outline, and with them the
+-- interior is set again: `icon` (M.OfferIcon's texture of this card's own
+-- spell id) when given, else the dark empty interior, so a reused card keeps
+-- no earlier card's icon. `rowHeight` (optional) places the square in a row
+-- of that height, at the text inset and clear of the widest (marked, 2-unit)
+-- status edge, and the width it then takes with its gap before the name is
+-- returned (else 0). The icon takes the interior's place and size: the
+-- outline, the row and the texts are where they were.
+function M.OfferSlot(card, rowHeight, r, g, b, icon)
     if not card then return 0 end
     local slot = card._nexusSlot
     if not slot then
@@ -4541,6 +4562,7 @@ function M.OfferSlot(card, rowHeight, r, g, b)
     local e = slot.edges
     if r and g and b then
         for edge = 1, 4 do e[edge]:SetTexture(r, g, b, 1) end
+        if icon then slot.interior:SetTexture(icon) else slot.interior:SetTexture(0, 0, 0, 0.45) end
     end
     local height = tonumber(rowHeight)
     if not height then return 0 end
@@ -4659,12 +4681,14 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             local history = Nexus.OrbHistory
             local q = own and tonumber(own.quality)
             local qc = q and history and type(history.QUALITY_COLORS) == "table" and history.QUALITY_COLORS[q] or nil
-            -- The same colour for the name and the empty slot before it
+            -- The same colour for the name and the slot before it
             -- (M.OfferSlot), repainted on every render so a reused card keeps
             -- no earlier card's tint: white (1, 1, 1) when the quality is unknown.
+            -- The slot shows this card's own verified icon (M.OfferIcon, from
+            -- its own facts' spell id), else it is empty.
             local r, g, b = qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1
             card.name:SetTextColor(r, g, b)
-            M.OfferSlot(card, nil, r, g, b)
+            M.OfferSlot(card, nil, r, g, b, M.OfferIcon(own))
             card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
             card.tag:SetText(shown.shown or shown.tag)
@@ -4678,6 +4702,8 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             card:Show()
         elseif card then
             card._nexusFull, card._nexusTag, card._nexusMarked = nil, nil, nil
+            -- A hidden card keeps no offer's icon: its slot, once made, is empty again.
+            if card._nexusSlot then card._nexusSlot.interior:SetTexture(0, 0, 0, 0.45) end
             card:Hide()
         end
         SetVisible(cardTexts[index], not show)
@@ -4780,8 +4806,8 @@ end
 -- without room, is shortened, complete on the card's hover), the name in the
 -- rest (shortened there, complete on the hover and named in the
 -- recommendation). The band, the roll box and the panel keep their size.
--- No verified Echo icon reaches an offer (the model's card facts carry none),
--- so each row starts with its empty quality slot (M.OfferSlot).
+-- Each row starts with its quality slot (M.OfferSlot), which holds the
+-- offer's verified icon when M.RenderOfferCards found one and is empty otherwise.
 -- Returns "rows".
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
@@ -4795,7 +4821,7 @@ function M.PlaceOfferCards(layout, box, inset)
         do
             card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (layout.small + rowGap)))
             card:SetSize(width, layout.small)
-            -- The empty slot first, at the text inset (M.OfferSlot). Then, in
+            -- The slot first, at the text inset (M.OfferSlot). Then, in
             -- the rest of the row, the status words: the tag up to half of it,
             -- the quality up to what leaves the name a sixth of it; the name
             -- takes what is left.

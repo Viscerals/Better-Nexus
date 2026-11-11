@@ -235,6 +235,49 @@ do
   Never('level '..lv..' with a board')
  end
 end
+-- OFFER_ICONS: the exact spell id of each real board card reaches the panel's
+-- offer row through the real adapter, runtime, Readout.CardFacts, Main and
+-- panel, and the row shows the client's own texture for that id
+-- (GetSpellInfo's third return; invented paths here). A card the client has no
+-- texture for keeps its empty slot, and a replaced board moves each icon with
+-- its Echo. Auto is OFF: showing an icon takes, sends and toggles nothing.
+do
+ local L=LBoot(10)
+ local real,asked=GetSpellInfo,{}
+ local function Path(id) return 'Interface\\Icons\\Fixture_Echo_'..id end
+ GetSpellInfo=function(id,...)
+  asked[id]=(asked[id] or 0)+1
+  local name=real(id,...)
+  if id==200001 or id==200004 then return name,nil,Path(id) end
+  return name
+ end
+ local function Icons(card)
+  local out={}
+  for _,r in ipairs({card:GetRegions()}) do
+   local t=r:GetTexture()
+   if type(t)=='string' then out[#out+1]=t end
+  end
+  return table.concat(out,' ')
+ end
+ local function Rows(label,want)
+  local cards=NexusPanel and NexusPanel._offerCards
+  local model=Nexus.Panel._lastModel
+  check(type(cards)=='table' and type(model)=='table' and type(model.cards)=='table' and #model.cards==3,'offer icons, '..label..': fixture: the panel holds three offer rows')
+  for i,w in ipairs(want) do
+   local facts=model.cards[i].facts
+   check(cards[i]:IsShown() and cards[i].name:GetText()==w[2],'offer icons, '..label..': row '..i..' shows the catalog name '..w[2]..': '..tostring(cards[i].name:GetText()))
+   check(type(facts)=='table' and facts.spellId==w[1] and facts.generated==nil,'offer icons, '..label..': row '..i..'\'s facts carry the board\'s exact spell id '..w[1]..': '..tostring(type(facts)=='table' and facts.spellId))
+   check(Icons(cards[i])==(w[3] and Path(w[1]) or ''),'offer icons, '..label..': row '..i..' shows '..(w[3] and 'the texture of spell '..w[1] or 'its empty slot, no texture')..': ['..Icons(cards[i])..']')
+  end
+ end
+ L.Board(LBOARD);L.Notify();L.Advance(.5)
+ Rows('first board',{{200001,'Echo 1',true},{200004,'Echo 4',true},{200002,'Echo 2',false}})
+ check((asked[200001] or 0)>=1 and (asked[200004] or 0)>=1 and (asked[200002] or 0)>=1,'offer icons: each board id was looked up')
+ L.Board({{spellId=200002,quality=2},{spellId=200001,quality=1},{spellId=200004,quality=4}});L.Notify();L.Advance(.5)
+ Rows('replaced board',{{200002,'Echo 2',false},{200001,'Echo 1',true},{200004,'Echo 4',true}})
+ check(not Nexus.RecomputeStats().autoEnabled and #L.actions==0,'offer icons: Auto stayed OFF and nothing was taken or sent')
+ GetSpellInfo=real
+end
 -- LEVELING_RARITY3 (R2-SPEC-01/02): the FINAL adapter Take-read phase, after
 -- ordinary preauthorization. Callbacks fire only while Adapter.Take runs:
 -- onAssigned after its verifier's AssignedWishlist read (same key returned),
