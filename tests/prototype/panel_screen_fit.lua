@@ -13,8 +13,16 @@ Nexus.CallboardStatus.GetSummary = function()
         lines={'Bring the tome'}, rewards={}}
 end
 
+-- Approved main panel cleanup: the panel is compact now (no fixed 104-unit
+-- offer block, a 48-unit difficulty card, an inline Callboard, a one-row
+-- progress), so the former model no longer outgrows the 600 px viewport at
+-- 2x font. The fixture needs a layout taller than the viewport: it carries
+-- three offers with long names, which wrap in full at 2x font.
 local model = {
-    status='ready', level=40, auto=false, cards={},
+    status='ready', level=40, auto=false,
+    cards={{text='Resonance of the Unbroken Covenant of the Northern Reach (Uncommon) wanted'},
+        {text='Hollow Bell of the Ninefold Sealed Ember Chamber (Rare) wanted'},
+        {text='Ashen Tithe of the Wandering Choir of the Forgotten Threshold (Uncommon)'}},
     recommendation='Review the next choice',
     progress={wishlistName='Synthetic plan', total=6, owned=1,
         missing={}, shed={}, toLock={}, unknownTomes={}},

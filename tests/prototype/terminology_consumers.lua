@@ -1674,7 +1674,12 @@ do
    layout=NexusPanel._responsiveLayout
    local box,panel=layout.boxes,{0,0,NexusPanel:GetWidth(),NexusPanel:GetHeight()}
    local switch=NexusPanel._switchBtn
-   check(NexusPanel:GetWidth()==420 and switch:GetWidth()==106 and switch:GetHeight()==22 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x22 header box and keeps the selected text')
+   -- Approved panel cleanup (compact header: the Build and Wishlist rows are
+   -- 20 units, 2 apart, each button at the top of its own row): the button
+   -- is 106x20, where it was 106x22. Its width, and so what of the label is
+   -- shown, is unchanged; Bounded below still requires the label's one-line
+   -- box to be no taller than the button and at least one model line.
+   check(NexusPanel:GetWidth()==420 and switch:GetWidth()==106 and switch:GetHeight()==20 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x20 header box and keeps the selected text')
    local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>switch:GetWidth()-12
    Bounded(switch,CAND['panel.button.my_builds'],shortSwitch,tag..': panel.button.my_builds')
    Hover(switch,shortSwitch and WithLabel(CANDT,tips,'switch') or tips.switch,
@@ -1708,9 +1713,18 @@ do
    end
    local charges=NexusPanel._chargesText
    local cell=ChargeCell()
-   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==cell and (layout.scale>1 or charges:GetWidth()==72) and charges:GetHeight()==layout.small
-    and Nexus.LayoutMetrics.Shortened(charges) and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),
-    tag..': the long valid charge row stays in its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px), shortened there')
+   -- Approved panel cleanup (nothing on the main panel is shortened): the
+   -- long charge row is no longer one shortened line. It keeps the same cell
+   -- (72 px at font scale 1, the layout-derived width above it) and wraps
+   -- there: more than one model line, in a box that holds those lines and is
+   -- no taller than the heading row it shares needs, still inside the roll
+   -- area. Its hover (below) still gives the complete row.
+   local chargeRows=G.Rows(charges:GetText() or '',charges:GetWidth(),G.model.char)
+   local headingRow=math.max(layout.small,chargeRows*G.model.line,NexusPanel._rollStatus:GetStringHeight())
+   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==cell and (layout.scale>1 or charges:GetWidth()==72)
+    and chargeRows>1 and charges.wordWrap==true and charges:GetHeight()>=chargeRows*G.model.line-0.5 and charges:GetHeight()<=headingRow+1
+    and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),
+    tag..': the long valid charge row keeps its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px) and is whole there, wrapped')
    local lines=Lines(NexusPanel._chargesHover)
    check(same(lines[1],{'Charges',1,1,1}) and same(lines[2],{LONGROW,1,1,1,true}),tag..': the actual charge hover recovers the complete row')
   end

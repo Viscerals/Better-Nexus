@@ -31,12 +31,19 @@ local stats = {
 local fontsReady = false
 local runtimeSignature, runtimeRevision = nil, 1
 
+-- small / normal / large are the shared fonts of every Nexus window.
+-- secondary is the main panel's own secondary text (labels, headings, tags,
+-- reasons): 11 units, the panel's readable floor, where the shared small
+-- font is 10. title is the main panel's own title, 15 units. Both follow the
+-- same native reference; no shared size changes.
 local FONT_NAMES = {
     small="NexusFontSmall",
     normal="NexusFontNormal",
     large="NexusFontLarge",
+    secondary="NexusFontSecondary",
+    title="NexusFontTitle",
 }
-local FONT_SIZES = {small=10,normal=12,large=14}
+local FONT_SIZES = {small=10,normal=12,large=14,secondary=11,title=15}
 -- The owned sizes follow the client's own small text: the native font object
 -- the loading overlay's detail line is drawn in. Its reported height becomes
 -- the owned small size and the 10 / 12 / 14 hierarchy keeps its proportions,
@@ -437,6 +444,15 @@ function M.FitButtonWidth(button, minimum, maximum)
     return width
 end
 
+-- A DPS entry of the panel spec as a key part: absent, unmeasured (true) or
+-- its measured label and value widths.
+local function RecordKey(entry)
+    if type(entry) == "table" then
+        return math.ceil(tonumber(entry[1]) or 0) .. ":" .. math.ceil(tonumber(entry[2]) or 0)
+    end
+    return entry and "1" or "0"
+end
+
 local function PanelKey(spec)
     return table.concat({
         Round(spec.width or 272,1),Round(spec.fontScale or 1,3),
@@ -453,6 +469,26 @@ local function PanelKey(spec)
         tonumber(spec.autoScopeRows) or 0,
         spec.noOffer and 1 or 0,
         math.ceil(tonumber(spec.detailNamesH) or 0),
+        RecordKey(spec.recordYours),RecordKey(spec.recordBest),
+        spec.autoInfo and 1 or 0,
+        math.ceil(tonumber(spec.statusTierH) or 0),spec.statusBar == false and 0 or 1,
+        type(spec.offerRowsH) == "table" and (math.ceil(tonumber(spec.offerRowsH[1]) or 0) .. ":"
+            .. math.ceil(tonumber(spec.offerRowsH[2]) or 0) .. ":" .. math.ceil(tonumber(spec.offerRowsH[3]) or 0)) or 0,
+        math.ceil(tonumber(spec.bodyH) or 0),math.ceil(tonumber(spec.bodyFloorH) or 0),
+        math.ceil(tonumber(spec.headerBuildH) or 0),math.ceil(tonumber(spec.headerWishlistH) or 0),
+        math.ceil(tonumber(spec.callboardTitleH) or 0),math.ceil(tonumber(spec.callboardDetailH) or 0),
+        math.ceil(tonumber(spec.callboardLabelW) or 0),
+        spec.performanceH == nil and "m" or math.ceil(tonumber(spec.performanceH) or 0),
+        math.ceil(tonumber(spec.progressLabelW) or 0),math.ceil(tonumber(spec.progressValueH) or 0),
+        type(spec.countRowsH) == "table" and (math.ceil(tonumber(spec.countRowsH[1]) or 0) .. ":"
+            .. math.ceil(tonumber(spec.countRowsH[2]) or 0)) or 0,
+        math.ceil(tonumber(spec.footerH) or 0),
+        spec.autoInfoInline and 1 or 0,math.ceil(tonumber(spec.autoInfoW) or 0),
+        math.ceil(tonumber(spec.headingH) or 0),
+        type(spec.offerReason) == "table" and (tostring(spec.offerReason.row) .. ":"
+            .. math.ceil(tonumber(spec.offerReason.top) or 0)) or 0,
+        spec.measured and 1 or 0,math.ceil(tonumber(spec.reservedRollH) or 0),
+        math.ceil(tonumber(spec.orbLineH) or 0),
     }, "|")
 end
 
@@ -501,8 +537,28 @@ function M.Panel(spec)
     layout.chargesMinW, layout.chargesGap = 72, 4
     layout.chargesW = math.max(72, math.floor(72 * scale + 0.5))
     local cursor = 6
-    local headerHeight = math.max(82, large * 3 + 14)
-    Add(layout,"header",8,cursor,width-16,headerHeight)
+    -- The Build and Wishlist lines keep a row of the normal font (at least
+    -- 20 units) while their text fits it; a name too long for its line wraps
+    -- beside its button and the header grows by the measured height of each
+    -- wrapped line (spec.headerBuildH, spec.headerWishlistH). Nothing is
+    -- shortened.
+    -- The approved compact header: line 1 (the 24-unit grip and the three
+    -- controls) ends 26 units under the header's top; the Build row follows
+    -- at 32, the Wishlist row 2 units under it, and 4 units close the header
+    -- (72 units at font scale 1, where it was 82).
+    local headerLine = math.max(20, normal)
+    local buildH = math.max(headerLine, math.ceil(tonumber(spec.headerBuildH) or 0))
+    local wishlistH = math.max(headerLine, math.ceil(tonumber(spec.headerWishlistH) or 0))
+    layout.headerLine, layout.headerBuildH, layout.headerWishlistH = headerLine, buildH, wishlistH
+    layout.headerBuildY, layout.headerWishlistY = cursor + 26, cursor + 26 + buildH + 2
+    local headerHeight = 26 + buildH + 2 + wishlistH + 4
+    -- Every block of the body keeps one compact side inset: 8 units, where it
+    -- was 10. The approved preview draws 6; 8 keeps the body on the line of
+    -- the header's grip, whose slot (x 8) is unchanged.
+    local inset = 8
+    local full = width - inset * 2
+    layout.inset, layout.full = inset, full
+    Add(layout,"header",inset,cursor,full,headerHeight)
     cursor = cursor + headerHeight + gap
 
     -- The Play panel of a build in progress (design/current "Nexus Main Panel
@@ -514,18 +570,40 @@ function M.Panel(spec)
     local play = not spec.noBuild and not spec.complete
     layout.play = play
     if spec.statusVisible then
-        local height = math.max(play and 56 or 52, normal + small * 2 + gap * 2)
-        Add(layout,"status",10,cursor,width-20,height)
+        -- The Compact A card (approved cleanup; the original card was 56 px
+        -- active and 66 completed): a 5-unit inset, the tier line (15 units
+        -- of primary text, or the measured height of a wrapped tier:
+        -- spec.statusTierH), the Soul Ash line (14), then 3 units and the
+        -- 6-unit Intensity bar, and a 5-unit inset: 48 units with short text
+        -- at font scale 1, active or completed. Without a validated
+        -- Intensity scale (spec.statusBar false) no room is kept for the bar.
+        local tierH = math.max(math.ceil(15 * scale), math.ceil(tonumber(spec.statusTierH) or 0))
+        local ashH = math.ceil(14 * scale)
+        local barH = spec.statusBar ~= false and 6 or 0
+        local height = 5 + tierH + ashH + (barH > 0 and (3 + barH) or 0) + 5
+        layout.statusInset, layout.statusTierH, layout.statusAshH, layout.statusBarH = 5, tierH, ashH, barH
+        Add(layout,"status",inset,cursor,full,height)
         cursor = cursor + height + gap
     end
     if spec.callboard then
-        -- Label plus two one-line rows. Each row is at least one 17px line,
-        -- including the conservative face at font scale 1.
-        local _, lineH = M.ConservativeText(scale)
+        -- The approved inline Callboard: its icon and its label share the
+        -- objective title's first line (the label's measured width:
+        -- spec.callboardLabelW), and the objective lines follow under the
+        -- title. Each row is at least one 17px line, including the
+        -- conservative face at font scale 1. A title or objective lines
+        -- longer than one row wrap, and the box grows by their measured
+        -- heights (spec.callboardTitleH, spec.callboardDetailH): nothing is
+        -- shortened or cut to one line.
+        local char, lineH = M.ConservativeText(scale)
         if lineH < 17 then lineH = 17 end
         layout.callboardLine = lineH
-        local callboardH = small + 4 + (lineH * 2) + math.max(2, math.floor(gap / 3))
-        Add(layout,"callboard",12,cursor,width-24,callboardH)
+        local titleH = math.max(lineH, math.ceil(tonumber(spec.callboardTitleH) or 0))
+        local detailH = math.max(lineH, math.ceil(tonumber(spec.callboardDetailH) or 0))
+        layout.callboardTitleH, layout.callboardDetailH = titleH, detailH
+        layout.callboardIcon = 16
+        layout.callboardLabelW = math.ceil(tonumber(spec.callboardLabelW) or (9 * char * 1.1))
+        local callboardH = titleH + detailH
+        Add(layout,"callboard",inset,cursor,full,callboardH)
         cursor = cursor + callboardH + gap
     end
     if spec.activeRoll and spec.noOffer then
@@ -545,39 +623,73 @@ function M.Panel(spec)
         layout.noOfferGap = tight
         if spec.orbButton then
             layout.orbButtonH = math.max(small + 6, line)
-            layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
+            layout.orbButtonW = math.min(full, math.ceil(12 * char) + 20)
         end
         cursor = cursor - gap + tight
         local height = math.max(rows * line, layout.orbButtonH or 0)
-        Add(layout,"roll",10,cursor,width-20,height)
+        Add(layout,"roll",inset,cursor,full,height)
         cursor = cursor + height + tight
     elseif spec.activeRoll then
-        local height = math.max(104, small * 6 + gap * 4)
+        local rowGap = math.max(2,math.floor(gap/3))
+        -- The heading row: one small line, or the measured height of a
+        -- heading or charges text that wraps beside the other
+        -- (spec.headingH). Everything under it moves down by the difference.
+        local headH = math.max(small, math.ceil(tonumber(spec.headingH) or 0))
+        local headExtra = headH - small
+        layout.headingH, layout.headingExtra = headH, headExtra
+        -- The control of the Auto scope line shares the heading row while
+        -- the caller found room for it there (spec.autoInfoInline, at its
+        -- measured width spec.autoInfoW); it then takes no row of its own.
+        layout.autoInfoInline = spec.autoInfo and spec.autoInfoInline and true or false
+        local height = math.max(104, small * 6 + gap * 4) + headExtra
         -- Where the text under the heading starts: under the offer rows
         -- while there are any (M.OfferRows), else right under the heading.
-        local bodyTop = 1 + small + math.max(3,math.floor(gap/2))
+        local bodyTop = 1 + headH + math.max(3,math.floor(gap/2))
         if spec.cardRows then
             -- That least height was sized for three one-line rows (to
             -- test.163021: 3 x (small + row gap) under the heading). The
             -- rows are taller now, and the box grows by exactly what they
             -- gained (15 px at font scale 1), so the text under them keeps
             -- the room it had.
-            local oneLineRows = bodyTop + 3 * (small + math.max(2,math.floor(gap/3)))
-            bodyTop = select(4, M.OfferRows(small, gap))
+            local oneLineRows = bodyTop + 3 * (small + rowGap)
+            bodyTop = select(4, M.OfferRows(small, gap)) + headExtra
             height = height + bodyTop - oneLineRows
         end
+        -- Measured content (approved cleanup: full offer names, tags and the
+        -- full recommendation, wrapped, with no line cap). spec.offerRowsH
+        -- gives each offer row's measured height: a wrapped name or tag, or
+        -- the selected offer's reason inside its row (spec.offerReason:
+        -- {row, top}, the reason starting `top` under the row's top), makes
+        -- that row taller than the model row, and the box grows by exactly
+        -- that.
+        if spec.cardRows and type(spec.offerRowsH) == "table" then
+            local _, rowH = M.OfferRows(small, gap)
+            local extra = 0
+            for index = 1, 3 do
+                extra = extra + math.max(0, math.ceil(tonumber(spec.offerRowsH[index]) or 0) - rowH)
+            end
+            layout.offerRowsH, layout.offerRowsExtra = spec.offerRowsH, extra
+            layout.offerReason = type(spec.offerReason) == "table" and spec.offerReason or nil
+            bodyTop = bodyTop + extra
+            height = height + extra
+        end
+        layout.bodyTop = bodyTop
         if spec.orbButton then
             -- Its own row for the passive "Open Orbs..." button, sized for
             -- its 12-character label in the conservative text model plus the
             -- template's end caps, and at least one of its lines high.
             local char, line = M.ConservativeText(scale)
             layout.orbButtonH = math.max(small + 6, line)
-            layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
+            layout.orbButtonW = math.min(full, math.ceil(12 * char) + 20)
             -- The optional mini-panel access shares this row, immediately
             -- left of Open Orbs. Keep the existing window/button geometry.
             layout.orbMiniButtonGap = 6
-            local available = width - 24 - layout.orbButtonW - layout.orbMiniButtonGap
-            local fullWidth = math.ceil(14 * char) + 20
+            local available = full - 4 - layout.orbButtonW - layout.orbMiniButtonGap
+            -- Its label is the panel's 11-unit secondary text, a tenth wider
+            -- than the 10-unit small font the model's character is for, and
+            -- is never fitted below that size: the full label's width
+            -- allows for it.
+            local fullWidth = math.ceil(14 * char * 1.1) + 20
             layout.orbMiniButtonW = math.max(1, math.min(fullWidth, available))
             -- The width rule above is unchanged; only the chosen label is
             -- shown in the session's language (ShownLabel).
@@ -596,25 +708,112 @@ function M.Panel(spec)
             if spec.orbButton then needed = needed + layout.orbButtonH + math.ceil(gap/2) end
             height = math.max(height, needed)
         end
-        Add(layout,"roll",10,cursor,width-20,height)
+        -- spec.bodyH: the measured height of the text under the heading (or
+        -- under the offer rows) at its width; the box is never shorter than
+        -- the whole text needs, above the button row.
+        local bodyH = math.ceil(tonumber(spec.bodyH) or 0)
+        layout.bodyH = bodyH
+        if spec.measured then
+            -- With measured content (the panel's own second computation) the
+            -- box is exactly its content: the heading, the offer rows, the
+            -- text under them when there is any, and the button row. No
+            -- least height or empty text room is kept (approved cleanup:
+            -- conditional content, no fixed empty block). A block reserved
+            -- through a gap between boards keeps the height it had
+            -- (spec.reservedRollH), so the panel does not jump.
+            if bodyH > 0 then
+                -- spec.bodyFloorH: the rows of the conservative text model
+                -- for a text that must stay readable in a face wider than
+                -- the measured one (the Orb guidance, an Orb pause reason,
+                -- the inline Auto line). The box is never shorter than that
+                -- while nothing else holds the block's height. In a block
+                -- kept through a gap between boards the text takes the room
+                -- that block already has, up to the floor, and the block
+                -- itself grows only for the measured text: the footprint of
+                -- an Auto cycle stays the board's.
+                local floorH = math.ceil(tonumber(spec.bodyFloorH) or 0)
+                if floorH > bodyH then
+                    local reserved = math.ceil(tonumber(spec.reservedRollH) or 0)
+                    if reserved > 0 then
+                        local used = bodyTop + bodyH + rowGap
+                            + (spec.orbButton and (layout.orbButtonH + math.ceil(gap/2)) or 0)
+                        bodyH = bodyH + math.max(0, math.min(floorH - bodyH, reserved - used))
+                    else
+                        bodyH = floorH
+                    end
+                    layout.bodyH = bodyH
+                end
+                height = bodyTop + bodyH + rowGap
+            elseif spec.cardRows then
+                height = bodyTop - rowGap
+            else
+                height = 1 + headH + rowGap
+            end
+            if spec.orbButton then height = height + layout.orbButtonH + math.ceil(gap/2) end
+            height = math.max(height, math.ceil(tonumber(spec.reservedRollH) or 0))
+        elseif bodyH > 0 then
+            local needed = bodyTop + bodyH + gap
+            if spec.orbButton then needed = needed + layout.orbButtonH + math.ceil(gap/2) end
+            height = math.max(height, needed)
+        end
+        Add(layout,"roll",inset,cursor,full,height)
         cursor = cursor + height + gap
-        -- The Auto scope line under the offer (the design's Auto ON note):
-        -- its own rows of the conservative model below the roll box, so the
-        -- whole line shows beside a recommendation too and never only on the
-        -- Auto button's hover. The caller counts the rows at width-24.
+        -- The Auto scope line under the offer (the design's Auto ON note) is
+        -- behind an optional control (spec.autoInfo). While the control
+        -- shares the heading row it has no box; at a text size where it does
+        -- not fit there it takes one short row of its own under the offer.
+        -- The line's own rows are laid out only while it is open (the caller
+        -- then gives autoScopeRows, counted at the block's width).
+        if spec.autoInfo then
+            local char, line = M.ConservativeText(scale)
+            layout.autoInfoW = math.min(full, math.ceil(tonumber(spec.autoInfoW) or (math.ceil(16 * char) + 20)))
+            if layout.autoInfoInline then
+                -- What the heading row keeps free at its right for it.
+                layout.headingReserve = layout.autoInfoW + 4
+            else
+                local infoH = math.max(small + 6, line)
+                Add(layout,"autoInfo",inset,cursor,layout.autoInfoW,infoH)
+                cursor = cursor + infoH + gap
+            end
+        end
         local scopeRows = tonumber(spec.autoScopeRows) or 0
         if scopeRows > 0 then
             local _, line = M.ConservativeText(scale)
-            Add(layout,"autoScope",12,cursor,width-24,scopeRows * line)
+            Add(layout,"autoScope",inset,cursor,full,scopeRows * line)
             cursor = cursor + scopeRows * line + gap
         end
     end
+    if spec.orbLine and not spec.noBuild then
+        -- The Orb run status with Open, right under the offer (the approved
+        -- order); the Orb window owns the run's controls. Its text wraps
+        -- beside the button in its measured height (spec.orbLineH).
+        local char, line = M.ConservativeText(scale)
+        local buttonH = math.max(small + 6, line)
+        local h = math.max(buttonH, math.ceil(tonumber(spec.orbLineH) or 0))
+        local openW = math.min(full, math.ceil(6 * char) + 20)
+        layout.orbLineOpenW = openW
+        Add(layout,"orbLine",inset,cursor,full-openW-gap,h)
+        Add(layout,"orbLineOpen",width-inset-openW,cursor,openW,buttonH)
+        cursor = cursor + h + gap
+    end
     layout.contentTop = cursor
 
+    -- The opt-in DPS RECORDS section (spec.showPerformance). Its height is
+    -- the measured height of the rows that exist (spec.performanceH): only
+    -- records that exist have a row, and without any there is no section,
+    -- heading or reserved block (0). A caller that measured nothing (nil)
+    -- gets the former modelled block.
+    local function Performance(modelled)
+        if not spec.showPerformance then return end
+        local height = spec.performanceH == nil and modelled or math.ceil(tonumber(spec.performanceH) or 0)
+        if height <= 0 then return end
+        Add(layout,"performance",inset,cursor,full,height)
+        cursor = cursor + height + gap
+    end
     if spec.noBuild then
-        Add(layout,"setupTitle",12,cursor,width-24,large)
+        Add(layout,"setupTitle",inset,cursor,full,large)
         cursor = cursor + large + gap
-        Add(layout,"setupHint",12,cursor,width-24,small * 2)
+        Add(layout,"setupHint",inset,cursor,full,small * 2)
         cursor = cursor + small * 2 + gap
         local buttonHeight = math.max(24, normal + 8)
         Add(layout,"setupAssign",(width-146)/2,cursor,146,buttonHeight)
@@ -623,16 +822,12 @@ function M.Panel(spec)
         cursor = cursor + buttonHeight + gap
     elseif spec.complete then
         if not spec.statusVisible then
-            Add(layout,"completeTitle",12,cursor,width-24,normal)
+            Add(layout,"completeTitle",inset,cursor,full,normal)
             cursor = cursor + normal + gap
-            Add(layout,"completeText",12,cursor,width-24,small * 2)
+            Add(layout,"completeText",inset,cursor,full,small * 2)
             cursor = cursor + small * 2 + gap
         end
-        if spec.showPerformance then
-            local height = small * 8 + gap * 5
-            Add(layout,"performance",12,cursor,width-24,height)
-            cursor = cursor + height + gap
-        end
+        Performance(small * 8 + gap * 5)
     else
         -- Compact plan progress: one heading row (the heading and Show /
         -- Hide details), the run's count with its whole unit on its own
@@ -642,35 +837,54 @@ function M.Panel(spec)
         -- behind them: the Still needed, Extra copies and To lock lists) is
         -- laid out only while details are shown (native QA test.163008):
         -- Hide details gives back its whole height.
+        -- Approved cleanup: collapsed, the progress is one row: the heading
+        -- (its measured width, spec.progressLabelW), the bar and Show
+        -- details. The run's count is hidden with the other four counts
+        -- until Details is opened and takes no row while it is. When the
+        -- heading and the button leave the bar too little room (large or
+        -- long text), the bar takes a row of its own under them. With
+        -- Details open the count has its own full-width row (its measured
+        -- height, spec.progressValueH), then the four counts in two rows
+        -- (their measured heights, spec.countRowsH), then the names.
         local rowGap = math.max(2,math.floor(gap/3))
         local char = M.ConservativeText(scale)
-        local detailsW = math.min(width-24, math.ceil(12 * char) + 20)
+        local detailsW = math.min(full, math.ceil(12 * char) + 20)
         local rowH = math.max(normal, small + 6)
-        layout.planDetailsW = detailsW
-        Add(layout,"progressHeader",12,cursor,math.max(1,width-24-detailsW-gap),rowH)
-        Add(layout,"planDetails",width-12-detailsW,cursor,detailsW,rowH)
-        cursor = cursor + rowH + rowGap
-        -- "12 / 79 rolled copies this run" and "79 / 79 rolled, 1 still to
-        -- lock" are 30-31 characters: about 330 px of the 396 px row at font
-        -- scale 1.25 in the 0.70 em model of the 12 px normal font. A model
-        -- figure, not a native measurement.
-        Add(layout,"progressValue",12,cursor,width-24,normal)
-        cursor = cursor + normal + rowGap
         local barH = math.max(5, math.ceil(small / 2))
-        Add(layout,"planBar",12,cursor,width-24,barH)
-        if not spec.planDetails then
-            cursor = cursor + barH + gap
+        local labelW = math.ceil(tonumber(spec.progressLabelW) or (8 * char * 1.1))
+        local barW = full - labelW - detailsW - gap * 2
+        layout.planDetailsW = detailsW
+        if barW >= 48 then
+            Add(layout,"progressHeader",inset,cursor,labelW,rowH)
+            Add(layout,"planBar",inset+labelW+gap,cursor+math.floor((rowH-barH)/2),barW,barH)
+            Add(layout,"planDetails",width-inset-detailsW,cursor,detailsW,rowH)
+            cursor = cursor + rowH
         else
-            cursor = cursor + barH + rowGap + 1
+            Add(layout,"progressHeader",inset,cursor,math.max(1,full-detailsW-gap),rowH)
+            Add(layout,"planDetails",width-inset-detailsW,cursor,detailsW,rowH)
+            cursor = cursor + rowH + rowGap
+            Add(layout,"planBar",inset,cursor,full,barH)
+            cursor = cursor + barH
+        end
+        if not spec.planDetails then
+            cursor = cursor + gap
+        else
+            cursor = cursor + rowGap + 1
+            local valueH = math.max(normal, math.ceil(tonumber(spec.progressValueH) or 0))
+            Add(layout,"progressValue",inset,cursor,full,valueH)
+            cursor = cursor + valueH + rowGap
             local columnGap = 12
-            local columnWidth = math.floor((width - 24 - columnGap) / 2)
-            local rightX, rightW = 12+columnWidth+columnGap, width-24-columnWidth-columnGap
-            Add(layout,"planNeeded",12,cursor,columnWidth,small)
-            Add(layout,"planTomes",rightX,cursor,rightW,small)
-            cursor = cursor + small + rowGap
-            Add(layout,"planExtra",12,cursor,columnWidth,small)
-            Add(layout,"planLocked",rightX,cursor,rightW,small)
-            cursor = cursor + small + gap
+            local columnWidth = math.floor((full - columnGap) / 2)
+            local rightX, rightW = inset+columnWidth+columnGap, full-columnWidth-columnGap
+            local counts = type(spec.countRowsH) == "table" and spec.countRowsH or {}
+            local firstH = math.max(small, math.ceil(tonumber(counts[1]) or 0))
+            local secondH = math.max(small, math.ceil(tonumber(counts[2]) or 0))
+            Add(layout,"planNeeded",inset,cursor,columnWidth,firstH)
+            Add(layout,"planTomes",rightX,cursor,rightW,firstH)
+            cursor = cursor + firstH + rowGap
+            Add(layout,"planExtra",inset,cursor,columnWidth,secondH)
+            Add(layout,"planLocked",rightX,cursor,rightW,secondH)
+            cursor = cursor + secondH + gap
             -- Each name column: its heading, a gap, then its three one-line
             -- name rows (two names and "+N more"), modelled at the small
             -- row; when the client measured those rows taller in their real
@@ -678,74 +892,75 @@ function M.Panel(spec)
             -- that measured stack instead, so the last row is never cut.
             local namesH = math.max(small * 3, math.ceil(tonumber(spec.detailNamesH) or 0))
             local columnHeight = small + math.max(3,math.floor(gap/2)) + namesH
-            Add(layout,"needed",12,cursor,columnWidth,columnHeight)
+            Add(layout,"needed",inset,cursor,columnWidth,columnHeight)
             Add(layout,"shed",rightX,cursor,rightW,columnHeight)
             cursor = cursor + columnHeight + gap
             if (tonumber(spec.toLockCount) or 0) > 0 then
                 local height = small * 3 + math.max(3,math.floor(gap/2))
-                Add(layout,"toLock",12,cursor,width-24,height)
+                Add(layout,"toLock",inset,cursor,full,height)
                 cursor = cursor + height + gap
             end
         end
         -- No flattened Difficulty / Soul Ash row: the card above holds it.
-        if spec.showPerformance then
-            local height = small * 5 + gap * 4
-            Add(layout,"performance",12,cursor,width-24,height)
-            cursor = cursor + height + gap
-        end
+        Performance(small * 5 + gap * 4)
     end
 
     if not spec.noBuild then
         -- Your record, then the best known record for the same Echoes, then
         -- what best known means: two rows and their note, never a rank.
+        -- Only the records that exist are laid out (spec.recordYours,
+        -- spec.recordBest): without one, no row, note or gap is reserved.
+        -- Each is one entry, a label followed by its value, given as the
+        -- measured widths {label, value} (or true: unmeasured, a whole
+        -- line). Both entries share one line while they fit beside each
+        -- other; otherwise each takes its own line, and an entry wider than
+        -- the line puts its value on a second line under its label. Nothing
+        -- is shortened. What best known means is on that entry's hover.
         local rowGap = math.max(2,math.floor(gap/3))
-        Add(layout,"bestDps",12,cursor,width-24,small)
-        cursor = cursor + small + rowGap
-        Add(layout,"bestKnown",12,cursor,width-24,small)
-        cursor = cursor + small + rowGap
-        Add(layout,"recordNote",12,cursor,width-24,small)
-        cursor = cursor + small + gap
-        if spec.orbLine then
-            -- One line of Orb run status with Open; the Orb window owns the
-            -- run's controls.
-            local _, line = M.ConservativeText(scale)
-            local h = math.max(small + 6, line)
-            local char = M.ConservativeText(scale)
-            local openW = math.min(width-24, math.ceil(6 * char) + 20)
-            layout.orbLineOpenW = openW
-            Add(layout,"orbLine",12,cursor,width-24-openW-gap,h)
-            Add(layout,"orbLineOpen",width-12-openW,cursor,openW,h)
-            cursor = cursor + h + gap
+        local function Entry(entry)
+            if type(entry) ~= "table" then return full, small end
+            local need = math.ceil((tonumber(entry[1]) or 0) + gap + (tonumber(entry[2]) or 0))
+            if need <= full then return need, small end
+            return full, small * 2 + rowGap
+        end
+        local yours, best = spec.recordYours, spec.recordBest
+        layout.recordYours, layout.recordBest = yours, best
+        if yours and best then
+            local yoursW, yoursH = Entry(yours)
+            local bestW, bestH = Entry(best)
+            if type(yours) == "table" and type(best) == "table"
+                and yoursH == small and bestH == small and yoursW + gap * 2 + bestW <= full then
+                Add(layout,"bestDps",inset,cursor,yoursW,small)
+                Add(layout,"bestKnown",inset+yoursW+gap*2,cursor,bestW,small)
+                cursor = cursor + small + gap
+            else
+                Add(layout,"bestDps",inset,cursor,yoursW,yoursH)
+                cursor = cursor + yoursH + rowGap
+                Add(layout,"bestKnown",inset,cursor,bestW,bestH)
+                cursor = cursor + bestH + gap
+            end
+        elseif yours or best then
+            local entryW, entryH = Entry(yours or best)
+            Add(layout,yours and "bestDps" or "bestKnown",inset,cursor,entryW,entryH)
+            cursor = cursor + entryH + gap
         end
     end
     layout.contentBottom = cursor
-    local footerHeight = math.max(22, normal + 7)
-    local reduction = spec.statusVisible and 0 or 59
-    local legacyMinimum
-    if play then
-        -- The compact Play panel is as tall as its content: no minimum from
-        -- the former fixed progress columns.
-        legacyMinimum = 0
-    elseif spec.noBuild then
-        legacyMinimum = (spec.activeRoll and 428 or 278) - reduction
-    elseif spec.complete then
-        if spec.showPerformance then
-            legacyMinimum = (spec.activeRoll and 430 or 286) - reduction
-        else
-            legacyMinimum = (spec.activeRoll and 292 or 168) - reduction
-        end
-    elseif spec.showPerformance then
-        legacyMinimum = (spec.activeRoll and 448 or 325) - reduction
-    else
-        legacyMinimum = (spec.activeRoll and 388 or 267) - reduction
-    end
-    if not play and spec.callboard then
-        legacyMinimum = legacyMinimum + 50
-    end
-    local footerY = math.max(cursor + gap,
-        legacyMinimum - footerHeight - 7)
-    Add(layout,"footer",8,footerY,width-16,footerHeight)
-    layout.height = footerY + footerHeight + 7
+    -- The footer hubs are two lines each: the hub's name and, under it, what
+    -- it opens; the row is as tall as the tallest hub needs (its measured
+    -- height, spec.footerH). A caller that measured nothing gets the former
+    -- one-line row.
+    local footerHeight = math.max(22, normal + 7, math.ceil(tonumber(spec.footerH) or 0))
+    -- Every view is as tall as its content: no minimum from the former fixed
+    -- columns, so a section that is absent leaves no empty block. That
+    -- includes the setup view (no Wishlist): with an Echo board open its
+    -- former least height left an empty band above the footer once the
+    -- header, the card and the measured offer block became compact.
+    -- Every section above ended with one gap: the footer follows it, and the
+    -- panel's own 6-unit inset closes it.
+    local footerY = cursor
+    Add(layout,"footer",inset,footerY,full,footerHeight)
+    layout.height = footerY + footerHeight + 6
     return Remember(panelCache,panelOrder,key,layout)
 end
 

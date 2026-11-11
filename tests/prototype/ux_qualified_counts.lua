@@ -62,15 +62,27 @@ local function Shows(needle)
  for _,t in ipairs(PanelTexts()) do if t:find(needle,1,true) then return t end end
  return nil
 end
--- The model the runtime published, with only its count fields varied.
-local function RenderCounts(owned,total,toLock)
+-- The model the runtime published, with only its count fields varied (and,
+-- when given, its DPS records: Q4).
+local function RenderCounts(owned,total,toLock,performance)
  local model=H.Clone(Nexus.Panel._lastModel)
  model.progress=model.progress or {}
  model.progress.owned,model.progress.total,model.progress.toLock=owned,total,toLock
  model.progress.missing={};model.progress.unknownTomes={}
  model.progress.wishlistName=model.progress.wishlistName or 'W-Free'
+ if performance~=nil then model.progress.performance=performance end
  model.cards={};model.recommendation=nil;model.orbGuidance=nil;model.autoNote=nil
  return Nexus.Panel.Render(model)==true
+end
+-- Approved panel cleanup (Progress: the run's count is hidden with the other
+-- four counts until Details expands). The count's words are unchanged; they
+-- are read after the player's own Show details click (the panel's Details
+-- button, memory only). Returns whether Details is open.
+local function OpenDetails()
+ local play=NexusPanel and NexusPanel._play
+ local button=play and play.details
+ if Nexus.Panel._playDetails~=true and button and button:IsShown() then button:GetScript('OnClick')(button) end
+ return Nexus.Panel._playDetails==true
 end
 
 C.scenario('Q1 rolled copies met while a locked target is still to lock: not complete, and said so',function()
@@ -80,6 +92,13 @@ C.scenario('Q1 rolled copies met while a locked target is still to lock: not com
  C.setup(type(Nexus.Panel._lastModel)=='table','Q1: fixture: the runtime published a panel model')
  local before=Effects()
  C.setup(RenderCounts(79,79,{'Locked Echo (Rare)'}),'Q1: fixture: the panel renders 79/79 rolled with one locked target to lock')
+ -- Approved panel cleanup: collapsed, the panel shows no count line at all;
+ -- Show details gives the run's count in the same words as before.
+ C.expect(Nexus.Panel._playDetails~=true and ProgressLine()==nil,'Q1: with Details collapsed the run count is not shown',ProgressLine())
+ -- The Details click renders the runtime's own model again, so the varied
+ -- counts are rendered once more with Details open.
+ C.setup(OpenDetails() and RenderCounts(79,79,{'Locked Echo (Rare)'}),
+  'Q1: fixture: the Details button opens the detail section and the same counts are rendered in it')
  local line=ProgressLine() or ''
  print('OBSERVED','Q1 progress='..line)
  C.expect(line:find('79 / 79 rolled',1,true)~=nil and line:find('to lock',1,true)~=nil,
@@ -90,7 +109,7 @@ C.scenario('Q1 rolled copies met while a locked target is still to lock: not com
 end)
 
 C.scenario('Q2 a partial run names its unit',function()
- C.setup(RenderCounts(12,79,{}),'Q2: fixture: the panel renders 12/79 rolled')
+ C.setup(RenderCounts(12,79,{}) and OpenDetails(),'Q2: fixture: the panel renders 12/79 rolled with Details open (the count shows there)')
  local line=ProgressLine() or ''
  print('OBSERVED','Q2 progress='..line)
  C.expect(line=='12 / 79 rolled copies this run','Q2: the progress names rolled copies this run',line)
@@ -116,7 +135,14 @@ C.scenario('Q4 the plan count says copies, not Echoes',function()
  for _,item in ipairs(captured or {}) do if item.text=='Show DPS records (now hidden)' then show=item end end
  C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records (now hidden)')
  if show then show.func() end
- C.setup(RenderCounts(12,79,{}),'Q4: fixture: the panel renders the plan with DPS records shown')
+ -- Approved panel cleanup (absent DPS sections are hidden completely, the
+ -- heading and the plan count beside it included): without any record the
+ -- section is not there, so the plan count's words are read from a section
+ -- that has a record (one synthetic personal Dummy record).
+ C.setup(RenderCounts(12,79,{},{}),'Q4: fixture: the panel renders the plan with DPS records turned on and no record')
+ C.expect(Shows('DPS RECORDS')==nil and Shows('Target build')==nil,
+  'Q4: with no record the DPS RECORDS section, its heading and its plan count are not shown',Shows('DPS RECORDS') or Shows('Target build'))
+ C.setup(RenderCounts(12,79,{},{dummy={personal={dps=12000,duration=95}}}),'Q4: fixture: the panel renders the plan with DPS records shown')
  local label=Shows('Target build') or ''
  print('OBSERVED','Q4 label='..label)
  C.expect(label:find('79 rolled copies',1,true)~=nil and not label:find('Echoes',1,true),

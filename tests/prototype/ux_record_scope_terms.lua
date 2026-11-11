@@ -106,7 +106,12 @@ C.scenario('R1 panel records: best known for these Echoes, real facts only, owne
  C.setup(RenderRecords(false),'R1: fixture: the panel renders two shared records')
  local texts=Joined(PanelTexts())
  print('OBSERVED','R1 texts='..texts:gsub('\n',' | '))
- C.expect(texts:find('Best known  25k',1,true)~=nil and texts:find('Best known  31k',1,true)~=nil,
+ -- Approved panel cleanup (the DPS RECORDS rows are measured from their
+ -- shown content and wrap): a shared record is one row, its label at the
+ -- left and its value at the right, as two texts in that order, where it was
+ -- one "Best known  25k" text beside your record. The label's words and the
+ -- value they label are unchanged (PanelTexts joins texts with a line break).
+ C.expect(texts:find('Best known\n25k',1,true)~=nil and texts:find('Best known\n31k',1,true)~=nil,
   'R1: the shared column is labelled Best known',texts)
  C.expect(not texts:find('Global',1,true),'R1: no record is labelled Global',texts)
  local before=Effects()

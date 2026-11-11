@@ -876,6 +876,31 @@ function M.CreateContextHeader(parent)
     parent._contextChange:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+-- The title's font role for its line and slot: the panel's own 15-unit title
+-- role while the whole line fits the slot at that size, else the primary
+-- role, which is the size the title had before it got its own role. The
+-- state cue is the end of the line, so a cue that fitted then is not cut by
+-- the larger title font; a line too wide even at the primary size is drawn
+-- there, never smaller. Only this label's font object is chosen: no owned or
+-- game font is resized. Applied with the header's words (not on a settled
+-- render); a font change takes a layout pass, which applies it again.
+-- Returns the role, or nil where the label cannot take a font object.
+function M.FitTitleRole(label, text, width)
+    local metrics = Nexus.LayoutMetrics
+    if not (label and metrics and type(metrics.FontObject) == "function"
+        and type(label.SetFontObject) == "function") then
+        return nil
+    end
+    local role = "title"
+    pcall(label.SetFontObject, label, metrics.FontObject(role))
+    local ok, measured = pcall(M.LineWidth, label, text)
+    if ok and (tonumber(measured) or 0) > (tonumber(width) or 0) + 0.01 then
+        role = "normal"
+        pcall(label.SetFontObject, label, metrics.FontObject(role))
+    end
+    return role
+end
+
 function M.UpdateContextHeader(model, settled)
     if not (frame and frame._contextTitle) then return false end
     local facts = M.DestinationFacts(model) or {}
@@ -938,15 +963,29 @@ function M.UpdateContextHeader(model, settled)
     -- layout's font scale makes its normal row taller they take that height
     -- and the Wishlist line (with its button) moves down by the difference,
     -- inside the header the layout already reserves.
+    -- Approved panel cleanup (full Build and Wishlist names): a name too
+    -- long for its line wraps beside its button, in the height the layout
+    -- measured for it (LayoutMetrics.Panel: headerBuildH, headerWishlistH,
+    -- from M.MeasureContextHeader), and the Wishlist line and its button
+    -- start under the whole Build line. Nothing is shortened.
+    -- The approved compact header: the Build row at 32 and the Wishlist row
+    -- 2 units under it (LayoutMetrics.Panel: headerBuildY, headerWishlistY),
+    -- each button at the top of its own row.
     local held = frame._responsiveLayout
     local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
-    local grow = lineH - 20
-    if settled and frame._nexusHeaderKey == key and frame._nexusHeaderLine == lineH then return true end
+    local buildH = math.max(lineH, type(held) == "table" and tonumber(held.headerBuildH) or 0)
+    local wishlistH = math.max(lineH, type(held) == "table" and tonumber(held.headerWishlistH) or 0)
+    local rows = lineH .. ":" .. buildH .. ":" .. wishlistH
+    if settled and frame._nexusHeaderKey == key and frame._nexusHeaderLine == rows then return true end
     frame._nexusHeaderKey = nil
+    local buildTop = type(held) == "table" and tonumber(held.headerBuildY) or 32
+    local wishlistTop = buildTop + buildH + 2
     frame._contextTitle:ClearAllPoints()
     frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -8)
+    frame._contextBuild:ClearAllPoints()
+    frame._contextBuild:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -buildTop)
     frame._contextWishlist:ClearAllPoints()
-    frame._contextWishlist:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(57 + grow))
+    frame._contextWishlist:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -wishlistTop)
     M.EnsureHeaderGrip()
     for index = 1, #lines do
         local line = lines[index]
@@ -954,20 +993,28 @@ function M.UpdateContextHeader(model, settled)
         line[1]:SetText(line[3])
         line[2]._nexusFull = line[4] or (index == 1
             and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index])
-        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
-            Nexus.LayoutMetrics.OneLineLabel(line[1], nil, index == 1 and 20 or lineH)
+        if index == 1 then
+            M.FitTitleRole(line[1], line[3], titleWidth)
+            if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
+                Nexus.LayoutMetrics.OneLineLabel(line[1], nil, 20)
+            end
+        else
+            if type(line[1].SetWordWrap) == "function" then pcall(line[1].SetWordWrap, line[1], true) end
+            line[1]:SetHeight(index == 2 and buildH or wishlistH)
         end
     end
     frame._switchBtn:ClearAllPoints()
-    frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
-    frame._switchBtn:SetSize(106, 22)
+    frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -buildTop)
+    frame._switchBtn:SetSize(106, 20)
     frame._contextChange:ClearAllPoints()
-    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -(55 + grow))
-    frame._contextChange:SetSize(106, 22)
+    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -wishlistTop)
+    frame._contextChange:SetSize(106, 20)
     local switchLabel = frame._switchBtn:GetFontString()
     if switchLabel and Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
         switchLabel:SetWidth(94)
-        Nexus.LayoutMetrics.OneLineLabel(switchLabel, nil, 22)
+        -- The label's one-line box is the button's own height (20 units in
+        -- the compact header), never taller than the button it sits in.
+        Nexus.LayoutMetrics.OneLineLabel(switchLabel, nil, 20)
     end
     M.EnsureHeaderClose()
     local state = frame._contextAutoState
@@ -978,8 +1025,42 @@ function M.UpdateContextHeader(model, settled)
         state:Show()
     end
     frame._nexusHeaderKey = key
-    frame._nexusHeaderLine = lineH
+    frame._nexusHeaderLine = rows
     return true
+end
+
+-- The Build and Wishlist lines' measured heights at their width, for the
+-- layout ("build:wishlist"). The header's words are applied first when they
+-- changed (M.UpdateContextHeader, as a settled render does), and the lines
+-- are measured only then or when the font row changed: an unchanged header
+-- sets and measures nothing. The heights are kept on the panel
+-- (frame._nexusHeaderRows) for this render's layout spec.
+function M.MeasureContextHeader(model)
+    if not (frame and frame._contextBuild and Nexus.LayoutMetrics) then return "0:0" end
+    M.UpdateContextHeader(model, true)
+    local held = frame._responsiveLayout
+    local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
+    -- The heights belong to the font the lines hold (both share one owned
+    -- font object): its face and size are part of the key, since the row
+    -- minimum above is the same 20 units over a range of font scales. As for
+    -- the Orb line (M.MeasureOrbLine), a replacement face of the same nominal
+    -- size comes with a new font reader and is measured again too.
+    local label = frame._contextBuild
+    local okFont, path, size = pcall(label.GetFont, label)
+    local key = tostring(frame._nexusHeaderKey) .. "\031" .. lineH .. "\031"
+        .. (okFont and (tostring(path) .. "\031" .. tostring(size)) or "?")
+    local rows = frame._nexusHeaderRows
+    if not (rows and rows.key == key and rawequal(rows.face, label.GetFont)) then
+        local metrics = Nexus.LayoutMetrics
+        local width = math.max(1, tonumber(frame._contextBuild:GetWidth()) or 1)
+        rows = {key = key, face = label.GetFont}
+        for name, label in pairs({build = frame._contextBuild, wishlist = frame._contextWishlist}) do
+            if type(label.SetWordWrap) == "function" then pcall(label.SetWordWrap, label, true) end
+            rows[name] = metrics.WrapHeight(label, width, lineH)
+        end
+        frame._nexusHeaderRows = rows
+    end
+    return rows.build .. ":" .. rows.wishlist
 end
 
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
@@ -1251,14 +1332,16 @@ local function Signature(value, seen)
     return table.concat(out)
 end
 
--- The difficulty card's shown values (C-02): its difficulty word, Soul Ash,
--- multiplier and Intensity, and the Intensity level its hover states. They
--- change no geometry: the layout signature keeps only whether each is there
--- (the card's visibility and the bar's), and a change of the values alone is
--- applied without a layout pass (M.RefreshServerStatusValues). Every other
--- field, an unknown one included, stays in the layout signature.
-M.SERVER_STATUS_VALUES = {tier = "truthy", mode = "truthy", ash = "truthy", gain = "truthy",
-    intensity = "present", intensityLevel = "present"}
+-- The difficulty card's shown values (C-02): Soul Ash and Intensity, and the
+-- Intensity level its hover states. They change no geometry: the layout
+-- signature keeps only whether each is there (the card's visibility and the
+-- bar's), and a change of the values alone is applied without a layout pass
+-- (M.RefreshServerStatusValues). Every other field, an unknown one included,
+-- stays in the layout signature: the difficulty word (tier, mode) too, since
+-- the Compact A card wraps a long tier and grows with it, so its words are
+-- geometry. The multiplier stays a value: it has its own fixed cell on the
+-- first line, so a changed one needs no layout pass.
+M.SERVER_STATUS_VALUES = {ash = "truthy", gain = "truthy", intensity = "present", intensityLevel = "present"}
 function M.ServerStatusLayout(ss)
     if type(ss) ~= "table" then return ss end
     local out = {}
@@ -1388,7 +1471,18 @@ local function ModelSignatures(model)
             -- an Orb run line is shown; the line's words refresh on every
             -- render (M.RefreshOrbLine).
             playDetails=M._playDetails == true or nil,
+            -- The Auto scope line, open or closed (memory only).
+            autoInfo=M._autoInfoOpen == true or nil,
+            -- Whether an Orb run line is shown; its words refresh on every
+            -- render (M.RefreshOrbLine), and its wrapped height is added to
+            -- this signature by M.Render (M.MeasureOrbLine).
             orbLine=type(model._nexusOrbLine) == "table" or nil,
+            -- The opt-in DPS RECORDS section shows only records that exist:
+            -- which rows there are, and their values, are geometry.
+            performanceRows=showPerformance and M.PerformanceKey(source.performance) or nil,
+            -- The DPS rows exist only for records that exist, so which
+            -- records are shown (and their shown values) is geometry.
+            records=M.PlayRecordFacts(model),
             -- The destination row's whole descriptor, Preview included.
             destination=destination,
             callboard=Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary
@@ -1457,6 +1551,10 @@ local function RollPresentation(model)
     local cardRows = #cards > 0 or (held ~= nil and held.cards == true)
     return {
         reserved=reserved,cardRows=cardRows,
+        -- The height the block had when it was last committed with content:
+        -- a reserved block keeps it (its content-sized box would otherwise
+        -- shrink through the gap and the panel would jump).
+        heldHeight=held and held.height or nil,
         -- What a successful commit of this render leaves for the next one.
         nextRoll=continuing and (hasContent or reserved)
             and {context=context,cards=cardRows,reserved=reserved} or nil,
@@ -1487,29 +1585,63 @@ end
 -- measured is each key's text in the active language (AutoLabel, Fit).
 local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
     keys = { on = "panel.button.auto_on", off = "panel.button.auto_off", unknown = "panel.button.auto_unknown" },
-    inset = 6, minSize = 9, font = "NexusAutoButtonFont" }
+    -- minSize: the panel's readable floor (11 units); a label is never
+    -- fitted below it.
+    inset = 6, minSize = 11, font = "NexusAutoButtonFont" }
 
 -- Auto OFF releases a roll-block reservation at once. The runtime does not
 -- render for a toggle, so the last committed model is rendered again with
 -- the new selection (the ordinary render transaction). Nothing else changes.
 -- The same render ends the no-Wishlist line's "Random rolling" at once
 -- (M.RandomRollShown): Random Roll does not pick while Auto is OFF.
-local function ReleaseRollOnAutoOff(auto)
-    local roll = renderState.roll
-    if auto or type(M._lastModel) ~= "table"
-        or not ((roll and roll.reserved) or M.RandomRollShown(M._lastModel)) then
-        return
-    end
-    local model = DefensiveCopy(M._lastModel)
+-- Approved panel cleanup: every actual change of the selection is drawn the
+-- same way, ON as well as OFF, so the chip, the offer heading, the marked
+-- offer's tag and the Auto lines always come from one selection (a heading
+-- that still said Auto OFF beside an Auto ON chip was seen in game). What
+-- the runtime said about the earlier selection is not carried over: its
+-- Random Roll "running" fact, its hold and its effective state are dropped,
+-- so nothing claims that picking resumed until the runtime says so itself.
+local function RenderAutoSelection(auto)
+    local last = M._lastModel
+    if type(last) ~= "table" or last.auto == auto then return end
+    local model = DefensiveCopy(last)
     local rawText = renderState.rawText or {}
     model.status, model.recommendation = rawText.status, rawText.recommendation
-    model.auto = false
+    model.auto = auto
+    model.randomRoll, model.effective, model.paused = nil, nil, nil
     -- A failed render stays a failed render (hidden, counted, retried by the
     -- next ordinary refresh); it is recorded, not raised into the toggle.
     local ok, why = pcall(M.Render, model)
     if not ok and Nexus.Errors and type(Nexus.Errors.Record) == "function" then
-        pcall(Nexus.Errors.Record, "Panel.ReleaseRollOnAutoOff", why)
+        pcall(Nexus.Errors.Record, "Panel.RenderAutoSelection", why)
     end
+end
+
+-- The host's display refresh renders its own last input again, and that
+-- input is from the last runtime step: after a toggle it still carries the
+-- earlier selection until the runtime steps, and turning Auto OFF requests
+-- no step. A refresh render (M._hostRefresh, set around the two host
+-- callbacks: M.Refresh and the display recovery) therefore keeps the
+-- selection this panel was last told (through M.SetAuto, which every change
+-- of the selection notifies), with the same projection as the notice's own
+-- render above, so a refresh cannot put the chip, the heading, the tag or
+-- the Random Roll line back to the superseded selection. It applies only
+-- while the runtime's own counter agrees with the notice (M.AutoSelectedNow;
+-- an unreadable counter leaves the notice standing), so an outdated notice
+-- never overrides the runtime, and it ends by itself once the host's input
+-- carries the selection. Every other render is drawn as given. Returns
+-- whether the candidate was changed.
+function M.KeepAutoSelection(candidate)
+    local told = M._autoSelection
+    if not M._hostRefresh or type(told) ~= "boolean" or type(candidate) ~= "table"
+        or type(candidate.auto) ~= "boolean" or candidate.auto == told then
+        return false
+    end
+    local now = M.AutoSelectedNow()
+    if now ~= nil and now ~= told then return false end
+    candidate.auto = told
+    candidate.randomRoll, candidate.effective, candidate.paused = nil, nil, nil
+    return true
 end
 
 -- The words carry the state (ON / OFF / --); colour only adds to them. OFF
@@ -1522,9 +1654,11 @@ local function AutoLabel(auto)
     return "|cffd9d9d9" .. LT("panel.button.auto_off") .. "|r"
 end
 
+-- A record's DPS as shown. A record measured as 0 is a record ("0"); only a
+-- missing or unusable number is the dash.
 local function FmtDps(dps)
     dps = tonumber(dps)
-    if not dps or dps <= 0 then return "—" end
+    if not dps or dps ~= dps or dps < 0 then return "—" end
     if dps >= 1000000 then return string.format("%.2fM", dps / 1000000) end
     if dps >= 1000 then return string.format("%dk", math.floor(dps / 1000)) end
     return tostring(math.floor(dps))
@@ -1546,11 +1680,11 @@ end
 local function CreateToLockWidgets(f)
     local layout = Nexus.LayoutMetrics
     f.toLockLabel = f:CreateFontString(nil, "OVERLAY",
-        layout and layout.FontObject("small") or "GameFontDisableSmall")
+        layout and layout.FontObject("secondary") or "GameFontDisableSmall")
     f.toLockLabel:SetText((Nexus.Localization.Text("panel.heading.locked_targets")))
     f.toLockLabel:SetTextColor(0.7, 0.45, 1)
     f.toLockText = f:CreateFontString(nil, "OVERLAY",
-        layout and layout.FontObject("small") or "GameFontHighlightSmall")
+        layout and layout.FontObject("secondary") or "GameFontHighlightSmall")
     f.toLockText:SetJustifyH("LEFT")
     f.toLockText:SetJustifyV("TOP")
     f.toLockText:SetTextColor(0.72, 0.45, 1)
@@ -1698,7 +1832,7 @@ end
 -- the Open Orbs control are unchanged. No measurement on an unchanged render.
 function M.FitOrbMiniButton(button)
     local layout = Nexus.LayoutMetrics
-    local base = layout and _G[layout.FontObject("small")]
+    local base = layout and _G[layout.FontObject("secondary")]
     if not (button and base and type(base.GetFont) == "function") then return end
     local ok, path, size, flags = pcall(base.GetFont, base)
     size = ok and tonumber(size) or nil
@@ -1723,8 +1857,9 @@ function M.FitOrbMiniButton(button)
         pcall(font.SetFont, font, path, fitSize, flags or "")
         probe:SetFontObject(font); probe:SetText(label)
         measured = tonumber(probe:GetStringWidth()) or 0
-        if measured <= budget or fitSize <= 8 then break end
-        fitSize = math.max(8, math.floor(fitSize * budget / measured))
+        -- Never fitted below the panel's readable floor (11 units).
+        if measured <= budget or fitSize <= 11 then break end
+        fitSize = math.max(11, math.floor(fitSize * budget / measured))
     end
     SetOwnedButtonFont(button, font)
     button._nexusMiniFitKey = key
@@ -1735,7 +1870,10 @@ end
 function M.ApplyOwnedFonts()
     local layout = Nexus.LayoutMetrics
     if not (layout and frame) then return false end
-    local small = layout.FontObject("small")
+    -- The approved readable sizes: primary text is the shared normal font
+    -- (12) and no text of this panel is under its own secondary font (11,
+    -- LayoutMetrics "secondary"); the shared small font (10) is not used here.
+    local small = layout.FontObject("secondary")
     local normal = layout.FontObject("normal")
     local large = layout.FontObject("large")
     if not frame._nexusOwnedFonts then
@@ -1745,14 +1883,17 @@ function M.ApplyOwnedFonts()
             tomesValue,shedLabel,shedText,performanceLabel,setLabelText,
             dummyLabel,dummyGlobal,lkLabel,lkPersonalLabel,lkGlobal,
             completeSubtext,setupHint,bestDpsText,versionText,
-            worldStatusGain,worldStatusBox and worldStatusBox.intensityText,
+            worldStatusBox and worldStatusBox.intensityText,frame._chargesText,
         }) do SetOwnedFont(widget, small) end
         for _, widget in ipairs(cardTexts) do SetOwnedFont(widget, small) end
         for _, widget in ipairs({
-            buildHeaderText,worldStatusText,worldStatusAsh,progressValue,
+            buildHeaderText,worldStatusText,worldStatusAsh,worldStatusGain,progressValue,
             dummyValue,dummyGlobalValue,lkValue,lkGlobalValue,completeBadge,
-            frame._contextTitle,frame._contextBuild,frame._contextWishlist,
+            frame._contextBuild,frame._contextWishlist,
         }) do SetOwnedFont(widget, normal) end
+        -- The panel's title has its own role (15 units, LayoutMetrics
+        -- "title"), on the same native reference as the fonts above.
+        SetOwnedFont(frame._contextTitle, layout.FontObject("title"))
         SetOwnedFont(frame._contextAutoState, small)
         SetOwnedFont(setupText, large)
         for _, widget in ipairs({
@@ -1934,7 +2075,11 @@ local function RequestDisplayRecovery()
         and callbacks.RequestFirstDisplay or callbacks.RefreshDisplay
     if type(request) ~= "function" then return false end
     renderStats.recoveryRequests = renderStats.recoveryRequests + 1
+    -- The host renders its own last input (M.KeepAutoSelection).
+    local was = M._hostRefresh
+    M._hostRefresh = true
     local ok, result = pcall(request)
+    M._hostRefresh = was
     return ok and result ~= false
 end
 
@@ -2293,7 +2438,7 @@ function M.FitPassiveHovers(settled)
     local pairs_ = {
         {frame._contextTitleHit, frame._contextTitle}, {frame._contextBuildHit, frame._contextBuild},
         {frame._contextWishlistHit, frame._contextWishlist},
-        {p.tomesHit, p.tomes}, {p.extraHit, p.extra}, {p.bestHit, p.bestLabel}, {p.orbHit, p.orb},
+        {p.tomesHit, p.tomes}, {p.extraHit, p.extra}, {p.orbHit, p.orb},
         {frame._callboardTitleHit, frame._callboardTitle}, {frame._callboardLineHit, frame._callboardLine},
     }
     for i = 1, #pairs_ do Fit(pairs_[i][1], pairs_[i][2]) end
@@ -3025,6 +3170,8 @@ local function EnsureFrame()
             GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.best_dps_none"), 0.7, 0.7, 0.7)
             GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.best_dps_how"), 0.9, 0.9, 0.9, true)
         end
+        -- Without a best known record there is no row for it: said here.
+        M.AddMissingRecordLine("best")
         GameTooltip:Show()
     end)
     bestDpsHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3954,124 +4101,185 @@ local function EnsureMinimapButton()
     return btn
 end
 
-local function PositionPerformance(topY, completed, metrics)
-    local small = metrics and metrics.small or 11
-    local normal = metrics and metrics.normal or 14
-    local gap = metrics and metrics.gap or 6
-    if completed then
-        -- Compact centered record table sized to stay inside the narrower HUD.
-        -- Keep headings centered while pulling value columns inward so long DPS
-        -- values do not hang off the right edge.
-        local left, width = 24, 224
-        local labelW, valueW = 120, 72
-
-        local dummyTop = topY - small - gap
-        local dummyGlobalTop = dummyTop - normal - math.max(3,math.floor(gap/2))
-        local lkHeadingTop = dummyGlobalTop - normal - gap
-        local lkTop = lkHeadingTop - small - gap
-        local lkGlobalTop = lkTop - normal - math.max(3,math.floor(gap/2))
-
-        SetPoint(performanceLabel, "TOP", frame, "TOP", 0, topY)
-        performanceLabel:SetSize(width, small)
-        performanceLabel:SetJustifyH("CENTER")
-
-        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, dummyTop)
-        dummyLabel:SetSize(labelW, normal); dummyLabel:SetJustifyH("LEFT")
-        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, dummyTop)
-        dummyValue:SetSize(valueW, normal); dummyValue:SetJustifyH("RIGHT")
-        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, dummyGlobalTop)
-        dummyGlobal:SetSize(labelW, normal); dummyGlobal:SetJustifyH("LEFT")
-        SetPoint(dummyGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, dummyGlobalTop)
-        dummyGlobalValue:SetSize(valueW, normal); dummyGlobalValue:SetJustifyH("RIGHT")
-
-        SetPoint(lkPersonalLabel, "TOP", frame, "TOP", 0, lkHeadingTop)
-        lkPersonalLabel:SetSize(width, small); lkPersonalLabel:SetJustifyH("CENTER")
-        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", left, lkTop)
-        lkLabel:SetSize(labelW, normal); lkLabel:SetJustifyH("LEFT")
-        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, lkTop)
-        lkValue:SetSize(valueW, normal); lkValue:SetJustifyH("RIGHT")
-        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", left, lkGlobalTop)
-        lkGlobal:SetSize(labelW, normal); lkGlobal:SetJustifyH("LEFT")
-        SetPoint(lkGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, lkGlobalTop)
-        lkGlobalValue:SetSize(valueW, normal); lkGlobalValue:SetJustifyH("RIGHT")
-    else
-        -- Expanded active-build performance is a separate section below progress.
-        -- Keeping it out of the progress columns prevents every optional state
-        -- (tomes, shed Echoes, live rolls) from competing for the same space.
-        local left, right = 20, 160
-        local colW = 120
-        local setTop = topY - small - math.max(3,math.floor(gap/2))
-        local rowTop = setTop - small - gap
-        local globalTop = rowTop - normal - math.max(3,math.floor(gap/2))
-        SetPoint(performanceLabel, "TOP", frame, "TOP", 0, topY)
-        performanceLabel:SetSize(260, small)
-        performanceLabel:SetJustifyH("CENTER")
-        SetPoint(setLabelText, "TOP", frame, "TOP", 0, setTop)
-        setLabelText:SetSize(260, small)
-        setLabelText:SetJustifyH("CENTER")
-
-        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, rowTop)
-        dummyLabel:SetSize(70, normal); dummyLabel:SetJustifyH("LEFT")
-        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + 70, rowTop)
-        dummyValue:SetSize(50, normal); dummyValue:SetJustifyH("RIGHT")
-        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, globalTop)
-        dummyGlobal:SetSize(colW, normal); dummyGlobal:SetJustifyH("LEFT")
-
-        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", right, rowTop)
-        lkLabel:SetSize(70, normal); lkLabel:SetJustifyH("LEFT")
-        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", right + 70, rowTop)
-        lkValue:SetSize(50, normal); lkValue:SetJustifyH("RIGHT")
-        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", right, globalTop)
-        lkGlobal:SetSize(colW, normal); lkGlobal:SetJustifyH("LEFT")
-    end
-
-    dummyHit:ClearAllPoints()
-    dummyHit:SetPoint("TOPLEFT", dummyLabel, "TOPLEFT", 0, 2)
-    dummyHit:SetPoint("BOTTOMRIGHT", completed and dummyGlobalValue or dummyGlobal, "BOTTOMRIGHT", 0, -2)
-    lkHit:ClearAllPoints()
-    lkHit:SetPoint("TOPLEFT", completed and lkPersonalLabel or lkLabel, "TOPLEFT", 0, 2)
-    lkHit:SetPoint("BOTTOMRIGHT", completed and lkGlobalValue or lkGlobal, "BOTTOMRIGHT", 0, -2)
+------------------------------------------------------------------------
+-- The opt-in DPS RECORDS section (Options > Show DPS records), approved
+-- panel cleanup: "Hide absent DPS/training sections completely ... Measured
+-- zero is valid. Partial records show only actual rows." The section is a
+-- list of rows built only from records that exist: your record and the best
+-- known record of the Training Dummy, then of the Lich King. A record is
+-- there when it carries a usable DPS, 0 included; a missing one has no row
+-- and no dash, and without any record there is no heading and no section.
+-- A build in progress heads the list "DPS RECORDS" with its plan's rolled
+-- copies and names each row of yours by its target ("Your Dummy", "Your
+-- Lich King"); a best known record without a row of yours above it is
+-- headed by its target's name. A completed build heads each target and says
+-- "Your Best" under it. Every row is its label and, at the right, its value;
+-- a label too long for its row wraps and the row grows. The two hover areas
+-- cover their target's rows and keep the complete record facts
+-- (AddDpsTooltip). The rows are measured before the layout
+-- (M.MeasurePerformance, LayoutMetrics.Panel: spec.performanceH) and placed
+-- in its box (M.PlacePerformance).
+------------------------------------------------------------------------
+-- A record with a usable DPS (a measured 0 included), else nil.
+local function DpsRecord(record)
+    local dps = type(record) == "table" and tonumber(record.dps) or nil
+    if dps and dps == dps and dps >= 0 and dps < math.huge then return record end
+    return nil
 end
 
-local function RenderPerformance(pr, completed)
-    local performance = type(pr.performance) == "table" and pr.performance or {}
+-- Which of the four records exist, with their shown values, as one string
+-- (the section's part of the layout signature).
+function M.PerformanceKey(performance)
+    performance = type(performance) == "table" and performance or {}
+    local parts = {}
+    for _, target in ipairs({"dummy", "lk"}) do
+        local records = type(performance[target]) == "table" and performance[target] or {}
+        for _, kind in ipairs({"personal", "global"}) do
+            local record = DpsRecord(records[kind])
+            parts[#parts + 1] = record and FmtDps(record.dps) or "-"
+        end
+    end
+    return table.concat(parts, "|")
+end
+
+-- The section's rows for this run: {label, text, value, valueText, group,
+-- heading}. Each row's widgets are the section's own FontStrings.
+function M.PerformanceRows(pr, completed)
+    local performance = type(pr) == "table" and type(pr.performance) == "table" and pr.performance or {}
     local dummy = type(performance.dummy) == "table" and performance.dummy or {}
     local lk = type(performance.lk) == "table" and performance.lk or {}
-    local myDummy, myLK = dummy.personal, lk.personal
-    local topDummy, topLK = dummy.global, lk.global
-
-    local count = tonumber(pr.total) or 0
-    -- M4 (UX-14): the shared column is the best record this client knows for
+    local myDummy, topDummy = DpsRecord(dummy.personal), DpsRecord(dummy.global)
+    local myLK, topLK = DpsRecord(lk.personal), DpsRecord(lk.global)
+    local rows = {facts = {myDummy = myDummy, topDummy = topDummy, myLK = myLK, topLK = topLK}}
+    if not (myDummy or topDummy or myLK or topLK) then return rows end
+    -- M4 (UX-14): the shared rows are the best record this client knows for
     -- these exact Echoes, not a global ranking (UserText.BEST_KNOWN).
     local text = Nexus.UserText
     local bestKnown = text and text.BEST_KNOWN or LT("panel.label.best_known")
+    local function Row(group, label, words, value, record, colour, heading)
+        rows[#rows + 1] = {group = group, label = label, text = words, value = value, heading = heading,
+            valueText = record and (colour .. FmtDps(record.dps) .. "|r") or nil}
+    end
     if completed then
-        performanceLabel:SetText(LT("panel.heading.training_dummy"))
-        setLabelText:SetText("")
-        dummyLabel:SetText(LT("panel.label.your_best"))
-        dummyGlobal:SetText(bestKnown)
-        lkPersonalLabel:SetText(LT("panel.heading.lich_king"))
-        lkLabel:SetText(LT("panel.label.your_best"))
-        lkGlobal:SetText(bestKnown)
+        if myDummy or topDummy then
+            Row("dummy", performanceLabel, LT("panel.heading.training_dummy"), nil, nil, nil, true)
+            if myDummy then Row("dummy", dummyLabel, LT("panel.label.your_best"), dummyValue, myDummy, "|cff4dff80") end
+            if topDummy then Row("dummy", dummyGlobal, bestKnown, dummyGlobalValue, topDummy, "|cffffd200") end
+        end
+        if myLK or topLK then
+            Row("lk", lkPersonalLabel, LT("panel.heading.lich_king"), nil, nil, nil, true)
+            if myLK then Row("lk", lkLabel, LT("panel.label.your_best"), lkValue, myLK, "|cff4dff80") end
+            if topLK then Row("lk", lkGlobal, bestKnown, lkGlobalValue, topLK, "|cffffd200") end
+        end
     else
-        performanceLabel:SetText(LT("panel.heading.dps_records"))
         -- M4 (UX-13): the plan's rolled copies, not Echo rows or names.
-        setLabelText:SetText(LF("panel.label.target_build_copies", {count = tostring(count)}))
-        dummyLabel:SetText(LT("panel.label.your_dummy"))
-        lkLabel:SetText(LT("panel.label.your_lich_king"))
+        Row(nil, performanceLabel, LT("panel.heading.dps_records"), setLabelText, nil, nil, true)
+        rows[#rows].valueText = "|cffa8a8b0" .. LF("panel.label.target_build_copies",
+            {count = tostring(tonumber(pr.total) or 0)}) .. "|r"
+        if myDummy then
+            Row("dummy", dummyLabel, LT("panel.label.your_dummy"), dummyValue, myDummy, "|cff4dff80")
+        elseif topDummy then
+            Row("dummy", dummyLabel, LT("panel.heading.training_dummy"), nil, nil, nil, true)
+        end
+        if topDummy then Row("dummy", dummyGlobal, bestKnown, dummyGlobalValue, topDummy, "|cffffd200") end
+        if myLK then
+            Row("lk", lkLabel, LT("panel.label.your_lich_king"), lkValue, myLK, "|cff4dff80")
+        elseif topLK then
+            Row("lk", lkLabel, LT("panel.heading.lich_king"), nil, nil, nil, true)
+        end
+        if topLK then Row("lk", lkGlobal, bestKnown, lkGlobalValue, topLK, "|cffffd200") end
     end
-    dummyValue:SetText(myDummy and ("|cff4dff80" .. FmtDps(myDummy.dps) .. "|r") or "|cff777777—|r")
-    lkValue:SetText(myLK and ("|cff4dff80" .. FmtDps(myLK.dps) .. "|r") or "|cff777777—|r")
-    if completed then
-        dummyGlobalValue:SetText(topDummy and ("|cffffd200" .. FmtDps(topDummy.dps) .. "|r") or "|cff777777—|r")
-        lkGlobalValue:SetText(topLK and ("|cffffd200" .. FmtDps(topLK.dps) .. "|r") or "|cff777777—|r")
-    else
-        dummyGlobal:SetText(topDummy and (bestKnown .. "  |cffffd200" .. FmtDps(topDummy.dps) .. "|r") or (bestKnown .. "  —"))
-        lkGlobal:SetText(topLK and (bestKnown .. "  |cffffd200" .. FmtDps(topLK.dps) .. "|r") or (bestKnown .. "  —"))
-    end
+    return rows
+end
 
-    AddDpsTooltip(dummyHit, LT("panel.value.target_training_dummy"), myDummy, topDummy)
-    AddDpsTooltip(lkHit, LT("panel.value.target_lich_king"), myLK, topLK)
+-- The section's words, visibility and hover facts. `enabled`: the section is
+-- turned on and this view may show it. Every widget without a row is hidden.
+function M.FillPerformance(pr, completed, enabled)
+    local rows = enabled and M.PerformanceRows(pr, completed) or {facts = {}}
+    local used = {}
+    for index = 1, #rows do
+        local row = rows[index]
+        row.label:SetText(row.text)
+        row.label:Show()
+        used[row.label] = true
+        if row.value then
+            row.value:SetText(row.valueText or "")
+            row.value:Show()
+            used[row.value] = true
+        end
+    end
+    for _, widget in ipairs({performanceLabel, setLabelText, dummyLabel, dummyValue, dummyGlobal, dummyGlobalValue,
+        lkLabel, lkPersonalLabel, lkValue, lkGlobal, lkGlobalValue}) do
+        if not used[widget] then widget:Hide() end
+    end
+    local facts = rows.facts
+    SetVisible(dummyHit, (facts.myDummy or facts.topDummy) and true or false)
+    SetVisible(lkHit, (facts.myLK or facts.topLK) and true or false)
+    AddDpsTooltip(dummyHit, LT("panel.value.target_training_dummy"), facts.myDummy, facts.topDummy)
+    AddDpsTooltip(lkHit, LT("panel.value.target_lich_king"), facts.myLK, facts.topLK)
+    return rows
+end
+
+-- The rows filled and measured at `width`: each row is as tall as its line
+-- or as its wrapped label beside the value's own width. Returns the
+-- section's height (0 without a row); the measured rows are kept on the
+-- panel for M.PlacePerformance.
+function M.MeasurePerformance(pr, completed, enabled, width)
+    local rows = M.FillPerformance(pr, completed, enabled)
+    local metrics = Nexus.LayoutMetrics
+    local scale = metrics.RuntimeMetrics()
+    local line = math.ceil(15 * scale)
+    local gap = math.ceil(6 * scale)
+    local rowGap = math.max(2, math.floor(gap / 3))
+    local height = 0
+    for index = 1, #rows do
+        local row = rows[index]
+        row.valueW = row.value and math.ceil(M.LineWidth(row.value, row.valueText or "")) or 0
+        row.labelW = math.max(1, width - (row.valueW > 0 and (row.valueW + gap) or 0))
+        if type(row.label.SetWordWrap) == "function" then pcall(row.label.SetWordWrap, row.label, true) end
+        row.h = metrics.WrapHeight(row.label, row.labelW, line)
+        -- A new target's first row keeps a section gap from the rows above.
+        row.top = height + ((index > 1 and row.group ~= rows[index - 1].group) and gap
+            or (index > 1 and rowGap or 0))
+        height = row.top + row.h
+    end
+    frame._performanceRows = rows
+    return height
+end
+
+-- The measured rows inside the layout's performance box; each target's hover
+-- covers its rows.
+function M.PlacePerformance(box)
+    local rows = frame and frame._performanceRows
+    if not (box and rows) then return end
+    local span = {}
+    for index = 1, #rows do
+        local row = rows[index]
+        local y = box.y + (row.top or 0)
+        row.label:ClearAllPoints()
+        row.label:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -y)
+        row.label:SetSize(row.labelW or box.w, row.h or 1)
+        row.label:SetJustifyH("LEFT")
+        if row.value then
+            row.value:ClearAllPoints()
+            row.value:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x + box.w - (row.valueW or 0), -y)
+            row.value:SetSize(math.max(1, row.valueW or 0), row.h or 1)
+            row.value:SetJustifyH("RIGHT")
+        end
+        if row.group then
+            local s = span[row.group] or {top = y}
+            s.bottom = y + (row.h or 0)
+            span[row.group] = s
+        end
+    end
+    for group, hit in pairs({dummy = dummyHit, lk = lkHit}) do
+        local s = span[group]
+        if s then
+            hit:ClearAllPoints()
+            hit:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -s.top)
+            hit:SetSize(box.w, math.max(1, s.bottom - s.top))
+        end
+    end
 end
 
 ------------------------------------------------------------------------
@@ -4113,7 +4321,7 @@ function M.DetailRows(column, r, g, b)
     local rows = column._nexusRows
     if rows then return rows end
     local metrics = Nexus.LayoutMetrics
-    local font = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    local font = metrics and metrics.FontObject and metrics.FontObject("secondary") or "GameFontHighlightSmall"
     rows = {column}
     for index = 2, 3 do
         local row = frame:CreateFontString(nil, "OVERLAY", font)
@@ -4476,6 +4684,8 @@ end
 -- modelled rows. Collapsed Details measures nothing and keeps the model.
 function M.PanelLayout(spec, progress)
     local metrics = Nexus.LayoutMetrics
+    -- Kept for this pass's measured second computation (M.MeasuredLayout).
+    M._panelSpec = spec
     local layout = metrics.Panel(spec)
     local boxes = type(layout) == "table" and layout.boxes or nil
     if not (spec.planDetails and boxes and boxes.needed and boxes.shed and needText and shedText) then
@@ -4525,7 +4735,10 @@ end
 -- texture cut from each side, the client's own bevel (as the Journal's
 -- icons). Gaps come from the layout (M.PlaceOfferCards). One table: the main
 -- chunk's locals are counted too.
-local OFFER = {mark = {1, 0.82, 0}, crop = 0.07}
+-- fill is every row's own ground; band is the selected row's (approved
+-- cleanup: the selected row is a filled band with a 2-unit accent bar in the
+-- mark colour, never an outline).
+local OFFER = {mark = {1, 0.82, 0}, crop = 0.07, fill = {0, 0, 0, 0.35}, band = {1, 1, 1, 0.09}, accent = 2}
 
 -- The verified icon of an offer (MI-F01): the client's own texture for the
 -- card's exact spell id, the third return of GetSpellInfo, as
@@ -4591,7 +4804,9 @@ function M.EnsureOfferCards()
     if frame._offerCards then return frame._offerCards end
     local area = frame._rollArea
     local metrics = Nexus.LayoutMetrics
-    local small = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    -- The name is primary text (12); its quality and tag are secondary (11).
+    local small = metrics and metrics.FontObject and metrics.FontObject("secondary") or "GameFontHighlightSmall"
+    local primary = metrics and metrics.FontObject and metrics.FontObject("normal") or "GameFontHighlight"
     local cards = {}
     for index = 1, 3 do
         local card = CreateFrame("Frame", nil, area)
@@ -4601,12 +4816,21 @@ function M.EnsureOfferCards()
         card.fill = card:CreateTexture(nil, "BACKGROUND")
         card.fill:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
         card.fill:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0)
-        card.fill:SetTexture(0, 0, 0, 0.35)
+        card.fill:SetTexture(OFFER.fill[1], OFFER.fill[2], OFFER.fill[3], OFFER.fill[4])
+        -- The selected row's accent bar: along the row's left edge, just
+        -- outside its icon, as tall as the row (M.PlaceOfferCards). Shown
+        -- only on the selected row (M.RenderOfferCards). A plain texture: it
+        -- takes no mouse and is no outline.
+        card.accent = card:CreateTexture(nil, "ARTWORK")
+        card.accent:SetTexture(OFFER.mark[1], OFFER.mark[2], OFFER.mark[3], 0.9)
+        card.accent:SetPoint("TOPLEFT", card, "TOPLEFT", -OFFER.accent, 0)
+        card.accent:SetSize(OFFER.accent, 1)
+        card.accent:Hide()
         -- No border: the row is its fill, its icon and its texts. Each text
         -- spans the row's height (M.PlaceOfferCards) and sits in its middle,
         -- on the icon's centre line.
         for _, key in ipairs({"name", "quality", "tag"}) do
-            local text = card:CreateFontString(nil, "OVERLAY", small)
+            local text = card:CreateFontString(nil, "OVERLAY", key == "name" and primary or small)
             text:SetJustifyH("LEFT")
             text:SetJustifyV("MIDDLE")
             text:SetWordWrap(false)
@@ -4680,12 +4904,19 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             else
                 card.tag:SetTextColor(0.75, 0.75, 0.75)
             end
-            -- The marked row is told by its tag's words and gold colour (no
-            -- border is drawn around a row).
+            -- The selected row (the marked offer, or with Auto OFF the one
+            -- to freeze) is told by its tag's words and gold colour, its
+            -- lighter band and its accent bar; no border is drawn around a
+            -- row. Set on every render, so a reused card keeps no earlier
+            -- selection.
+            local band = (shown.marked or shown.freeze) and OFFER.band or OFFER.fill
+            card.fill:SetTexture(band[1], band[2], band[3], band[4])
+            SetVisible(card.accent, (shown.marked or shown.freeze) and true or false)
             card._nexusFull, card._nexusTag, card._nexusMarked = shown.full, shown.tag, shown.marked
             card:Show()
         elseif card then
             card._nexusFull, card._nexusTag, card._nexusMarked = nil, nil, nil
+            SetVisible(card.accent, false)
             -- A hidden card keeps no offer's icon: its slot, once made, is cleared.
             if card._nexusSlot then M.OfferSlot(card, nil, true, nil) end
             card:Hide()
@@ -4731,7 +4962,9 @@ function M.SetOfferHeading(text, model, activeSlot, layout)
     local forms = readout.OfferHeadingForms and readout.OfferHeadingForms(model.auto)
         or {readout.OfferHeading(model.auto)}
     local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.roll or nil
-    local width = box and (box.w - 4 - (SafeText(model._nexusChargeLine) ~= ""
+    -- (Less what the Auto scope control keeps at the row's right while it
+    -- shares this row: layout.headingReserve.)
+    local width = box and (box.w - 4 - (tonumber(layout.headingReserve) or 0) - (SafeText(model._nexusChargeLine) ~= ""
         and (tonumber(layout.chargesMinW) or 72) + (tonumber(layout.chargesGap) or 4) or 0)) or nil
     local chosen, measured = "", nil
     for _, form in ipairs(forms) do
@@ -4778,7 +5011,7 @@ function M.ChargesCell(layout, heading)
         local visible = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
         need = math.max(M.LineWidth(heading, line), #(visible:gsub("[\128-\191]", "")) * char)
     end
-    local room = box.w - 4 - (tonumber(layout.chargesGap) or 4) - math.ceil(need)
+    local room = box.w - 4 - (tonumber(layout.headingReserve) or 0) - (tonumber(layout.chargesGap) or 4) - math.ceil(need)
     return math.max(minimum, math.min(wanted, room))
 end
 
@@ -4797,38 +5030,188 @@ end
 -- does not use). What is shortened is complete on the card's hover, and the
 -- name in the recommendation.
 -- Returns "rows".
+-- Approved panel cleanup (full offer names): a name longer than its column
+-- wraps there and its row is as tall as the wrapped name (the heights
+-- M.MeasuredLayout measured: layout.offerRowsH); the rows follow each
+-- other, a row gap apart. Its quality and tag stay on the row's first line.
+-- Without measured heights (a layout computed without them) every row keeps
+-- the model row's height.
+function M.OfferRowWidths(card, width, layout, rowH)
+    local gap = layout.gap
+    local left = rowH + gap
+    local rest = math.max(1, width - left - math.ceil(gap / 2))
+    local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
+    local nameNeed = math.ceil(M.LineWidth(card.name, card.name:GetText() or ""))
+    local qualityNeed = quality ~= "" and math.ceil(M.LineWidth(card.quality, quality)) or 0
+    local tagW = tag ~= "" and math.min(math.ceil(M.LineWidth(card.tag, tag)),
+        math.max(math.floor(rest / 2), rest - 2 * gap - qualityNeed - nameNeed)) or 0
+    local room = rest - tagW - 2 * gap - math.min(math.floor(rest / 6), nameNeed)
+    local qualityW = quality ~= "" and math.max(1, math.min(room, qualityNeed)) or 0
+    local nameW = math.max(1, rest - tagW - qualityW - (tagW > 0 and gap or 0) - (qualityW > 0 and gap or 0))
+    return left, nameW, qualityW, tagW
+end
+
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
     if not (cards and layout and box) then return nil end
     local top, rowH, rowGap = Nexus.LayoutMetrics.OfferRows(layout.small, layout.gap)
     local gap = layout.gap
     local width = box.w - inset * 2
+    local measured = type(layout.offerRowsH) == "table" and layout.offerRowsH or nil
+    local reason = measured and layout.offerReason or nil
+    local y = top + (tonumber(layout.headingExtra) or 0)
     for index = 1, 3 do
         local card = cards[index]
+        local height = math.max(rowH, math.ceil(measured and tonumber(measured[index]) or 0))
         card:ClearAllPoints()
-        card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (rowH + rowGap)))
-        card:SetSize(width, rowH)
-        local left = M.OfferSlot(card, rowH) + gap
-        local rest = math.max(1, width - left - math.ceil(gap / 2))
-        local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
-        local nameNeed = math.ceil(M.LineWidth(card.name, card.name:GetText() or ""))
-        local qualityNeed = quality ~= "" and math.ceil(M.LineWidth(card.quality, quality)) or 0
-        local tagW = tag ~= "" and math.min(math.ceil(M.LineWidth(card.tag, tag)),
-            math.max(math.floor(rest / 2), rest - 2 * gap - qualityNeed - nameNeed)) or 0
-        local room = rest - tagW - 2 * gap - math.min(math.floor(rest / 6), nameNeed)
-        local qualityW = quality ~= "" and math.max(1, math.min(room, qualityNeed)) or 0
-        local nameW = math.max(1, rest - tagW - qualityW - (tagW > 0 and gap or 0) - (qualityW > 0 and gap or 0))
+        card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -y)
+        card:SetSize(width, height)
+        if card.accent then
+            card.accent:ClearAllPoints()
+            card.accent:SetPoint("TOPLEFT", card, "TOPLEFT", -OFFER.accent, 0)
+            card.accent:SetSize(OFFER.accent, height)
+        end
+        M.OfferSlot(card, rowH)
+        local left, nameW, qualityW, tagW = M.OfferRowWidths(card, width, layout, rowH)
+        -- The texts' own part of the row: all of it, or what is above the
+        -- selected offer's reason.
+        local textH = (reason and reason.row == index) and math.min(height, tonumber(reason.top) or height) or height
         local x = left
-        for _, part in ipairs({{card.name, nameW}, {card.quality, qualityW}, {card.tag, tagW}}) do
+        for _, part in ipairs({{card.name, nameW, textH}, {card.quality, qualityW, rowH}, {card.tag, tagW, rowH}}) do
             local text = part[1]
             text:ClearAllPoints()
             text:SetPoint("TOPLEFT", card, "TOPLEFT", x, 0)
-            text:SetSize(math.max(1, part[2]), rowH)
+            text:SetSize(math.max(1, part[2]), part[3])
+            -- With measured rows a quality or tag too long for its column
+            -- wraps there, in the height its text needs.
+            if measured and text ~= card.name and part[2] > 0 and card:IsShown() then
+                Nexus.LayoutMetrics.WrapHeight(text, part[2], rowH)
+            end
             if part[2] > 0 then x = x + part[2] + gap end
         end
         card._nexusLayout = "rows"
+        y = y + height + rowGap
     end
     return "rows"
+end
+
+-- Enables word wrap on a text (the client's own switch; a text created as
+-- one line otherwise keeps it) and returns its measured height at `width`.
+function M.WrappedHeight(text, width, minimum)
+    if type(text.SetWordWrap) == "function" then pcall(text.SetWordWrap, text, true) end
+    return (Nexus.LayoutMetrics.WrapHeight(text, math.max(1, width), minimum))
+end
+
+-- With every text of this pass worded (ApplyModel), the measured heights of
+-- the texts that may wrap, at the widths they will have, and the layout
+-- computed again with them (LayoutMetrics.Panel), so nothing is shortened or
+-- cut and nothing keeps room it does not use:
+--   the offer heading and the charges beside it (spec.headingH);
+--   each offer row: its name, quality and tag (spec.offerRowsH), and for the
+--   selected offer its reason inside the row under them (spec.offerReason);
+--   the text under the heading or the rows when it is not such a reason
+--   (spec.bodyH);
+--   with Details open, the run's count and the four counts
+--   (spec.progressValueH, spec.countRowsH);
+--   the Orb run line (spec.orbLineH).
+-- The collapsed level-80 block keeps its own model; a pass without a spec
+-- keeps `layout`.
+function M.MeasuredLayout(layout)
+    local spec, metrics = M._panelSpec, Nexus.LayoutMetrics
+    if not (type(spec) == "table" and metrics and type(layout) == "table" and type(layout.boxes) == "table") then
+        return layout
+    end
+    local boxes, small, gap = layout.boxes, layout.small, layout.gap
+    local rowGap = math.max(2, math.floor(gap / 3))
+    local box = boxes.roll
+    if box and not layout.noOffer then
+        local width = box.w - 4
+        local _, rowH = metrics.OfferRows(small, gap)
+        -- The heading row: its one small line while the heading and the
+        -- charges each fit one line (so a one-line heading keeps the
+        -- established band), and the wrapped height of whichever of them
+        -- needs more than one line.
+        local function Needed(text, limit)
+            local wrapped = M.WrappedHeight(text, limit, 1)
+            local single = M.WrappedHeight(text, 100000, 1)
+            return wrapped > single + 0.5 and wrapped or small
+        end
+        local headW = width - (tonumber(layout.headingReserve) or 0)
+        local headH = small
+        local charges = frame._chargesText
+        if charges and charges:IsShown() then
+            local cell = M.ChargesCell(layout, statusText)
+            headH = math.max(headH, Needed(charges, cell))
+            headW = headW - cell - (tonumber(layout.chargesGap) or 4)
+        end
+        if (statusText:GetText() or "") ~= "" then
+            headH = math.max(headH, Needed(statusText, headW))
+        end
+        spec.headingH = headH
+        -- The offer rows.
+        local cards = frame._offerCards
+        local body = recText:GetText() or ""
+        local rows, reason
+        -- Only rows that are shown are content: between boards the text
+        -- stands right under the heading, and the block keeps its height
+        -- through spec.reservedRollH, not through empty rows.
+        local anyShown = false
+        for index = 1, 3 do
+            if cards and cards[index]:IsShown() then anyShown = true end
+        end
+        spec.cardRows = anyShown
+        if anyShown then
+            rows = {}
+            for index = 1, 3 do
+                local card = cards[index]
+                rows[index] = rowH
+                if card:IsShown() then
+                    local left, nameW, qualityW, tagW = M.OfferRowWidths(card, width, layout, rowH)
+                    local height = M.WrappedHeight(card.name, nameW, rowH)
+                    if qualityW > 0 then height = math.max(height, M.WrappedHeight(card.quality, qualityW, rowH)) end
+                    if tagW > 0 then height = math.max(height, M.WrappedHeight(card.tag, tagW, rowH)) end
+                    if frame._offerReasonRow == index and body ~= "" then
+                        local reasonH = M.WrappedHeight(recText, width - left - math.ceil(gap / 2), small)
+                        reason = {row = index, top = height, h = reasonH}
+                        height = height + reasonH + rowGap
+                    end
+                    rows[index] = height
+                end
+            end
+        end
+        spec.offerRowsH, spec.offerReason = rows, reason
+        local bodyH = (not reason and body ~= "") and M.WrappedHeight(recText, width, small) or nil
+        -- The Orb guidance, an Orb pause reason and the inline Auto line are
+        -- the rows that must stay readable in a face wider than the one
+        -- measured (LayoutMetrics.ConservativeText; spec.guidanceRows marks
+        -- them): that model's rows at this width are their box's least
+        -- height (spec.bodyFloorH), as before the rows were measured. The
+        -- layout applies it (a block kept between boards is not grown by it).
+        spec.bodyFloorH = nil
+        if bodyH and (tonumber(spec.guidanceRows) or 0) > 0 and metrics.TextRows and metrics.ConservativeText then
+            local _, line = metrics.ConservativeText(layout.scale)
+            spec.bodyFloorH = metrics.TextRows(body, width, layout.scale) * line
+        end
+        spec.bodyH = bodyH
+        spec.measured = true
+    end
+    local p = frame._play
+    if p and boxes.planNeeded and boxes.planTomes and boxes.planExtra and boxes.planLocked and boxes.progressValue then
+        spec.countRowsH = {
+            math.max(M.WrappedHeight(p.needed, boxes.planNeeded.w, small), M.WrappedHeight(p.tomes, boxes.planTomes.w, small)),
+            math.max(M.WrappedHeight(p.extra, boxes.planExtra.w, small), M.WrappedHeight(p.locked, boxes.planLocked.w, small)),
+        }
+        spec.progressValueH = M.WrappedHeight(progressValue, boxes.progressValue.w, layout.normal)
+    else
+        spec.countRowsH, spec.progressValueH = nil, nil
+    end
+    if p and boxes.orbLine and p.orb:IsShown() then
+        spec.orbLineH = M.WrappedHeight(p.orb, boxes.orbLine.w, small)
+    else
+        spec.orbLineH = nil
+    end
+    local ok, measured = pcall(metrics.Panel, spec)
+    return ok and type(measured) == "table" and measured or layout
 end
 
 ------------------------------------------------------------------------
@@ -4856,9 +5239,11 @@ local function PlayWhole(value)
 end
 
 -- "4,812": a whole DPS with thousands separators; nil when not a record.
+-- A record measured as 0 is a record ("0"): only a missing record, or one
+-- without a usable number, is none.
 local function PlayDps(record)
     local dps = type(record) == "table" and PlayWhole(record.dps) or nil
-    if not dps or dps <= 0 then return nil end
+    if not dps then return nil end
     local text = tostring(dps)
     while true do
         local grouped, n = text:gsub("^(%d+)(%d%d%d)", "%1,%2")
@@ -4884,7 +5269,7 @@ function M.EnsurePlayWidgets()
     if not frame then return nil end
     if frame._play then return frame._play end
     local metrics = Nexus.LayoutMetrics
-    local small = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    local small = metrics and metrics.FontObject and metrics.FontObject("secondary") or "GameFontHighlightSmall"
     local p = {}
     local function Line(justify)
         local text = frame:CreateFontString(nil, "OVERLAY", small)
@@ -4956,10 +5341,11 @@ function M.EnsurePlayWidgets()
     p.serverHit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     p.serverHit:Hide()
     -- Your record (its label is the former best-DPS line, which keeps its
-    -- hover) and the best known record for these Echoes, then the note.
-    p.yoursValue = Line("RIGHT")
-    p.bestLabel, p.bestValue = Line(), Line("RIGHT")
-    p.note = Line()
+    -- hover, p.yoursHit) and the best known record for these Echoes: each a
+    -- label with its value right after it (M.PlacePlaySummary).
+    p.yoursValue = Line()
+    p.yoursHit = bestDpsHit
+    p.bestLabel, p.bestValue = Line(), Line()
     p.bestHit = Hover(p.bestLabel, function(self)
         if not GameTooltip then return end
         local model = type(M._lastModel) == "table" and M._lastModel or {}
@@ -4977,7 +5363,10 @@ function M.EnsurePlayWidgets()
                 or LF("panel.tooltip.best_known_target_none", {target = target}),
                 0.85, 0.85, 0.85, true)
         end
-        if text and text.RECORD_SCOPE then GameTooltip:AddLine(text.RECORD_SCOPE, 0.45, 0.75, 1, true) end
+        -- Without a record of yours there is no row for it: said here.
+        M.AddMissingRecordLine("yours")
+        -- What best known means (the scope the former note row stated).
+        GameTooltip:AddLine(text and text.RECORD_SCOPE or LT("panel.note.shared_records_scope"), 0.45, 0.75, 1, true)
         GameTooltip:Show()
     end)
     M.PassiveDragSurface(p.bestHit)
@@ -5085,19 +5474,13 @@ function M.OrbLineText()
     return {shown = shown, full = type(full) == "string" and full or shown}
 end
 
--- Your record and the best known record for the same Echoes (layout rows
--- bestDps, bestKnown, recordNote). Also run on a records-only render.
-function M.RenderPlayRecords(model, layout)
-    local records = layout ~= nil and layout.boxes ~= nil and layout.boxes.bestKnown ~= nil
-    local p = (records or (frame and frame._play)) and M.EnsurePlayWidgets() or nil
-    if not p then return end
-    SetVisible(p.yoursValue, records); SetVisible(p.bestLabel, records); SetVisible(p.bestValue, records)
-    SetVisible(p.bestHit, records); SetVisible(p.note, records)
-    if not records then
-        bestDpsText:SetJustifyH("CENTER")
-        return
-    end
-    local text = Nexus.UserText
+-- The DPS records this panel may show, as their shown values: `yours` the
+-- character's own record(s) and `best` the best known record(s) for the same
+-- Echoes, each nil when no such record exists (a record measured as 0 is
+-- one); `dummyOnly` when yours is a Training Dummy record alone. Reads the
+-- model only.
+function M.PlayRecordFacts(model)
+    model = type(model) == "table" and model or {}
     local function Value(d, l)
         if d and l then return LF("panel.value.records_dummy_and_lk", {dummy = d, lk = l}) end
         if d then return LF("panel.value.records_dps", {dps = d}) end
@@ -5106,42 +5489,104 @@ function M.RenderPlayRecords(model, layout)
     end
     local best = type(model.bestDps) == "table" and model.bestDps or {}
     local mineD, mineL = PlayDps(best.dummy), PlayDps(best.lk)
-    local mine = Value(mineD, mineL)
-    bestDpsText:SetJustifyH("LEFT")
-    bestDpsText:SetText(PLAY.label .. LT((mineD and not mineL) and "panel.label.yours_training_dummy" or "panel.label.yours") .. "|r")
-    p.yoursValue:SetText(mine and (PLAY.value .. mine .. "|r")
-        or (PLAY.muted .. LT("panel.value.no_record_yet") .. "|r"))
     local pr = type(model.progress) == "table" and model.progress or {}
     local perf = type(pr.performance) == "table" and pr.performance or {}
     local knownD = PlayDps(type(perf.dummy) == "table" and perf.dummy.global or nil)
     local knownL = PlayDps(type(perf.lk) == "table" and perf.lk.global or nil)
-    local known = Value(knownD, knownL)
+    return {yours = Value(mineD, mineL), dummyOnly = mineD ~= nil and mineL == nil,
+        best = Value(knownD, knownL)}
+end
+
+-- Your record and the best known record for the same Echoes (layout boxes
+-- bestDps and bestKnown), each one entry: a label followed by its value. An
+-- entry exists only while its record does (LayoutMetrics.Panel:
+-- spec.recordYours, spec.recordBest): without a record its label, value and
+-- hover are hidden and nothing is said in its place; the hover of the entry
+-- that does exist names the missing one (M.AddMissingRecordLine). Also run on
+-- a records-only render.
+function M.RenderPlayRecords(model, layout)
+    local boxes = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes or nil
+    local yoursRow = boxes ~= nil and boxes.bestDps ~= nil
+    local bestRow = boxes ~= nil and boxes.bestKnown ~= nil
+    if boxes then
+        SetVisible(bestDpsText, yoursRow); SetVisible(bestDpsHit, yoursRow)
+    else
+        bestDpsText:SetJustifyH("CENTER")
+    end
+    local p = (yoursRow or bestRow or (frame and frame._play)) and M.EnsurePlayWidgets() or nil
+    if not p then return end
+    SetVisible(p.yoursValue, yoursRow)
+    SetVisible(p.bestLabel, bestRow); SetVisible(p.bestValue, bestRow); SetVisible(p.bestHit, bestRow)
+    if not (yoursRow or bestRow) then return end
+    M.FillPlayRecords(p, M.PlayRecordFacts(model))
+end
+
+-- The entries' words from M.PlayRecordFacts. An entry kept by an earlier
+-- layout (this pass built none) whose record is gone says so, never 0.
+function M.FillPlayRecords(p, facts)
+    local text = Nexus.UserText
+    local mine, known = facts.yours, facts.best
+    bestDpsText:SetJustifyH("LEFT")
+    bestDpsText:SetText(PLAY.label .. LT(facts.dummyOnly and "panel.label.yours_training_dummy" or "panel.label.yours") .. "|r")
+    p.yoursValue:SetText(mine and (PLAY.value .. mine .. "|r")
+        or (PLAY.muted .. LT("panel.value.no_record_yet") .. "|r"))
     p.bestLabel:SetText(PLAY.label .. LF("panel.label.best_known_same_build",
         {best_known = tostring(text and text.BEST_KNOWN or LT("panel.label.best_known"))}) .. "|r")
-    if known then
-        p.bestValue:SetText(PLAY.value .. known .. "|r")
-    else
-        -- No record held: say why, from the start-up snapshot. Loading is a
-        -- wait and unavailable is named; neither is "0" or "no records".
-        local okStatus, status = false, nil
-        if type(Nexus.StartupStatus) == "function" then okStatus, status = pcall(Nexus.StartupStatus) end
-        local state = okStatus and type(status) == "table" and status.state or nil
-        local readout = Nexus.Readout
-        local function Kind(kind, fallback)
-            return readout and readout.StatusText and readout.StatusText(kind, fallback) or fallback
-        end
-        if state == "ready" then
-            p.bestValue:SetText(PLAY.muted .. LT("panel.value.none_received_yet") .. "|r")
-        elseif state == "failed" then
-            p.bestValue:SetText(PLAY.wait .. Kind("unavailable", LT("panel.status.shared_data_short")) .. "|r")
-        else
-            local loading = LT("panel.value.shared_data_loading")
-            p.bestValue:SetText(PLAY.wait .. ((readout and readout.StatusParts)
-                and (readout.StatusParts("loading").glyph .. " " .. loading) or loading) .. "|r")
-        end
+    p.bestValue:SetText(known and (PLAY.value .. known .. "|r") or M.BestKnownAbsence())
+end
+
+-- Why no best known record is held, from the start-up snapshot, in its status
+-- colour: loading is a wait and unavailable is named; neither is "0" or "no
+-- records". Reads the snapshot only.
+function M.BestKnownAbsence()
+    local okStatus, status = false, nil
+    if type(Nexus.StartupStatus) == "function" then okStatus, status = pcall(Nexus.StartupStatus) end
+    local state = okStatus and type(status) == "table" and status.state or nil
+    local readout = Nexus.Readout
+    if state == "ready" then return PLAY.muted .. LT("panel.value.none_received_yet") .. "|r" end
+    if state == "failed" then
+        local fallback = LT("panel.status.shared_data_short")
+        return PLAY.wait .. (readout and readout.StatusText and readout.StatusText("unavailable", fallback)
+            or fallback) .. "|r"
     end
-    -- The design's note in the shared record-scope words (UserText.RECORD_SCOPE).
-    p.note:SetText(PLAY.muted .. LT("panel.note.shared_records_scope") .. "|r")
+    local loading = LT("panel.value.shared_data_loading")
+    return PLAY.wait .. ((readout and readout.StatusParts)
+        and (readout.StatusParts("loading").glyph .. " " .. loading) or loading) .. "|r"
+end
+
+-- On the hover of a DPS row that exists: the record that has no row, so its
+-- absence (or the wait for shared data) stays readable. `side` is the
+-- record to name when it is missing: "best" on your row's hover, "yours" on
+-- the best known row's. Reads the committed model and the start-up snapshot.
+function M.AddMissingRecordLine(side)
+    if not GameTooltip then return end
+    local facts = M.PlayRecordFacts(M._lastModel)
+    if side == "best" and not facts.best then
+        local text = Nexus.UserText
+        GameTooltip:AddDoubleLine(LF("panel.label.best_known_same_build",
+            {best_known = tostring(text and text.BEST_KNOWN or LT("panel.label.best_known"))}),
+            M.BestKnownAbsence(), 0.66, 0.66, 0.69, 1, 1, 1)
+    elseif side == "yours" and not facts.yours then
+        GameTooltip:AddDoubleLine(LT("panel.label.yours"), LT("panel.value.no_record_yet"),
+            0.66, 0.66, 0.69, 0.53, 0.53, 0.53)
+    end
+end
+
+-- The measured widths of the DPS entries this model shows, each {label,
+-- value} in the entry's own font, or nil for a record that does not exist
+-- (LayoutMetrics.Panel: spec.recordYours, spec.recordBest). The entries'
+-- texts are set on their widgets to be measured.
+function M.PlayRecordWidths(model)
+    local facts = M.PlayRecordFacts(model)
+    if not (facts.yours or facts.best) then return facts end
+    local p = M.EnsurePlayWidgets()
+    if not p then return facts end
+    M.FillPlayRecords(p, facts)
+    local function Entry(label, value)
+        return {math.ceil(M.LineWidth(label, label:GetText() or "")), math.ceil(M.LineWidth(value, value:GetText() or ""))}
+    end
+    return {yours = facts.yours and Entry(bestDpsText, p.yoursValue) or nil,
+        best = facts.best and Entry(p.bestLabel, p.bestValue) or nil}
 end
 
 -- The Play summary's content and visibility for this render. `layout` is the
@@ -5160,6 +5605,9 @@ function M.RenderPlaySummary(model, layout)
     -- counts are worded on every Play render either way, so Show details
     -- restores the same counts. The former tomes row is one of the counts.
     if play then
+        -- Approved cleanup: the run's count is hidden with the other four
+        -- counts until Details is opened (its row is laid out only then).
+        SetVisible(progressValue, details)
         SetVisible(needLabel, details); SetVisible(needText, details); SetVisible(needHit, details)
         SetVisible(shedLabel, details); SetVisible(shedText, details); SetVisible(shedHit, details)
         M.ShowDetailRows(needText); M.ShowDetailRows(shedText)
@@ -5218,6 +5666,31 @@ function M.RenderPlaySummary(model, layout)
     M.RefreshOrbLine(model, layout)
 end
 
+-- The wrapped height the Orb run line's words need at the width its row has
+-- (the last layout's, or the row's ordinary width before there is one), for
+-- the layout signature. Measured on a hidden text of the line's own font, so
+-- no shown widget is touched, and only when the words, the width or the face
+-- changed. "0" without a line.
+function M.MeasureOrbLine(line)
+    if type(line) ~= "table" or not (frame and Nexus.LayoutMetrics) then return "0" end
+    local laid = frame._responsiveLayout
+    local box = type(laid) == "table" and type(laid.boxes) == "table" and laid.boxes.orbLine or nil
+    local width = box and box.w or 330
+    local probe = frame._orbLineProbe
+    if not probe then
+        probe = frame:CreateFontString(nil, "OVERLAY", Nexus.LayoutMetrics.FontObject("secondary"))
+        probe:Hide()
+        frame._orbLineProbe = probe
+    end
+    local key = tostring(line.shown) .. "\031" .. tostring(width)
+    if frame._orbLineProbeKey ~= key or not rawequal(frame._orbLineProbeFace, probe.GetFont) then
+        probe:SetText(tostring(line.shown))
+        frame._orbLineProbeH = M.WrappedHeight(probe, width, 1)
+        frame._orbLineProbeKey, frame._orbLineProbeFace = key, probe.GetFont
+    end
+    return tostring(frame._orbLineProbeH)
+end
+
 -- The Orb line's text, on every render, settled ones included (the run
 -- moves without a new model): shown while this render read a run and the
 -- layout holds its row.
@@ -5260,15 +5733,31 @@ function M.PlacePlaySummary(layout)
     Put(p.extra, boxes.planExtra); Put(p.locked, boxes.planLocked)
     -- Your value shares the label's row on the right; the label keeps the
     -- left part of it.
-    local records = boxes.bestDps
-    if records then
-        local valueW = math.floor(records.w * 0.55)
-        Put(bestDpsText, records, 0, valueW)
-        Put(p.yoursValue, records, records.w - valueW, records.w - valueW)
-        Put(p.bestLabel, boxes.bestKnown, 0, valueW)
-        Put(p.bestValue, boxes.bestKnown, records.w - valueW, records.w - valueW)
-        Put(p.note, boxes.recordNote)
+    -- Each DPS entry that is laid out: its label, then its value one layout
+    -- gap after it at their measured widths (LayoutMetrics.Panel sized the
+    -- box for them); in a two-line box the value is under the label. An
+    -- unmeasured entry splits its line. The hover covers the entry's box.
+    local function Entry(label, value, hit, box, widths)
+        if not box then return end
+        local line = layout.small
+        local function At(widget, x, y, w, h)
+            widget:ClearAllPoints()
+            widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -y)
+            widget:SetSize(math.max(1, w), h)
+        end
+        local labelW = type(widths) == "table" and math.ceil(tonumber(widths[1]) or 0) or math.floor(box.w * 0.45)
+        local valueW = type(widths) == "table" and math.ceil(tonumber(widths[2]) or 0) or (box.w - labelW)
+        At(label, box.x, box.y, math.min(labelW, box.w), line)
+        if box.h > line then
+            At(value, box.x, box.y + box.h - line, box.w, line)
+        else
+            local x = type(widths) == "table" and (labelW + layout.gap) or labelW
+            At(value, box.x + x, box.y, math.max(1, math.min(valueW, box.w - x)), line)
+        end
+        if hit then At(hit, box.x, box.y, box.w, box.h) end
     end
+    Entry(bestDpsText, p.yoursValue, p.yoursHit, boxes.bestDps, layout.recordYours)
+    Entry(p.bestLabel, p.bestValue, p.bestHit, boxes.bestKnown, layout.recordBest)
     Put(p.orb, boxes.orbLine)
     Put(p.orbOpen, boxes.orbLineOpen)
 end
@@ -5329,7 +5818,9 @@ function M.AutoScopeFallback(body, model, rollBlock, noBuild, layout)
     if not Nexus.LayoutMetrics or type(note) ~= "string"
         or not M.AutoScopeShown(model, rollBlock, noBuild) then return body end
     local boxes = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes or nil
-    if boxes and boxes.autoScope then return body end
+    -- With the layout's own row or its control (the player opens the line
+    -- there), the words are not added to the body.
+    if boxes and (boxes.autoScope or boxes.autoInfo or layout.autoInfoInline) then return body end
     body = tostring(body or "")
     if body:find(note, 1, true) then return body end
     return (body ~= "" and (body .. "\n") or "") .. note
@@ -5337,7 +5828,80 @@ end
 
 -- Places and fills the line from the layout's autoScope box (none: hidden).
 -- Built lazily and reached through M: EnsureFrame is at the upvalue ceiling.
+-- Compact Auto ON (approved cleanup: "Put long explanation behind optional
+-- disclosure"). The scope line is closed until the player opens it: memory
+-- only, like Details, and the panel keeps its top while it grows or shrinks
+-- (M.HoldPanelTop). It only shows or hides words: Auto, its confirmation,
+-- its holds and every permission stay exactly as they are.
+function M.ToggleAutoInfo()
+    M._autoInfoOpen = not M._autoInfoOpen
+    M._detailsHold = M.CapturePanelTop()
+    if M.Refresh then M.Refresh() end
+    return M._autoInfoOpen
+end
+
+-- The control of that line, in the layout's autoInfo box (none: hidden). Its
+-- name is the existing "Auto explained"; "+" and "-" are code-owned marks.
+-- A button of its own, so it is not a drag surface. Built lazily.
+function M.EnsureAutoInfoToggle()
+    local toggle = frame and frame._autoInfoBtn
+    if frame and not toggle then
+        toggle = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        toggle:SetScript("OnClick", function() M.ToggleAutoInfo() end)
+        toggle:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(LT("panel.tooltip.auto_explained_title"), 1, 1, 1)
+            GameTooltip:AddLine(LT("panel.tooltip.auto_full_details"), 0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        toggle:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.FontObject then SetOwnedButtonFont(toggle, metrics.FontObject("secondary")) end
+        if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, toggle) end
+        toggle:Hide()
+        frame._autoInfoBtn = toggle
+    end
+    if toggle then
+        toggle:SetText(LT("panel.tooltip.auto_explained_title") .. (M._autoInfoOpen and "  -" or "  +"))
+    end
+    return toggle
+end
+
+-- The control's own width for its current label (LayoutMetrics
+-- .FitButtonWidth: its text's width and the template's end caps).
+function M.AutoInfoWidth()
+    local toggle = M.EnsureAutoInfoToggle()
+    if not toggle then return nil end
+    return Nexus.LayoutMetrics.FitButtonWidth(toggle, 1)
+end
+
+-- Places the control: at the right end of the offer heading's row while the
+-- layout keeps room for it there (layout.autoInfoInline: Auto ON then adds
+-- no row), else in its own autoInfo box under the offer; hidden without
+-- either.
+function M.RenderAutoInfoToggle(layout)
+    local boxes = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes or nil
+    local box = boxes and boxes.autoInfo or nil
+    if boxes and not box and layout.autoInfoInline and boxes.roll then
+        local roll, width = boxes.roll, tonumber(layout.autoInfoW) or 1
+        box = {x = roll.x + roll.w - 2 - width, y = roll.y - 1, w = width, h = math.max(15, layout.small + 4)}
+    end
+    if not (box and frame) then
+        if frame and frame._autoInfoBtn then frame._autoInfoBtn:Hide() end
+        return false
+    end
+    local toggle = M.EnsureAutoInfoToggle()
+    toggle:ClearAllPoints()
+    toggle:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -box.y)
+    toggle:SetSize(box.w, box.h)
+    toggle:SetFrameLevel(frame:GetFrameLevel() + 6)
+    toggle:Show()
+    return true
+end
+
 function M.RenderAutoScope(layout)
+    M.RenderAutoInfoToggle(layout)
     local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.autoScope or nil
     local line = frame and frame._autoScopeText
     local note = Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
@@ -5348,7 +5912,7 @@ function M.RenderAutoScope(layout)
     if not line then
         local metrics = Nexus.LayoutMetrics
         line = frame:CreateFontString(nil, "OVERLAY", metrics and metrics.FontObject
-            and metrics.FontObject("small") or "GameFontHighlightSmall")
+            and metrics.FontObject("secondary") or "GameFontHighlightSmall")
         line:SetJustifyH("LEFT")
         line:SetJustifyV("TOP")
         line:SetWordWrap(true)
@@ -5405,6 +5969,13 @@ local function EnsureCallboardWidgets()
     line:SetWordWrap(false)
     line:SetTextColor(0.85, 0.85, 0.85)
     frame._callboardLine = line
+    -- The panel's readable sizes: the objective is primary text (12), its
+    -- label and detail secondary (11), never the client's smaller stock font.
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FontObject then
+        SetOwnedFont(label, Nexus.LayoutMetrics.FontObject("secondary"))
+        SetOwnedFont(title, Nexus.LayoutMetrics.FontObject("normal"))
+        SetOwnedFont(line, Nexus.LayoutMetrics.FontObject("secondary"))
+    end
     local lineHit = CreateFrame("Frame", nil, frame)
     lineHit:EnableMouse(true)
     frame._callboardLineHit = lineHit
@@ -5501,11 +6072,12 @@ local function FillCallboard(summary)
         end
     end
     if frame._callboardLineHit then frame._callboardLineHit._nexusFullLines = fullLines end
-    if type(summary.lines) == "table" and summary.lines[1] then
-        detail = tostring(summary.lines[1])
-        if #summary.lines > 1 then
-            detail = detail .. "  |cff888888" .. LF("panel.label.more_count", {count = LC(#summary.lines - 1)}) .. "|r"
-        end
+    -- Approved panel cleanup (full Callboard text): every objective line is
+    -- shown, one under the other and wrapped, instead of the first line and
+    -- "+N more"; the box grows for them (M.MeasureCallboard).
+    detail = table.concat(fullLines, "\n")
+    for _, text in ipairs({frame._callboardTitle, frame._callboardLine}) do
+        if type(text.SetWordWrap) == "function" then pcall(text.SetWordWrap, text, true) end
     end
     frame._callboardLine:SetText(detail ~= "" and detail or ("|cff888888" .. LT("panel.label.callboard_no_details") .. "|r"))
     SetVisible(frame._callboardLabel, true)
@@ -5516,6 +6088,30 @@ local function FillCallboard(summary)
     SetCallboardHit(frame._callboardTitleHit, true)
     SetCallboardHit(frame._callboardLineHit, true)
     return true
+end
+
+-- The Callboard's words (FillCallboard) and the measured heights of its
+-- title and of its objective lines at the width they will have, for the
+-- layout; nil without an observed objective. `width` is the Callboard box's.
+-- The approved inline Callboard: the icon and the "CALLBOARD" label stand on
+-- the objective title's first line, the title beside them, and the objective
+-- lines under the title from the label's left. M.CallboardColumns gives the
+-- title's and the lines' left offsets and widths in a box `width` wide for a
+-- label `labelW` wide.
+M.CALLBOARD = {icon = 16, gap = 4}
+function M.CallboardColumns(width, labelW)
+    local C = M.CALLBOARD
+    local labelX = C.icon + C.gap
+    local titleX = labelX + labelW + C.gap * 2
+    return labelX, titleX, math.max(1, width - titleX), math.max(1, width - labelX)
+end
+
+-- Returns the title's and the lines' measured heights and the label's width.
+function M.MeasureCallboard(summary, width)
+    if not FillCallboard(summary) then return nil end
+    local labelW = math.ceil(M.LineWidth(frame._callboardLabel, frame._callboardLabel:GetText() or "")) + 1
+    local _, _, titleW, detailW = M.CallboardColumns(width, labelW)
+    return M.WrappedHeight(frame._callboardTitle, titleW, 1), M.WrappedHeight(frame._callboardLine, detailW, 1), labelW
 end
 
 -- Manual fallback when LayoutMetrics is unavailable (negative Y from TOPLEFT).
@@ -5561,22 +6157,24 @@ local function PlaceCallboardBox(box, layout)
         widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -y)
         widget:SetSize(w, h)
     end
-    place(frame._callboardLabel, box.x, box.y, box.w, small)
-    place(frame._callboardIcon, box.x, box.y + small + 2, 22, 22)
     local lineH = CallboardLineHeight(layout)
-    local titleY = box.y + small + 2
-    place(frame._callboardTitle, box.x + 26, titleY,
-        math.max(1, box.w - 26), lineH)
-    place(frame._callboardTitleHit, box.x + 26, titleY,
-        math.max(1, box.w - 26), lineH)
-    local lineY = titleY + lineH
-    place(frame._callboardLine, box.x + 26, lineY,
-        math.max(1, box.w - 26), lineH)
-    place(frame._callboardLineHit, box.x + 26, lineY,
-        math.max(1, box.w - 26), lineH)
-    if frame._callboardDivider then
-        place(frame._callboardDivider, box.x - 1, box.y + box.h - 1, box.w + 2, 1)
-    end
+    -- The title and the objective lines in the heights the layout measured
+    -- for their wrapped text (one row each while they fit one). Inline: the
+    -- icon and the label on the title's first line (M.CallboardColumns).
+    local titleH = math.max(lineH, layout and tonumber(layout.callboardTitleH) or 0)
+    local detailH = math.max(lineH, layout and tonumber(layout.callboardDetailH) or 0)
+    local labelW = layout and tonumber(layout.callboardLabelW) or 60
+    local labelX, titleX, titleW, detailW = M.CallboardColumns(box.w, labelW)
+    local icon = M.CALLBOARD.icon
+    place(frame._callboardIcon, box.x, box.y + math.max(0, math.floor((lineH - icon) / 2)), icon, icon)
+    place(frame._callboardLabel, box.x + labelX, box.y + math.max(0, math.floor((lineH - small) / 2)), labelW, small)
+    place(frame._callboardTitle, box.x + titleX, box.y, titleW, titleH)
+    place(frame._callboardTitleHit, box.x + titleX, box.y, titleW, titleH)
+    local lineY = box.y + titleH
+    place(frame._callboardLine, box.x + labelX, lineY, detailW, detailH)
+    place(frame._callboardLineHit, box.x + labelX, lineY, detailW, detailH)
+    -- No rule under the Callboard: the section gap separates it.
+    if frame._callboardDivider then frame._callboardDivider:Hide() end
 end
 
 local function RenderCallboard(summary, top)
@@ -5585,15 +6183,11 @@ local function RenderCallboard(summary, top)
     end
 end
 
-local function ShowPerformance(show)
-    SetVisible(performanceLabel, show); SetVisible(setLabelText, show)
-    SetVisible(dummyLabel, show); SetVisible(dummyValue, show); SetVisible(dummyGlobal, show); SetVisible(dummyGlobalValue, show); SetVisible(dummyHit, show)
-    SetVisible(lkLabel, show); SetVisible(lkPersonalLabel, show); SetVisible(lkValue, show); SetVisible(lkGlobal, show); SetVisible(lkGlobalValue, show); SetVisible(lkHit, show)
-end
-
+-- The DPS RECORDS section's words, visibility and hover facts for this
+-- render (M.FillPerformance): only the rows of records that exist are
+-- shown, and none while the section is off.
 local function RenderPerformanceState(pr, completed, enabled)
-    ShowPerformance(enabled)
-    if enabled then RenderPerformance(pr, completed) end
+    M.FillPerformance(pr, completed, enabled and true or false)
 end
 
 function M.Init(cb)
@@ -5605,7 +6199,10 @@ function M.SetAuto(auto)
     -- Auto ON ends the line of an earlier refused click.
     if auto then M._autoRefusal = nil end
     if autoBtn then autoBtn:SetText(AutoLabel(auto and true or false)) end
-    ReleaseRollOnAutoOff(auto and true or false)
+    -- Kept for the host's refresh renders (M.KeepAutoSelection); only the
+    -- next notice replaces it.
+    M._autoSelection = auto and true or false
+    RenderAutoSelection(auto and true or false)
 end
 
 -- /nexus panel and the minimap button: the player's own hide or show, saved
@@ -5615,12 +6212,85 @@ function M.Toggle()
     if f:IsShown() then M.Hide() else M.Show() end
 end
 
+------------------------------------------------------------------------
+-- The Compact A difficulty card (approved panel cleanup). The card keeps
+-- what made it the original: its tooltip backdrop and border, the validated
+-- mode colours, Soul Ash, the multiplier, the red Intensity bar, its hover
+-- and Hardcore-menu click and its theme exemption. Only its geometry is
+-- compact and flowing: the tier and the multiplier on the first line, Soul
+-- Ash under the tier, the bar under them (LayoutMetrics.Panel: 48 units with
+-- short text at font scale 1). A tier too long for its line wraps and the
+-- card grows by its measured height; nothing is shortened.
+------------------------------------------------------------------------
+M.STATUS_CARD = {side = 8, gap = 6, gain = 70}
+
+-- Whether the card shows its Intensity bar: only with a reading and the
+-- game's validated scale (maximum and level thresholds).
+function M.StatusBarShown(ss)
+    return type(ss) == "table" and ss.intensity ~= nil and (tonumber(ss.intensityMax) or 0) > 0
+        and type(ss.intensityThresholds) == "table"
+end
+
+-- The multiplier's cell on the first line (0 without a multiplier): the
+-- original card's 70 units at the layout's font scale, whatever the value,
+-- so a changed multiplier moves nothing (C-02).
+function M.StatusGainWidth(scale)
+    if (worldStatusGain:GetText() or "") == "" then return 0 end
+    return math.floor(M.STATUS_CARD.gain * (tonumber(scale) or 1) + 0.5)
+end
+
+-- The tier's width beside the multiplier in a card `cardWidth` wide.
+function M.StatusTierWidth(cardWidth, scale)
+    local gainW = M.StatusGainWidth(scale)
+    return math.max(1, cardWidth - M.STATUS_CARD.side * 2 - (gainW > 0 and (gainW + M.STATUS_CARD.gap) or 0))
+end
+
+-- The card's words (M.RenderServerStatusValues) and the measured height of
+-- its tier at the width it will have, for the layout; nil without a card.
+function M.MeasureStatusCard(ss, complete, cardWidth, scale)
+    if not M.RenderServerStatusValues(ss, complete) then return nil end
+    if type(worldStatusText.SetWordWrap) == "function" then pcall(worldStatusText.SetWordWrap, worldStatusText, true) end
+    return (Nexus.LayoutMetrics.WrapHeight(worldStatusText, M.StatusTierWidth(cardWidth, scale), 1))
+end
+
+-- The card's texts and bar inside the layout's status box.
+function M.PlaceStatusCard(layout, box)
+    local side, inset = M.STATUS_CARD.side, tonumber(layout.statusInset) or 5
+    local tierH, ashH = layout.statusTierH, layout.statusAshH
+    local gainW = M.StatusGainWidth(layout.scale)
+    worldStatusBox:ClearAllPoints()
+    worldStatusBox:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -box.y)
+    worldStatusBox:SetSize(box.w, box.h)
+    worldStatusText:ClearAllPoints()
+    worldStatusText:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side, -inset)
+    worldStatusText:SetSize(M.StatusTierWidth(box.w, layout.scale), tierH)
+    worldStatusText:SetJustifyH("LEFT")
+    worldStatusText:SetJustifyV("TOP")
+    worldStatusGain:ClearAllPoints()
+    worldStatusGain:SetPoint("TOPRIGHT", worldStatusBox, "TOPRIGHT", -side, -inset)
+    worldStatusGain:SetSize(math.max(1, gainW), math.ceil(15 * (tonumber(layout.scale) or 1)))
+    worldStatusGain:SetJustifyH("RIGHT")
+    worldStatusAsh:ClearAllPoints()
+    worldStatusAsh:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side, -(inset + tierH))
+    worldStatusAsh:SetSize(box.w - side * 2, ashH)
+    worldStatusAsh:SetJustifyH("LEFT")
+    local bar = worldStatusBox.intensityBar
+    bar:ClearAllPoints()
+    bar:SetPoint("BOTTOMLEFT", worldStatusBox, "BOTTOMLEFT", side, inset)
+    bar:SetPoint("BOTTOMRIGHT", worldStatusBox, "BOTTOMRIGHT", -side, inset)
+    bar:SetHeight(math.max(1, tonumber(layout.statusBarH) or 6))
+    worldStatusBox.PositionIntensityTicks()
+end
+
 local function LayoutServerStatus(completed, layout)
-    -- The card's text boxes are sized for the 10 / 12 px owned fonts. With a
-    -- responsive layout they grow in step with its font scale (the same
-    -- sizes at scale 1), inside the status box that layout reserves; the
-    -- first line leaves the multiplier its own cell. Each size is rounded in
-    -- place: nothing is allocated on this render path.
+    -- With a responsive layout the card is the Compact A card.
+    if type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.status and layout.statusTierH then
+        return M.PlaceStatusCard(layout, layout.boxes.status)
+    end
+    -- Without one, the former fixed card. Its text boxes are sized for the
+    -- 10 / 12 px owned fonts and grow in step with a held layout's font
+    -- scale (the same sizes at scale 1); the first line leaves the
+    -- multiplier its own cell. Each size is rounded in place.
     local scale = type(layout) == "table" and tonumber(layout.scale) or 1
     local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.status or nil
     local inner = (box and box.w or 400) - 18
@@ -5712,7 +6382,7 @@ end
 -- and Random Roll's option and levels (M.RandomRollAutoControl). The option,
 -- a selected Auto, a recommendation or a missing name never do alone. Reads
 -- the model and that option. It words that line and its hover, and Auto
--- turned OFF renders the line again (ReleaseRollOnAutoOff); no action,
+-- turned OFF renders the line again (RenderAutoSelection); no action,
 -- permission or setting follows from it.
 function M.RandomRollShown(model)
     if type(model) ~= "table" or model.randomRoll ~= true or model.auto ~= true
@@ -5767,9 +6437,57 @@ function M.RarityModeFacts(model)
     })
 end
 
+------------------------------------------------------------------------
+-- The approved two-line footer hubs: each hub's name and, under it, what it
+-- opens, in existing words with those meanings: Plan opens the Wishlist
+-- Editor workspace, Explore the Build Library and Leaderboard workspaces,
+-- Orbs the "Orbs / Lost Memories" window. Explore's line uses the two names
+-- its own menu rows and the opened windows already carry (panel.menu.
+-- build_library, panel.menu.leaderboard), not a shorter word from another
+-- window's button: the caption is not shortened to stay on one line. The
+-- second line is the panel's secondary
+-- text; a line too long for its hub wraps and every hub takes the tallest
+-- hub's height (M.MeasureFooter, LayoutMetrics.Panel: spec.footerH). The
+-- hubs keep their own click and hover routes. Three 120-unit hubs, 6 units
+-- apart, then 8 units and the 24-unit FAQ shortcut fill the 404-unit row.
+------------------------------------------------------------------------
+M.FOOTER = {hub = 120, gap = 6, faq = 24, faqGap = 8, pad = 4, side = 6}
+
+function M.FooterHubs()
+    return {
+        {planBtn, LT("panel.menu.wishlist_editor")},
+        {exploreBtn, LT("panel.menu.build_library") .. " · " .. LT("panel.menu.leaderboard")},
+        {frame._orbsHubBtn, LT("panel.menu.orbs")},
+    }
+end
+
+-- The hubs' second lines worded and measured; returns the height a hub needs
+-- (its name line and the tallest second line inside the hub's own padding).
+function M.MeasureFooter(scale)
+    local metrics, F = Nexus.LayoutMetrics, M.FOOTER
+    scale = tonumber(scale) or 1
+    local nameH, lineH, tallest = math.ceil(15 * scale), math.ceil(14 * scale), 0
+    for _, hub in ipairs(M.FooterHubs()) do
+        local button, words = hub[1], hub[2]
+        local sub = button._nexusSub
+        if not sub then
+            sub = button:CreateFontString(nil, "OVERLAY", metrics.FontObject("secondary"))
+            sub:SetJustifyH("CENTER")
+            sub:SetJustifyV("TOP")
+            sub:SetTextColor(0.66, 0.66, 0.69)
+            button._nexusSub = sub
+        end
+        sub:SetText(words)
+        sub:Show()
+        tallest = math.max(tallest, M.WrappedHeight(sub, F.hub - F.side * 2, lineH))
+    end
+    frame._footerLines = {name = nameH, sub = tallest}
+    return F.pad + nameH + tallest + F.pad
+end
+
 -- Auto keeps its existing consentful click handler, now in the header. The
 -- footer contains navigation only; moving between hubs never toggles Auto.
-local function LayoutFooter(showAuto)
+local function LayoutFooter(showAuto, layout)
     -- Header line 1 (M.HeaderSlots): Options beside Close, Auto beside Options.
     local slots = M.PlaceOptionsButton()
 
@@ -5785,14 +6503,35 @@ local function LayoutFooter(showAuto)
         autoBtn:SetSize(slots.autoWidth, slots.height)
         AUTO_LABEL.Fit()
     else autoBtn:Hide() end
-    -- Three 116 px hubs and the 24 px FAQ shortcut (M.EnsureFaqButton) at
-    -- their right: 10 + 3 x 116 + 2 x 10 + 8 + 24 = 410 of the 420 px row.
-    planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
-    planBtn:SetSize(116, 22)
-    exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", 10, 0)
-    exploreBtn:SetSize(116, 22)
-    orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", 10, 0)
-    orbsHub:SetSize(116, 22)
+    local F = M.FOOTER
+    local footer = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.footer or nil
+    local lines = footer and frame._footerLines or nil
+    local hubH = footer and footer.h or 22
+    planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 6)
+    planBtn:SetSize(F.hub, hubH)
+    exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", F.gap, 0)
+    exploreBtn:SetSize(F.hub, hubH)
+    orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", F.gap, 0)
+    orbsHub:SetSize(F.hub, hubH)
+    for _, button in ipairs({planBtn, exploreBtn, orbsHub}) do
+        local sub = button._nexusSub
+        if sub then
+            if lines then
+                -- The name on the hub's first line, what it opens under it.
+                local label = type(button.GetFontString) == "function" and button:GetFontString() or nil
+                if label then
+                    label:ClearAllPoints()
+                    label:SetPoint("TOP", button, "TOP", 0, -F.pad)
+                end
+                sub:ClearAllPoints()
+                sub:SetPoint("TOPLEFT", button, "TOPLEFT", F.side, -(F.pad + lines.name))
+                sub:SetSize(F.hub - F.side * 2, lines.sub)
+                sub:Show()
+            else
+                sub:Hide()
+            end
+        end
+    end
 
     planBtn:Show()
     exploreBtn:Show()
@@ -5800,8 +6539,8 @@ local function LayoutFooter(showAuto)
     local faq = M.EnsureFaqButton()
     if faq then
         faq:ClearAllPoints()
-        faq:SetPoint("LEFT", orbsHub, "RIGHT", 8, 0)
-        faq:SetSize(24, 22)
+        faq:SetPoint("LEFT", orbsHub, "RIGHT", F.faqGap, 0)
+        faq:SetSize(F.faq, 22)
         faq:Show()
     end
 end
@@ -5832,9 +6571,17 @@ local function ApplyPanelLayout(layout, completed)
         PlacePanelBox(rollArea, boxes.roll)
         local inset = 2
         local y = 1
+        -- The heading row is one small line, or as tall as a heading or
+        -- charges text that wraps needs (layout.headingH); what is under it
+        -- moves down by the difference. The Auto scope control, while it
+        -- shares this row (layout.headingReserve), stands at its right end.
+        local headH = tonumber(layout.headingH) or layout.small
+        local headExtra = tonumber(layout.headingExtra) or 0
+        local rowW = boxes.roll.w - inset * 2 - (tonumber(layout.headingReserve) or 0)
         statusText:ClearAllPoints()
         statusText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
-        statusText:SetSize(boxes.roll.w-inset*2, layout.small)
+        statusText:SetSize(rowW, headH)
+        statusText:SetJustifyV("TOP")
         local charges = frame._chargesText
         if charges then
             -- The cell the layout sizes for the font scale, in the room the
@@ -5843,12 +6590,13 @@ local function ApplyPanelLayout(layout, completed)
             local cell = charges:IsShown() and not layout.noOffer and M.ChargesCell(layout, statusText)
                 or tonumber(layout.chargesMinW) or 72
             charges:ClearAllPoints()
-            charges:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -inset, -y)
-            charges:SetSize(cell, layout.small)
+            charges:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -(boxes.roll.w - inset - rowW), -y)
+            charges:SetSize(cell, headH)
+            charges:SetJustifyV("TOP")
             -- The heading keeps the rest of its row, less the cell and its
             -- gap, while charges are shown.
             if charges:IsShown() then
-                statusText:SetWidth(boxes.roll.w-inset*2-cell-(tonumber(layout.chargesGap) or 4))
+                statusText:SetWidth(rowW-cell-(tonumber(layout.chargesGap) or 4))
             end
         end
         -- The one-line rows and the offer cards that show in their place
@@ -5858,10 +6606,11 @@ local function ApplyPanelLayout(layout, completed)
         for index = 1, 3 do
             local text = cardTexts[index]
             text:ClearAllPoints()
-            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -(rowTop + (index - 1) * (rowH + rowGap)))
+            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -(headExtra + rowTop + (index - 1) * (rowH + rowGap)))
             text:SetSize(boxes.roll.w-inset*2, rowH)
         end
-        y = bodyTop
+        -- Rows made taller by wrapped text push the text under them down.
+        y = tonumber(layout.bodyTop) or (bodyTop + headExtra + (tonumber(layout.offerRowsExtra) or 0))
         M.PlaceOfferCards(layout, boxes.roll, inset)
         -- Guidance alone (no cards) starts right below the heading, so it
         -- has the card rows' space; with cards it follows them as before.
@@ -5871,7 +6620,7 @@ local function ApplyPanelLayout(layout, completed)
         end
         local recY = y
         if noCards then
-            recY = 1 + layout.small + math.max(3,math.floor(layout.gap/2))
+            recY = 1 + headH + math.max(3,math.floor(layout.gap/2))
         end
         local button = frame._orbsBtn
         local buttonRow = 0
@@ -5897,9 +6646,23 @@ local function ApplyPanelLayout(layout, completed)
             end
         end
         recText:ClearAllPoints()
-        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -recY)
-        recText:SetSize(boxes.roll.w-inset*2,
-            math.max(layout.small*2,boxes.roll.h-recY-layout.gap-buttonRow))
+        local reason = layout.offerReason
+        local reasonCard = reason and frame._offerCards and frame._offerCards[reason.row] or nil
+        if reasonCard and reasonCard:IsShown() then
+            -- The selected offer's reason: inside its own row, under its
+            -- name, across the row's text columns (M.MeasuredLayout
+            -- measured it there). It is not repeated under the rows.
+            local left = rowH + layout.gap
+            recText:SetPoint("TOPLEFT", reasonCard, "TOPLEFT", left, -(tonumber(reason.top) or rowH))
+            recText:SetSize(math.max(1, boxes.roll.w - inset * 2 - left - math.ceil(layout.gap / 2)),
+                math.max(1, tonumber(reason.h) or layout.small))
+        else
+            recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -recY)
+            -- The measured height of the whole text, or (a layout computed
+            -- without it) the room the box leaves.
+            recText:SetSize(boxes.roll.w-inset*2, (tonumber(layout.bodyH) or 0) > 0 and layout.bodyH
+                or math.max(layout.small*2,boxes.roll.h-recY-layout.gap-buttonRow))
+        end
         rollDivider:ClearAllPoints()
         rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
         rollDivider:SetSize(boxes.roll.w-2,1)
@@ -5981,9 +6744,8 @@ local function ApplyPanelLayout(layout, completed)
         frame.toLockHit:SetPoint("TOPLEFT",frame.toLockLabel,"TOPLEFT",-2,2)
         frame.toLockHit:SetPoint("BOTTOMRIGHT",frame.toLockText,"BOTTOMRIGHT",2,-2)
     end
-    if boxes.performance then
-        PositionPerformance(-boxes.performance.y,completed,layout)
-    end
+    -- The DPS RECORDS section's measured rows (M.MeasurePerformance).
+    M.PlacePerformance(boxes.performance)
     PlacePanelBox(bestDpsText, boxes.bestDps)
     M.PlacePlaySummary(layout)
     -- Show / Hide details keeps the panel's top where it was: ApplyCandidate
@@ -6119,16 +6881,48 @@ local function ApplyModel(model, signatures, roll)
     local callboardObserved = callboardSummary and callboardSummary.observed == true
     local responsiveLayout
     if Nexus.LayoutMetrics then
+        local recordWidths = noBuild and {} or M.PlayRecordWidths(model)
         local metricsOk, fontScale, uiScale, revision =
             pcall(Nexus.LayoutMetrics.RuntimeMetrics)
         if metricsOk then
+            -- The difficulty card's words, set now so its tier is measured
+            -- at the width it will have (a long tier wraps, the card grows).
+            -- Every body block is 404 units wide (the 420-unit panel less
+            -- its 8-unit inset on each side).
+            local statusTierH = statusVisible and M.MeasureStatusCard(ss, complete, 404, fontScale) or nil
+            -- The Callboard's words, set now so its title and objective
+            -- lines are measured at the widths they will have.
+            local callboardTitleH, callboardDetailH, callboardLabelW
+            if callboardObserved then
+                callboardTitleH, callboardDetailH, callboardLabelW = M.MeasureCallboard(callboardSummary, 404, fontScale)
+            end
+            -- The opt-in DPS RECORDS section: its rows worded and measured
+            -- (0 without a record, so no block is laid out).
+            local performanceH = M.MeasurePerformance(pr, complete, not noBuild and showPerformance, 404)
+            -- The Auto scope control: on the offer heading's row while it
+            -- takes no more than two fifths of the 404-unit block (so Auto ON
+            -- adds no row at normal and 125% text), else a row of its own.
+            local autoInfo = M.AutoScopeShown(model, rollBlock and not noOffer, noBuild)
+            local autoInfoW = autoInfo and M.AutoInfoWidth() or nil
             -- M.PanelLayout: LayoutMetrics.Panel, with open Details name
             -- columns at their measured height.
             local layoutOk, candidate = pcall(M.PanelLayout,{
                 width=420,fontScale=fontScale,uiScale=uiScale,
                 revision=revision,activeRoll=rollBlock,
                 statusVisible=statusVisible,noBuild=noBuild,
+                statusTierH=statusTierH,statusBar=M.StatusBarShown(ss) and true or false,
+                -- The Build and Wishlist lines at their measured heights.
+                headerBuildH=frame._nexusHeaderRows and frame._nexusHeaderRows.build or nil,
+                headerWishlistH=frame._nexusHeaderRows and frame._nexusHeaderRows.wishlist or nil,
                 complete=complete,showPerformance=showPerformance,
+                performanceH=performanceH,
+                progressLabelW=math.ceil(M.LineWidth(progressLabel, progressLabel:GetText() or "")) + 2,
+                footerH=M.MeasureFooter(fontScale),
+                autoInfoW=autoInfoW,autoInfoInline=autoInfoW ~= nil and autoInfoW <= 161,
+                -- Between boards (Auto ON in the same context, no offer
+                -- shown: a reserved block, a wait or a hold) the block keeps
+                -- at least the height it had, so the panel does not jump.
+                reservedRollH=type(roll) == "table" and #cards == 0 and roll.heldHeight or nil,
                 toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
                 unknownTomes=type(pr.unknownTomes) == "table"
                     and #pr.unknownTomes or 0,
@@ -6149,14 +6943,23 @@ local function ApplyModel(model, signatures, roll)
                     or 0,
                 cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
                 callboard=callboardObserved and true or false,
+                callboardTitleH=callboardTitleH,callboardDetailH=callboardDetailH,
+                callboardLabelW=callboardLabelW,
                 planDetails=M._playDetails == true,
+                -- The DPS entries exist only for records that exist, at
+                -- their measured widths.
+                recordYours=recordWidths.yours,
+                recordBest=recordWidths.best,
                 orbLine=type(model._nexusOrbLine) == "table",
                 -- The Auto scope line's rows (M.RenderAutoScope), at the
-                -- 396 px content width of the 420 px panel.
+                -- 404 px block width of the 420 px panel.
                 -- Not in the collapsed level-80 block: no offer, nothing to choose.
-                autoScopeRows=M.AutoScopeShown(model, rollBlock and not noOffer, noBuild)
+                -- Compact Auto ON: its control always, the line's rows
+                -- only while the player has opened it (M.ToggleAutoInfo).
+                autoInfo=autoInfo,
+                autoScopeRows=M._autoInfoOpen == true and autoInfo
                     and Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
-                    and Nexus.LayoutMetrics.TextRows(Nexus.Readout.AUTO_ON_NOTE, 396, fontScale)
+                    and Nexus.LayoutMetrics.TextRows(Nexus.Readout.AUTO_ON_NOTE, 404, fontScale)
                     or 0,
             }, pr)
             if layoutOk and type(candidate) == "table" then
@@ -6167,7 +6970,18 @@ local function ApplyModel(model, signatures, roll)
             responsiveLayout = frame._responsiveLayout
         end
     end
-    LayoutFooter(showAutoControl)
+    LayoutFooter(showAutoControl, responsiveLayout)
+    -- The selected offer's row, when the text under the heading is that
+    -- offer's recommendation: the one card the runtime marked as its Take
+    -- target (either Auto mode) or, with Auto OFF, the one it freezes. With
+    -- the Orb guidance and its button, or without a recommendation, there is
+    -- none and the text stays under the rows.
+    frame._offerReasonRow = nil
+    if rollBlock and recommendation ~= "" and bodyText == recommendation and #cards > 0
+        and not (guide and guide.openOrbs) and Nexus.Readout then
+        frame._offerReasonRow = (Nexus.Readout.MarkedCard and Nexus.Readout.MarkedCard(cards))
+            or (model.auto == false and Nexus.Readout.FreezeCard and Nexus.Readout.FreezeCard(cards)) or nil
+    end
 
     -- The heading is the destination row's first cell: it is worded and
     -- fitted at the end of this pass (UpdateDestinationRow), not here.
@@ -6340,7 +7154,6 @@ local function ApplyModel(model, signatures, roll)
     SetVisible(setupGetStartedBtn, noBuild); SetVisible(setupImportBtn, noBuild)
     SetVisible(completeBadge, complete and not noBuild); SetVisible(completeSubtext, complete and not noBuild)
     ShowCoreProgress(not noBuild and not complete)
-    ShowPerformance(not noBuild and showPerformance)
 
     -- Collapse the space reserved for Nexus' Soul Ash card whenever the player
     -- uses the server HUD. Live-roll content still gets its own fixed block.
@@ -6540,6 +7353,9 @@ local function ApplyModel(model, signatures, roll)
     -- The Play summary over the rows above (counts, Details, the Difficulty
     -- / Soul Ash line, the DPS rows and the Orb line).
     M.RenderPlaySummary(model, responsiveLayout)
+    -- Every text of this pass is worded now: the layout is computed again
+    -- with the measured heights of the texts that may wrap (M.MeasuredLayout).
+    if responsiveLayout then responsiveLayout = M.MeasuredLayout(responsiveLayout) end
     ApplyPanelLayout(responsiveLayout,complete)
     M.RenderAutoScope(responsiveLayout)
     -- Issue #143: the labels of the three mapped buttons keep one line inside
@@ -6674,6 +7490,8 @@ end
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
+    -- A host refresh renders an input from before the last Auto notice.
+    M.KeepAutoSelection(candidate)
     -- Read the original record: DefensiveCopy removes its metatables.
     local raw = {status=RawSource(model, "status"),
         recommendation=RawSource(model, "recommendation")}
@@ -6705,6 +7523,28 @@ function M.Render(model)
     -- The destination cells' effective fonts are part of the layout key. A
     -- full pass replaces this with the fonts it leaves (ApplyModel); a failed
     -- one commits nothing.
+    -- The Build and Wishlist lines wrap, so their measured heights are
+    -- geometry: a name that needs another line takes a layout pass, while
+    -- words that keep their heights do not (M.MeasureContextHeader). A
+    -- failed measurement forces a full pass.
+    local headerOk, headerRows = pcall(M.MeasureContextHeader, candidate)
+    signatures.layout = signatures.layout .. "|header:" .. (headerOk and tostring(headerRows) or tostring(renderStats.calls))
+    -- The panel's texts wrap at their measured heights, so a face whose
+    -- metrics differ under the same nominal font and size (which
+    -- LayoutMetrics.RuntimeKey does not show) must be measured again. As for
+    -- the passive hovers (M.FitPassiveHovers), such a face comes with a new
+    -- GetFont reader: a changed reader is a new face revision. The client's
+    -- own reader is one fixed method, so this never changes there.
+    if not rawequal(frame._nexusFaceReader, statusText.GetFont) then
+        frame._nexusFaceReader = statusText.GetFont
+        frame._nexusFaceRevision = (frame._nexusFaceRevision or 0) + 1
+    end
+    signatures.layout = signatures.layout .. "|face:" .. tostring(frame._nexusFaceRevision)
+    -- The Orb run line wraps in full: its wrapped height is geometry, its
+    -- words are not (a changed line of the same height stays a settled
+    -- render, C-03).
+    local orbOk, orbRows = pcall(M.MeasureOrbLine, candidate._nexusOrbLine)
+    signatures.layout = signatures.layout .. "|orb:" .. (orbOk and tostring(orbRows) or tostring(renderStats.calls))
     signatures.modelLayout = signatures.layout
     signatures.layout = signatures.modelLayout .. "|fonts:" .. M.DestinationRowFonts()
 
@@ -6749,6 +7589,12 @@ function M.Render(model)
     -- Only a successful render decides the next reservation; a failed one
     -- leaves the last committed state as it was.
     renderState.roll = roll.nextRoll
+    if renderState.roll then
+        -- The committed block's height, for a reservation of it.
+        local laid = frame._responsiveLayout
+        local box = type(laid) == "table" and type(laid.boxes) == "table" and laid.boxes.roll or nil
+        renderState.roll.height = box and box.h or nil
+    end
     renderState.rawText = rawText
     renderState.statusPresentation = {text=candidate.status, localized=localized==true}
     renderState.committed = true
@@ -6872,6 +7718,9 @@ function M.EnsurePauseBanner()
     banner.note:SetPoint("TOPLEFT", banner.title, "BOTTOMLEFT", 0, -2)
     banner.note:SetJustifyH("LEFT")
     banner.note:SetWordWrap(false)
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FontObject then
+        SetOwnedFont(banner.note, Nexus.LayoutMetrics.FontObject("secondary"))
+    end
     banner:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -7147,9 +7996,21 @@ function M.ShowAutoTooltip(owner)
     GameTooltip:Show()
 end
 
+-- Ends a host refresh call: the mark returns to what it was (a refresh may
+-- nest), an error of the callback is raised again unchanged, and its results
+-- are returned as they came. (A field, not another chunk-level local.)
+function M.EndHostRefresh(was, ok, ...)
+    M._hostRefresh = was
+    if not ok then error((...), 0) end
+    return ...
+end
+
 function M.Refresh()
     if callbacks and type(callbacks.RefreshDisplay) == "function" then
-        return callbacks.RefreshDisplay()
+        -- The host renders its own last input (M.KeepAutoSelection).
+        local was = M._hostRefresh
+        M._hostRefresh = true
+        return M.EndHostRefresh(was, pcall(callbacks.RefreshDisplay))
     end
     if M._lastModel then return M.Render(M._lastModel) end
     return false
@@ -7490,7 +8351,7 @@ function M.NoteAutoClick(before, ok, state)
         return true
     end
     -- The ordinary render transaction of the last committed model with its
-    -- own raw text (as ReleaseRollOnAutoOff); nothing else changes.
+    -- own raw text (as RenderAutoSelection); nothing else changes.
     local copy = DefensiveCopy(model)
     local rawText = renderState.rawText or {}
     copy.status, copy.recommendation = rawText.status, rawText.recommendation

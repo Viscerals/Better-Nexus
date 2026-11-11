@@ -81,6 +81,10 @@ for _,scale in ipairs({.75,1,1.25,1.5,2})do
  for _,uiScale in ipairs({.65,1,1.5})do
   NexusFontNormal:SetFont('Fonts\\FRIZQT__.TTF',12*scale,'')
   NexusFontSmall:SetFont('Fonts\\FRIZQT__.TTF',10*scale,'')
+  -- Approved panel cleanup (secondary floor 11): the main panel's secondary
+  -- text, this button's label included, is its own 11-unit font object; it
+  -- follows the same synthetic scale here as the shared fonts above.
+  if NexusFontSecondary then NexusFontSecondary:SetFont('Fonts\\FRIZQT__.TTF',11*scale,'') end
   UIParent.GetEffectiveScale=function()return uiScale end
   for _,withCards in ipairs({false,true})do
    model.cards=withCards and {{text='Synthetic card'}} or {}

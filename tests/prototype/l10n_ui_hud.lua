@@ -151,6 +151,13 @@ local function HudSession()
  Pn.Render(Model({auto=true,cards=CARDS}))
  out.headingOn=NexusPanel._rollStatus:GetText()
  out.tagOn=cards[1] and cards[1].tag:GetText()
+ -- Approved panel cleanup (compact Auto ON): the Auto scope row is closed
+ -- behind its own control until the player opens it. Open it (memory only)
+ -- and render the same model again, then read the row as before.
+ if NexusPanel._autoInfoBtn and not (NexusPanel._autoScopeText and NexusPanel._autoScopeText:IsShown()) then
+  NexusPanel._autoInfoBtn:Click()
+  Pn.Render(Model({auto=true,cards=CARDS}))
+ end
  out.scope=NexusPanel._autoScopeText and NexusPanel._autoScopeText:GetText()
  Pn.Render(Model({auto=true,paused='unsynced'}))
  out.headingWait=NexusPanel._rollStatus:GetText()

@@ -129,7 +129,13 @@ end
 C.scenario('R1 every passive surface moves the same root with a plain left drag and saves once',function()
  local before=Effects()
  if not P._playDetails then P.TogglePlanDetails() end
- P.Render(Model({cards={{text='Frostwake Sigil (Rare)'}}}))
+ -- Approved panel cleanup: a DPS entry exists only for a record that exists
+ -- (play_panel_summary S4b / S4c), so this fixture carries both records to
+ -- have the best-known surface to drag from.
+ local shown=Model({cards={{text='Frostwake Sigil (Rare)'}}})
+ shown.bestDps={dummy={dps=4812}}
+ shown.progress.performance={dummy={global={dps=5130,player='Synthetic'}},lk={}}
+ P.Render(shown)
  for _,s in ipairs(Surfaces()) do
   local name,hit=s[1],s[2]
   if C.setup(hit~=nil and hit:IsShown(),'R1: fixture: '..name..' is shown') then

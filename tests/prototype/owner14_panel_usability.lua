@@ -621,9 +621,15 @@ C.scenario('F1 footer FAQ shortcut and number explanations',function()
  if faq then
   local point,rel,relPoint,x=faq:GetPoint(1)
   C.expect(rel==NexusPanel._orbsHubBtn and point=='LEFT' and relPoint=='RIGHT' and x>=8,'F1: it sits after the Orbs hub, a separate target')
-  -- Footer row: 10 + 3 hubs + 2 x 10 gaps + gap + ? must stay inside 420 px.
+  -- Footer row: the left inset + 3 hubs + 2 gaps + gap + ? must stay inside
+  -- 420 px. Approved main panel cleanup: the row starts at the panel's
+  -- compact 8-unit inset with the hubs 6 units apart (it was 10 and 10), so
+  -- both are read from the hubs' own anchors.
   local hub=NexusPanel._orbsHubBtn:GetWidth()
-  C.expect(10+3*hub+20+x+faq:GetWidth()<=420-8,'F1: the hubs and ? fit the 420 px footer',10+3*hub+20+x+faq:GetWidth())
+  local hubs=NexusPanel._footerButtons
+  local _,_,_,left=hubs.plan:GetPoint(1)
+  local _,_,_,between=hubs.explore:GetPoint(1)
+  C.expect(left+3*hub+2*between+x+faq:GetWidth()<=420-8,'F1: the hubs and ? fit the 420 px footer',left+3*hub+2*between+x+faq:GetWidth())
   C.expect(faq:GetWidth()>=22 and faq:GetHeight()>=22,'F1: a 22 px target at least',faq:GetWidth()..'x'..faq:GetHeight())
   local before=Effects()
   local spy=Spy(Nexus.Help,'Show',function() faq:Click() end)

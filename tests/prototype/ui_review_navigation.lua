@@ -412,7 +412,11 @@ C.scenario('V3 header Auto and separate Plan, Explore and Orbs footer inside the
  if not (a and p and e and o) then return end
  print('OBSERVED','V3 auto='..G.Text(a)..' plan='..G.Text(p)..' explore='..G.Text(e)..' orbs='..G.Text(o))
  C.guard(hubs.auto:IsShown() and a[2]<=10 and a[3]-a[1]==84,'V3: Auto is a separate header control',G.Text(a))
- C.expect(a[4]<p[2] and e[1]-p[3]>=10 and o[1]-e[3]>=10,'V3: header Auto stands apart from footer navigation',
+ -- Approved compact footer (two-line hubs, compact gaps): the three hubs are
+ -- 4 units apart in the approved design and 6 here, beside the FAQ shortcut
+ -- in the same 404-unit row; the former 10-unit gap belonged to the one-line
+ -- hubs. Auto stays a header control, apart from and above the footer.
+ C.expect(a[4]<p[2] and e[1]-p[3]>=4 and o[1]-e[3]>=4,'V3: header Auto stands apart from footer navigation',
   G.Text(a)..' '..G.Text(p)..' '..G.Text(e)..' '..G.Text(o))
  C.expect(o[3]<=420-8 and G.Apart(a,p) and G.Apart(p,e) and G.Apart(e,o),'V3: all four stay inside the panel margin, apart',G.Text(o))
  C.setup(P.Render(Model({noBuild=true}))==true,'V3: fixture: the setup view (no build) renders')
@@ -455,12 +459,19 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
    'V3a: enlarged header label and control remain within the panel and do not overlap',
    left and right and (G.Text(left)..' '..G.Text(right)) or 'unplaced')
  end
- C.expect(build.wordWrap~=true and wishlist.wordWrap~=true and build:GetHeight()==20
-  and wishlist:GetHeight()==20 and Nexus.LayoutMetrics.Shortened(build)
-  and Nexus.LayoutMetrics.Shortened(wishlist),
-  'V3a: 64-character names remain one line and expose complete text on hover',
-  'build='..tostring(build.wordWrap)..'/'..build:GetHeight()..'/'..build:GetStringWidth()..'/'..build:GetWidth()
-   ..' wishlist='..tostring(wishlist.wordWrap)..'/'..wishlist:GetHeight()..'/'..wishlist:GetStringWidth()..'/'..wishlist:GetWidth())
+ -- Approved panel cleanup (full Build and Wishlist names: "Wrap and grow at
+ -- normal and 125% text ... No clipping, ellipsis or arbitrary line cap"):
+ -- a 64-character name is no longer held to one shortened 20-unit line. It
+ -- wraps in its own column, its row is as tall as its wrapped text (more
+ -- than one line here), and the Wishlist line starts under the whole Build
+ -- line. The complete name on the hover is kept (checked below).
+ local br,wr=Rect(build),Rect(wishlist)
+ C.expect(build:GetHeight()>20 and wishlist:GetHeight()>20
+  and build:GetHeight()+0.5>=build:GetStringHeight() and wishlist:GetHeight()+0.5>=wishlist:GetStringHeight()
+  and br and wr and wr[2]>=br[4],
+  'V3a: 64-character names wrap in full, each row as tall as its text, the Wishlist line under the whole Build line',
+  'build='..build:GetHeight()..'/'..build:GetStringHeight()..'/'..build:GetStringWidth()..'/'..build:GetWidth()
+   ..' wishlist='..wishlist:GetHeight()..'/'..wishlist:GetStringHeight()..'/'..wishlist:GetStringWidth()..'/'..wishlist:GetWidth())
  for _,hit in ipairs({f._contextBuildHit,f._contextWishlistHit}) do
   local lines,ok=V.TooltipLines(hit:GetScript('OnEnter'),hit)
   C.expect(ok and table.concat(lines,'\n'):find(long,1,true)~=nil,
@@ -484,12 +495,19 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  f._nexusOwnedFonts=false
  P.ApplyOwnedFonts()
  methods.SetFontObject,methods.SetNormalFontObject=oldFont,oldNormal
- C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
+ -- Approved readable sizes: the title is its own 15-unit role ("title") and
+ -- the Auto state cue is secondary text at the 11-unit floor ("secondary"),
+ -- where they were the shared 12-unit and 10-unit fonts. Each is still one
+ -- of Nexus's owned fonts, so it follows the same native-reference scale.
+ local function Name(font) return tostring(type(font)=='table' and font.GetName and font:GetName() or font) end
+ C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('title')
   and build._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
   and wishlist._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
-  and f._contextAutoState._testFontObject==Nexus.LayoutMetrics.FontObject('small')
+  and f._contextAutoState._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
   and change._testNormalFontObject==Nexus.LayoutMetrics.FontObject('normal'),
-  'V3a: context and Change text join Nexus owned-font scaling at 125 percent')
+  'V3a: context and Change text join Nexus owned-font scaling at 125 percent',
+  Name(title._testFontObject)..' '..Name(build._testFontObject)..' '..Name(wishlist._testFontObject)
+   ..' '..Name(f._contextAutoState._testFontObject)..' '..Name(change._testNormalFontObject))
  local plan=Spy(Nexus.FullUIWorkspaces,'ShowPlan',function() change:Click() end)
  C.expect(plan.n==1,'V3a: Change opens Plan without silently assigning a Wishlist')
  C.guard(GameplayEffects()==before,'V3a: header navigation and hover do not automate, spend or send')

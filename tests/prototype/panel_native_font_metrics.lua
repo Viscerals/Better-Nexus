@@ -141,7 +141,11 @@ local function Size(region) local _,size=region:GetFont();return size end
 local function Near(a,b) return type(a)=='number' and type(b)=='number' and math.abs(a-b)<0.011 end
 -- The native scale the owned fonts follow: never under the former sizes.
 local function Scale() return math.max(1,math.min(2,NATIVE.height/10)) end
-local function Role(kind) return ({small=10,normal=12,large=14})[kind]*Scale() end
+-- Approved readable sizes (T1): the main panel's secondary text is its own
+-- 11-unit font ("secondary"), not the shared 10-unit small font, and offer
+-- names and the difficulty multiplier are primary text (normal, 12). Each
+-- follows the same native reference scale as before.
+local function Role(kind) return ({small=10,normal=12,large=14,secondary=11,title=15})[kind]*Scale() end
 local function Owned(kind)
  local font=_G[({small='NexusFontSmall',normal='NexusFontNormal',large='NexusFontLarge'})[kind]]
  return font and Size(font) or nil
@@ -243,10 +247,12 @@ local function OfferRows(tag,area,small,lines,kind)
   local edge
   for _,key in ipairs({'name','quality','tag'}) do
    local text=card[key]
-   if not Near(Size(text),small) then fonts=false;notes[#notes+1]=i..'.'..key..' font='..tostring(Size(text)) end
+   -- The name is primary text (normal); its quality and tag are secondary.
+   local want=key=='name' and Role('normal') or small
+   if not Near(Size(text),want) then fonts=false;notes[#notes+1]=i..'.'..key..' font='..tostring(Size(text)) end
    if (text:GetText() or '')~='' then
     local tr=Rect(text)
-    if text:GetHeight()<small-0.01 then rows=false end
+    if text:GetHeight()<want-0.01 then rows=false end
     if not (tr and G.Inside(tr,cr,0.01)) then inside=false;notes[#notes+1]=i..'.'..key..' '..Text(tr) end
     if edge and tr and tr[1]<edge-0.01 then ordered=false end
     edge=tr and tr[3] or edge
@@ -287,7 +293,7 @@ local function OfferRows(tag,area,small,lines,kind)
   shares[#shares+1]=i..': '..table.concat(parts,', ')
  end
  print('OBSERVED',tag,'offer rows '..table.concat(shares,' | '))
- kind(fonts,tag..': every offer name, quality and tag is drawn at the native-derived small size '..small,detail)
+ kind(fonts,tag..': every offer name is drawn at the native-derived primary size and its quality and tag at the secondary size '..small,detail)
  kind(rows,tag..': every offer row and text box is at least that tall',detail)
  C.guard(inside and ordered and apart,tag..': the rows are compact, in order, apart and inside the roll area',detail)
  C.guard(whole,tag..': a tag no wider than half the row is whole',detail)
@@ -304,7 +310,9 @@ C.scenario('N1 the offer name is drawn at the loading overlay\'s native font hei
  local receiver,reference=Size(name),Size(GameFontHighlightSmall)
  print('OBSERVED','N1 receiver='..tostring(receiver),'reference='..tostring(reference),
   'ratio='..string.format('%.4f',receiver/reference),'uiScale='..tostring(NATIVE.uiScale))
- C.expect(Near(receiver,reference),'N1: NexusPanel._offerCards[1].name has the native reference height (ratio 1)',
+ -- The name is primary text: 12 units where the native small reference is
+ -- 10, so 1.2 x the reference height (never smaller than the reference).
+ C.expect(Near(receiver,reference*1.2),'N1: NexusPanel._offerCards[1].name is primary text on the native reference (ratio 1.2)',
   tostring(receiver)..'/'..tostring(reference))
  C.expect(Near(Owned('small'),16) and Near(Owned('normal'),19.2) and Near(Owned('large'),22.4),
   'N1: the owned fonts keep the 10 / 12 / 14 hierarchy on the native 16',
@@ -323,7 +331,7 @@ local function Roles(height)
  local layout=NexusPanel._responsiveLayout
  if not C.setup(type(layout)=='table' and layout.boxes and layout.boxes.roll and layout.boxes.status and layout.boxes.header,
   tag..': fixture: the responsive layout holds the header, status and roll boxes') then return end
- local small,normal=Role('small'),Role('normal')
+ local small,normal=Role('secondary'),Role('normal')
  local fontScale=LM.RuntimeMetrics()
  print('OBSERVED',tag,'owned='..tostring(Owned('small'))..'/'..tostring(Owned('normal'))..'/'..tostring(Owned('large')),
   'fontScale='..tostring(fontScale),'rows='..layout.small..'/'..layout.normal..'/'..layout.large,
@@ -347,12 +355,13 @@ local function Roles(height)
  local chargesRect,headRect=Rect(charges),Rect(head)
  print('OBSERVED',tag,'charges="'..tostring(charges:GetText())..'" font='..tostring(Size(charges)),
   'cell='..tostring(charges:GetWidth())..'x'..tostring(charges:GetHeight()),'natural='..string.format('%.1f',Natural(charges)))
- C.guard(charges:IsShown() and Near(Size(charges),height),tag..': the charges are already drawn in the client\'s own small font',Size(charges))
+ C.guard(charges:IsShown() and Near(Size(charges),Role('secondary')),tag..': the charges are already drawn in the client\'s own small font',Size(charges))
  -- Revision 2, R1: the cell is the layout's cell for the font scale, in the
  -- room the fitted heading leaves; the heading keeps the rest of the row
  -- less the cell and its 4 px gap. The heading form is still the one fitted
- -- beside the 72 px minimum. A row wider than its cell stays shortened there
- -- and complete on its hover (the #143 charge-row contract).
+ -- beside the 72 px minimum. A row wider than its cell wraps there in full
+ -- (approved panel cleanup: nothing on the main panel is shortened) and is
+ -- still complete on its hover.
  local row=(area[3]-area[1])-4
  local cell=Cell(row,head,true)
  local shownForm,wantForm=Form(head,row,false)
@@ -369,17 +378,24 @@ local function Roles(height)
  if Natural(charges)<=cell then
   C.expect(Natural(charges)<=charges:GetWidth()+0.01,tag..': the compact charges row is whole inline in its cell',cellDetail)
  else
-  -- The top of the range: no room beside the heading, so the row stays
-  -- shortened in its 72 px minimum and complete on its hover.
-  C.guard(cell==72 and charges:GetWidth()==72 and Natural(charges)>charges:GetWidth(),
-   tag..': with no room beside the heading the charges row stays shortened in its 72 px minimum',cellDetail)
+  -- The top of the range: no room for the row on one line beside the
+  -- heading. (The charges are the panel's 11-unit secondary text now, so a
+  -- row can also be wider than a derived cell above the 72 px minimum.)
+  -- Approved panel cleanup: the row keeps that cell and wraps in it, in a
+  -- box as tall as its lines need; it is not shortened. This is behaviour
+  -- of the cleanup (the row was one shortened line before), so it is an
+  -- expectation; the cell's width is checked above.
+  C.expect(charges:GetWidth()==cell and Natural(charges)>charges:GetWidth()
+   and charges:GetHeight()+0.5>=charges:GetStringHeight(),
+   tag..': with no room on one line beside the heading the charges row wraps whole in its derived cell',
+   cellDetail..'; box '..tostring(charges:GetHeight())..' for text '..tostring(charges:GetStringHeight()))
  end
  if Natural(head)<=row-76 then
   C.guard(Natural(head)<=head:GetWidth()+0.01,tag..': a heading that fitted beside the 72 px minimum is still whole beside the wider cell',cellDetail)
  else
   print('OBSERVED',tag,'LIMIT: the shortest heading form is wider than its row at this height (shortened by the client, as before)')
  end
- C.guard(charges:GetWidth()>=72 and Near(Size(charges),height),tag..': the cell is never under 72 px and the charges keep their font (no shrink)',cellDetail)
+ C.guard(charges:GetWidth()>=72 and Near(Size(charges),Role('secondary')),tag..': the cell is never under 72 px and the charges keep their font (no shrink)',cellDetail)
  C.guard(chargesRect and headRect and headRect[3]<=chargesRect[1]+0.01 and G.Inside(chargesRect,area,0.01),
   tag..': the heading ends before the charges cell, inside the roll area',Text(headRect)..' '..Text(chargesRect))
  local legend=NexusPanel._chargesHover and NexusPanel._chargesHover:GetScript('OnEnter')
@@ -396,7 +412,9 @@ local function Roles(height)
  for i,line in ipairs(lines) do
   rects[i]=Rect(line)
   notes[#notes+1]=Text(rects[i])..' font='..tostring(Size(line))
-  if not Near(Size(line),normal) then headerFonts=false end
+  -- Approved panel cleanup: the title has its own 15-unit role; the Build
+  -- and Wishlist lines stay primary text.
+  if not Near(Size(line),i==1 and Role('title') or normal) then headerFonts=false end
   -- The title keeps line 1's literal 20 px row (checked below); the Build
   -- and Wishlist rows follow their font.
   if i>1 and line:GetHeight()<normal-0.01 then headerRows=false end
@@ -422,9 +440,9 @@ local function Roles(height)
  local statusDetail='card '..Text(cardRect)..' tier '..Text(tierRect)..' font='..tostring(Size(tier))
   ..' ash '..Text(ashRect)..' font='..tostring(Size(ash))..' gain '..Text(gainRect)..' font='..tostring(Size(gain))
  print('OBSERVED',tag,statusDetail)
- C.expect(Near(Size(tier),normal) and Near(Size(ash),normal) and Near(Size(gain),small),
-  tag..': the difficulty card\'s tier and Soul Ash use the normal size and its multiplier the small size',statusDetail)
- ;(height>=16 and C.expect or C.guard)(tier:GetHeight()>=normal-0.01 and ash:GetHeight()>=normal-0.01 and gain:GetHeight()>=small-0.01,
+ C.expect(Near(Size(tier),normal) and Near(Size(ash),normal) and Near(Size(gain),normal),
+  tag..': the difficulty card\'s tier, Soul Ash and multiplier use the normal (primary) size',statusDetail)
+ ;(height>=16 and C.expect or C.guard)(tier:GetHeight()>=normal-0.01 and ash:GetHeight()>=normal-0.01 and gain:GetHeight()>=normal-0.01,
   tag..': each difficulty card text box is at least as tall as its font',statusDetail)
  -- Whole before too (a 10 / 12 px text in a 10 / 12 px box); it must stay whole.
  C.guard(tier:GetWidth()>=Natural(tier)-0.01 and ash:GetWidth()>=Natural(ash)-0.01 and gain:GetWidth()>=Natural(gain)-0.01,
@@ -464,15 +482,15 @@ local function Narrow(height)
  for i,card in ipairs(LONG) do lines[i]=card.text end
  C.setup(P.RenderOfferCards(lines,R.MarkedCard(LONG),false,true,nil,nil)==true and P.PlaceOfferCards(layout,box,2)=='rows',
   tag..': fixture: the real card render and placement ran at the narrow box')
- local small=Role('small')
+ local small=Role('secondary')
  print('OBSERVED',tag,'roll='..box.w..'x'..box.h,'row='..layout.small,'name box='..tostring(NexusPanel._offerCards[1].name:GetWidth()),
   'name natural='..string.format('%.1f',Natural(NexusPanel._offerCards[1].name)))
  OfferRows(tag,Rect(area),small,LONG,C.expect)
  local name=NexusPanel._offerCards[1].name
  C.guard(name:GetStringWidth()>name:GetWidth() and tostring(NexusPanel._offerCards[1]._nexusFull):find('Resonance of the Unbroken Covenant',1,true)~=nil,
-  tag..': the long name is shortened in its row and complete on the card hover')
- C.expect(Near(Size(name),Size(NexusPanel._offerCards[1].tag)) and Near(Size(name),small),
-  tag..': the shortened name keeps the full native-derived size (no per-text shrink)',Size(name))
+  tag..': the long name is wider than one line of its column (it wraps there) and complete on the card hover')
+ C.expect(Near(Size(name),Role('normal')) and Near(Size(NexusPanel._offerCards[1].tag),small),
+  tag..': the shortened name keeps the full native-derived primary size (no per-text shrink)',Size(name))
  -- Revision 2, R1 at the narrow box, through the real heading and cell
  -- functions (the panel itself always lays out at 420 px): the Play
  -- fixture's slot heading, then a preview heading with its shorter forms.
@@ -522,14 +540,14 @@ C.scenario('N4 a native height that changes after start-up is followed, without 
  print('OBSERVED','N4 16->20 receiver='..tostring(Size(name)),'builds='..tostring(LM.Stats().fontBuilds-builds),
   'revision '..tostring(revision)..'->'..tostring(after),'row '..tostring(small16)..'->'..tostring(NexusPanel._responsiveLayout.small),
   'height '..tostring(height16)..'->'..tostring(NexusPanel:GetHeight()))
- C.expect(Near(Size(name),20),'N4: the offer name follows the new native height on the next render',Size(name))
+ C.expect(Near(Size(name),Role('normal')),'N4: the offer name follows the new native height on the next render',Size(name))
  C.expect(LM.Stats().fontBuilds==builds+1 and after>revision,'N4: one font build and a new runtime revision record the change',
   tostring(LM.Stats().fontBuilds-builds)..' builds, revision '..tostring(after))
  C.expect(NexusPanel._responsiveLayout.small==22 and NexusPanel:GetHeight()>height16,
   'N4: the cached layout is not reused: the rows and the panel grow',NexusPanel._responsiveLayout.small)
  SetNative(16)
  P.Render(Play())
- C.expect(Near(Size(name),16) and NexusPanel._responsiveLayout.small==small16,'N4: and it returns with the native height',Size(name))
+ C.expect(Near(Size(name),Role('normal')) and NexusPanel._responsiveLayout.small==small16,'N4: and it returns with the native height',Size(name))
  NexusLoadingStatusFrame=loading
  -- The supported font scales bound the owned sizes.
  SetNative(30);P.Render(Play())
@@ -558,8 +576,8 @@ C.scenario('N5 the owned size equals the reference at any shared effective scale
   C.setup(Render(Play())==true,'N5: fixture: the Play panel at effective scale '..uiScale)
   local _,reported=LM.RuntimeMetrics()
   seen[#seen+1]=tostring(Owned('small'))..'/'..tostring(Owned('normal'))..'/'..tostring(Owned('large'))
-  C.expect(Near(Size(NexusPanel._offerCards[1].name),Size(GameFontHighlightSmall)),
-   'N5: at effective scale '..uiScale..' the offer name and the reference have the same height',Size(NexusPanel._offerCards[1].name))
+  C.expect(Near(Size(NexusPanel._offerCards[1].name),Size(GameFontHighlightSmall)*1.2),
+   'N5: at effective scale '..uiScale..' the offer name keeps its primary size on the reference (1.2 x its height)',Size(NexusPanel._offerCards[1].name))
   C.guard(Near(reported,uiScale) and NexusPanel:GetScale()==panelScale,'N5: the UI scale is read, never set',reported)
  end
  C.guard(seen[1]==seen[2],'N5: the owned sizes do not depend on the effective scale',seen[1]..' vs '..seen[2])
@@ -604,20 +622,68 @@ C.scenario('N7 a native height of 10, or no readable reference, keeps 10 / 12 / 
   'N7: the owned fonts are exactly 10 / 12 / 14 at font scale 1',tostring(Owned('small'))..'/'..tostring(Owned('normal'))..'/'..tostring(Owned('large')))
  C.guard(layout.small==11 and layout.normal==14 and layout.large==16 and layout.gap==6,'N7: the layout rows are 11 / 14 / 16 with a 6 px gap')
  local cards=NexusPanel._offerCards
- C.guard(cards[1]:GetHeight()==15 and cards[1].name:GetHeight()==15 and Size(cards[1].name)==10,
-  'N7: an offer row is 15 px for the 10 px font: its 11 px line with a 2 px row gap above and below (offer-row spacing)',tostring(cards[1]:GetHeight()))
+ -- Approved panel cleanup (full offer names, wrapped, no line cap): a row
+ -- whose name fits its column keeps the 15 px model row (row 2); a name
+ -- longer than its column wraps and its row is as tall as the wrapped name
+ -- (row 1's long name takes two 14 px lines of the 12 px font here: 28).
+ -- Approved panel cleanup (the selected offer's complete reason within its
+ -- own row, not repeated under the rows): row 1 is this fixture's selected
+ -- offer, so under its wrapped texts (the tallest of name, quality and tag)
+ -- it also holds the recommendation's reason, and is as tall as both. The
+ -- former literal 28 was the wrapped name alone, with the reason below the
+ -- three rows.
+ local reason=NexusPanel._rollRec
+ local texts=math.max(cards[1].name:GetHeight(),cards[1].quality:GetHeight(),cards[1].tag:GetHeight())
+ local rowRect,reasonRect=Rect(cards[1]),Rect(reason)
+ print('OBSERVED','N7 row 1='..tostring(cards[1]:GetHeight())..' name='..tostring(cards[1].name:GetHeight())
+  ..' quality='..tostring(cards[1].quality:GetHeight())..' tag='..tostring(cards[1].tag:GetHeight())
+  ..' reason='..tostring(reason:GetHeight())..' "'..G.Visible(reason:GetText() or '')..'" row 2='..tostring(cards[2]:GetHeight()))
+ C.guard(cards[2]:GetHeight()==15 and cards[2].name:GetHeight()==15 and cards[1].name:GetHeight()==28
+  and reason:IsShown() and G.Visible(reason:GetText() or '')~='' and rowRect and reasonRect and G.Inside(reasonRect,rowRect,0.01)
+  -- The row is its texts and its reason, with no more than the layout's
+  -- gap between and around them (no reserved empty band).
+  and reason:GetHeight()+0.5>=reason:GetStringHeight()
+  and cards[1]:GetHeight()>=texts+reason:GetHeight() and cards[1]:GetHeight()<=texts+reason:GetHeight()+layout.gap
+  and Size(cards[1].name)==12 and Size(cards[1].tag)==11,
+  'N7: an offer row is 15 px for the 12 px name and 11 px tag (its 11 px line with a 2 px row gap above and below), as tall as a wrapped name needs, and the selected row also holds its reason',
+  tostring(cards[1]:GetHeight())..' / '..tostring(cards[2]:GetHeight()))
  C.guard(NexusPanel._chargesText:GetWidth()==72 and NexusPanel._rollStatus:GetWidth()==layout.boxes.roll.w-4-76,
   'N7: the charges cell is 72 px and the heading keeps the rest less 76',NexusPanel._chargesText:GetWidth())
  local title,build,wishlist=Rect(NexusPanel._contextTitle),Rect(NexusPanel._contextBuild),Rect(NexusPanel._contextWishlist)
- C.guard(title and build and wishlist and title[2]==8 and build[2]==32 and wishlist[2]==57
-  and NexusPanel._contextTitle:GetHeight()==20 and NexusPanel._contextBuild:GetHeight()==20 and NexusPanel._contextWishlist:GetHeight()==20
-  and build[1]==12 and wishlist[1]==12,'N7: the header lines are at 8 / 32 / 57 in 20 px rows',Text(title)..' '..Text(build)..' '..Text(wishlist))
+ -- Approved compact insets and gaps: the Wishlist line follows the Build
+ -- line's own row after a 2-unit gap (32 + 20 + 2 = 54; formerly a fixed 57,
+ -- 5 units under it).
+ C.guard(title and build and wishlist and title[2]==8 and build[2]==32 and wishlist[2]==build[4]+2 and wishlist[2]==54
+  and NexusPanel._contextTitle:GetHeight()==20 and NexusPanel._contextBuild:GetHeight()==20
+  -- Approved panel cleanup (full Build and Wishlist names, wrapped): a line
+  -- whose text fits keeps its 20 px row (the Build line here); this
+  -- fixture's Wishlist line is longer than its 286 px and is as tall as its
+  -- wrapped text instead of being shortened.
+  and NexusPanel._contextWishlist:GetHeight()>=20
+  and NexusPanel._contextWishlist:GetHeight()+0.5>=NexusPanel._contextWishlist:GetStringHeight()
+  and build[1]==12 and wishlist[1]==12,'N7: the header lines are at 8 / 32 / 54, in 20 px rows or as tall as their wrapped text',
+  Text(title)..' '..Text(build)..' '..Text(wishlist))
  local switch,change=Rect(NexusPanel._switchBtn),Rect(NexusPanel._contextChange)
- C.guard(switch and change and switch[2]==30 and change[2]==55 and switch[3]-switch[1]==106 and switch[4]-switch[2]==22
-  and change[3]-change[1]==106 and change[4]-change[2]==22,'N7: My Builds and Change are 106 x 22 at 30 and 55',Text(switch)..' '..Text(change))
+ -- Approved compact gaps: each button stands at its own line's top and is as
+ -- tall as that line's 20-unit row, so the two rows 2 units apart do not
+ -- overlap (formerly 106 x 22 at 30 and 55, around rows 25 units apart). The
+ -- 106-unit width, the routes and the labels are unchanged.
+ C.guard(switch and change and switch[2]==build[2] and change[2]==wishlist[2] and switch[3]-switch[1]==106 and switch[4]-switch[2]==20
+  and change[3]-change[1]==106 and change[4]-change[2]==20 and G.Apart(switch,change),
+  'N7: My Builds and Change are 106 x 20 at their lines\' tops (32 and 54), apart',Text(switch)..' '..Text(change))
  local card,tier,ash,gain=StatusCard()
- C.guard(card and tier:GetWidth()==104 and tier:GetHeight()==16 and ash:GetWidth()==172 and ash:GetHeight()==17
-  and gain:GetWidth()==70 and gain:GetHeight()==14,'N7: the difficulty card texts are 104x16, 172x17 and 70x14',
+ -- Approved panel cleanup: the Compact A card (48 units with its bar, where
+ -- the original was 56): a 15-unit tier line beside the multiplier's own
+ -- width (6 units apart, between the card's 8-unit side insets) and a
+ -- 14-unit Soul Ash line across the card. The former fixed 104x16, 172x17
+ -- and 70x14 boxes are gone. Approved compact insets: the card is the
+ -- panel's width less its 8-unit insets (404 of 420; formerly 400 between
+ -- 10-unit insets), so its text room is 388.
+ local inner=card and card:GetWidth()-16
+ C.guard(card and card:GetWidth()==NexusPanel:GetWidth()-16 and card:GetHeight()==48 and tier:GetHeight()==15
+  and tier:GetWidth()+6+gain:GetWidth()==inner
+  and ash:GetWidth()==inner and ash:GetHeight()==14 and gain:GetHeight()==15,
+  'N7: the Compact A card is 48 units: a 15-unit tier line beside the multiplier and a 14-unit Soul Ash line',
   card and (tier:GetWidth()..'x'..tier:GetHeight()..' '..ash:GetWidth()..'x'..ash:GetHeight()..' '..gain:GetWidth()..'x'..gain:GetHeight()))
  -- No readable reference: the fixed sizes.
  local reference=GameFontHighlightSmall
@@ -641,7 +707,23 @@ local function Fixed(height,name,model)
  local head,charges=NexusPanel._rollStatus,NexusPanel._chargesText
  if not C.setup(type(layout)=='table' and layout.boxes and layout.boxes.roll and head:IsShown() and charges:IsShown()
   and (head:GetText() or '')~='' and (charges:GetText() or '')~='',tag..': fixture: the heading and the charges row are shown') then return end
- local row=layout.boxes.roll.w-4
+ -- Approved compact Auto ON (no permanent row solely for the explanation
+ -- control): while Auto is ON the optional "Auto explained" disclosure
+ -- stands at the right end of this heading row, so the row the heading and
+ -- the charges cell share is the roll width less 4 and less the room the
+ -- layout states for that control (layout.headingReserve; none with Auto
+ -- OFF). The cell rule itself (Cell) is unchanged.
+ local reserve=tonumber(layout.headingReserve) or 0
+ local row=layout.boxes.roll.w-4-reserve
+ local disclosure=NexusPanel._autoInfoBtn
+ if reserve>0 then
+  local dr,hr,cr=Rect(disclosure),Rect(head),Rect(charges)
+  C.guard(model.auto==true and disclosure and disclosure:IsShown() and dr and hr and cr and G.Apart(dr,hr) and G.Apart(dr,cr)
+   and disclosure:GetWidth()<=reserve,tag..': the row is shared only with the shown Auto disclosure, which overlaps neither the heading nor the charges',
+   'reserve '..reserve..' disclosure '..Text(dr))
+ else
+  C.guard(not (disclosure and disclosure:IsShown() and model.auto~=true),tag..': with Auto OFF no disclosure takes heading room')
+ end
  local cell=Cell(row,head,false)
  local conservative=Chars(head)*math.max(7.0,0.70*10*Scale())
  local detail='cell '..tostring(charges:GetWidth())..' want '..cell..'; heading "'..G.Visible(head:GetText())..'" box '..tostring(head:GetWidth())
@@ -656,7 +738,7 @@ local function Fixed(height,name,model)
  if conservative<=row-76 then
   C.guard(conservative<=head:GetWidth()+0.01,tag..': the heading still holds its line under the conservative text model',detail)
  end
- C.guard(charges:GetWidth()>=72 and Near(Size(charges),height),tag..': the cell is never under 72 px and the charges keep their font',detail)
+ C.guard(charges:GetWidth()>=72 and Near(Size(charges),Role('secondary')),tag..': the cell is never under 72 px and the charges keep their font',detail)
 end
 for _,height in ipairs({12,16,20}) do
  C.scenario('R1 headings without offer cards at native height '..height,function()
@@ -664,6 +746,139 @@ for _,height in ipairs({12,16,20}) do
   Fixed(height,'Auto ON, paused',Model({auto=true,paused='combat',recommendation='Take a needed Echo',charges=CHARGES,serverStatus=SERVER,slot=2}))
  end)
 end
+
+----------------------------------------------------------------------------
+-- T1: the approved readable sizes ("Primary text target 12 UI units;
+-- secondary floor 11. Preserve existing native-reference scaling and
+-- other-window/shared fonts"). At a native small font of 10 the offer names
+-- are 12 and no shown text of the main panel is under 11; at native 16 both
+-- keep the native-reference scale (x1.6). The shared owned fonts other
+-- windows use stay 10 / 12 / 14 x that scale. EXPECT fails before the change
+-- by design: the panel's secondary texts were the shared 10-unit small font.
+----------------------------------------------------------------------------
+C.scenario('T1 main panel text is at least 11 units, names 12, at the native-reference scale; shared fonts unchanged',function()
+ for _,height in ipairs({10,16}) do
+  local tag='T1 native '..height
+  SetNative(height)
+  C.setup(Render(Play())==true,tag..': fixture: the Play panel renders an offer, charges and the difficulty card')
+  local scale=Scale()
+  local least,which
+  for _,region in ipairs(G.Shown(NexusPanel)) do
+   if region.kind=='FontString' and G.Visible(region:GetText() or '')~='' then
+    local size=Size(region)
+    if not least or size<least then least,which=size,G.Visible(region:GetText()) end
+   end
+  end
+  C.expect(least~=nil and least>=11*scale-0.011,tag..': no shown main panel text is under the 11-unit floor x the native scale',
+   tostring(least)..' "'..tostring(which)..'"')
+  local card=NexusPanel._offerCards[1]
+  C.expect(Near(Size(card.name),12*scale) and Near(Size(card.tag),11*scale),
+   tag..': an offer name is primary (12) and its tag secondary (11), x the native scale',
+   tostring(Size(card.name))..' / '..tostring(Size(card.tag)))
+  C.expect(Near(Size(NexusPanel._contextTitle),15*scale),tag..': the panel title is its own 15-unit role, x the native scale',
+   tostring(Size(NexusPanel._contextTitle)))
+  C.expect(Near(Size(NexusPanel._rollStatus),11*scale) and Near(Size(NexusPanel._rollRec),11*scale)
+   and Near(Size(NexusPanel._chargesText),11*scale),tag..': the offer heading, the recommendation and the charges are secondary (11)',
+   tostring(Size(NexusPanel._rollStatus))..' / '..tostring(Size(NexusPanel._rollRec))..' / '..tostring(Size(NexusPanel._chargesText)))
+  C.guard(Near(Owned('small'),10*scale) and Near(Owned('normal'),12*scale) and Near(Owned('large'),14*scale),
+   tag..': the shared owned fonts of the other windows stay 10 / 12 / 14 x the native scale',
+   tostring(Owned('small'))..'/'..tostring(Owned('normal'))..'/'..tostring(Owned('large')))
+ end
+ C.guard(NATIVE.nativeSets==0,'T1: no game font object is set',NATIVE.nativeSets)
+end)
+
+----------------------------------------------------------------------------
+-- N9, N10: the header's own text against a font that changes or grows.
+----------------------------------------------------------------------------
+-- N9. EXPECT (fails before the correction): the Build and Wishlist lines
+-- wrap at their measured heights, and those heights were kept for the same
+-- header words whatever the font. Rendering the SAME model again after the
+-- native height changed (10 to 12.5: the 20-unit header row minimum is the
+-- same at both) left the Wishlist line at the height measured for the
+-- smaller font, so its last line was cut; back at 10 the larger height
+-- stayed as an empty band. The model is rendered directly here: the Render
+-- helper above first renders another model, which changes the header words
+-- and so hid this.
+C.scenario('N9 the wrapped Wishlist line is measured again when only the font changes',function()
+ local function Named()
+  local m=Play()
+  m.progress.wishlistName='Synthetic Play plan whose name is long enough to need more than one line'
+  return m
+ end
+ local line=NexusPanel._contextWishlist
+ local function Fit() return line:GetHeight(),math.max(20,math.ceil(line:GetStringHeight())) end
+ local function Header() return NexusPanel._responsiveLayout.boxes.header.h end
+ SetNative(10)
+ C.setup(Render(Named())==true,'N9: fixture: a long Wishlist name at native 10')
+ local h10,need10=Fit()
+ local box10=Header()
+ C.setup(need10>20 and Near(h10,need10),'N9: fixture: the name wraps at native 10 and its line is as tall as its text',
+  tostring(h10)..' for '..tostring(need10))
+ SetNative(12.5)
+ C.setup(P.Render(Named())==true and math.max(20,NexusPanel._responsiveLayout.normal)==20,
+  'N9: fixture: the same model at native 12.5, where the header row minimum is still 20',NexusPanel._responsiveLayout.normal)
+ local h12,need12=Fit()
+ local box12=Header()
+ print('OBSERVED','N9 native 10 -> 12.5','line '..tostring(h10)..' -> '..tostring(h12),
+  'text needs '..tostring(need10)..' -> '..tostring(need12),'header '..tostring(box10)..' -> '..tostring(box12))
+ C.setup(need12>need10,'N9: fixture: the larger font needs a taller line',need12)
+ C.expect(Near(h12,need12),'N9: the Wishlist line is as tall as its text at the new size (no line is cut)',
+  tostring(h12)..' for '..tostring(need12))
+ C.expect(box12>=box10+(need12-need10)-0.01,'N9: and the header grows by what the line gained',
+  tostring(box10)..' -> '..tostring(box12))
+ SetNative(10)
+ P.Render(Named())
+ local back,needBack=Fit()
+ C.expect(Near(back,needBack) and Near(back,h10) and Header()==box10,
+  'N9: back at native 10 the line and the header return (no height is kept from the larger font)',
+  tostring(back)..' for '..tostring(needBack)..', header '..tostring(Header()))
+end)
+
+-- N10. EXPECT (fails before the correction): the title became the 15-unit
+-- role in the same one-line slot (150 units at 420), and its state cue is
+-- the end of that line, so a cue that fitted at the former primary size was
+-- cut by the client. A title whose line is wider than its slot at the title
+-- role is drawn at the primary role instead (the size it had before), never
+-- smaller. GUARD: the plain title, and a cue title that fits, keep the
+-- 15-unit role. Widths are this fixture's stated model (0.55 em).
+C.scenario('N10 a title with a state cue is not cut by the larger title font',function()
+ local title=NexusPanel._contextTitle
+ local function Title(native,text,edit)
+  SetNative(native)
+  local m=Play()
+  if edit then edit(m) end
+  C.setup(Render(m)==true and G.Visible(title:GetText() or '')==text,
+   'N10: fixture: native '..tostring(native)..' shows "'..text..'"',title:GetText())
+  local size,cut=Size(title),LM.Shortened(title)
+  print('OBSERVED','N10 native '..tostring(native),'"'..text..'"','font='..tostring(size),'slot='..tostring(title:GetWidth()),
+   'line='..tostring(Natural(title)),'cut='..tostring(cut))
+  return size,cut
+ end
+ local function Preview(m) m.progress.isCommunityPreview=true end
+ local function PreviewEmpty(m) m.progress.isCommunityPreview=true;m.assignment={emptySlot=true} end
+ local function Unconfirmed(m) m.progress.activeSlot=nil end
+
+ local size,cut=Title(10,'Nexus')
+ C.guard(Near(size,Role('title')) and not cut,'N10: the plain title keeps its 15-unit role',size)
+ size,cut=Title(10,'Nexus [Preview]',Preview)
+ C.guard(Near(size,Role('title')) and not cut,'N10: a cue title that fits its slot keeps the 15-unit role',size)
+ size,cut=Title(10,'Nexus [Unconfirmed]',Unconfirmed)
+ C.expect(not cut and Near(size,Role('normal')),
+  'N10: native 10: the Unconfirmed cue is whole, at the primary size it fitted at before',tostring(size)..' cut='..tostring(cut))
+ size,cut=Title(10,'Nexus [Preview; Empty]',PreviewEmpty)
+ C.expect(not cut and Near(size,Role('normal')),
+  'N10: native 10: the Preview and Empty cues are whole, at the primary size',tostring(size)..' cut='..tostring(cut))
+ size,cut=Title(12.5,'Nexus [Preview]',Preview)
+ C.expect(not cut and Near(size,Role('normal')),
+  'N10: native 12.5: the Preview cue is whole, at the primary size',tostring(size)..' cut='..tostring(cut))
+ -- Wider than the slot even at the primary size (as before the title role
+ -- existed): it is at least not drawn larger than that, and never smaller.
+ size=Title(12.5,'Nexus [Unconfirmed]',Unconfirmed)
+ C.expect(Near(size,Role('normal')),'N10: native 12.5: a cue too wide for the slot is drawn at the primary size, not larger or smaller',size)
+ size,cut=Title(12.5,'Nexus')
+ C.guard(Near(size,Role('title')) and not cut,'N10: the plain title returns to its 15-unit role after a cue title',size)
+ C.guard(NATIVE.nativeSets==0,'N10: no game font object is set',NATIVE.nativeSets)
+end)
 
 ----------------------------------------------------------------------------
 -- N8: what must not change.

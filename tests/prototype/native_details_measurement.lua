@@ -304,12 +304,16 @@ C.scenario('D3 125% text: the same face in the scaled font, every line whole',fu
  local labelGap=math.max(3,math.floor(layout.gap/2))
  C.expect(layout.boxes.needed.h==layout.small+labelGap+math.max(layout.small*3,3*MODEL.line),
   'D3: each column is its heading plus the three measured 125% lines',layout.boxes.needed.h)
- local small=Nexus.LayoutMetrics.FontObject('small')
+ -- Approved panel cleanup (secondary floor 11): the main panel's secondary
+ -- text, these columns included, is its own 11-unit font object, not the
+ -- shared 10-unit small one. What is protected is unchanged: the added rows
+ -- use the same font object as their column.
+ local small=Nexus.LayoutMetrics.FontObject('secondary')
  local same=need._font==small and shed._font==small
  for _,col in ipairs({need,shed}) do
   for index=2,#col._nexusRows do if col._nexusRows[index]._font~=small then same=false end end
  end
- C.expect(same,'D3: the added rows use the same owned small font object as their column',small)
+ C.expect(same,'D3: the added rows use the same owned secondary font object as their column',small)
  Use(G.MODELS.default)
  P._playDetails=false;P.Render(Model('default'))
 end)

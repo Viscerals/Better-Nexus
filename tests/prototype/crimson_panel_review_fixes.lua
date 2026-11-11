@@ -229,8 +229,15 @@ C.scenario('V2 Charges, recommendation and Details headings fit their text; the 
  P.Render(Model({recommendation=long}))
  local t,h=Rect(root._rollRec),Rect(root._recommendationHover)
  C.expect(h[1]==t[1] and h[3]==t[3] and h[4]==t[4],'V2: an overflowing recommendation keeps its whole box',G.Text(h)..' in '..G.Text(t))
- local tip=table.concat(V.TooltipLines(root._recommendationHover:GetScript('OnEnter'),root._recommendationHover),' ')
- C.guard(tip:find('Take the needed Echo when it is offered.',1,true)~=nil,'V2: its hover still shows the complete text')
+ -- Approved panel cleanup ("Full ... recommendation and reason text. Wrap and
+ -- grow ... No clipping, ellipsis or arbitrary line cap"): a long
+ -- recommendation no longer overflows a fixed box with its complete text only
+ -- on a hover. Its box is as tall as its wrapped text, so the complete text
+ -- is on the panel itself.
+ local rec=root._rollRec
+ C.guard(V.Plain(rec:GetText() or ''):find('Take the needed Echo when it is offered.',1,true)~=nil
+  and rec:GetHeight()+0.5>=rec:GetStringHeight(),'V2: the complete recommendation is shown on the panel, in a box as tall as its wrapped text',
+  rec:GetHeight()..' needs '..rec:GetStringHeight())
  P.Render(Model({noCharges=true}))
  C.guard(not root._chargesHover:IsShown(),'V2: without a Charges line its hover is hidden')
  local row=root._destinationRow
@@ -556,18 +563,35 @@ function S.L()
 end
 -- No box: besides its fill and its three texts, the only thing a row paints
 -- and shows is its icon. A row outline or a slot outline is a painted colour.
+-- Approved panel cleanup ("The selected row is a filled band with a 2-unit
+-- accent bar, not an outline"): the one selected row (the row whose tag is
+-- in the mark colour) may also paint exactly that bar: one colour region, 2
+-- units wide, as tall as the row, ending at the row's left edge. It is on one
+-- side only, so it is no rectangle around the row or its icon; any other
+-- painted colour, a second one, or a bar on a row that is not selected still
+-- fails, as every painted colour did before.
 function S.Bare(o)
- local n=0
- for _,v in ipairs(o and o.visuals or {}) do if v.path==nil then n=n+1 end end
- return o~=nil and n==0,n..' painted colour region(s) besides the fill'
+ local n,last=0,nil
+ for _,v in ipairs(o and o.visuals or {}) do if v.path==nil then n=n+1;last=v end end
+ if o==nil then return false,'no row' end
+ if n==0 then return true,'0 painted colour region(s) besides the fill' end
+ local r=last and S.Rect(last.region) or nil
+ local bar=n==1 and (S.TagColour(o,true)) and r~=nil and o.rect~=nil
+  and math.abs((r[3]-r[1])-2)<0.01 and math.abs(r[3]-o.rect[1])<0.01
+  and math.abs(r[2]-o.rect[2])<0.01 and math.abs(r[4]-o.rect[4])<0.01
+ return bar and true or false,n..' painted colour region(s) besides the fill'
+  ..(bar and ': the selected row\'s 2-unit accent bar at its left edge' or (r and (' '..G.Text(r)) or ''))
 end
--- The borderless icon: a square of its row's height at the row's left and top.
+-- The borderless icon: a square of the row's own line height (S.L().rowH) at
+-- the row's left and top. Approved panel cleanup (full offer names): a row
+-- whose name wraps is taller than that line, and the icon keeps the line's
+-- square beside the first line instead of growing with the row.
 function S.IconFit(o)
  local icon,r=S.Icon(o),o.rect
  if not icon then return false,'no icon' end
  local side=icon[3]-icon[1]
- if math.abs(side-(icon[4]-icon[2]))>0.01 or math.abs(side-(r[4]-r[2]))>0.01 then
-  return false,'icon '..G.Text(icon)..' is not a square of its row\'s height '..G.Text(r)
+ if math.abs(side-(icon[4]-icon[2]))>0.01 or math.abs(side-S.L().rowH)>0.01 then
+  return false,'icon '..G.Text(icon)..' is not a square of its row\'s line height '..S.L().rowH..' in '..G.Text(r)
  end
  if math.abs(icon[1]-r[1])>0.01 or math.abs(icon[2]-r[2])>0.01 then return false,'icon '..G.Text(icon)..' is not at its row\'s left and top '..G.Text(r) end
  return true,G.Text(icon)
@@ -578,14 +602,23 @@ end
 -- row's right; each box spans the row's height with its text set to the
 -- middle, so the texts and the icon share one centre line.
 function S.Columns(o)
+ -- Approved panel cleanup (full offer names): the icon square is the row's
+ -- line height, so the name starts one gap after that; a wrapped name spans
+ -- its whole (taller) row, while the quality and the tag keep the row's
+ -- first line.
  local L,r=S.L(),o.rect
- local x,last=r[1]+(r[4]-r[2])+L.gap,nil
+ local x,last=r[1]+L.rowH+L.gap,nil
  for _,k in ipairs({'name','quality','tag'}) do
   local t=o.texts[k]
   if t.text~='' then
    if not t.rect then return false,k..' has no box' end
    if math.abs(t.rect[1]-x)>0.01 then return false,string.format('%s starts at %.1f, want %.1f',k,t.rect[1],x) end
-   if math.abs(t.rect[2]-r[2])>0.01 or math.abs(t.rect[4]-r[4])>0.01 then return false,k..' '..G.Text(t.rect)..' does not span its row\'s height '..G.Text(r) end
+   -- Each text starts at the row's top and spans at least the row's line;
+   -- a text that wraps, and a row that also holds the selected offer's
+   -- reason under its texts, make the box or the row taller than that line.
+   if math.abs(t.rect[2]-r[2])>0.01 or t.rect[4]<r[2]+L.rowH-0.01 or t.rect[4]>r[4]+0.01 then
+    return false,k..' '..G.Text(t.rect)..' does not span its row\'s line inside its row '..G.Text(r)
+   end
    if SlotSpy.justify[o.card[k]]~='MIDDLE' then return false,k..' is set to '..tostring(SlotSpy.justify[o.card[k]])..', not to the middle of its box' end
    x,last=t.rect[3]+L.gap,t.rect
   end
@@ -597,31 +630,67 @@ end
 -- The band: the first row two row gaps under the heading line, each row its
 -- height and one row gap from the next, and the text under the rows two row
 -- gaps below the last.
-function S.Rows(n)
+-- Approved panel cleanup (full offer names): a row is its line (S.L().rowH)
+-- while its name fits its column, and as tall as its wrapped name when it
+-- does not; each row still starts one row gap under the one before.
+-- The band starts two row gaps under the heading, which is one small line or
+-- as tall as a heading that wraps. A row is exactly as tall as its own texts
+-- need: its line, or a name, quality or tag that wraps (the name's measured
+-- text height; the quality and tag boxes are sized from their own text).
+-- `selected` is the scenario's own statement of which row is the selected
+-- offer (nil: none); it is never read from the panel, so the panel cannot
+-- choose which of the two contracts below is checked.
+--   No selected row: the text under the rows starts two row gaps below the
+--   last row. This is the check as it was before the cleanup: it is
+--   unconditional and fails when that text has no box.
+--   Selected row i: its reason is inside it, starting directly under the
+--   row's own texts, within the row's sides, and ending one row gap above
+--   the row's bottom, so the row is its texts, its reason and that gap.
+function S.Rows(n,selected)
  local L,roll=S.L(),S.Rect(root._rollArea)
- local top=roll[2]+1+L.small+2*L.rowGap
+ local head=root._rollStatus
+ local top=roll[2]+1+math.max(L.small,head and head:IsShown() and head:GetHeight() or 0)+2*L.rowGap
+ local want=top
+ local rec=S.Rect(root._rollRec)
  for i=1,n do
   local card=root._offerCards[i]
   local r=card:IsVisible() and S.Rect(card) or nil
   if not r then return false,'row '..i..' is not shown' end
-  local want=top+(i-1)*(L.rowH+L.rowGap)
-  if math.abs(r[2]-want)>0.01 or math.abs((r[4]-r[2])-L.rowH)>0.01 then
-   return false,string.format('row %d %s, want top %.1f and height %.1f',i,G.Text(r),want,L.rowH)
+  local texts=math.max(L.rowH,math.ceil(card.name:GetStringHeight() or 0),card.quality:GetHeight() or 0,card.tag:GetHeight() or 0)
+  local height=texts
+  if i==selected then
+   if G.Visible(root._rollRec:GetText() or '')=='' or not rec then return false,'the selected row '..i..' has no reason text with a box' end
+   if math.abs(rec[2]-(r[2]+texts))>0.01 or math.abs(r[4]-rec[4]-L.rowGap)>0.01 or rec[1]<r[1]-0.01 or rec[3]>r[3]+0.01 then
+    return false,string.format('the selected row %d %s holds its reason at %s, want it from %.1f to %.1f inside the row',
+     i,G.Text(r),G.Text(rec),r[2]+texts,r[4]-L.rowGap)
+   end
+   height=texts+(rec[4]-rec[2])+L.rowGap
   end
+  if math.abs(r[2]-want)>0.01 or math.abs((r[4]-r[2])-height)>0.01 then
+   return false,string.format('row %d %s, want top %.1f and height %.1f',i,G.Text(r),want,height)
+  end
+  want=r[4]+L.rowGap
  end
- local rec,body=S.Rect(root._rollRec),top+3*L.rowH+4*L.rowGap
- if not (rec and math.abs(rec[2]-body)<=0.01) then return false,string.format('the text under the rows starts at %.1f, want %.1f',rec and rec[2] or -1,body) end
- return true,string.format('rows from %.1f, text from %.1f',top,body)
+ local body=want+L.rowGap
+ if not selected and not (rec and math.abs(rec[2]-body)<=0.01) then
+  return false,string.format('the text under the rows starts at %.1f, want %.1f',rec and rec[2] or -1,body)
+ end
+ return true,string.format('rows from %.1f, %s',top,selected and ('the reason inside row '..selected) or string.format('text from %.1f',body))
 end
 -- The room the text under the rows had while they were one-line rows (to
 -- test.163021): the roll box's least height less the heading, three rows and
 -- the box's bottom gap. More rows of guidance only add to it.
+-- Approved panel cleanup ("Save height through spacing and conditional
+-- content"; no fixed empty block): the text under the rows no longer keeps
+-- the room of the former fixed 104-unit box whether it needs it or not. What
+-- is protected now is that its box is inside the roll box and as tall as the
+-- text it holds needs.
 function S.BodyRoom()
- local L=S.L()
- local least=math.max(104,L.small*6+L.gap*4)-(1+L.small+math.max(3,math.floor(L.gap/2))+3*(L.small+L.rowGap))-L.gap
- local rec,roll=S.Rect(root._rollRec),S.Rect(root._rollArea)
- return rec~=nil and roll~=nil and G.Inside(rec,roll,0.01) and (rec[4]-rec[2])>=least-0.01,
-  string.format('%.1f of at least %.1f',rec and rec[4]-rec[2] or -1,least)
+ local text=root._rollRec
+ local rec,roll=S.Rect(text),S.Rect(root._rollArea)
+ local needs=G.Visible(text:GetText() or '')~='' and text:GetStringHeight() or 0
+ return rec~=nil and roll~=nil and G.Inside(rec,roll,0.01) and (rec[4]-rec[2])+0.5>=needs,
+  string.format('%.1f for a text that needs %.1f',rec and rec[4]-rec[2] or -1,needs)
 end
 function S.Meaning(model,i,o)
  local R=Nexus.Readout
@@ -854,9 +923,16 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
    S.Offer('Hollow Bell of the '..string.rep('Ashen ',8)..'Choir',4,'Owned 0 of 1'),
    S.Offer(string.rep('Gravecall ',6)..'Chorus (Rare)',nil,'Owned 1 of 1')}}))
   local h1,r1,c1=root:GetHeight(),S.Rect(root._rollArea),Controls()
-  C.guard(h1==h0 and r0~=nil and r1~=nil and math.abs((r1[4]-r1[2])-(r0[4]-r0[2]))<0.01 and c1==c0,
-   'REG-SLOT: at '..pct..' long names and tags keep the panel height, the roll box and the recommendation and controls',
-   tostring(h0)..'->'..tostring(h1)..' '..c0..'->'..c1)
+  -- Approved panel cleanup ("Full offer names ... Wrap and grow ... No
+  -- clipping, ellipsis or arbitrary line cap"): a long name is no longer
+  -- shortened in a fixed row, so the panel and the roll box grow by exactly
+  -- what the wrapped names add to their rows and by nothing else; the
+  -- recommendation and the controls stay as they were.
+  local extra=0
+  for i=1,3 do extra=extra+math.max(0,root._offerCards[i]:GetHeight()-S.L().rowH) end
+  C.guard(extra>0 and h1==h0+extra and r0~=nil and r1~=nil and math.abs((r1[4]-r1[2])-(r0[4]-r0[2])-extra)<0.01 and c1==c0,
+   'REG-SLOT: at '..pct..' long names wrap: the panel and the roll box grow by exactly their rows\' extra height; the recommendation and controls stay',
+   tostring(h0)..'->'..tostring(h1)..' extra '..extra..' '..c0..'->'..c1)
   local want={2,4,nil}
   for i=1,3 do
    local o=S.Observe(i)
@@ -1241,7 +1317,12 @@ C.scenario('REG-ROW-1 no boxes: a row paints no outline; its icon is a borderles
   local o=S.Observe(i)
   if C.setup(o~=nil and o.visible,'REG-ROW: fixture: offer row '..i..' is shown') then
    local bare,bwhy=S.Bare(o)
-   C.expect(bare,'REG-ROW: row '..i..(i==2 and ' (marked)' or '')..' paints no outline: besides its fill it shows only its icon',bwhy)
+   C.expect(bare,'REG-ROW: row '..i..(i==2 and ' (marked)' or '')..' paints no outline: besides its fill it shows only its icon'
+    ..(i==2 and ' and, as the selected row, its 2-unit accent bar' or ''),bwhy)
+   -- The bar belongs to the selected row alone.
+   local bars=0
+   for _,v in ipairs(o.visuals or {}) do if v.path==nil then bars=bars+1 end end
+   C.expect(bars==(i==2 and 1 or 0),'REG-ROW: row '..i..(i==2 and ' (marked) shows the one accent bar' or ' shows no accent bar'),bars)
    if want[1] then
     local shown,swhy=S.IconShown(o,want[1],want[2])
     C.guard(shown,'REG-ROW: row '..i..' still shows the texture of its own spell id and its name in its rarity colour',swhy)
@@ -1263,10 +1344,11 @@ C.scenario('REG-ROW-1 no boxes: a row paints no outline; its icon is a borderles
  end
  C.guard(starts[1]~=nil and starts[1]==starts[2] and starts[2]==starts[3],'REG-ROW: the names of rows with and without an icon start at the same place',
   tostring(starts[1])..'/'..tostring(starts[2])..'/'..tostring(starts[3]))
- local rows,rwhy=S.Rows(3)
- C.expect(rows,'REG-ROW: each row is its text line with a row gap above and below, a row gap from the next; two row gaps under the heading and above the text below',rwhy)
+ -- Row 2 is the selected offer here (marked.highlight above).
+ local rows,rwhy=S.Rows(3,2)
+ C.expect(rows,'REG-ROW: each row is exactly as tall as its texts, a row gap from the next, two row gaps under the heading; the selected row 2 holds its reason under its texts and one row gap above its bottom',rwhy)
  local room,mwhy=S.BodyRoom()
- C.guard(room,'REG-ROW: the text under the rows keeps the room it had, inside the roll box',mwhy)
+ C.guard(room,'REG-ROW: the reason text is inside the roll box, in a box as tall as its text needs',mwhy)
  S.icon.Restore()
 end)
 
@@ -1298,13 +1380,14 @@ C.scenario('REG-ROW-2 at 50 to 150% and with the 16 px and 2.0 faces: long and o
     C.guard(S.Hover(o):find(V.Plain(shown.full),1,true)~=nil,'REG-ROW: '..label..' long row '..i..'\'s hover shows its complete line',S.Hover(o))
    end
   end
-  C.guard(short==3,'REG-ROW: fixture: '..label..' each long name is shortened in its row',short)
+  C.guard(short==3,'REG-ROW: fixture: '..label..' each long name is wider than one line of its column',short)
   C.guard(S.icon.Asked(200001)==1 and S.icon.Asked(200002)==1 and #S.icon.calls==2,
    'REG-ROW: '..label..' each id is looked up once; the old-input row, a text without facts, is never looked up',#S.icon.calls)
+  -- No row of this board is selected: the text is under the rows.
   local rows,rwhy=S.Rows(3)
-  C.expect(rows,'REG-ROW: '..label..' the rows keep their band',rwhy)
+  C.expect(rows,'REG-ROW: '..label..' the rows keep their band: each exactly as tall as its texts, and the text under them two row gaps below the last',rwhy)
   local room,mwhy=S.BodyRoom()
-  C.guard(room,'REG-ROW: '..label..' the text under the rows keeps its room inside the roll box',mwhy)
+  C.guard(room,'REG-ROW: '..label..' the text under the rows is inside the roll box, in a box as tall as its text needs',mwhy)
  end
  for _,scale in ipairs({0.5,1,1.25,1.5}) do
   P.SetPanelScale(scale)

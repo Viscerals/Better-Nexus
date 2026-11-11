@@ -225,13 +225,29 @@ C.scenario('P4 Auto ON: the offer is recommended only, with what Auto may do',fu
  C.setup(P.Render(Model({auto=true,cards=CARDS}))==true,'P4: fixture: a synthetic Auto ON model with an offer')
  local cards=NexusPanel._offerCards
  C.expect(cards and cards[1].tag:GetText()==R.OFFER_RECOMMENDED_TAG,'P4: the marked card is recommended, not promised')
- C.expect(Heading():find('Current offer - Auto ON',1,true)~=nil,'P4: the heading says Auto is ON',Heading())
- -- The Auto ON line is the panel's own visible row below the offer (the
- -- design's always-shown note), not a hover and not part of the body.
+ -- Approved panel cleanup (Auto ON takes no row of its own): the Auto
+ -- explanation control shares the heading's row, so the heading is fitted
+ -- beside it and may show one of its shorter forms (Readout
+ -- .OfferHeadingForms); every form still says Auto is ON.
+ local says=false
+ for _,form in ipairs(R.OfferHeadingForms(true)) do if Heading():find(form,1,true) then says=true end end
+ C.expect(says and Heading():find('Auto ON',1,true)~=nil,'P4: the heading says Auto is ON',Heading())
+ -- Approved panel cleanup ("Compact Auto ON. Put long explanation behind
+ -- optional disclosure"): the Auto ON line is no longer always on the panel.
+ -- It starts closed behind its own control (NexusPanel._autoInfoBtn); once
+ -- the player opens it, it is the panel's own row below the offer, in full,
+ -- not a hover and not part of the body, and it stays open across renders
+ -- (P6-P8) until the player closes it.
+ local toggle=NexusPanel._autoInfoBtn
  local scope=NexusPanel._autoScopeText
+ C.expect(toggle~=nil and toggle:IsShown() and not (scope and scope:IsShown()),
+  'P4: the Auto ON line starts closed behind its control',toggle and toggle:GetText())
+ if toggle then toggle:Click() end
+ C.setup(P.Render(Model({auto=true,cards=CARDS}))==true,'P4: fixture: the same model rendered again after the control was clicked')
+ scope=NexusPanel._autoScopeText
  local boxes=NexusPanel._responsiveLayout and NexusPanel._responsiveLayout.boxes or {}
  C.expect(scope~=nil and scope:IsShown() and Visible(scope:GetText())==R.AUTO_ON_NOTE,
-  'P4: the Auto ON line is shown in full on the panel',scope and scope:GetText())
+  'P4: once opened, the Auto ON line is shown in full on the panel',scope and scope:GetText())
  C.expect(boxes.autoScope and boxes.roll and boxes.autoScope.y>=boxes.roll.y+boxes.roll.h,
   'P4: the Auto ON line follows the offer, in its own rows below it')
  C.expect(not Body():find(R.AUTO_ON_NOTE,1,true),'P4: the line is not repeated in the recommendation body',Body())
@@ -252,9 +268,9 @@ C.scenario('P5 waiting for current Echo data: named as a wait, never zero offers
  C.guard(Heading():find('paused',1,true)~=nil,'P5: another hold keeps the paused heading',Heading())
 end)
 
--- The original design shows the Auto ON note whenever Auto is ON with an
--- offer; it must not retreat into the Auto hover when a recommendation is
--- present. Fit is the offline conservative text model only (native NOT RUN).
+-- The opened Auto ON note (P4: opened by its control, and still open here)
+-- must not retreat into the Auto hover when a recommendation is present.
+-- Fit is the offline conservative text model only (native NOT RUN).
 C.scenario('P6 Auto ON beside a recommendation: the scope line stays visible; the body stays the recommendation',function()
  local before=Effects()
  C.setup(P.Render(Model({auto=true,cards=CARDS,recommendation='Take a needed Echo'}))==true,

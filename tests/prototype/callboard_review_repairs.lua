@@ -247,14 +247,28 @@ local function InOrder(seen,expected)
  end
  return true
 end
+-- Approved main panel cleanup ("Wrap and grow ... include ... Callboard. No
+-- clipping, ellipsis or arbitrary line cap"): the detail row no longer shows
+-- only the first objective line with "+N more". Every line is on the panel,
+-- in order, in a box as tall as its text (play_panel_summary S19); the hover
+-- keeps listing every complete line as before.
+local function RowShows(text,lines)
+ local at=1
+ for _,want in ipairs(lines) do
+  local s,e=text:find(want,at,true)
+  if not s then return false end
+  at=e+1
+ end
+ return true
+end
 local row,rowText=RenderDetail()
-check(rowText:find('Kill 3 rats',1,true)==1 and rowText:find('+2 more',1,true)~=nil
- and not rowText:find('Ember',1,true),'fixture: the row shows the first detail line and +2 more')
-check(row:GetStringWidth()<=row:GetWidth(),'fixture: the first visible detail line fits its row')
+check(rowText:find('Kill 3 rats',1,true)==1 and RowShows(rowText,snapshot.lines) and not rowText:find('more',1,true),
+ 'fixture: the row shows every objective line in order, with no "+N more"')
+check(row:GetHeight()+0.5>=row:GetStringHeight(),'fixture: the detail row is as tall as its lines need')
 check(InOrder(HoverDetail(),snapshot.lines),'the detail hover shows every complete objective line in order')
 snapshot={observed=true,title='Callboard Relay',lines={'Find 2 keys','Unlock the Sunken Vault door'},rewards={}}
 row,rowText=RenderDetail()
-check(rowText:find('Find 2 keys',1,true)==1 and rowText:find('+1 more',1,true)~=nil,
+check(rowText:find('Find 2 keys',1,true)==1 and RowShows(rowText,snapshot.lines) and not rowText:find('more',1,true),
  'fixture: the changed objective is the one rendered')
 local changedTip=HoverDetail()
 local changedText=table.concat(changedTip,'|')
@@ -341,8 +355,9 @@ do
  check(titleHit:IsShown() and lineHit:IsShown() and titleHit:IsMouseEnabled()==true
   and lineHit:IsMouseEnabled()==true,'a returning objective shows both hover areas and they take the mouse again')
  check(panel._callboardTitle:IsShown() and panel._callboardTitle:GetText()==newTitle
-  and backText:find('Report to the Warden',1,true)==1 and backText:find('+1 more',1,true)~=nil
-  and not backText:find('braziers',1,true),'the returning rows show the current objective text')
+  and backText:find('Report to the Warden',1,true)==1 and RowShows(backText,snapshot.lines)
+  and not backText:find('more',1,true)
+  and not backText:find('braziers',1,true),'the returning rows show the current objective text (every line, no "+N more")')
  check(SamePlace(titleHit,panel._callboardTitle) and SamePlace(lineHit,panel._callboardLine)
   and panel._callboardTitle:GetHeight()>=17 and panel._callboardLine:GetHeight()>=17,
   'the returning hover areas cover the current one-line title and detail rows')

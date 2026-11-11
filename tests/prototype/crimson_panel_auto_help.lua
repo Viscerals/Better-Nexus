@@ -442,8 +442,15 @@ C.scenario('A19 a change is shown by the next render without a layout pass; the 
  sets=0
  P.SetAuto(false)
  C.guard(Line()==NONE and sets==0 and P.RenderStats().calls==rendered+1,'A19: a second Auto OFF notice renders nothing more',Line()..' sets='..sets)
+ -- Approved panel cleanup ("Actual Auto changes must update both chip and
+ -- offer heading/instruction"): an Auto ON notice is now drawn too, by one
+ -- render of the last model with the new selection (it used to change only
+ -- the chip). What this guard protects is unchanged: that render drops the
+ -- runtime's earlier "running" fact, so the notice alone never says Random
+ -- rolling.
  P.SetAuto(true)
- C.guard(Line()==NONE and P.RenderStats().calls==rendered+1,'A19: an Auto ON notice alone never says Random rolling (the runtime states it)',Line())
+ C.guard(Line()==NONE and P.RenderStats().calls==rendered+2,'A19: an Auto ON notice alone never says Random rolling (the runtime states it)',
+  Line()..' renders='..(P.RenderStats().calls-rendered))
  label.SetText=nil
  local change=NexusPanel._contextChange
  local function Rect(r) return G.Rect(r,NexusPanel) end
