@@ -876,29 +876,16 @@ function M.CreateContextHeader(parent)
     parent._contextChange:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
--- The title's font role for its line and slot: the panel's own 15-unit title
--- role while the whole line fits the slot at that size, else the primary
--- role, which is the size the title had before it got its own role. The
--- state cue is the end of the line, so a cue that fitted then is not cut by
--- the larger title font; a line too wide even at the primary size is drawn
--- there, never smaller. Only this label's font object is chosen: no owned or
--- game font is resized. Applied with the header's words (not on a settled
--- render); a font change takes a layout pass, which applies it again.
--- Returns the role, or nil where the label cannot take a font object.
-function M.FitTitleRole(label, text, width)
-    local metrics = Nexus.LayoutMetrics
-    if not (label and metrics and type(metrics.FontObject) == "function"
-        and type(label.SetFontObject) == "function") then
-        return nil
-    end
-    local role = "title"
-    pcall(label.SetFontObject, label, metrics.FontObject(role))
-    local ok, measured = pcall(M.LineWidth, label, text)
-    if ok and (tonumber(measured) or 0) > (tonumber(width) or 0) + 0.01 then
-        role = "normal"
-        pcall(label.SetFontObject, label, metrics.FontObject(role))
-    end
-    return role
+-- The title is always the panel's own 15-unit title role (M.ApplyOwnedFonts)
+-- and is never cut or drawn smaller. Its state cue is the end of its line, so
+-- a title wider than its slot wraps inside the slot: by words, and inside a
+-- word longer than the slot (a long localized cue) where the client offers
+-- that switch. Its height is measured with the Build and Wishlist lines
+-- (M.MeasureContextHeader) and header line 1 grows for it
+-- (LayoutMetrics.Panel: headerTitleH).
+function M.WrapTitle(label)
+    if type(label.SetWordWrap) == "function" then pcall(label.SetWordWrap, label, true) end
+    if type(label.SetNonSpaceWrap) == "function" then pcall(label.SetNonSpaceWrap, label, true) end
 end
 
 function M.UpdateContextHeader(model, settled)
@@ -958,11 +945,13 @@ function M.UpdateContextHeader(model, settled)
     local key = table.concat({tostring(width), tostring(titleWidth), tostring(labelWidth),
         lines[1][3], lines[2][3], lines[3][3], tostring(tooltip[1]), tostring(tooltip[2]),
         tostring(tooltip[3]), tostring(tooltip[4]), tostring(autoState)}, "\031")
-    -- The title keeps line 1's literal 20 px row beside the controls. The
+    -- The title has line 1's 20-unit row beside the controls while its text
+    -- needs no more, and its measured height when it needs more (a state cue
+    -- that wraps in the title's slot): the rows under it then start lower by
+    -- the difference (LayoutMetrics.Panel: headerTitleH, headerBuildY). The
     -- Build and Wishlist rows are 20 px for the 12 px owned font; when the
     -- layout's font scale makes its normal row taller they take that height
-    -- and the Wishlist line (with its button) moves down by the difference,
-    -- inside the header the layout already reserves.
+    -- and the Wishlist line (with its button) moves down by the difference.
     -- Approved panel cleanup (full Build and Wishlist names): a name too
     -- long for its line wraps beside its button, in the height the layout
     -- measured for it (LayoutMetrics.Panel: headerBuildH, headerWishlistH,
@@ -975,7 +964,8 @@ function M.UpdateContextHeader(model, settled)
     local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
     local buildH = math.max(lineH, type(held) == "table" and tonumber(held.headerBuildH) or 0)
     local wishlistH = math.max(lineH, type(held) == "table" and tonumber(held.headerWishlistH) or 0)
-    local rows = lineH .. ":" .. buildH .. ":" .. wishlistH
+    local titleH = math.max(20, type(held) == "table" and tonumber(held.headerTitleH) or 0)
+    local rows = lineH .. ":" .. buildH .. ":" .. wishlistH .. ":" .. titleH
     if settled and frame._nexusHeaderKey == key and frame._nexusHeaderLine == rows then return true end
     frame._nexusHeaderKey = nil
     local buildTop = type(held) == "table" and tonumber(held.headerBuildY) or 32
@@ -994,10 +984,9 @@ function M.UpdateContextHeader(model, settled)
         line[2]._nexusFull = line[4] or (index == 1
             and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index])
         if index == 1 then
-            M.FitTitleRole(line[1], line[3], titleWidth)
-            if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
-                Nexus.LayoutMetrics.OneLineLabel(line[1], nil, 20)
-            end
+            -- Whole in its slot, at the height the layout holds for it.
+            M.WrapTitle(line[1])
+            line[1]:SetHeight(titleH)
         else
             if type(line[1].SetWordWrap) == "function" then pcall(line[1].SetWordWrap, line[1], true) end
             line[1]:SetHeight(index == 2 and buildH or wishlistH)
@@ -1029,26 +1018,29 @@ function M.UpdateContextHeader(model, settled)
     return true
 end
 
--- The Build and Wishlist lines' measured heights at their width, for the
--- layout ("build:wishlist"). The header's words are applied first when they
--- changed (M.UpdateContextHeader, as a settled render does), and the lines
--- are measured only then or when the font row changed: an unchanged header
--- sets and measures nothing. The heights are kept on the panel
--- (frame._nexusHeaderRows) for this render's layout spec.
+-- The title's and the Build and Wishlist lines' measured heights at their
+-- widths, for the layout ("build:wishlist:title"). The header's words are
+-- applied first when they changed (M.UpdateContextHeader, as a settled render
+-- does), and the lines are measured only then or when a font changed: an
+-- unchanged header sets and measures nothing. The heights are kept on the
+-- panel (frame._nexusHeaderRows) for this render's layout spec.
 function M.MeasureContextHeader(model)
-    if not (frame and frame._contextBuild and Nexus.LayoutMetrics) then return "0:0" end
+    if not (frame and frame._contextBuild and Nexus.LayoutMetrics) then return "0:0:0" end
     M.UpdateContextHeader(model, true)
     local held = frame._responsiveLayout
     local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
-    -- The heights belong to the font the lines hold (both share one owned
-    -- font object): its face and size are part of the key, since the row
-    -- minimum above is the same 20 units over a range of font scales. As for
-    -- the Orb line (M.MeasureOrbLine), a replacement face of the same nominal
-    -- size comes with a new font reader and is measured again too.
-    local label = frame._contextBuild
+    -- The heights belong to the fonts the lines hold (Build and Wishlist
+    -- share one owned font object, the title has its own): each face and
+    -- size is part of the key, since the row minimum above is the same 20
+    -- units over a range of font scales. As for the Orb line
+    -- (M.MeasureOrbLine), a replacement face of the same nominal size comes
+    -- with a new font reader and is measured again too.
+    local label, title = frame._contextBuild, frame._contextTitle
     local okFont, path, size = pcall(label.GetFont, label)
+    local okTitle, titlePath, titleSize = pcall(title.GetFont, title)
     local key = tostring(frame._nexusHeaderKey) .. "\031" .. lineH .. "\031"
-        .. (okFont and (tostring(path) .. "\031" .. tostring(size)) or "?")
+        .. (okFont and (tostring(path) .. "\031" .. tostring(size)) or "?") .. "\031"
+        .. (okTitle and (tostring(titlePath) .. "\031" .. tostring(titleSize)) or "?")
     local rows = frame._nexusHeaderRows
     if not (rows and rows.key == key and rawequal(rows.face, label.GetFont)) then
         local metrics = Nexus.LayoutMetrics
@@ -1058,9 +1050,12 @@ function M.MeasureContextHeader(model)
             if type(label.SetWordWrap) == "function" then pcall(label.SetWordWrap, label, true) end
             rows[name] = metrics.WrapHeight(label, width, lineH)
         end
+        -- The title: whole in its slot, at least line 1's 20-unit row.
+        M.WrapTitle(title)
+        rows.title = metrics.WrapHeight(title, math.max(1, tonumber(title:GetWidth()) or 1), 20)
         frame._nexusHeaderRows = rows
     end
-    return rows.build .. ":" .. rows.wishlist
+    return rows.build .. ":" .. rows.wishlist .. ":" .. rows.title
 end
 
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
@@ -1476,7 +1471,8 @@ local function ModelSignatures(model)
             -- Whether an Orb run line is shown; its words refresh on every
             -- render (M.RefreshOrbLine), and its wrapped height is added to
             -- this signature by M.Render (M.MeasureOrbLine).
-            orbLine=type(model._nexusOrbLine) == "table" or nil,
+            orbLine=(type(model._nexusOrbLine) == "table"
+                and (M.OrbStripShown(model) and "strip" or "details")) or nil,
             -- The opt-in DPS RECORDS section shows only records that exist:
             -- which rows there are, and their values, are geometry.
             performanceRows=showPerformance and M.PerformanceKey(source.performance) or nil,
@@ -4173,9 +4169,15 @@ function M.PerformanceRows(pr, completed)
         end
     else
         -- M4 (UX-13): the plan's rolled copies, not Echo rows or names.
-        Row(nil, performanceLabel, LT("panel.heading.dps_records"), setLabelText, nil, nil, true)
-        rows[#rows].valueText = "|cffa8a8b0" .. LF("panel.label.target_build_copies",
-            {count = tostring(tonumber(pr.total) or 0)}) .. "|r"
+        -- That total is a plan count: like the other counts it is drawn only
+        -- while Details is open (the open Details block also states it, in
+        -- the run's own count). With Details closed the heading stands alone.
+        local total = M._playDetails == true
+        Row(nil, performanceLabel, LT("panel.heading.dps_records"), total and setLabelText or nil, nil, nil, true)
+        if total then
+            rows[#rows].valueText = "|cffa8a8b0" .. LF("panel.label.target_build_copies",
+                {count = tostring(tonumber(pr.total) or 0)}) .. "|r"
+        end
         if myDummy then
             Row("dummy", dummyLabel, LT("panel.label.your_dummy"), dummyValue, myDummy, "|cff4dff80")
         elseif topDummy then
@@ -5210,6 +5212,12 @@ function M.MeasuredLayout(layout)
     else
         spec.orbLineH = nil
     end
+    -- The Orb window's complete line inside the open Details block.
+    if p and boxes.planOrb and p.orbDetail:IsShown() then
+        spec.orbDetailH = M.WrappedHeight(p.orbDetail, boxes.planOrb.w, small)
+    else
+        spec.orbDetailH = nil
+    end
     local ok, measured = pcall(metrics.Panel, spec)
     return ok and type(measured) == "table" and measured or layout
 end
@@ -5380,6 +5388,10 @@ function M.EnsurePlayWidgets()
         GameTooltip:Show()
     end)
     M.PassiveDragSurface(p.orbHit)
+    -- The Orb window's complete line (the run's numbers), drawn only inside
+    -- the open Details block, wrapped at its measured height.
+    p.orbDetail = Line()
+    p.orbDetail:SetJustifyV("TOP")
     p.orbOpen = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     p.orbOpen:SetText(LT("panel.button.orb_open"))
     p.orbOpen:SetScript("OnClick", function()
@@ -5465,13 +5477,27 @@ function M.HoldPanelTop(layout)
     return growth
 end
 
--- The Orb line's text for this render (UI.PanelRunLine), or nil.
+-- The Orb run's texts for this render (UI.PanelRunLine), or nil. `strip` is
+-- the Orb window's own numberless words (the run's state and its wait): the
+-- only Orb text drawn outside Details. `full` is its complete line, with the
+-- run's numbers: the strip's hover, and the row inside the open Details
+-- block. `shown`, the window's numbered short line, is kept for callers of
+-- this read and is not drawn on the panel. A read that gives no words (not
+-- this addon's Orb window) leaves `strip` nil: no number is then put in its
+-- place, the strip is not laid out and the numbers stay inside Details.
 function M.OrbLineText()
     local orb = Nexus.OrbPanel
     if not (orb and type(orb.PanelRunLine) == "function") then return nil end
-    local ok, shown, full = pcall(orb.PanelRunLine)
+    local ok, shown, full, words = pcall(orb.PanelRunLine)
     if not ok or type(shown) ~= "string" or shown == "" then return nil end
-    return {shown = shown, full = type(full) == "string" and full or shown}
+    return {shown = shown, full = type(full) == "string" and full or shown,
+        strip = type(words) == "string" and words ~= "" and words or nil}
+end
+
+-- Whether this model shows the Orb strip outside Details (its words exist).
+function M.OrbStripShown(model)
+    local line = type(model) == "table" and model._nexusOrbLine or nil
+    return type(line) == "table" and line.strip ~= nil
 end
 
 -- The DPS records this panel may show, as their shown values: `yours` the
@@ -5671,42 +5697,61 @@ end
 -- the layout signature. Measured on a hidden text of the line's own font, so
 -- no shown widget is touched, and only when the words, the width or the face
 -- changed. "0" without a line.
+-- Two heights, "strip:details": the numberless strip at its row's width, and,
+-- while Details is open, the Orb window's complete line at the Details
+-- block's width (0 while it is closed, where that line is not drawn).
 function M.MeasureOrbLine(line)
     if type(line) ~= "table" or not (frame and Nexus.LayoutMetrics) then return "0" end
     local laid = frame._responsiveLayout
-    local box = type(laid) == "table" and type(laid.boxes) == "table" and laid.boxes.orbLine or nil
-    local width = box and box.w or 330
+    local boxes = type(laid) == "table" and type(laid.boxes) == "table" and laid.boxes or {}
+    local width = boxes.orbLine and boxes.orbLine.w or 330
+    local detailWidth = boxes.planOrb and boxes.planOrb.w or 404
+    local details = M._playDetails == true
     local probe = frame._orbLineProbe
     if not probe then
         probe = frame:CreateFontString(nil, "OVERLAY", Nexus.LayoutMetrics.FontObject("secondary"))
         probe:Hide()
         frame._orbLineProbe = probe
     end
-    local key = tostring(line.shown) .. "\031" .. tostring(width)
+    local key = table.concat({tostring(line.strip), tostring(width),
+        details and tostring(line.full) or "", details and tostring(detailWidth) or ""}, "\031")
     if frame._orbLineProbeKey ~= key or not rawequal(frame._orbLineProbeFace, probe.GetFont) then
-        probe:SetText(tostring(line.shown))
-        frame._orbLineProbeH = M.WrappedHeight(probe, width, 1)
+        local stripH, detailH = 0, 0
+        if line.strip then
+            probe:SetText(tostring(line.strip))
+            stripH = M.WrappedHeight(probe, width, 1)
+        end
+        if details then
+            probe:SetText(tostring(line.full))
+            detailH = M.WrappedHeight(probe, detailWidth, 1)
+        end
+        frame._orbLineProbeH = stripH .. ":" .. detailH
         frame._orbLineProbeKey, frame._orbLineProbeFace = key, probe.GetFont
     end
     return tostring(frame._orbLineProbeH)
 end
 
--- The Orb line's text, on every render, settled ones included (the run
--- moves without a new model): shown while this render read a run and the
--- layout holds its row.
+-- The Orb run's texts, on every render, settled ones included (the run moves
+-- without a new model). Outside Details: the numberless strip and Open,
+-- while this render read a run and the layout holds the strip's row; its
+-- hover gives the complete line. Inside the open Details block: that
+-- complete line, the only place the run's numbers are drawn.
 function M.RefreshOrbLine(model, layout)
     local p = frame and frame._play
     if not p then return end
     local line = type(model) == "table" and model._nexusOrbLine or nil
-    local shown = type(line) == "table" and type(layout) == "table" and type(layout.boxes) == "table"
-        and layout.boxes.orbLine ~= nil
+    local boxes = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes or {}
+    local shown = type(line) == "table" and line.strip ~= nil and boxes.orbLine ~= nil
     if shown then
-        p.orb:SetText(line.shown)
+        p.orb:SetText(line.strip)
         p.orbHit._nexusFull = line.full
     else
         p.orbHit._nexusFull = nil
     end
     SetVisible(p.orb, shown); SetVisible(p.orbHit, shown); SetVisible(p.orbOpen, shown)
+    local detailed = type(line) == "table" and boxes.planOrb ~= nil
+    if detailed then p.orbDetail:SetText(line.full) end
+    SetVisible(p.orbDetail, detailed)
 end
 
 -- Geometry of the Play summary inside the layout's boxes.
@@ -5760,6 +5805,7 @@ function M.PlacePlaySummary(layout)
     Entry(p.bestLabel, p.bestValue, p.bestHit, boxes.bestKnown, layout.recordBest)
     Put(p.orb, boxes.orbLine)
     Put(p.orbOpen, boxes.orbLineOpen)
+    Put(p.orbDetail, boxes.planOrb)
 end
 
 -- The Auto scope line (Claude Design full UI, "Main panel (Play)": with Auto
@@ -6914,6 +6960,8 @@ local function ApplyModel(model, signatures, roll)
                 -- The Build and Wishlist lines at their measured heights.
                 headerBuildH=frame._nexusHeaderRows and frame._nexusHeaderRows.build or nil,
                 headerWishlistH=frame._nexusHeaderRows and frame._nexusHeaderRows.wishlist or nil,
+                -- The title at its measured height (a state cue that wraps).
+                headerTitleH=frame._nexusHeaderRows and frame._nexusHeaderRows.title or nil,
                 complete=complete,showPerformance=showPerformance,
                 performanceH=performanceH,
                 progressLabelW=math.ceil(M.LineWidth(progressLabel, progressLabel:GetText() or "")) + 2,
@@ -6950,7 +6998,10 @@ local function ApplyModel(model, signatures, roll)
                 -- their measured widths.
                 recordYours=recordWidths.yours,
                 recordBest=recordWidths.best,
-                orbLine=type(model._nexusOrbLine) == "table",
+                -- The numberless Orb strip under the offer, and, with
+                -- Details open, the row of the run's numbers inside it.
+                orbLine=M.OrbStripShown(model),
+                orbDetail=M._playDetails == true and type(model._nexusOrbLine) == "table",
                 -- The Auto scope line's rows (M.RenderAutoScope), at the
                 -- 404 px block width of the 420 px panel.
                 -- Not in the collapsed level-80 block: no offer, nothing to choose.

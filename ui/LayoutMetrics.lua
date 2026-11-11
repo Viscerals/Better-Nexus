@@ -489,6 +489,8 @@ local function PanelKey(spec)
             .. math.ceil(tonumber(spec.offerReason.top) or 0)) or 0,
         spec.measured and 1 or 0,math.ceil(tonumber(spec.reservedRollH) or 0),
         math.ceil(tonumber(spec.orbLineH) or 0),
+        spec.orbDetail and 1 or 0,math.ceil(tonumber(spec.orbDetailH) or 0),
+        math.ceil(tonumber(spec.headerTitleH) or 0),
     }, "|")
 end
 
@@ -546,12 +548,22 @@ function M.Panel(spec)
     -- controls) ends 26 units under the header's top; the Build row follows
     -- at 32, the Wishlist row 2 units under it, and 4 units close the header
     -- (72 units at font scale 1, where it was 82).
+    -- The title on line 1 keeps a 20-unit row while its text needs no more.
+    -- A title that needs more (a state cue that wraps in the title's slot,
+    -- or one line of a larger font) takes its measured height
+    -- (spec.headerTitleH), and line 1 grows by the difference: the Build and
+    -- Wishlist rows and the header's end move down by exactly that. The grip
+    -- and the three controls stay at the top of line 1.
     local headerLine = math.max(20, normal)
+    local titleH = math.max(20, math.ceil(tonumber(spec.headerTitleH) or 0))
+    local titleExtra = titleH - 20
     local buildH = math.max(headerLine, math.ceil(tonumber(spec.headerBuildH) or 0))
     local wishlistH = math.max(headerLine, math.ceil(tonumber(spec.headerWishlistH) or 0))
     layout.headerLine, layout.headerBuildH, layout.headerWishlistH = headerLine, buildH, wishlistH
-    layout.headerBuildY, layout.headerWishlistY = cursor + 26, cursor + 26 + buildH + 2
-    local headerHeight = 26 + buildH + 2 + wishlistH + 4
+    layout.headerTitleH = titleH
+    layout.headerBuildY = cursor + 26 + titleExtra
+    layout.headerWishlistY = layout.headerBuildY + buildH + 2
+    local headerHeight = 26 + titleExtra + buildH + 2 + wishlistH + 4
     -- Every block of the body keeps one compact side inset: 8 units, where it
     -- was 10. The approved preview draws 6; 8 keeps the body on the line of
     -- the header's grip, whose slot (x 8) is unchanged.
@@ -885,6 +897,15 @@ function M.Panel(spec)
             Add(layout,"planExtra",inset,cursor,columnWidth,secondH)
             Add(layout,"planLocked",rightX,cursor,rightW,secondH)
             cursor = cursor + secondH + gap
+            -- The Orb run's numbers (used of approved, awaiting a result):
+            -- like the other counts, a row of the open Details block only,
+            -- across the block, as tall as its wrapped words measure
+            -- (spec.orbDetailH). Outside Details the Orb strip has no number.
+            if spec.orbDetail then
+                local orbH = math.max(small, math.ceil(tonumber(spec.orbDetailH) or 0))
+                Add(layout,"planOrb",inset,cursor,full,orbH)
+                cursor = cursor + orbH + gap
+            end
             -- Each name column: its heading, a gap, then its three one-line
             -- name rows (two names and "+N more"), modelled at the small
             -- row; when the client measured those rows taller in their real

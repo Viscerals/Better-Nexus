@@ -165,15 +165,18 @@ assert(panel._contextTitleHit._nexusFull == titleHover, 'C-03: the title hover k
 -- the unchanged header stays untouched.
 local orbPanel = assert(Nexus.OrbPanel, 'fixture: the Orb window module is loaded')
 local realRunLine = orbPanel.PanelRunLine
-local runShown, runFull = 'Orb run: waiting', 'Orb run: waiting for the next offer'
-orbPanel.PanelRunLine = function() return runShown, runFull end
+-- The Orb read gives three texts: the numbered short line, the complete line
+-- (the hover) and the numberless words. The panel draws the words outside
+-- Details (counts only inside expanded Details), never the numbered line.
+local runShown, runFull, runWords = 'Orb run: waiting; Used 1 of 5 approved', 'Orb run: waiting for the next offer', 'Orb run: waiting'
+orbPanel.PanelRunLine = function() return runShown, runFull, runWords end
 Render()
 Render()
-assert(p.orb:IsShown() and p.orb:GetText() == runShown and p.orbHit._nexusFull == runFull,
+assert(p.orb:IsShown() and p.orb:GetText() == runWords and p.orbHit._nexusFull == runFull,
     'fixture: the Orb run line is shown')
-runShown, runFull = 'Orb run: offer open', 'Orb run: an offer is open in the Orb window'
+runShown, runFull, runWords = 'Orb run: offer open; Used 1 of 5 approved', 'Orb run: an offer is open in the Orb window', 'Orb run: offer open'
 local changed, changedPer = Measure(watch, Render)
-assert(p.orb:GetText() == runShown, 'C-03: the changed Orb run line is shown')
+assert(p.orb:GetText() == runWords, 'C-03: the changed Orb run line is shown')
 assert(p.orbHit._nexusFull == runFull and Tooltip(p.orbHit):find(runFull, 1, true),
     'C-03: the Orb line hover says the changed run')
 assert(((changedPer[p.orbHit] or {}).ClearAllPoints or 0) > 0,

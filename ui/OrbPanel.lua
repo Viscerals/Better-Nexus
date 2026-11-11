@@ -2834,29 +2834,39 @@ end
 -- is known: none approved this session, local saved data still loading or no
 -- runtime. A read that fails or is malformed says so. Reads only; it pumps,
 -- starts, resumes and spends nothing.
+-- A third value, words (approved panel cleanup: the run's numbers are drawn
+-- only inside the panel's open Details): the same state words as `shown`,
+-- whole, and the same wait behind the same mark, said without a count
+-- ("awaiting Orb result" where `shown` counts the Orbs), and no usage. It has
+-- no number by construction: the state words carry none and the three wait
+-- texts are existing whole labels. The first two values are unchanged.
 function UI.PanelRunLine()
     local okView,v=pcall(miniView)
     if not okView or type(v)~="table" then v={kind="error"} end
     if v.kind=="none" or v.kind=="loading" or v.kind=="missing" then return nil end
     if v.kind~="run" then
         local unread=TF("orb.status.line_run",{status=T(MINI_UNREAD_KEY)})
-        return unread,unread
+        return unread,unread,unread
     end
     local state,usage=miniStateText(v),miniUsage(v,true)
-    local wait
+    local wait,waitWords
     if v.reserved==nil or v.pending==nil or v.uncertain==nil or v.unconfirmedResults==nil
         or v.historyKnown~=true or v.uncertain>0 or v.unconfirmedResults>0 then
         wait="? "..T("orb.status.line_spend_unconfirmed")
+        waitWords=wait
     elseif v.reserved>0 then
         wait="... "..TF("orb.status.line_awaiting_result",{count=N(v.reserved)})
+        waitWords="... "..T("orb.status.segment_awaiting_result")
     elseif v.pending then
         wait="... "..T("orb.status.line_result_not_settled")
+        waitWords=wait
     end
     local shown=TF("orb.status.line_run",{status=state.."; "..usage..(wait and ("; "..wait) or "")})
     local full=TF("orb.status.line_run",{status=state..". "..miniUsage(v)..". "..miniPending(v)..". "..miniMissing(v).."."})
     local reason=v.reason and truthful(v.reason) or nil
     if type(reason)=="string" and reason~="" then full=full.." "..reason end
-    return (shown:gsub("|","||")),(full:gsub("|","||"))
+    local words=TF("orb.status.line_run",{status=state..(waitWords and ("; "..waitWords) or "")})
+    return (shown:gsub("|","||")),(full:gsub("|","||")),(words:gsub("|","||"))
 end
 local function miniKey(v)
     return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),

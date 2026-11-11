@@ -425,8 +425,15 @@ local function Roles(height)
  print('OBSERVED',tag,'header '..headerDetail,'box='..Text(headerRect))
  C.expect(headerFonts,tag..': the title, Build and Wishlist lines are drawn at the native-derived normal size '..normal,headerDetail)
  ;(height>=20 and C.expect or C.guard)(headerRows,tag..': the Build and Wishlist rows are at least as tall as their font',headerDetail)
- C.guard(rects[1] and rects[1][1]==36 and rects[1][2]==8 and lines[1]:GetHeight()==20,
-  tag..': the title keeps header line 1\'s literal 20 px row at 36, 8',Text(rects[1]))
+ C.guard(rects[1] and rects[1][1]==36 and rects[1][2]==8,tag..': the title stays at 36, 8 on header line 1',Text(rects[1]))
+ -- Independent Spec review, required finding 2 (no fixed-height text
+ -- container): the title's box was a literal 20 px whatever its font needed
+ -- (18, 24 and 30 px fonts here). It is the 20 px line while the text needs
+ -- no more, and the text's own measured height when it needs more; the rows
+ -- under it start lower by the difference (N10).
+ local titleNeeds=math.max(20,math.ceil(lines[1]:GetStringHeight()))
+ ;(titleNeeds>20 and C.expect or C.guard)(lines[1]:GetHeight()==titleNeeds,
+  tag..': the title\'s box is as tall as its text needs, at least the 20 px line',tostring(lines[1]:GetHeight())..' / '..tostring(titleNeeds))
  C.guard(headerApart and headerInside,tag..': the header lines are apart and inside the header the layout reserves',headerDetail)
  local switch,change=Rect(NexusPanel._switchBtn),Rect(NexusPanel._contextChange)
  C.guard(switch and change and G.Apart(switch,change) and rects[2] and rects[3]
@@ -834,50 +841,115 @@ C.scenario('N9 the wrapped Wishlist line is measured again when only the font ch
   tostring(back)..' for '..tostring(needBack)..', header '..tostring(Header()))
 end)
 
--- N10. EXPECT (fails before the correction): the title became the 15-unit
--- role in the same one-line slot (150 units at 420), and its state cue is
--- the end of that line, so a cue that fitted at the former primary size was
--- cut by the client. A title whose line is wider than its slot at the title
--- role is drawn at the primary role instead (the size it had before), never
--- smaller. GUARD: the plain title, and a cue title that fits, keep the
--- 15-unit role. Widths are this fixture's stated model (0.55 em).
-C.scenario('N10 a title with a state cue is not cut by the larger title font',function()
+-- N10 (independent Spec review, required finding 2). The title keeps its own
+-- 15-unit role (times the native reference) whatever it says. Its state cue
+-- is the end of its line, so a title wider than its slot (150 units at 420)
+-- wraps inside that slot at its measured height instead of being cut or drawn
+-- smaller; header line 1 is as tall as the title needs, and the Build and
+-- Wishlist rows, their buttons and the header box move down by exactly what
+-- the title gained. Checked for "Nexus" and "Nexus paused" with every cue
+-- (Preview, Empty, both, Unconfirmed, Not known) at 100% and 125%.
+-- EXPECT fails before the correction (a wide title fell back to the 12-unit
+-- primary role in a fixed 20-unit line and was still cut at 125%); GUARD: the
+-- line-1 slots and the grip do not move, the slot keeps its width, and a
+-- title that needs one 20-unit line leaves the header as it was. Widths are
+-- this fixture's stated model (0.55 em, 1.15 em lines), not native glyphs.
+C.scenario('N10 the title is 15 units and whole with every state cue: it wraps in its slot and the header grows',function()
  local title=NexusPanel._contextTitle
- local function Title(native,text,edit)
-  SetNative(native)
-  local m=Play()
-  if edit then edit(m) end
-  C.setup(Render(m)==true and G.Visible(title:GetText() or '')==text,
-   'N10: fixture: native '..tostring(native)..' shows "'..text..'"',title:GetText())
-  local size,cut=Size(title),LM.Shortened(title)
-  print('OBSERVED','N10 native '..tostring(native),'"'..text..'"','font='..tostring(size),'slot='..tostring(title:GetWidth()),
-   'line='..tostring(Natural(title)),'cut='..tostring(cut))
-  return size,cut
+ local regions=G.RegionMethods()
+ local hadNonSpace=rawget(regions,'SetNonSpaceWrap')
+ -- The client's own switch for breaking inside a word longer than the line
+ -- (a long localized cue); recorded here so the request can be observed.
+ regions.SetNonSpaceWrap=function(self,on) rawset(self,'_nonSpaceWrap',on and true or false) end
+ -- Word wrap, recorded the same way (the harness keeps no such state).
+ local hadWrap=rawget(regions,'SetWordWrap')
+ regions.SetWordWrap=function(self,on)
+  rawset(self,'wordWrap',on and true or false)
+  if hadWrap then return hadWrap(self,on) end
  end
- local function Preview(m) m.progress.isCommunityPreview=true end
- local function PreviewEmpty(m) m.progress.isCommunityPreview=true;m.assignment={emptySlot=true} end
- local function Unconfirmed(m) m.progress.activeSlot=nil end
-
- local size,cut=Title(10,'Nexus')
- C.guard(Near(size,Role('title')) and not cut,'N10: the plain title keeps its 15-unit role',size)
- size,cut=Title(10,'Nexus [Preview]',Preview)
- C.guard(Near(size,Role('title')) and not cut,'N10: a cue title that fits its slot keeps the 15-unit role',size)
- size,cut=Title(10,'Nexus [Unconfirmed]',Unconfirmed)
- C.expect(not cut and Near(size,Role('normal')),
-  'N10: native 10: the Unconfirmed cue is whole, at the primary size it fitted at before',tostring(size)..' cut='..tostring(cut))
- size,cut=Title(10,'Nexus [Preview; Empty]',PreviewEmpty)
- C.expect(not cut and Near(size,Role('normal')),
-  'N10: native 10: the Preview and Empty cues are whole, at the primary size',tostring(size)..' cut='..tostring(cut))
- size,cut=Title(12.5,'Nexus [Preview]',Preview)
- C.expect(not cut and Near(size,Role('normal')),
-  'N10: native 12.5: the Preview cue is whole, at the primary size',tostring(size)..' cut='..tostring(cut))
- -- Wider than the slot even at the primary size (as before the title role
- -- existed): it is at least not drawn larger than that, and never smaller.
- size=Title(12.5,'Nexus [Unconfirmed]',Unconfirmed)
- C.expect(Near(size,Role('normal')),'N10: native 12.5: a cue too wide for the slot is drawn at the primary size, not larger or smaller',size)
- size,cut=Title(12.5,'Nexus')
- C.guard(Near(size,Role('title')) and not cut,'N10: the plain title returns to its 15-unit role after a cue title',size)
- C.guard(NATIVE.nativeSets==0,'N10: no game font object is set',NATIVE.nativeSets)
+ local api,paused=Nexus.SessionPause,false
+ -- Boundary double: the session pause, as this check sets it (Status only).
+ Nexus.SessionPause={Status=function() return {paused=paused,epoch=1} end,IsPaused=function() return paused end,
+  Pause=function() return {paused=paused,epoch=1} end,Resume=function() return {paused=paused,epoch=1} end}
+ local ok,err=pcall(function()
+  local EDITS={
+   {'',nil},
+   {' [Preview]',function(m) m.progress.isCommunityPreview=true end},
+   {' [Empty]',function(m) m.assignment={emptySlot=true} end},
+   {' [Preview; Empty]',function(m) m.progress.isCommunityPreview=true;m.assignment={emptySlot=true} end},
+   {' [Unconfirmed]',function(m) m.progress.activeSlot=nil end},
+   {' [Not known]',function(m) m.assignment={state='loading'} end},
+  }
+  local function Top(region) local r=Rect(region);return r and r[2] or nil end
+  local wrapped=0
+  for _,native in ipairs({10,12.5}) do
+   for _,isPaused in ipairs({false,true}) do
+    for _,edit in ipairs(EDITS) do
+     local text=(isPaused and 'Nexus paused' or 'Nexus')..edit[1]
+     local tag='N10 native '..tostring(native)..' "'..text..'"'
+     SetNative(native)
+     paused=isPaused
+     local m=Play()
+     if edit[2] then edit[2](m) end
+     if C.setup(Render(m)==true and G.Visible(title:GetText() or '')==text,tag..': fixture: the title says this',title:GetText()) then
+      local layout=NexusPanel._responsiveLayout
+      local size,slot=Size(title),title:GetWidth()
+      local rect=Rect(title)
+      local needs=math.ceil(title:GetStringHeight())
+      local rows=G.Rows(title:GetText() or '',slot,CHAR*size)
+      local height=rect and (rect[4]-rect[2]) or -1
+      -- The longest word of the line at this size: wrapping can keep the
+      -- line whole only while each word fits the slot.
+      local longest=0
+      for word in G.Visible(title:GetText() or ''):gmatch('%S+') do longest=math.max(longest,G.Length(word)*CHAR*size) end
+      local titleRow=math.max(20,needs)
+      local gained=titleRow-20
+      local build,wishlist=Rect(NexusPanel._contextBuild),Rect(NexusPanel._contextWishlist)
+      local header=layout.boxes.header
+      print('OBSERVED',tag,'font='..tostring(size),'slot='..tostring(slot),'line='..string.format('%.1f',Natural(title)),
+       'rows='..tostring(rows),'box='..tostring(height),'needs='..tostring(needs),'header='..tostring(header.h),
+       'build top='..tostring(build and build[2]))
+      if rows>1 then wrapped=wrapped+1 end
+      C.setup(longest<=slot+0.01,tag..': fixture: every word of the title fits the slot at the title size',longest)
+      C.expect(Near(size,Role('title')),tag..': the title is drawn at its 15-unit role, never smaller',size)
+      C.expect(height+0.5>=needs and (rows<=1 or rawget(title,'wordWrap')==true) and not (rows<=1 and LM.Shortened(title)),
+       tag..': the whole title is shown: one line that fits, or wrapped in a box as tall as its lines',
+       'box '..tostring(height)..' for '..tostring(needs)..', rows '..tostring(rows)..', wrap '..tostring(rawget(title,'wordWrap')))
+      C.expect(math.abs(height-titleRow)<=0.01,tag..': the title box is its measured height (at least the 20-unit line), no taller',
+       tostring(height)..' / '..tostring(titleRow))
+      C.expect(build~=nil and wishlist~=nil and math.abs(build[2]-(32+gained))<=0.01 and build[2]>=rect[4]-0.01
+       and wishlist[2]>=build[4]-0.01 and math.abs((header.y+header.h)-(wishlist[4]+4))<=0.01,
+       tag..': the Build row starts under the whole title, the Wishlist row under it, and the header box closes 4 units under that',
+       'title '..Text(rect)..' build '..Text(build)..' wishlist '..Text(wishlist)..' header y='..tostring(header.y)..' h='..tostring(header.h))
+      C.expect(math.abs((Top(NexusPanel._switchBtn) or -1)-build[2])<=0.01 and math.abs((Top(NexusPanel._contextChange) or -1)-wishlist[2])<=0.01,
+       tag..': My Builds and Change stay at the top of their own rows',
+       tostring(Top(NexusPanel._switchBtn))..' / '..tostring(Top(NexusPanel._contextChange)))
+      C.guard(slot==150 and rect~=nil and rect[1]==36 and rect[2]==8,tag..': the title keeps its slot (150 units from x 36, y 8)',Text(rect))
+      local grip=P.EnsureHeaderGrip()
+      local gr=grip and Rect(grip) or nil
+      C.guard(gr~=nil and gr[1]==8 and gr[2]==6 and gr[3]-gr[1]==24 and gr[4]-gr[2]==24,tag..': the 24 x 24 grip does not move',Text(gr))
+      if gained==0 then
+       C.guard(math.abs(build[2]-32)<=0.01,tag..': a title that needs one 20-unit line leaves the Build row at 32',build[2])
+      end
+     end
+    end
+   end
+  end
+  C.setup(wrapped>=6,'N10: fixture: several of these titles need more than one line',wrapped)
+  C.expect(rawget(title,'_nonSpaceWrap')==true,'N10: the title may also break inside a word longer than its slot (a long localized cue is not cut)',
+   tostring(rawget(title,'_nonSpaceWrap')))
+  local s=P.HeaderSlots()
+  C.guard(s.top==7 and s.height==22 and s.reserved==234 and s.titleLeft==36 and s.gripWidth==24 and s.gripHeight==24,
+   'N10: the header line 1 slots are unchanged')
+  C.guard(NATIVE.nativeSets==0,'N10: no game font object is set',NATIVE.nativeSets)
+ end)
+ paused=false
+ Nexus.SessionPause=api
+ regions.SetNonSpaceWrap=hadNonSpace
+ regions.SetWordWrap=hadWrap
+ SetNative(10)
+ Render(Play())
+ C.setup(ok,'N10: fixture: the title scenario ran',err)
 end)
 
 ----------------------------------------------------------------------------

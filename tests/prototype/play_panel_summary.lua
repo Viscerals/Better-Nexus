@@ -410,14 +410,19 @@ C.scenario('S5 one line of Orb run status from the Orb window read; Open opens a
   return {state='WAIT_RESULT',spent=2,limit=5,reserved=1,running=true,pending=true,canResume=false,
    uncertain=0,unconfirmedResults=0,historyKnown=true,remaining=3,limitKnown=true}
  end
- local shown,full=Nexus.OrbPanel.PanelRunLine()
+ local shown,full,words=Nexus.OrbPanel.PanelRunLine()
  C.expect(shown=='Orb run: Running - Waiting for result confirmation; Used 2 of 5 approved; ... 1 awaiting result',
   'S5: the line names the state, usage and the wait',shown)
  C.expect(type(full)=='string' and full:find('Pending: 1 Orb requested, not confirmed yet',1,true)~=nil,
   'S5: the hover keeps the full pending wording',full)
  local actions,sent=#H.actions,#H.sent
  P.Render(Model())
- C.expect(p.orb:IsShown() and Plain(p.orb)==shown and p.orbOpen:IsShown(),'S5: the HUD shows the line and Open',Plain(p.orb))
+ -- Counts only inside expanded Details (S29): the strip on the panel is the
+ -- Orb window's numberless words for the same state and wait, not the
+ -- numbered line; that line stays on the strip's hover.
+ C.expect(p.orb:IsShown() and words=='Orb run: Running - Waiting for result confirmation; ... awaiting Orb result'
+  and Plain(p.orb)==words and p.orbOpen:IsShown() and p.orbHit._nexusFull==full,
+  'S5: the HUD shows the run\'s state and wait in words, with Open, and the complete line on its hover',Plain(p.orb))
  C.expect(NexusPanel._responsiveLayout.boxes.orbLine~=nil,'S5: the layout holds its row')
  -- The synthetic run is withdrawn before Open, so the Orb window reads the
  -- real (no run) state.
@@ -1254,7 +1259,22 @@ C.scenario('S20 the opt-in DPS RECORDS section shows only records that exist; no
    'S20: a Training Dummy record of yours shows its row under the section heading',text)
   C.expect(not text:find('Lich King',1,true) and not text:find('Best known',1,true) and not text:find('—',1,true),
    'S20: the records that do not exist have no row and no placeholder',text)
-  WholeTexts('S20 yours only',{'DPS RECORDS','Your Dummy','12k','Target build'})
+  -- The heading's "Target build - N rolled copies" is a plan count
+  -- (DESIGN_NOTES 4 and 8: counts only inside expanded Details): with
+  -- Details closed the heading is "DPS RECORDS" alone; with Details open it
+  -- carries the total again, whole. EXPECT fails before the correction (the
+  -- total showed with Details closed).
+  C.expect(not text:find('Target build',1,true) and not text:find('rolled copies',1,true),
+   'S20: with Details closed the DPS RECORDS heading carries no plan total',text)
+  WholeTexts('S20 yours only',{'DPS RECORDS','Your Dummy','12k'},3)
+  local closedDetails=P._playDetails
+  P._playDetails=true
+  text=Shown({dummy={personal={dps=12000}},lk={}})
+  C.expect(text:find('Target build · 6 rolled copies',1,true)~=nil,'S20: with Details open the heading shows the plan total',text)
+  WholeTexts('S20 yours only, Details open',{'DPS RECORDS','Your Dummy','12k','Target build'},4)
+  P._playDetails=closedDetails
+  text=Shown({dummy={personal={dps=12000}},lk={}})
+  C.expect(not text:find('Target build',1,true),'S20: closing Details takes the total off the heading again',text)
   text,box=Shown({dummy={personal={dps=0}},lk={}})
   C.expect(box~=nil and text:find('Your Dummy',1,true)~=nil and text:find('| 0 |',1,true)~=nil and not text:find('—',1,true),
    'S20: a record measured as 0 is shown as 0, not as missing',text)
@@ -1553,6 +1573,135 @@ C.scenario('S27 no Wishlist with an Echo board: the footer follows the last setu
   if band==nil then return end
   C.expect(band==gap,tag..': the footer follows Create Wishlist by one gap (no empty band)',tostring(band)..' / '..tostring(gap))
   C.expect(closed,tag..': the panel ends 6 units under the footer, at the layout height',NexusPanel:GetHeight())
+ end
+ P.Render(Model())
+end)
+
+-- Approved panel cleanup (DESIGN_NOTES 4 and 8 and the owner-accepted
+-- preview): "Counts (plan, per-offer ownership, Orb run) appear only inside
+-- expanded Details." The Orb run strip under the offer keeps the run's state
+-- and its wait in words, with Open, and carries no number; the Orb window's
+-- complete line (Orbs used of the approved maximum, what awaits a result, the
+-- rolled copies still missing) is drawn whole, wrapped, inside the open
+-- Details block. The numberless words come from the Orb window's own read: a
+-- third value of PanelRunLine beside the two it always returned, which keep
+-- their numbers. EXPECT fails before the correction (the strip was the
+-- numbered line, Details held no Orb row and there was no third value);
+-- GUARD: the two established values, the hover and the effect counters.
+C.scenario('S29 the Orb run strip outside Details carries no number; the run\'s numbers are whole inside Details',function()
+ G.UseFont(G.MODELS.default)
+ local runtime=Nexus.OrbRuntime
+ if not C.setup(type(runtime)=='table' and type(Nexus.OrbPanel.PanelRunLine)=='function','S29: fixture: the Orb read exists') then return end
+ local compact,status=runtime.CompactStatus,nil
+ runtime.CompactStatus=function() return status end
+ local wasDetails=P._playDetails
+ local function Digits(text) return tostring(text or ''):find('%d')~=nil end
+ local function Run(o)
+  local s={state='WAIT_RESULT',spent=2,limit=5,reserved=1,running=true,pending=true,canResume=false,
+   uncertain=0,unconfirmedResults=0,historyKnown=true,remaining=3,limitKnown=true}
+  for k,v in pairs(o or {}) do s[k]=v end
+  return s
+ end
+ local ok,err=pcall(function()
+  -- The producer. {what, status, the wait mark the numbered line shows}.
+  local CASES={
+   {'a requested Orb',Run(),'; ... '},
+   {'an unsettled result',Run({reserved=0}),'; ... '},
+   {'an unconfirmed spend',Run({uncertain=1}),'; ? '},
+   {'a pause that an earlier action must settle',Run({state='PAUSED',reserved=0,running=false,pending=false}),nil},
+   {'a recovery being checked',Run({state='RECOVERY',reserved=0,running=false,pending=false,recoveryPhase='checking',recoveryKind='automatic'}),nil},
+  }
+  for _,case in ipairs(CASES) do
+   status=case[2]
+   local shown,full,strip=Nexus.OrbPanel.PanelRunLine()
+   -- The state words: what the numbered line says before its usage.
+   local state=type(shown)=='string' and shown:match('^(.-); Used ') or nil
+   if C.setup(type(full)=='string' and state~=nil,'S29: fixture: '..case[1]..': the numbered line names its state, then its usage',tostring(shown)) then
+    C.guard(Digits(shown) and Digits(full) and (shown:find('; ? ',1,true)~=nil or shown:find('; ... ',1,true)~=nil)==(case[3]~=nil)
+     and (case[3]==nil or shown:find(case[3],1,true)~=nil),
+     'S29: '..case[1]..': the two established values keep the run\'s numbers and wait mark',shown)
+    C.expect(type(strip)=='string' and strip~='' and not Digits(strip),'S29: '..case[1]..': the third value has no number',tostring(strip))
+    if type(strip)=='string' then
+     local rest=strip:sub(#state+1)
+     C.expect(strip:sub(1,#state)==state,'S29: '..case[1]..': the third value keeps the complete state words',strip..' / '..state)
+     C.expect((case[3]==nil and rest=='') or (case[3]~=nil and rest:sub(1,#case[3])==case[3] and #rest>#case[3]),
+      'S29: '..case[1]..': the third value '..(case[3] and 'says the wait in words after the same mark' or 'adds nothing to the state'),'"'..rest..'"')
+    end
+   end
+  end
+  -- The panel.
+  status=Run()
+  local shown,full,strip=Nexus.OrbPanel.PanelRunLine()
+  local cards,rec=LongOffer('Take Cinder Lattice.')
+  local function Draw(details)
+   P._playDetails=details
+   return P.Render(Model({cards=cards,recommendation=rec,missing={'Hollow Bell'}}))==true
+  end
+  -- Every shown text that names an Orb and carries a digit.
+  local function Numbered()
+   local hits={}
+   for _,r in ipairs(G.Shown(NexusPanel)) do
+    if r.kind=='FontString' then
+     local plain=Plain(r)
+     if plain:find('Orb',1,true) and Digits(plain) then hits[#hits+1]=plain end
+    end
+   end
+   return hits
+  end
+  local before=Effects()
+  if not C.setup(Draw(false) and NexusPanel._play.orb:IsShown(),'S29: fixture: a Play panel with an Orb run, Details closed') then return end
+  local p=NexusPanel._play
+  C.expect(type(strip)=='string' and Plain(p.orb)==strip and p.orbOpen:IsShown(),
+   'S29: Details closed: the strip is the run\'s state and wait in words, with Open',Plain(p.orb))
+  local hits=Numbered()
+  C.expect(#hits==0,'S29: Details closed: no shown text carries an Orb run number',table.concat(hits,' | '))
+  C.guard(p.orbHit._nexusFull==full,'S29: the strip\'s hover still gives the Orb window\'s complete line')
+  local closedHeight=NexusPanel:GetHeight()
+  C.setup(Draw(true),'S29: fixture: the same panel with Details open')
+  local boxes=NexusPanel._responsiveLayout.boxes
+  local detail=p.orbDetail
+  C.expect(detail~=nil and detail:IsShown() and Plain(detail)==full and Digits(Plain(detail)),
+   'S29: Details open: the Orb window\'s complete line, with its numbers, is shown',detail and Plain(detail) or 'no Details Orb text')
+  if detail and detail:IsShown() and boxes.planLocked and boxes.needed then
+   local rect=G.Rect(detail,NexusPanel)
+   C.expect(rect[4]-rect[2]+0.5>=detail:GetStringHeight() and rect[3]-rect[1]>=boxes.needed.w
+    and rect[2]>=boxes.planLocked.y+boxes.planLocked.h-0.01 and rect[4]<=boxes.needed.y+0.01,
+    'S29: Details open: that line is whole (wrapped in its measured height), under the four counts and above the name columns',
+    G.Text(rect)..' needs '..tostring(detail:GetStringHeight()))
+  end
+  C.expect(type(strip)=='string' and Plain(p.orb)==strip,'S29: Details open: the strip outside Details still carries no number',Plain(p.orb))
+  C.setup(Draw(false),'S29: fixture: Details closed again')
+  hits=Numbered()
+  C.expect(#hits==0 and not (detail and detail:IsShown()) and NexusPanel:GetHeight()==closedHeight,
+   'S29: closing Details hides the numbers again and gives their row\'s height back',table.concat(hits,' | ')..' '..NexusPanel:GetHeight()..'/'..closedHeight)
+  C.guard(Effects()==before,'S29: showing the strip and the Details line makes no game action, send, saved-data or Auto change',Effects())
+ end)
+ runtime.CompactStatus=compact
+ P._playDetails=wasDetails
+ P.Render(Model())
+ C.setup(ok,'S29: fixture: the Orb scenario ran',err)
+end)
+
+-- Per-offer ownership (the third family of counts in DESIGN_NOTES 4 and 8).
+-- The real producer gives an offer one annotation from a fixed set of words
+-- (Readout.CardLine with a Policy annotation code, worded by
+-- UserText.Annotation); none of them is an ownership count, so an offer row
+-- shows no such number outside Details and nothing is taken off it. GUARD
+-- (holds before and after): every real annotation is numberless on its row,
+-- and the row still names the offer and its quality.
+C.scenario('S30 a real offer annotation is words only: no ownership number on an offer row',function()
+ G.UseFont(G.MODELS.default)
+ local words=Nexus.UserText and Nexus.UserText.Annotation
+ if not C.setup(type(words)=='function','S30: fixture: the annotation wording exists') then return end
+ for _,code in ipairs({'wanted','returns later','banked','filler','low quality','target met','wrong quality','target satisfied','frozen'}) do
+  local note=words(code)
+  C.guard(type(note)=='string' and note~='' and note~=code and not note:find('%d'),'S30: the "'..code..'" annotation is worded without a number',tostring(note))
+  C.setup(P.Render(Model({cards={{text='Hollow Bell (Rare) '..tostring(note)},{text='Cinder Lattice (Epic)'},{text='Ashen Tithe'}}}))==true,
+   'S30: fixture: an offer with the "'..code..'" annotation renders')
+  local card=NexusPanel._offerCards[1]
+  C.guard(Plain(card.name)=='Hollow Bell' and Plain(card.quality):find('Rare',1,true)~=nil and Plain(card.tag)==note
+   and not Plain(card.tag):find('%d'),'S30: the "'..code..'" row names its offer and quality and shows the annotation, with no number',
+   Plain(card.name)..' | '..Plain(card.quality)..' | '..Plain(card.tag))
  end
  P.Render(Model())
 end)
