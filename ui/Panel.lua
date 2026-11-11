@@ -4506,17 +4506,19 @@ end
 -- Play offer cards (Claude Design full UI, "Main panel (Play)": the current
 -- offer first, as three cards side by side, the Wishlist pick set apart).
 -- Each card shows the name, the quality and a tag from Readout.OfferCard,
--- with its complete CardLine on hover. The cards take exactly the space
--- LayoutMetrics.Panel already reserves for the three card rows, so the
--- panel's geometry contract is unchanged. Display only: a card has a hover
+-- with its complete CardLine on hover. The cards take exactly the band
+-- LayoutMetrics.OfferRows gives the three card rows, which LayoutMetrics.Panel
+-- reserves in the roll box. Display only: a card has a hover
 -- and no click, so it never takes, banishes, rerolls or freezes; choosing
 -- stays in the game's Echo window. Built lazily and reached through M:
 -- EnsureFrame is at the Lua 5.1 upvalue ceiling and ApplyModel close to it.
 -- Without a responsive layout (no LayoutMetrics) the one-line rows stay.
 ------------------------------------------------------------------------
--- Fixed colours (status, never from the palette), the column gap and the
--- text inset. One table: the main chunk's locals are counted too.
-local OFFER = {edge = {0.32, 0.32, 0.38}, mark = {1, 0.82, 0}, gap = 4, pad = 4}
+-- The fixed status colour (never from the palette) and the share of an icon
+-- texture cut from each side, the client's own bevel (as the Journal's
+-- icons). Gaps come from the layout (M.PlaceOfferCards). One table: the main
+-- chunk's locals are counted too.
+local OFFER = {mark = {1, 0.82, 0}, crop = 0.07}
 
 -- The verified icon of an offer (MI-F01): the client's own texture for the
 -- card's exact spell id, the third return of GetSpellInfo, as
@@ -4538,51 +4540,43 @@ function M.OfferIcon(facts)
     return nil
 end
 
--- The slot before an offer's name (MI-F01: a verified item or spell icon,
--- otherwise an empty slot in the card's own Echo quality colour). It is made
--- once per card on its first need, as plain textures of the card (an interior
--- and a 1-unit outline; no frame or mouse), and afterwards is only repainted
--- and placed. `r, g, b` (optional) repaint the outline, and with them the
--- interior is set again: `icon` (M.OfferIcon's texture of this card's own
--- spell id) when given, else the dark empty interior, so a reused card keeps
--- no earlier card's icon. `rowHeight` (optional) places the square in a row
--- of that height, at the text inset and clear of the widest (marked, 2-unit)
--- status edge, and the width it then takes with its gap before the name is
--- returned (else 0). The icon takes the interior's place and size: the
--- outline, the row and the texts are where they were.
-function M.OfferSlot(card, rowHeight, r, g, b, icon)
+-- The slot before an offer's name (MI-F01: a verified item or spell icon).
+-- It is one plain texture of the card (no frame or mouse, and no outline:
+-- the rarity-coloured square around it was removed with the row's border),
+-- made once per card on its first need and afterwards only set and placed.
+-- With `paint`, the texture is set again: `icon` (M.OfferIcon's texture of
+-- this card's own spell id), shown inside the client's own bevel
+-- (OFFER.crop); without an icon it is cleared and hidden, so a reused card
+-- keeps no earlier card's icon and an offer without one shows nothing there.
+-- `side` (optional) places it as a square of that size, the row's height, at
+-- the row's left and top, and is returned (else 0). The square is kept free
+-- when there is no icon, so every row's name starts at the same place.
+function M.OfferSlot(card, side, paint, icon)
     if not card then return 0 end
     local slot = card._nexusSlot
     if not slot then
-        slot = {interior = card:CreateTexture(nil, "BORDER"), edges = {}}
-        slot.interior:SetTexture(0, 0, 0, 0.45)
-        for edge = 1, 4 do slot.edges[edge] = card:CreateTexture(nil, "ARTWORK") end
+        slot = {icon = card:CreateTexture(nil, "ARTWORK")}
+        slot.icon:SetTexCoord(OFFER.crop, 1 - OFFER.crop, OFFER.crop, 1 - OFFER.crop)
+        slot.icon:Hide()
         card._nexusSlot = slot
     end
-    local e = slot.edges
-    if r and g and b then
-        for edge = 1, 4 do e[edge]:SetTexture(r, g, b, 1) end
-        if icon then slot.interior:SetTexture(icon) else slot.interior:SetTexture(0, 0, 0, 0.45) end
+    local texture = slot.icon
+    if paint then
+        if icon then
+            texture:SetTexture(icon)
+            texture:Show()
+        else
+            texture:SetTexture(nil)
+            texture:Hide()
+        end
     end
-    local height = tonumber(rowHeight)
-    if not height then return 0 end
-    local margin = 2
-    local side = math.max(1, math.floor(height) - margin * 2)
-    local x, y = OFFER.pad, margin
-    e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y); e[1]:SetSize(side, 1)
-    e[2]:ClearAllPoints(); e[2]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -(y + side - 1)); e[2]:SetSize(side, 1)
-    e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y); e[3]:SetSize(1, side)
-    e[4]:ClearAllPoints(); e[4]:SetPoint("TOPLEFT", card, "TOPLEFT", x + side - 1, -y); e[4]:SetSize(1, side)
-    local inside = slot.interior
-    inside:ClearAllPoints()
-    if side > 2 then
-        inside:SetPoint("TOPLEFT", card, "TOPLEFT", x + 1, -(y + 1))
-        inside:SetSize(side - 2, side - 2)
-        inside:Show()
-    else
-        inside:Hide()
-    end
-    return side + OFFER.gap
+    side = tonumber(side)
+    if not side then return 0 end
+    side = math.max(1, math.floor(side))
+    texture:ClearAllPoints()
+    texture:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+    texture:SetSize(side, side)
+    return side
 end
 
 function M.EnsureOfferCards()
@@ -4601,14 +4595,13 @@ function M.EnsureOfferCards()
         card.fill:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
         card.fill:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0)
         card.fill:SetTexture(0, 0, 0, 0.35)
-        -- Top, bottom, left and right edges: a border the client draws as
-        -- plain textures (no backdrop edge file at 1-2 px).
-        card.edges = {}
-        for edge = 1, 4 do card.edges[edge] = card:CreateTexture(nil, "BORDER") end
+        -- No border: the row is its fill, its icon and its texts. Each text
+        -- spans the row's height (M.PlaceOfferCards) and sits in its middle,
+        -- on the icon's centre line.
         for _, key in ipairs({"name", "quality", "tag"}) do
             local text = card:CreateFontString(nil, "OVERLAY", small)
             text:SetJustifyH("LEFT")
-            text:SetJustifyV("TOP")
+            text:SetJustifyV("MIDDLE")
             text:SetWordWrap(false)
             card[key] = text
         end
@@ -4630,21 +4623,6 @@ function M.EnsureOfferCards()
     end
     frame._offerCards = cards
     return cards
-end
-
-local function PaintOfferEdges(card, marked)
-    local c = marked and OFFER.mark or OFFER.edge
-    local size = marked and 2 or 1
-    local e = card.edges
-    e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
-    e[1]:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0); e[1]:SetHeight(size)
-    e[2]:ClearAllPoints(); e[2]:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 0, 0)
-    e[2]:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0); e[2]:SetHeight(size)
-    e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
-    e[3]:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 0, 0); e[3]:SetWidth(size)
-    e[4]:ClearAllPoints(); e[4]:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
-    e[4]:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0); e[4]:SetWidth(size)
-    for edge = 1, 4 do e[edge]:SetTexture(c[1], c[2], c[3], marked and 1 or 0.9) end
 end
 
 -- Content of the three cards from the current model's card lines only:
@@ -4681,14 +4659,12 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             local history = Nexus.OrbHistory
             local q = own and tonumber(own.quality)
             local qc = q and history and type(history.QUALITY_COLORS) == "table" and history.QUALITY_COLORS[q] or nil
-            -- The same colour for the name and the slot before it
-            -- (M.OfferSlot), repainted on every render so a reused card keeps
-            -- no earlier card's tint: white (1, 1, 1) when the quality is unknown.
-            -- The slot shows this card's own verified icon (M.OfferIcon, from
-            -- its own facts' spell id), else it is empty.
-            local r, g, b = qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1
-            card.name:SetTextColor(r, g, b)
-            M.OfferSlot(card, nil, r, g, b, M.OfferIcon(own))
+            -- Set on every render, so a reused card keeps no earlier card's
+            -- colour: white (1, 1, 1) when the quality is unknown. The slot
+            -- before the name shows this card's own verified icon
+            -- (M.OfferIcon, from its own facts' spell id), else nothing.
+            card.name:SetTextColor(qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1)
+            M.OfferSlot(card, nil, true, M.OfferIcon(own))
             card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
             card.tag:SetText(shown.shown or shown.tag)
@@ -4697,13 +4673,14 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             else
                 card.tag:SetTextColor(0.75, 0.75, 0.75)
             end
+            -- The marked row is told by its tag's words and gold colour (no
+            -- border is drawn around a row).
             card._nexusFull, card._nexusTag, card._nexusMarked = shown.full, shown.tag, shown.marked
-            PaintOfferEdges(card, shown.marked)
             card:Show()
         elseif card then
             card._nexusFull, card._nexusTag, card._nexusMarked = nil, nil, nil
-            -- A hidden card keeps no offer's icon: its slot, once made, is empty again.
-            if card._nexusSlot then card._nexusSlot.interior:SetTexture(0, 0, 0, 0.45) end
+            -- A hidden card keeps no offer's icon: its slot, once made, is cleared.
+            if card._nexusSlot then M.OfferSlot(card, nil, true, nil) end
             card:Hide()
         end
         SetVisible(cardTexts[index], not show)
@@ -4800,49 +4777,49 @@ end
 
 -- Geometry of the cards inside the roll box (design/current "Nexus Main
 -- Panel - Compact Redesign": compact offer rows, not tall cards): the band
--- the card rows hold (from below the heading, 3 x (small + row gap)), one
--- full-width row per offer: the name, then its quality and its tag at their
--- whole widths (only a tag wider than half the row, or a quality then left
--- without room, is shortened, complete on the card's hover), the name in the
--- rest (shortened there, complete on the hover and named in the
--- recommendation). The band, the roll box and the panel keep their size.
--- Each row starts with its quality slot (M.OfferSlot), which holds the
--- offer's verified icon when M.RenderOfferCards found one and is empty otherwise.
+-- LayoutMetrics.OfferRows gives them below the heading, one full-width row
+-- per offer, a small text line with a row gap above and below it. No border
+-- is drawn around a row or its icon. Each row starts with its icon square
+-- (M.OfferSlot: the row's height, at the row's left; kept free without an
+-- icon), then one layout gap, then the name, its quality and its tag, one
+-- layout gap apart and ending half a gap from the row's right; each text
+-- spans the row's height and sits in its middle. The quality and the tag
+-- keep their whole widths while the row has the room: a tag is held to half
+-- of the texts' room, and a quality to what leaves the name a sixth of it,
+-- only by what the name itself needs (a short name gives them the room it
+-- does not use). What is shortened is complete on the card's hover, and the
+-- name in the recommendation.
 -- Returns "rows".
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
     if not (cards and layout and box) then return nil end
-    local top = 1 + layout.small + math.max(3, math.floor(layout.gap / 2))
-    local rowGap = math.max(2, math.floor(layout.gap / 3))
+    local top, rowH, rowGap = Nexus.LayoutMetrics.OfferRows(layout.small, layout.gap)
+    local gap = layout.gap
     local width = box.w - inset * 2
     for index = 1, 3 do
         local card = cards[index]
         card:ClearAllPoints()
-        do
-            card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (layout.small + rowGap)))
-            card:SetSize(width, layout.small)
-            -- The slot first, at the text inset (M.OfferSlot). Then, in
-            -- the rest of the row, the status words: the tag up to half of it,
-            -- the quality up to what leaves the name a sixth of it; the name
-            -- takes what is left.
-            local inner = math.max(1, width - OFFER.pad * 2)
-            local slotW = M.OfferSlot(card, layout.small)
-            local rest = math.max(1, inner - slotW)
-            local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
-            local tagW = tag ~= "" and math.min(math.floor(rest / 2), math.ceil(M.LineWidth(card.tag, tag))) or 0
-            local room = rest - tagW - 2 * OFFER.gap - math.floor(rest / 6)
-            local qualityW = quality ~= "" and math.max(1, math.min(room, math.ceil(M.LineWidth(card.quality, quality)))) or 0
-            local nameW = math.max(1, rest - tagW - qualityW - (tagW > 0 and OFFER.gap or 0) - (qualityW > 0 and OFFER.gap or 0))
-            local x = OFFER.pad + slotW
-            for _, part in ipairs({{card.name, nameW}, {card.quality, qualityW}, {card.tag, tagW}}) do
-                local text = part[1]
-                text:ClearAllPoints()
-                text:SetPoint("TOPLEFT", card, "TOPLEFT", x, 0)
-                text:SetSize(math.max(1, part[2]), layout.small)
-                if part[2] > 0 then x = x + part[2] + OFFER.gap end
-            end
-            card._nexusLayout = "rows"
+        card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (rowH + rowGap)))
+        card:SetSize(width, rowH)
+        local left = M.OfferSlot(card, rowH) + gap
+        local rest = math.max(1, width - left - math.ceil(gap / 2))
+        local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
+        local nameNeed = math.ceil(M.LineWidth(card.name, card.name:GetText() or ""))
+        local qualityNeed = quality ~= "" and math.ceil(M.LineWidth(card.quality, quality)) or 0
+        local tagW = tag ~= "" and math.min(math.ceil(M.LineWidth(card.tag, tag)),
+            math.max(math.floor(rest / 2), rest - 2 * gap - qualityNeed - nameNeed)) or 0
+        local room = rest - tagW - 2 * gap - math.min(math.floor(rest / 6), nameNeed)
+        local qualityW = quality ~= "" and math.max(1, math.min(room, qualityNeed)) or 0
+        local nameW = math.max(1, rest - tagW - qualityW - (tagW > 0 and gap or 0) - (qualityW > 0 and gap or 0))
+        local x = left
+        for _, part in ipairs({{card.name, nameW}, {card.quality, qualityW}, {card.tag, tagW}}) do
+            local text = part[1]
+            text:ClearAllPoints()
+            text:SetPoint("TOPLEFT", card, "TOPLEFT", x, 0)
+            text:SetSize(math.max(1, part[2]), rowH)
+            if part[2] > 0 then x = x + part[2] + gap end
         end
+        card._nexusLayout = "rows"
     end
     return "rows"
 end
@@ -5826,16 +5803,17 @@ local function ApplyPanelLayout(layout, completed)
                 statusText:SetWidth(boxes.roll.w-inset*2-cell-(tonumber(layout.chargesGap) or 4))
             end
         end
-        y = y + layout.small + math.max(3,math.floor(layout.gap/2))
+        -- The one-line rows and the offer cards that show in their place
+        -- share one band (LayoutMetrics.OfferRows); the text below starts
+        -- under it.
+        local rowTop, rowH, rowGap, bodyTop = Nexus.LayoutMetrics.OfferRows(layout.small, layout.gap)
         for index = 1, 3 do
             local text = cardTexts[index]
             text:ClearAllPoints()
-            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
-            text:SetSize(boxes.roll.w-inset*2, layout.small)
-            y = y + layout.small + math.max(2,math.floor(layout.gap/3))
+            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -(rowTop + (index - 1) * (rowH + rowGap)))
+            text:SetSize(boxes.roll.w-inset*2, rowH)
         end
-        -- The offer cards take the same band as these rows (in three columns,
-        -- or stacked rows when a status line does not fit a column).
+        y = bodyTop
         M.PlaceOfferCards(layout, boxes.roll, inset)
         -- Guidance alone (no cards) starts right below the heading, so it
         -- has the card rows' space; with cards it follows them as before.

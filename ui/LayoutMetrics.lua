@@ -456,6 +456,22 @@ local function PanelKey(spec)
     }, "|")
 end
 
+-- The three offer rows of the roll box, in one place for the box's height
+-- (M.Panel) and their placement (Panel.PlaceOfferCards), from the panel's
+-- small text line and section gap. A row is one small text line with a row
+-- gap above and below it (room for a legible icon and for the text to
+-- breathe); rows are a row gap apart, and the band keeps two row gaps under
+-- the heading line and above the text below. Returns, from the roll box's
+-- top: the first row's top, a row's height, the gap between rows and where
+-- the text under the rows starts. At font scale 1 (small 11, gap 6):
+-- 16, 15, 2 and 69.
+function M.OfferRows(small, gap)
+    local rowGap = math.max(2, math.floor(gap / 3))
+    local rowH = small + 2 * rowGap
+    local top = 1 + small + 2 * rowGap
+    return top, rowH, rowGap, top + 3 * rowH + 4 * rowGap
+end
+
 function M.Panel(spec)
     spec = type(spec) == "table" and spec or {}
     stats.requests = stats.requests + 1
@@ -537,6 +553,19 @@ function M.Panel(spec)
         cursor = cursor + height + tight
     elseif spec.activeRoll then
         local height = math.max(104, small * 6 + gap * 4)
+        -- Where the text under the heading starts: under the offer rows
+        -- while there are any (M.OfferRows), else right under the heading.
+        local bodyTop = 1 + small + math.max(3,math.floor(gap/2))
+        if spec.cardRows then
+            -- That least height was sized for three one-line rows (to
+            -- test.163021: 3 x (small + row gap) under the heading). The
+            -- rows are taller now, and the box grows by exactly what they
+            -- gained (15 px at font scale 1), so the text under them keeps
+            -- the room it had.
+            local oneLineRows = bodyTop + 3 * (small + math.max(2,math.floor(gap/3)))
+            bodyTop = select(4, M.OfferRows(small, gap))
+            height = height + bodyTop - oneLineRows
+        end
         if spec.orbButton then
             -- Its own row for the passive "Open Orbs..." button, sized for
             -- its 12-character label in the conservative text model plus the
@@ -563,11 +592,7 @@ function M.Panel(spec)
             -- conservative text model below the heading (and the card rows,
             -- if any), above the button row. Never smaller than before.
             local _, line = M.ConservativeText(scale)
-            local y = 1 + small + math.max(3,math.floor(gap/2))
-            if spec.cardRows then
-                y = y + 3 * (small + math.max(2,math.floor(gap/3)))
-            end
-            local needed = y + rows * line + gap
+            local needed = bodyTop + rows * line + gap
             if spec.orbButton then needed = needed + layout.orbButtonH + math.ceil(gap/2) end
             height = math.max(height, needed)
         end

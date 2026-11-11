@@ -254,13 +254,14 @@ local function OfferRows(tag,area,small,lines,kind)
   end
   local nr=Rect(card.name)
   if nr and cr then
-   -- The row left for the three texts after the empty quality slot.
-   local rest=(cr[3]-cr[1])-4-(nr[1]-cr[1])
+   -- The room of the three texts: from the name's left, after the icon square and its gap, to the last text's right.
+   local rest=(edge or cr[3])-nr[1]
    local tagText=card.tag:GetText() or ''
    if tagText~='' and Natural(card.tag)<=math.floor(rest/2) and card.tag:GetWidth()<math.ceil(Natural(card.tag))-0.01 then
     whole=false;notes[#notes+1]=i..'.tag box='..tostring(card.tag:GetWidth())..' natural='..tostring(Natural(card.tag))
    end
-   if card.name:GetWidth()<math.floor(rest/6)-0.01 then sixth=false end
+   -- A name shorter than a sixth is whole and gives its idle room to the status words (offer-row spacing).
+   if card.name:GetWidth()<math.min(math.floor(rest/6),math.ceil(Natural(card.name)))-0.01 then sixth=false end
   end
   local enter=card:GetScript('OnEnter')
   tip={}
@@ -290,7 +291,7 @@ local function OfferRows(tag,area,small,lines,kind)
  kind(rows,tag..': every offer row and text box is at least that tall',detail)
  C.guard(inside and ordered and apart,tag..': the rows are compact, in order, apart and inside the roll area',detail)
  C.guard(whole,tag..': a tag no wider than half the row is whole',detail)
- C.guard(sixth,tag..': the name keeps at least a sixth of the row',detail)
+ C.guard(sixth,tag..': the name keeps at least a sixth of the row, or its whole text when that is shorter',detail)
  C.guard(hover,tag..': each card\'s hover gives its complete line and tag',detail)
 end
 
@@ -603,7 +604,8 @@ C.scenario('N7 a native height of 10, or no readable reference, keeps 10 / 12 / 
   'N7: the owned fonts are exactly 10 / 12 / 14 at font scale 1',tostring(Owned('small'))..'/'..tostring(Owned('normal'))..'/'..tostring(Owned('large')))
  C.guard(layout.small==11 and layout.normal==14 and layout.large==16 and layout.gap==6,'N7: the layout rows are 11 / 14 / 16 with a 6 px gap')
  local cards=NexusPanel._offerCards
- C.guard(cards[1]:GetHeight()==11 and cards[1].name:GetHeight()==11 and Size(cards[1].name)==10,'N7: an offer row is 11 px for the 10 px font')
+ C.guard(cards[1]:GetHeight()==15 and cards[1].name:GetHeight()==15 and Size(cards[1].name)==10,
+  'N7: an offer row is 15 px for the 10 px font: its 11 px line with a 2 px row gap above and below (offer-row spacing)',tostring(cards[1]:GetHeight()))
  C.guard(NexusPanel._chargesText:GetWidth()==72 and NexusPanel._rollStatus:GetWidth()==layout.boxes.roll.w-4-76,
   'N7: the charges cell is 72 px and the heading keeps the rest less 76',NexusPanel._chargesText:GetWidth())
  local title,build,wishlist=Rect(NexusPanel._contextTitle),Rect(NexusPanel._contextBuild),Rect(NexusPanel._contextWishlist)
@@ -675,10 +677,10 @@ C.scenario('N8 display-only cards, collapsed Details, header slots and the grip 
   if cards[i]:GetScript('OnClick') or cards[i]:GetScript('OnMouseUp') or cards[i]:GetScript('OnMouseDown') then clickable=true end
   if cards[i]._nexusPassiveDrag~=true then passive=false end
   local slot=cards[i]._nexusSlot
-  if not (type(slot)=='table' and slot.interior and #slot.edges==4) then slots=false end
+  if not (type(slot)=='table' and slot.icon~=nil and slot.interior==nil and slot.edges==nil and cards[i].edges==nil) then slots=false end
  end
  C.guard(not clickable and passive,'N8: a card has no click and stays a passive drag surface')
- C.guard(slots,'N8: each row keeps its empty quality slot; no icon is added')
+ C.guard(slots,'N8: each row keeps its one icon slot and has no outline around it or the row (offer-row spacing, REG-ROW)')
  local layout=NexusPanel._responsiveLayout
  C.guard(P._playDetails~=true and layout.boxes.planNeeded==nil and layout.boxes.needed==nil,'N8: Details stays collapsed: no count or name rows are laid out')
  local s=P.HeaderSlots()

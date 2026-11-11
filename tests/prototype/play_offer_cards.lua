@@ -186,7 +186,9 @@ C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and 
  -- Geometry: disjoint full-width rows inside the roll area, within the card band.
  local area=NexusPanel._rollArea
  local layout=NexusPanel._responsiveLayout
- local band=layout and 3*(layout.small+math.max(2,math.floor(layout.gap/3))) or 0
+ -- Offer-row spacing: a row is its small line with a row gap above and below, a row gap from the next.
+ local rowGap=layout and math.max(2,math.floor(layout.gap/3)) or 0
+ local band=layout and 3*(layout.small+2*rowGap)+2*rowGap or 0
  local lastBottom,inside,first=nil,true,nil
  for i=1,3 do
   local point,relative,_,x,y=cards[i]:GetPoint()
@@ -196,7 +198,7 @@ C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and 
   lastBottom=-y+cards[i]:GetHeight()
  end
  C.expect(inside,'P2: the offers are three disjoint rows inside the roll area')
- C.expect(layout and lastBottom and first and lastBottom-first<=band and cards[1]:GetHeight()==layout.small,
+ C.expect(layout and lastBottom and first and lastBottom-first<=band and cards[1]:GetHeight()==layout.small+2*rowGap,
   'P2: the three rows stay within the band the card rows reserve',tostring(lastBottom)..'-'..tostring(first)..'/'..band)
  local clickable=false
  for i=1,3 do

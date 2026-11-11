@@ -62,8 +62,23 @@ end
 -- had, or does nothing where it had none (its no-op). Nothing is created,
 -- placed or tinted here. V4 rebinds RM, so this table itself is kept and
 -- its methods are put back before V4.
-local SlotSpy={methods=RM,saved={SetTexture=rawget(RM,'SetTexture'),SetVertexColor=rawget(RM,'SetVertexColor')},
- fill=setmetatable({},{__mode='k'}),vertex=setmetatable({},{__mode='k'}),path=setmetatable({},{__mode='k'})}
+-- REG-ROW adds, the same way: the colour a text receives through
+-- SetTextColor(r,g,b[,a]) and the vertical justification it is given.
+local SlotSpy={methods=RM,saved={SetTexture=rawget(RM,'SetTexture'),SetVertexColor=rawget(RM,'SetVertexColor'),
+  SetTextColor=rawget(RM,'SetTextColor'),SetJustifyV=rawget(RM,'SetJustifyV')},
+ fill=setmetatable({},{__mode='k'}),vertex=setmetatable({},{__mode='k'}),path=setmetatable({},{__mode='k'}),
+ text=setmetatable({},{__mode='k'}),justify=setmetatable({},{__mode='k'})}
+RM.SetTextColor=function(self,...)
+ local a,b,c=...
+ if type(a)=='number' and type(b)=='number' and type(c)=='number' then SlotSpy.text[self]={a,b,c} end
+ local prev=SlotSpy.saved.SetTextColor
+ if prev then return prev(self,...) end
+end
+RM.SetJustifyV=function(self,...)
+ SlotSpy.justify[self]=(...)
+ local prev=SlotSpy.saved.SetJustifyV
+ if prev then return prev(self,...) end
+end
 RM.SetTexture=function(self,...)
  local a,b,c=...
  if type(a)=='number' and type(b)=='number' and type(c)=='number' then SlotSpy.fill[self]={a,b,c};SlotSpy.path[self]=nil
@@ -424,16 +439,18 @@ C.scenario('V9 ready, then Pause, then an unreadable Status: the hover and detai
  P.Render(Model())
 end)
 
--- REG-SLOT (S3_OFFER_EMPTY_SLOT / MI-F01): an offer whose Echo has no
--- verified icon shows an EMPTY slot before its name, inside its own compact
--- row, tinted with the Echo rarity colour of the card's own quality
--- (OrbHistory.QUALITY_COLORS); an unknown own quality, a name ending in
--- "(Rare)" included, stays neutral (white, as the name). No icon path or id
--- (these model cards carry no spell id; REG-ICON below covers those that do).
--- The slot is what the card's real region tree shows apart from its fill,
--- edges and three texts; its tint is what SetTexture / SetVertexColor
--- received (SlotSpy). EXPECT: the slot, its tint and its geometry (absent at
--- a171db9c). GUARD: current text, tag, hover, edges, band, hidden cards,
+-- REG-SLOT (S3_OFFER_EMPTY_SLOT / MI-F01, as corrected by REG-ROW): an offer
+-- whose Echo has no verified icon shows NO icon: nothing in its row shows or
+-- holds a texture path or id, and its name is in the Echo rarity colour of
+-- the card's own quality (OrbHistory.QUALITY_COLORS); an unknown own quality,
+-- a name ending in "(Rare)" included, stays white. These model cards carry no
+-- spell id (REG-ICON below covers those that do). What a row shows is read
+-- from the card's real region tree apart from its fill and three texts, and
+-- from what SetTexture / SetVertexColor / SetTextColor received (SlotSpy).
+-- The rarity-tinted outline of the empty slot and the row's status edges,
+-- which these scenarios required to 89124b3a, are removed on the user's
+-- request ("remove the outline boxes"); REG-ROW expects their absence. GUARD
+-- here: current text, tag, hover, band, hidden cards, the name's colour,
 -- passive input and the Shift drag. Model geometry only: native pixel fit
 -- and desktop 125% are NOT RUN.
 local S={QC=Nexus.OrbHistory and Nexus.OrbHistory.QUALITY_COLORS or {}}
@@ -445,14 +462,14 @@ function S.Same(c,q)
  return type(c)=='table' and type(q)=='table' and math.abs(c[1]-q[1])<0.001 and math.abs(c[2]-q[2])<0.001 and math.abs(c[3]-q[3])<0.001
 end
 function S.Rect(r) local ok,v=pcall(G.Rect,r,root);return ok and v or nil end
--- The card's own descendants apart from its fill, four edges and three texts,
--- each once: the harness lists a created Texture or FontString both as a
--- region and as a child (as G.Shown notes), so both routes use the same skip
--- and seen sets. Unknown descendants are kept; frames are walked into.
+-- The card's own descendants apart from its fill and three texts, each once:
+-- the harness lists a created Texture or FontString both as a region and as
+-- a child (as G.Shown notes), so both routes use the same skip and seen sets.
+-- Unknown descendants are kept; frames are walked into. A row outline, were
+-- one painted again, is among them (REG-ROW).
 function S.Parts(card)
  local skip,seen,out={},{},{}
  for _,k in ipairs({'fill','name','quality','tag'}) do if card[k] then skip[card[k]]=true end end
- for _,e in ipairs(type(card.edges)=='table' and card.edges or {}) do skip[e]=true end
  local function Walk(f)
   for _,list in ipairs({{f:GetRegions()},{f:GetChildren()}}) do
    for _,c in ipairs(list) do
@@ -506,60 +523,105 @@ function S.Observe(i)
  o.slot,o.tints,o.paths,o.visuals=S.Slot(card)
  return o
 end
-function S.Placed(o)
+S.WHITE={1,1,1}
+-- The colour the card's name last received: its own Echo rarity colour, or
+-- white 1,1,1 when its quality is unknown.
+function S.Named(o,q)
+ local c=SlotSpy.text[o.card.name]
+ return S.Same(c,q and S.QC[q] or S.WHITE),c and string.format('name colour %.2f/%.2f/%.2f',c[1],c[2],c[3]) or 'name colour never set'
+end
+function S.Paths(o) local out={};for _,p in ipairs(o and o.paths or {}) do out[#out+1]=tostring(p) end return '['..table.concat(out,' ')..']' end
+-- Whether any region of the card still holds a texture path or id.
+function S.Stale(card) for _,p in ipairs(S.Parts(card)) do if SlotSpy.path[p]~=nil then return true end end return false end
+-- An offer without a verified icon: its row is shown, nothing in it shows or
+-- holds a texture path or id, and its name is in its own rarity colour.
+function S.Fallback(o,q)
  if not (o and o.visible and o.rect) then return false,'card not visible' end
- local s=o.slot
- if not s then return false,'no visible slot apart from the fill, edges and texts' end
- if not G.Inside(s,o.rect,0.01) then return false,'slot '..G.Text(s)..' outside its row '..G.Text(o.rect) end
- local name=o.texts.name.rect
- if not (name and s[3]<=name[1]+0.01) then return false,'slot '..G.Text(s)..' leaves no space before the name' end
+ if #o.paths>0 or S.Stale(o.card) then return false,'a texture '..S.Paths(o) end
+ return S.Named(o,q)
+end
+-- The rectangle of the one texture path or id the row shows.
+function S.Icon(o)
+ for _,v in ipairs(o and o.visuals or {}) do if v.path~=nil then return S.Rect(v.region) end end
+ return nil
+end
+-- REG-ROW: the numbers the rows are built from, read from the panel's own
+-- layout (one small text line and the section gap) and derived here, not
+-- read back from the product: the gap between rows and a row's height (its
+-- text line with one row gap above and below).
+function S.L()
+ local l=root._responsiveLayout
+ local rowGap=math.max(2,math.floor(l.gap/3))
+ return {small=l.small,gap=l.gap,rowGap=rowGap,rowH=l.small+2*rowGap}
+end
+-- No box: besides its fill and its three texts, the only thing a row paints
+-- and shows is its icon. A row outline or a slot outline is a painted colour.
+function S.Bare(o)
+ local n=0
+ for _,v in ipairs(o and o.visuals or {}) do if v.path==nil then n=n+1 end end
+ return o~=nil and n==0,n..' painted colour region(s) besides the fill'
+end
+-- The borderless icon: a square of its row's height at the row's left and top.
+function S.IconFit(o)
+ local icon,r=S.Icon(o),o.rect
+ if not icon then return false,'no icon' end
+ local side=icon[3]-icon[1]
+ if math.abs(side-(icon[4]-icon[2]))>0.01 or math.abs(side-(r[4]-r[2]))>0.01 then
+  return false,'icon '..G.Text(icon)..' is not a square of its row\'s height '..G.Text(r)
+ end
+ if math.abs(icon[1]-r[1])>0.01 or math.abs(icon[2]-r[2])>0.01 then return false,'icon '..G.Text(icon)..' is not at its row\'s left and top '..G.Text(r) end
+ return true,G.Text(icon)
+end
+-- The columns of one row: the name starts one layout gap after the icon's
+-- square (kept free without an icon, so names stay aligned); each shown text
+-- box is one layout gap from the next and the last ends half a gap from the
+-- row's right; each box spans the row's height with its text set to the
+-- middle, so the texts and the icon share one centre line.
+function S.Columns(o)
+ local L,r=S.L(),o.rect
+ local x,last=r[1]+(r[4]-r[2])+L.gap,nil
  for _,k in ipairs({'name','quality','tag'}) do
   local t=o.texts[k]
-  if t.text~='' and t.rect and not G.Apart(s,t.rect) then return false,'slot '..G.Text(s)..' overlaps the '..k end
+  if t.text~='' then
+   if not t.rect then return false,k..' has no box' end
+   if math.abs(t.rect[1]-x)>0.01 then return false,string.format('%s starts at %.1f, want %.1f',k,t.rect[1],x) end
+   if math.abs(t.rect[2]-r[2])>0.01 or math.abs(t.rect[4]-r[4])>0.01 then return false,k..' '..G.Text(t.rect)..' does not span its row\'s height '..G.Text(r) end
+   if SlotSpy.justify[o.card[k]]~='MIDDLE' then return false,k..' is set to '..tostring(SlotSpy.justify[o.card[k]])..', not to the middle of its box' end
+   x,last=t.rect[3]+L.gap,t.rect
+  end
  end
- for _,p in ipairs(o.paths) do
-  if type(p)=='number' or (type(p)=='string' and p:lower():find('icons',1,true)) then return false,'an icon texture '..tostring(p) end
+ local right=r[3]-math.ceil(L.gap/2)
+ if not (last and math.abs(last[3]-right)<=0.01) then return false,string.format('the last text ends at %.1f, want %.1f',last and last[3] or -1,right) end
+ return true,G.Text(r)
+end
+-- The band: the first row two row gaps under the heading line, each row its
+-- height and one row gap from the next, and the text under the rows two row
+-- gaps below the last.
+function S.Rows(n)
+ local L,roll=S.L(),S.Rect(root._rollArea)
+ local top=roll[2]+1+L.small+2*L.rowGap
+ for i=1,n do
+  local card=root._offerCards[i]
+  local r=card:IsVisible() and S.Rect(card) or nil
+  if not r then return false,'row '..i..' is not shown' end
+  local want=top+(i-1)*(L.rowH+L.rowGap)
+  if math.abs(r[2]-want)>0.01 or math.abs((r[4]-r[2])-L.rowH)>0.01 then
+   return false,string.format('row %d %s, want top %.1f and height %.1f',i,G.Text(r),want,L.rowH)
+  end
  end
- return true,G.Text(s)
+ local rec,body=S.Rect(root._rollRec),top+3*L.rowH+4*L.rowGap
+ if not (rec and math.abs(rec[2]-body)<=0.01) then return false,string.format('the text under the rows starts at %.1f, want %.1f',rec and rec[2] or -1,body) end
+ return true,string.format('rows from %.1f, text from %.1f',top,body)
 end
-function S.Tint(o,q) for _,c in ipairs(o and o.tints or {}) do if S.Same(c,S.QC[q]) then return true end end return false end
-function S.Rarity(o) for q=1,4 do if S.Tint(o,q) then return q end end return nil end
-function S.Only(o,q)
- if not S.Tint(o,q) then return false end
- for r=1,4 do if r~=q and S.Tint(o,r) then return false end end
- return true
-end
-function S.Tints(o)
- local out={}
- for _,c in ipairs(o and o.tints or {}) do out[#out+1]=string.format('%.2f/%.2f/%.2f',c[1],c[2],c[3]) end
- return 'tints '..table.concat(out,' ')
-end
--- The effective numeric tint of one slot visual: its colour texture times its
--- vertex colour (each 1,1,1 when not recorded); nil when neither was recorded.
-function S.Effective(v)
- if not (v and (v.fill or v.vertex)) then return nil end
- local f,x=v.fill or {1,1,1},v.vertex or {1,1,1}
- return {f[1]*x[1],f[2]*x[2],f[3]*x[3]}
-end
--- The slot visuals (identities) whose effective tint is exactly `rgb`.
-function S.Bearing(o,rgb)
- local out={}
- for _,v in ipairs(o and o.visuals or {}) do if S.Same(S.Effective(v),rgb) then out[#out+1]=v.region end end
- return out
-end
--- Whether one of `regions` is in `set`: the same reused visual as before.
-function S.Tracked(regions,set)
- for _,r in ipairs(regions) do if set[r] then return true end end
- return false
-end
-S.WHITE={1,1,1}
--- Known own quality: the slot, only its rarity colour, and a visual that shows
--- it; unknown: the slot, no rarity colour, and a visual that is white 1,1,1.
-function S.Fallback(o,q)
- local placed,why=S.Placed(o)
- if not placed then return false,why end
- if q then return S.Only(o,q) and #S.Bearing(o,S.QC[q])>0,why..' '..S.Tints(o) end
- return S.Rarity(o)==nil and #S.Bearing(o,S.WHITE)>0,why..' '..S.Tints(o)
+-- The room the text under the rows had while they were one-line rows (to
+-- test.163021): the roll box's least height less the heading, three rows and
+-- the box's bottom gap. More rows of guidance only add to it.
+function S.BodyRoom()
+ local L=S.L()
+ local least=math.max(104,L.small*6+L.gap*4)-(1+L.small+math.max(3,math.floor(L.gap/2))+3*(L.small+L.rowGap))-L.gap
+ local rec,roll=S.Rect(root._rollRec),S.Rect(root._rollArea)
+ return rec~=nil and roll~=nil and G.Inside(rec,roll,0.01) and (rec[4]-rec[2])>=least-0.01,
+  string.format('%.1f of at least %.1f',rec and rec[4]-rec[2] or -1,least)
 end
 function S.Meaning(model,i,o)
  local R=Nexus.Readout
@@ -587,15 +649,6 @@ function S.Band(o)
   end
  end
  return true,G.Text(o.rect)
-end
-function S.Edges(o)
- local e=o and o.card.edges
- if type(e)~='table' or #e~=4 then return false end
- for i=1,4 do
-  local c=SlotSpy.fill[e[i]]
-  if not (S.Same(c,{0.32,0.32,0.38}) or S.Same(c,{1,0.82,0})) then return false end
- end
- return true
 end
 function S.TextureIds()
  local cards,ids={},{}
@@ -714,7 +767,7 @@ function S.Restore()
  P.Render(Model())
 end
 
-C.scenario('REG-SLOT-0 controls: start-up, Auto OFF, real cards keep their current text, hover, band and edges',function()
+C.scenario('REG-SLOT-0 controls: start-up, Auto OFF, real cards keep their current text, hover and band',function()
  C.setup(Nexus.StartupStatus().coreReady==true,'REG-SLOT: fixture: local start-up is ready')
  C.setup(S.keep.drag==nil and P._panelDrag==nil,'REG-SLOT: fixture: no move is active from an earlier scenario')
  C.guard(S.keep.effects:find('auto=false',1,true)~=nil,'REG-SLOT: Auto is OFF before the offer checks',S.keep.effects:match('auto=%S+'))
@@ -727,14 +780,13 @@ C.scenario('REG-SLOT-0 controls: start-up, Auto OFF, real cards keep their curre
    C.guard(ok,'REG-SLOT: card '..i..' keeps the Readout name, quality and tag',detail)
    local band,why=S.Band(o)
    C.guard(band,'REG-SLOT: card '..i..' keeps its compact row in the roll box, its texts inside and apart',why)
-   C.guard(S.Edges(o),'REG-SLOT: card '..i..' keeps its fixed status edges')
    local tip=V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' '))
    C.guard(tip:find(V.Plain(shown.full),1,true)~=nil,'REG-SLOT: card '..i..'\'s hover shows its complete line',tip)
   end
  end
 end)
 
-C.scenario('REG-SLOT-1 one reused card: its own rarity tints its empty slot; an unknown quality stays neutral',function()
+C.scenario('REG-SLOT-1 one reused card: its own rarity colours its name; an unknown quality stays white; no icon appears',function()
  local first=root._offerCards and root._offerCards[1]
  local states={
   {'own rarity 2',S.Offer('Frostwake Sigil',2),2},
@@ -743,7 +795,7 @@ C.scenario('REG-SLOT-1 one reused card: its own rarity tints its empty slot; an 
   {'no own facts (a quality only in its text)',{text='Frostwake Sigil (Rare)'},nil},
   {'own rarity 2 again',S.Offer('Frostwake Sigil',2),2},
  }
- local placed,counts,bearers={},{},{}
+ local counts={}
  for n,st in ipairs(states) do
   local m=Model({cards={st[2]}})
   P.Render(m)
@@ -751,22 +803,13 @@ C.scenario('REG-SLOT-1 one reused card: its own rarity tints its empty slot; an 
   if C.setup(o~=nil and o.visible and o.card==first,'REG-SLOT: fixture: the same first card is shown with '..st[1]) then
    local ok,_,detail=S.Meaning(m,1,o)
    C.guard(ok,'REG-SLOT: with '..st[1]..' the card keeps its Readout name, quality and tag',detail)
-   local at,why=S.Placed(o)
-   placed[n],counts[n]=at,#S.Parts(first)
-   C.expect(at,'REG-SLOT: with '..st[1]..' the card shows an empty slot inside its row, before the name, apart from its texts',why)
-   if st[3] then
-    local bearing=S.Bearing(o,S.QC[st[3]])
-    C.expect(at and S.Only(o,st[3]) and #bearing>0 and (next(bearers)==nil or S.Tracked(bearing,bearers)),
-     'REG-SLOT: with '..st[1]..' the slot carries Echo rarity colour '..st[3]..' and no other, on the same reused visual',S.Tints(o))
-    for _,r in ipairs(bearing) do bearers[r]=true end
-   else
-    C.expect(at and S.Rarity(o)==nil and S.Tracked(S.Bearing(o,S.WHITE),bearers),
-     'REG-SLOT: with '..st[1]..' the slot stays neutral: its reused tint-bearing visual is white 1,1,1, no rarity colour from the text or the earlier card',S.Tints(o))
-   end
+   counts[n]=#S.Parts(first)
+   local fine,why=S.Fallback(o,st[3])
+   C.guard(fine,'REG-SLOT: with '..st[1]..' the row shows no icon and its name is '..(st[3] and ('in Echo rarity colour '..st[3]) or 'white 1,1,1: no rarity colour from the text or the earlier card'),why)
   end
  end
- C.expect(placed[1] and placed[#states] and counts[1]==counts[#states],
-  'REG-SLOT: the reused card keeps the same slot regions across renders (none added per render)',tostring(counts[1])..' -> '..tostring(counts[#states]))
+ C.guard(counts[1]~=nil and counts[1]==counts[#states],
+  'REG-SLOT: the reused card keeps the same regions across renders (none added per render)',tostring(counts[1])..' -> '..tostring(counts[#states]))
 end)
 
 C.scenario('REG-SLOT-2 fewer, replaced, no and returning offers: hidden cards show nothing; shown ones follow current facts',function()
@@ -788,7 +831,7 @@ C.scenario('REG-SLOT-2 fewer, replaced, no and returning offers: hidden cards sh
      local ok,_,detail=S.Meaning(m,i,o)
      C.guard(ok,'REG-SLOT: with '..b[1]..' card '..i..' shows its current name, quality and tag',detail)
      local fine,why=S.Fallback(o,b[3][i])
-     C.expect(fine,'REG-SLOT: with '..b[1]..' card '..i..' shows its empty slot in its current facts\' colour ('..tostring(b[3][i] or 'neutral')..')',why)
+     C.guard(fine,'REG-SLOT: with '..b[1]..' card '..i..' shows no icon and its name in its current facts\' colour ('..tostring(b[3][i] or 'white')..')',why)
     end
    elseif card then
     C.guard(not card:IsVisible() and not S.AnyVisible(card),'REG-SLOT: with '..b[1]..' card '..i..' and everything in it is hidden')
@@ -797,7 +840,7 @@ C.scenario('REG-SLOT-2 fewer, replaced, no and returning offers: hidden cards sh
  end
 end)
 
-C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep slot, name, quality and tag inside their row and apart',function()
+C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, quality and tag inside their row and apart',function()
  for _,scale in ipairs({0.5,1,1.25,1.5}) do
   local pct=string.format('%d%%',math.floor(scale*100+0.5))
   P.SetPanelScale(scale)
@@ -821,7 +864,7 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep slot, n
     local band,why=S.Band(o)
     C.guard(band,'REG-SLOT: at '..pct..' long card '..i..' keeps its compact row with its texts inside and apart',why)
     local fine,fwhy=S.Fallback(o,want[i])
-    C.expect(fine,'REG-SLOT: at '..pct..' long card '..i..' shows its empty slot inside its row, before the name and apart from its texts, in its own colour',fwhy)
+    C.guard(fine,'REG-SLOT: at '..pct..' long card '..i..' shows no icon and its name in its own colour',fwhy)
    end
   end
  end
@@ -899,12 +942,13 @@ end)
 -- Readout.CardFacts for named and nameless offers alike; the icon is never
 -- taken from a name, a text or another row. Without an id, with an id that is
 -- not a positive whole number, or with a lookup that fails, raises or answers
--- anything but a texture, the empty rarity slot of REG-SLOT stays. A reused,
+-- anything but a texture, the row shows no icon (REG-SLOT). A reused,
 -- replaced or hidden card keeps no earlier texture. One lookup per shown
 -- offer per layout pass; none on a settled render; no failure is remembered.
 -- EXPECT: the id in the facts and the icon (absent at 4ab0b525). GUARD: names,
--- the generated flag, text, hover, band, edges, the empty slot and passive
--- input. Model geometry only: the native icon render is NOT RUN.
+-- the generated flag, text, hover, band, the row without an icon and passive
+-- input. The slot's rarity outline is removed (REG-ROW). Model geometry only:
+-- the native icon render is NOT RUN.
 S.icon={real=GetSpellInfo,calls={},map={}}
 function S.icon.Lookup(id,...)
  S.icon.calls[#S.icon.calls+1]=id
@@ -923,30 +967,24 @@ function S.Echo(name,q,id,note)
  local card={name=name,quality=q,spellId=id}
  return {text=Nexus.Readout.CardLine(card,nil,nil)..(note and (' '..note) or ''),facts=Nexus.Readout.CardFacts(card)}
 end
-function S.Paths(o) local out={};for _,p in ipairs(o and o.paths or {}) do out[#out+1]=tostring(p) end return '['..table.concat(out,' ')..']' end
--- The slot of a card that shows an icon: its slot visuals hold exactly one
--- texture, `path`, inside the slot; the slot is inside the row, before the
--- name and apart from the texts; the outline still bears the card's own
--- rarity colour and no other (white 1,1,1 when the quality is unknown).
+-- A row that shows an icon: its visuals hold exactly one texture, `path`, in a
+-- positive rectangle inside the row, before the name and apart from the
+-- texts; its name is in the card's own rarity colour (white when unknown).
 function S.IconShown(o,path,q)
  if not (o and o.visible and o.rect) then return false,'card not visible' end
- if #o.paths~=1 or o.paths[1]~=path then return false,'slot textures '..S.Paths(o)..', want '..tostring(path) end
- local s,icon=o.slot,nil
- if not (s and G.Inside(s,o.rect,0.01)) then return false,'slot outside its row' end
- for _,v in ipairs(o.visuals) do if v.path==path then icon=S.Rect(v.region) end end
- if not (icon and icon[3]-icon[1]>0 and icon[4]-icon[2]>0 and G.Inside(icon,s,0.01)) then return false,'icon outside the slot' end
+ if #o.paths~=1 or o.paths[1]~=path then return false,'row textures '..S.Paths(o)..', want '..tostring(path) end
+ local icon=S.Icon(o)
+ if not (icon and icon[3]-icon[1]>0 and icon[4]-icon[2]>0 and G.Inside(icon,o.rect,0.01)) then return false,'icon outside its row' end
  local name=o.texts.name.rect
- if not (name and s[3]<=name[1]+0.01) then return false,'slot '..G.Text(s)..' leaves no space before the name' end
+ if not (name and icon[3]<=name[1]+0.01) then return false,'icon '..G.Text(icon)..' leaves no space before the name' end
  for _,k in ipairs({'name','quality','tag'}) do
   local t=o.texts[k]
-  if t.text~='' and t.rect and not G.Apart(s,t.rect) then return false,'slot '..G.Text(s)..' overlaps the '..k end
+  if t.text~='' and t.rect and not G.Apart(icon,t.rect) then return false,'icon '..G.Text(icon)..' overlaps the '..k end
  end
- if q and not (S.Only(o,q) and #S.Bearing(o,S.QC[q])>0) then return false,'rarity outline: '..S.Tints(o) end
- if not q and not (S.Rarity(o)==nil and #S.Bearing(o,S.WHITE)>0) then return false,'neutral outline: '..S.Tints(o) end
- return true,'icon '..G.Text(icon)..' in slot '..G.Text(s)
+ local named,nwhy=S.Named(o,q)
+ if not named then return false,nwhy end
+ return true,'icon '..G.Text(icon)
 end
--- Whether any region of the card still holds a texture path or id.
-function S.Stale(card) for _,p in ipairs(S.Parts(card)) do if SlotSpy.path[p]~=nil then return true end end return false end
 
 C.scenario('REG-ICON-1 the producer keeps the exact spell id of every offer; names and the generated flag are unchanged',function()
  local R=Nexus.Readout
@@ -975,12 +1013,11 @@ C.scenario('REG-ICON-2 an offer with an exact spell id and a verified texture sh
   local o=S.Observe(i)
   if C.setup(o~=nil and o.visible,'REG-ICON: fixture: offer card '..i..' is shown') then
    local ok,why=S.IconShown(o,want[1],want[2])
-   C.expect(ok,'REG-ICON: card '..i..' ('..want[3]..') shows the texture of its own spell id inside its slot, before the name, in its rarity outline',why)
+   C.expect(ok,'REG-ICON: card '..i..' ('..want[3]..') shows the texture of its own spell id inside its row, before the name',why)
    local same,shown,detail=S.Meaning(m,i,o)
    C.guard(same,'REG-ICON: card '..i..' keeps the Readout name, quality and tag',detail)
    local band,bwhy=S.Band(o)
    C.guard(band,'REG-ICON: card '..i..' keeps its compact row in the roll box, its texts inside and apart',bwhy)
-   C.guard(S.Edges(o),'REG-ICON: card '..i..' keeps its fixed status edges')
    local tip=V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' '))
    C.guard(tip:find(V.Plain(shown.full),1,true)~=nil,'REG-ICON: card '..i..'\'s hover still shows its complete line',tip)
   end
@@ -988,13 +1025,13 @@ C.scenario('REG-ICON-2 an offer with an exact spell id and a verified texture sh
  local third=S.Observe(3)
  if C.setup(third~=nil and third.visible,'REG-ICON: fixture: offer card 3 is shown') then
   local fine,why=S.Fallback(third,4)
-  C.guard(fine,'REG-ICON: card 3, without a spell id, keeps its empty rarity slot and shows no neighbour\'s icon',why..' '..S.Paths(third))
+  C.guard(fine,'REG-ICON: card 3, without a spell id, shows no icon, its own or a neighbour\'s',why..' '..S.Paths(third))
  end
  C.expect(S.icon.Asked(200001)==1 and S.icon.Asked(200002)==1,'REG-ICON: each shown offer\'s exact id was looked up once',S.icon.Asked(200001)..'/'..S.icon.Asked(200002))
  S.icon.Restore()
 end)
 
-C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its slot and row beside long names and tags',function()
+C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its row beside long names and tags',function()
  S.icon.Use({[200001]=S.icon.Path(200001),[200002]=S.icon.Path(200002),[200003]=S.icon.Path(200003)})
  for _,scale in ipairs({0.5,1,1.25,1.5}) do
   local pct=string.format('%d%%',math.floor(scale*100+0.5))
@@ -1008,7 +1045,7 @@ C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its slot a
     local band,why=S.Band(o)
     C.guard(band,'REG-ICON: at '..pct..' long card '..i..' keeps its compact row with its texts inside and apart',why)
     local ok,iwhy=S.IconShown(o,S.icon.Path(200000+i),q or nil)
-    C.expect(ok,'REG-ICON: at '..pct..' long card '..i..' shows its icon inside its slot and row, before the name and apart from its texts',iwhy)
+    C.expect(ok,'REG-ICON: at '..pct..' long card '..i..' shows its icon inside its row, before the name and apart from its texts',iwhy)
    end
   end
  end
@@ -1016,7 +1053,7 @@ C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its slot a
  S.Restore()
 end)
 
-C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lookup without a texture keeps the empty slot',function()
+C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lookup without a texture shows no icon',function()
  local A=S.icon.Path(200001)
  local first=root._offerCards and root._offerCards[1]
  local answers={
@@ -1033,11 +1070,11 @@ C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lo
   local o=S.Observe(1)
   if C.setup(okRender and o~=nil and o.visible and o.card==first,'REG-ICON: fixture: the first card is shown after '..a[1]) then
    local fine,why=S.Fallback(o,2)
-   C.guard(fine,'REG-ICON: '..a[1]..' keeps the empty rarity slot',why..' '..S.Paths(o))
+   C.guard(fine,'REG-ICON: '..a[1]..' shows no icon',why..' '..S.Paths(o))
    C.expect(S.icon.Asked(a[2])==1,'REG-ICON: '..a[1]..': the exact id was asked once, and its failure guessed nothing',S.icon.Asked(a[2]))
   end
  end
- -- An id the client must never be asked about: a texture is on offer for each, so only the refusal keeps the slot empty.
+ -- An id the client must never be asked about: a texture is on offer for each, so only the refusal keeps the row without an icon.
  local huge=2^40
  for _,bad in ipairs({{'zero',0},{'a negative number',-200001},{'a fraction',200001.5},{'a string','200001'},{'a number above the 32-bit range',huge},{'a boolean',true}}) do
   S.icon.Use({[bad[2]]=A,[200001]=A})
@@ -1045,7 +1082,7 @@ C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lo
   local o=S.Observe(1)
   if C.setup(okRender and o~=nil and o.visible and o.card==first,'REG-ICON: fixture: the first card is shown with '..bad[1]..' as its spell id') then
    local fine,why=S.Fallback(o,3)
-   C.guard(fine and #S.icon.calls==0,'REG-ICON: '..bad[1]..' as a spell id is never looked up and keeps the empty rarity slot',why..' '..S.Paths(o)..' lookups '..#S.icon.calls)
+   C.guard(fine and #S.icon.calls==0,'REG-ICON: '..bad[1]..' as a spell id is never looked up and shows no icon',why..' '..S.Paths(o)..' lookups '..#S.icon.calls)
   end
  end
  S.icon.Use({[200001]=A})
@@ -1056,7 +1093,7 @@ C.scenario('REG-ICON-4 no id, an id that is not a positive whole number, or a lo
  local okNone=pcall(P.Render,Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
  GetSpellInfo=S.icon.Lookup
  local none=S.Observe(1)
- C.guard(okNone and none~=nil and none.visible and (S.Fallback(none,2)),'REG-ICON: a client without the lookup renders the empty rarity slot',S.Paths(none))
+ C.guard(okNone and none~=nil and none.visible and (S.Fallback(none,2)),'REG-ICON: a client without the lookup renders the row without an icon',S.Paths(none))
  S.icon.Restore()
 end)
 
@@ -1082,7 +1119,7 @@ C.scenario('REG-ICON-5 one reused card: another id under the same name, a failed
  P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200019)}}))
  local o3=S.Observe(1)
  local c,cwhy=S.Fallback(o3,2)
- C.expect(a and b and c and S.icon.Asked(200019)==1,'REG-ICON: after two icons, an id without a texture puts the empty rarity slot back on the same card',cwhy..' '..S.Paths(o3))
+ C.expect(a and b and c and S.icon.Asked(200019)==1,'REG-ICON: after two icons, an id without a texture leaves the same card without an icon',cwhy..' '..S.Paths(o3))
  P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
  local again=S.IconShown(S.Observe(1),A,2)
  P.Render(Model({cards={},recommendation=''}))
@@ -1091,11 +1128,11 @@ C.scenario('REG-ICON-5 one reused card: another id under the same name, a failed
  P.Render(Model({cards={S.Offer('Hollow Bell',3)}}))
  local o5=S.Observe(1)
  local e,ewhy=S.Fallback(o5,3)
- C.guard(o5.card==first and e and not S.Stale(first),'REG-ICON: a returning offer without a spell id shows its empty rarity slot, no earlier icon',ewhy..' '..S.Paths(o5))
+ C.guard(o5.card==first and e and not S.Stale(first),'REG-ICON: a returning offer without a spell id shows no icon, its own or an earlier one',ewhy..' '..S.Paths(o5))
  P.Render(Model({cards={S.Echo('Frostwake Sigil',2,200001)}}))
  local f,fwhy=S.IconShown(S.Observe(1),A,2)
  C.expect(f,'REG-ICON: a returning offer with a spell id shows its texture again',fwhy)
- C.guard(#S.Parts(first)==parts,'REG-ICON: the reused card keeps the same slot regions (none added per render)',parts..' -> '..#S.Parts(first))
+ C.guard(#S.Parts(first)==parts,'REG-ICON: the reused card keeps the same regions (none added per render)',parts..' -> '..#S.Parts(first))
  S.icon.Restore()
 end)
 
@@ -1120,7 +1157,7 @@ C.scenario('REG-ICON-6 one lookup per shown offer per layout pass, none on a set
  P.Render(Late())
  local o=S.Observe(1)
  local empty,why=S.Fallback(o,1)
- C.expect(empty and S.icon.Asked(200004)==1,'REG-ICON: an id the client has no texture for is asked once and keeps the empty rarity slot',why..' asked '..S.icon.Asked(200004))
+ C.expect(empty and S.icon.Asked(200004)==1,'REG-ICON: an id the client has no texture for is asked once and shows no icon',why..' asked '..S.icon.Asked(200004))
  S.icon.map[200004]=D
  S.icon.calls={}
  P.Render(Late())
@@ -1147,7 +1184,7 @@ C.scenario('REG-ICON-7 a card that shows an icon stays passive: no handler of it
   local kind=p.GetObjectType and p:GetObjectType()
   if kind~='Texture' then plain=false end
  end
- C.guard(plain,'REG-ICON: the slot and its icon are plain textures of the card: no frame, button or mouse region of their own')
+ C.guard(plain,'REG-ICON: the icon is a plain texture of the card: no frame, button or mouse region of its own')
  C.guard(card:GetScript('OnClick')==nil and card:GetScript('OnMouseUp')==nil and card._nexusPassiveDrag==true,
   'REG-ICON: the card chooses nothing: no click or mouse-up of its own; it is a passive drag surface')
  local okClick=pcall(function() card:Click('LeftButton');if up then up(root,'LeftButton') end end)
@@ -1169,6 +1206,139 @@ end)
 -- Whatever a REG-ICON scenario left: the client lookup is the harness's again.
 S.icon.Restore()
 
+-- REG-ROW (offer-row spacing, the user's "remove the outline boxes around them
+-- and fix the spacing" on test.163021 / 89124b3a). A row paints no outline:
+-- neither the rectangle around the whole row (grey, or gold on the marked
+-- row) nor the four-edge square around the icon; besides its fill it shows
+-- only its icon. The icon is a borderless square of the row's height; a row
+-- without one keeps that square free, so names stay aligned. The name is one
+-- layout gap after the square, the texts one layout gap apart, each spanning
+-- the row with its text set to the middle. A row is its text line with a row
+-- gap above and below; rows are a row gap apart, two row gaps under the
+-- heading and above the text below, whose room the taller band does not
+-- take. A status word keeps its whole width while the row has room it is not
+-- using. EXPECT: all of that (absent at 89124b3a). GUARD: words, colours,
+-- the texture, hover, hidden rows, lookups and passive input. Model geometry
+-- only: how it looks in the client is NOT RUN.
+function S.TagColour(o,marked)
+ local c=SlotSpy.text[o.card.tag]
+ return S.Same(c,marked and {1,0.82,0} or {0.75,0.75,0.75}),c and string.format('%.2f/%.2f/%.2f',c[1],c[2],c[3]) or 'never set'
+end
+function S.Hover(o) return V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' ')) end
+-- Whether a text's box holds its whole one-line text.
+function S.Whole(card,k) return (card[k]:GetWidth() or 0)+0.01>=(card[k]:GetStringWidth() or 0) end
+
+C.scenario('REG-ROW-1 no boxes: a row paints no outline; its icon is a borderless square of the row; words, colours and hover stay',function()
+ local A,B=S.icon.Path(200001),S.icon.Path(200002)
+ S.icon.Use({[200001]=A,[200002]=B})
+ local marked=S.Echo('Hollow Bell',3,200002,'Owned 1 of 2')
+ marked.highlight=true
+ local m=Model({cards={S.Echo('Frostwake Sigil',2,200001),marked,S.Echo('Ashen Crown',4,nil)}})
+ P.Render(Model())
+ P.Render(m)
+ local starts={}
+ for i,want in ipairs({{A,2},{B,3},{false,4}}) do
+  local o=S.Observe(i)
+  if C.setup(o~=nil and o.visible,'REG-ROW: fixture: offer row '..i..' is shown') then
+   local bare,bwhy=S.Bare(o)
+   C.expect(bare,'REG-ROW: row '..i..(i==2 and ' (marked)' or '')..' paints no outline: besides its fill it shows only its icon',bwhy)
+   if want[1] then
+    local shown,swhy=S.IconShown(o,want[1],want[2])
+    C.guard(shown,'REG-ROW: row '..i..' still shows the texture of its own spell id and its name in its rarity colour',swhy)
+    local fit,fwhy=S.IconFit(o)
+    C.expect(fit,'REG-ROW: row '..i..'\'s icon is a borderless square of the row\'s height at the row\'s left',fwhy)
+   else
+    local none,nwhy=S.Fallback(o,want[2])
+    C.guard(none,'REG-ROW: row '..i..', without a spell id, shows no icon and its name in its rarity colour',nwhy)
+   end
+   local cols,cwhy=S.Columns(o)
+   C.expect(cols,'REG-ROW: row '..i..': the name one layout gap after the icon square, the texts one gap apart, each on the row\'s centre line',cwhy)
+   starts[i]=o.texts.name.rect and o.texts.name.rect[1]
+   local same,shown,detail=S.Meaning(m,i,o)
+   C.guard(same,'REG-ROW: row '..i..' keeps the Readout name, quality and tag',detail)
+   local tint,twhy=S.TagColour(o,i==2)
+   C.guard(tint and (o.card._nexusMarked==true)==(i==2),'REG-ROW: row '..i..' keeps its tag\'s colour ('..(i==2 and 'gold: the marked row' or 'grey')..') and its mark',twhy)
+   C.guard(S.Hover(o):find(V.Plain(shown.full),1,true)~=nil,'REG-ROW: row '..i..'\'s hover still shows its complete line',S.Hover(o))
+  end
+ end
+ C.guard(starts[1]~=nil and starts[1]==starts[2] and starts[2]==starts[3],'REG-ROW: the names of rows with and without an icon start at the same place',
+  tostring(starts[1])..'/'..tostring(starts[2])..'/'..tostring(starts[3]))
+ local rows,rwhy=S.Rows(3)
+ C.expect(rows,'REG-ROW: each row is its text line with a row gap above and below, a row gap from the next; two row gaps under the heading and above the text below',rwhy)
+ local room,mwhy=S.BodyRoom()
+ C.guard(room,'REG-ROW: the text under the rows keeps the room it had, inside the roll box',mwhy)
+ S.icon.Restore()
+end)
+
+C.scenario('REG-ROW-2 at 50 to 150% and with the 16 px and 2.0 faces: long and old-input rows keep their columns; a shortened text is whole on the hover',function()
+ S.icon.Use({[200001]=S.icon.Path(200001),[200002]=S.icon.Path(200002)})
+ local function Board()
+  return Model({cards={S.Echo(string.rep('Cinderbound ',8)..'Lattice',2,200001,'Owned 2 of 3'),
+   S.Echo('Hollow Bell of the '..string.rep('Ashen ',8)..'Choir',4,200002,'Owned 0 of 1'),
+   {text=string.rep('Gravecall ',6)..'Chorus (Rare) Owned 1 of 1'}}})
+ end
+ local function Check(label)
+  local m=Board()
+  P.Render(Model())
+  S.icon.calls={}
+  P.Render(m)
+  local short=0
+  for i=1,3 do
+   local o=S.Observe(i)
+   if C.setup(o~=nil and o.visible,'REG-ROW: fixture: '..label..' long row '..i..' is shown') then
+    local band,why=S.Band(o)
+    C.guard(band,'REG-ROW: '..label..' long row '..i..' keeps its texts inside the row and apart',why)
+    local bare,bwhy=S.Bare(o)
+    local cols,cwhy=S.Columns(o)
+    local fit,fwhy=true,''
+    if i<3 then fit,fwhy=S.IconFit(o) end
+    C.expect(bare and cols and fit,'REG-ROW: '..label..' long row '..i..' has no outline, its icon square and its columns',bwhy..' / '..cwhy..' / '..fwhy)
+    if not S.Whole(o.card,'name') then short=short+1 end
+    local _,shown=S.Meaning(m,i,o)
+    C.guard(S.Hover(o):find(V.Plain(shown.full),1,true)~=nil,'REG-ROW: '..label..' long row '..i..'\'s hover shows its complete line',S.Hover(o))
+   end
+  end
+  C.guard(short==3,'REG-ROW: fixture: '..label..' each long name is shortened in its row',short)
+  C.guard(S.icon.Asked(200001)==1 and S.icon.Asked(200002)==1 and #S.icon.calls==2,
+   'REG-ROW: '..label..' each id is looked up once; the old-input row, a text without facts, is never looked up',#S.icon.calls)
+  local rows,rwhy=S.Rows(3)
+  C.expect(rows,'REG-ROW: '..label..' the rows keep their band',rwhy)
+  local room,mwhy=S.BodyRoom()
+  C.guard(room,'REG-ROW: '..label..' the text under the rows keeps its room inside the roll box',mwhy)
+ end
+ for _,scale in ipairs({0.5,1,1.25,1.5}) do
+  P.SetPanelScale(scale)
+  Check('at '..string.format('%d%%',math.floor(scale*100+0.5)))
+ end
+ P.SetPanelScale(1)
+ for _,font in ipairs({G.MODELS.px16,G.MODELS.double}) do
+  G.UseFont(font)
+  Check('with the '..font.name)
+ end
+ S.icon.Restore()
+ S.Restore()
+end)
+
+C.scenario('REG-ROW-3 a status word keeps its whole width while the row has room it is not using; a long name still gives it only half',function()
+ local note='Different quality from target (wants 4)'
+ P.Render(Model())
+ P.Render(Model({cards={S.Echo('Ember Spark',2,nil,note),S.Echo(string.rep('Cinderbound ',8)..'Lattice',2,nil,note)}}))
+ local a,b=S.Observe(1),S.Observe(2)
+ if not C.setup(a~=nil and a.visible and b~=nil and b.visible and a.texts.tag.text==note and b.texts.tag.text==note,
+  'REG-ROW: fixture: a short and a long name, each with the same long status word',a and a.texts.tag.text) then return end
+ local half=(a.rect[3]-a.rect[1])/2
+ C.setup(a.card.tag:GetStringWidth()>half,'REG-ROW: fixture: that status word is wider than half the row',a.card.tag:GetStringWidth()..' of '..half)
+ C.expect(S.Whole(a.card,'tag') and S.Whole(a.card,'quality') and S.Whole(a.card,'name'),
+  'REG-ROW: beside a short name the status word, the quality and the name are all whole',
+  a.card.tag:GetWidth()..' of '..a.card.tag:GetStringWidth())
+ C.guard(not S.Whole(b.card,'tag') and b.card.tag:GetWidth()<=half and b.card.name:GetWidth()>=(b.rect[3]-b.rect[1])/6-0.01,
+  'REG-ROW: beside a long name the status word has at most half the row and the name at least a sixth',
+  b.card.tag:GetWidth()..' / '..b.card.name:GetWidth())
+ C.guard(S.Hover(b):find(note,1,true)~=nil,'REG-ROW: the shortened status word is whole on the row\'s hover',S.Hover(b))
+ local band,why=S.Band(a)
+ C.guard(band,'REG-ROW: the short-name row keeps its texts inside the row and apart',why)
+end)
+
 C.scenario('REG-SLOT-5 after the offer checks: nothing else changed and unrelated textures keep their identity',function()
  S.Restore()
  C.guard(P._panelDrag==nil and ShiftHeld.value==1,'REG-SLOT: no move is active and Shift is held again for the later scenarios')
@@ -1188,6 +1358,8 @@ end)
 pcall(S.Restore)
 SlotSpy.methods.SetTexture=SlotSpy.saved.SetTexture
 SlotSpy.methods.SetVertexColor=SlotSpy.saved.SetVertexColor
+SlotSpy.methods.SetTextColor=SlotSpy.saved.SetTextColor
+SlotSpy.methods.SetJustifyV=SlotSpy.saved.SetJustifyV
 
 -- V4 last: it loads the addon again (a fresh load) with the saved data.
 C.scenario('V4 a centre saved at a fitted size is kept on a fresh load',function()
