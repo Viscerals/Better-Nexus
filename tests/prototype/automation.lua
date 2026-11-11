@@ -149,12 +149,16 @@ end
 -- panel. The fact is exactly true only while Random Roll is what picks now
 -- (the exact option, Auto ON, autoPick, no Wishlist, levels 2-79, nothing
 -- pausing or holding it) and absent otherwise; it changes nothing that is taken.
+-- The line says "Auto-pick by rarity (ON)" only from that fact. While the
+-- option is on and nothing is positively assigned, it names the mode with the
+-- reason it is not picking (rarity_auto_pick_mode); otherwise None assigned.
 do
- local ACTIVE,NONE='Wishlist: Random rolling','Wishlist: None assigned'
+ local ACTIVE,NONE='Auto-pick by rarity (ON)','Wishlist: None assigned'
+ local function Mode(state) return 'Auto-pick by rarity ('..state..')' end
  local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
  local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
- local function Is(want,label)
-  check(Shown()==(want and true or nil) and Line()==(want and ACTIVE or NONE),
+ local function Is(want,label,line)
+  check(Shown()==(want and true or nil) and Line()==(want and ACTIVE or line or NONE),
    'Random rolling shown, '..label..': '..tostring(Shown())..' / '..tostring(Line()))
  end
  -- Between boards: every fact is needed, and each one taken away ends it.
@@ -163,25 +167,25 @@ do
  SlashCmdList.NEXUS('auto');L.Advance(.5)
  Is(false,'Auto ON, option absent')
  SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('leveling on');L.Advance(.5)
- Is(false,'option on, Auto OFF')
+ Is(false,'option on, Auto OFF',Mode('Auto OFF'))
  SlashCmdList.NEXUS('auto');L.Advance(.5)
  Is(true,'option on, Auto ON, between boards')
  SlashCmdList.NEXUS('pause');L.Advance(.5)
- check(Nexus.SessionPause.IsPaused()==true and Line()==NONE,'Random rolling shown, session pause: '..tostring(Line()))
+ check(Nexus.SessionPause.IsPaused()==true and Line()==Mode('paused'),'Random rolling shown, session pause: the mode says paused: '..tostring(Line()))
  Nexus.SessionPause.Resume();L.Advance(.5)
  check(Nexus.SessionPause.IsPaused()~=true,'fixture: the session pause ended')
  Is(true,'after Resume')
  local orb=ProjectEbonhold.OrbService
  ProjectEbonhold.OrbService={IsStateKnown=function()return true end,IsOfferPending=function()return true end};L.Advance(.5)
- Is(false,'an Orb offer pending')
+ Is(false,'an Orb offer pending',Mode('waiting'))
  ProjectEbonhold.OrbService={};L.Advance(.5)
- Is(false,'an unknown Orb state')
+ Is(false,'an unknown Orb state',Mode('waiting'))
  ProjectEbonhold.OrbService=orb;L.Advance(.5)
  Is(true,'the Orb state idle again')
  -- autoPick has no in-game switch: the fixture writes it, and the option's
  -- own setter (already on) requests the next step.
  Nexus.Store.Settings().autoPick=false;SlashCmdList.NEXUS('leveling on');L.Advance(.5)
- Is(false,'autoPick false')
+ Is(false,'autoPick false',Mode('autoPick off'))
  Nexus.Store.Settings().autoPick=true;SlashCmdList.NEXUS('leveling on');L.Advance(.5)
  Is(true,'autoPick true again')
  SlashCmdList.NEXUS('leveling off');L.Advance(.5)
@@ -189,21 +193,21 @@ do
  SlashCmdList.NEXUS('leveling on');L.Advance(.5)
  Is(true,'option on again')
  L.playerLevel=80;L.Fire('PLAYER_LEVEL_UP',80);L.Advance(.5)
- Is(false,'level 80')
+ Is(false,'level 80',Mode('levels 2-79 only'))
  L.playerLevel=79;L.Fire('PLAYER_LEVEL_UP',79);L.Advance(.5)
  Is(true,'level 79')
  -- The runtime renders nothing for a toggle: the panel renders its last
  -- model again with the new selection, at once.
  SlashCmdList.NEXUS('auto')
- check(not Nexus.RecomputeStats().autoEnabled and Line()==NONE and Nexus.Panel._lastModel.auto==false,
-  'Random rolling shown, Auto OFF again: the line says None assigned at once: '..tostring(Line()))
+ check(not Nexus.RecomputeStats().autoEnabled and Line()==Mode('Auto OFF') and Nexus.Panel._lastModel.auto==false,
+  'Random rolling shown, Auto OFF again: the line says Auto OFF at once: '..tostring(Line()))
  L.Advance(.5)
- check(Line()==NONE,'Random rolling shown, Auto OFF again, later: '..tostring(Line()))
+ check(Line()==Mode('Auto OFF'),'Random rolling shown, Auto OFF again, later: '..tostring(Line()))
  check(#L.actions==0,'Random rolling shown: no action without a board')
  -- A board: Random Roll's recommendation with Auto OFF is a recommendation
  -- only; with Auto ON it is Random Roll's own Take, from the prepared beat.
  L.Board(LBOARD);L.Notify();L.Advance(.5)
- Is(false,'a board with Auto OFF (a recommendation only)')
+ Is(false,'a board with Auto OFF (a recommendation only)',Mode('Auto OFF'))
  SlashCmdList.NEXUS('auto');L.Advance(.25)
  check(Nexus.RecomputeStats().lastActionLifecycle.state=='prepared' and #TakeIds(L)==0,'fixture: one prepared beat first')
  Is(true,'a board with Auto ON, prepared')
@@ -213,7 +217,7 @@ do
 end
 -- A board Random Roll refuses, an assigned Wishlist and the level limits.
 do
- local ACTIVE='Wishlist: Random rolling'
+ local ACTIVE='Auto-pick by rarity (ON)'
  local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
  local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
  local function Never(label) check(Shown()==nil and Line()~=ACTIVE,'Random rolling not shown, '..label..': '..tostring(Shown())..' / '..tostring(Line())) end

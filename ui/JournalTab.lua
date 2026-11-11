@@ -190,6 +190,193 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
     return true
 end
 
+------------------------------------------------------------------------
+-- Auto-pick by rarity instead of a Wishlist (Plan's alternative; the optional
+-- leveling pick, settings.autoPickLeveling, "Random Roll" in Options). This
+-- file owns the assignment routes, so the choice is made here: it only ever
+-- removes the assignment of the one destination the adapter positively
+-- verifies (GameAdapter.NoWishlistTarget / ClearAssignmentVerified, the
+-- existing Unassign underneath) and turns the existing option on through its
+-- existing command. It never selects Auto, never resumes a pause and never
+-- touches autoPick or any other permission. An Auto that is selected ON when
+-- the choice is accepted is turned OFF first, through the stop-only route
+-- (Nexus.DisableOrdinaryAutomation), so the mode never starts picking without
+-- the player's own later Auto start. Words: Readout.RarityText.
+------------------------------------------------------------------------
+local RARITY_POPUP = "NEXUS_USE_RARITY_AUTO_PICK"
+StaticPopupDialogs[RARITY_POPUP] = {
+    text = "%s", button1 = "", button2 = "",
+    OnAccept = function(_, data)
+        if type(data) == "table" and type(data.accept) == "function" then data.accept() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
+-- The exact destination as words: the Saved Build with its name and slot, or
+-- the first run.
+function M.RarityTargetLabel(destination)
+    local words = Nexus.Readout.RarityText
+    if type(destination) ~= "table" then return words("target_unknown") end
+    if destination.kind == "firstRun" then return words("target_first_run") end
+    local slot = tostring(tonumber(destination.slot) or "?")
+    local name = M.SafeName(destination.name, "")
+    if name == "" then return words("target_slot", {slot = slot}) end
+    return words("target_saved_build", {name = name, slot = slot})
+end
+
+-- Everything the choice and its display rest on, read now and read only:
+-- the two settings, the adapter's verified destination and assignment, the
+-- level, whether Auto is selected, the session pause, and whether the panel
+-- currently admits the runtime's own "it is picking" fact. `mode` is
+-- Readout.RarityMode over them. A read that fails leaves its fact unknown.
+function M.RarityAutoPickStatus()
+    local out = {assignment = "unknown", reason = "unreadable"}
+    local store, policy, adapter, panel = Nexus.Store, Nexus.Policy, Nexus.GameAdapter, Nexus.Panel
+    local okSettings, settings = pcall(function() return store.Settings() end)
+    settings = okSettings and type(settings) == "table" and settings or {}
+    out.option, out.autoPick = settings.autoPickLeveling == true, settings.autoPick == true
+    local okTarget, target = pcall(function() return adapter.NoWishlistTarget() end)
+    if okTarget and type(target) == "table" then
+        out.assignment, out.reason = target.state, target.reason
+        out.destination, out.wishlist, out.bound = target.destination, target.name, target.bound
+    end
+    local okLevel, level = pcall(function() return adapter.Level() end)
+    out.level = okLevel and tonumber(level) or nil
+    out.levelOk = out.level ~= nil and policy and type(policy.LevelingLevel) == "function"
+        and policy.LevelingLevel(out.level) == true or false
+    out.auto = M.AutoSelected()
+    local pause = Nexus.SessionPause
+    local okPause, paused = pcall(function() return pause and pause.IsPaused() end)
+    out.sessionPaused = okPause and paused and true or false
+    local okRun, running = pcall(function() return panel.RandomRollShown(panel._lastModel) end)
+    out.running = okRun and running == true
+    out.target = M.RarityTargetLabel(out.destination)
+    out.mode = Nexus.Readout.RarityMode(out)
+    return out
+end
+
+-- Turns the existing option on or off through its existing command (the
+-- route Options uses), and answers whether the settings now say so.
+local function SetRarityOption(on)
+    local slash = SlashCmdList and SlashCmdList.NEXUS
+    if type(slash) ~= "function" then return false end
+    slash(on and "leveling on" or "leveling off")
+    local ok, settings = pcall(function() return Nexus.Store.Settings() end)
+    return ok and type(settings) == "table" and (settings.autoPickLeveling == true) == (on == true)
+end
+
+-- The player chose Auto-pick by rarity (Plan's button or its row in the
+-- Wishlist chooser). `done` (optional) is called after anything that changed
+-- or refused, so the caller can redraw. Outcomes, each said in chat:
+--   a Save is pending, or the destination's assignment is not positively
+--     known: nothing changes;
+--   it is already what this destination uses: the option is turned off
+--     (nothing is assigned or unassigned);
+--   nothing is assigned and Auto is OFF: the option is turned on, at once;
+--   a Wishlist is assigned, or Auto is selected ON: it asks first, naming the
+--     Wishlist and the exact destination. Cancel changes nothing. On accept,
+--     in this order: the owner, the pending Save and the destination are
+--     checked again (AssignmentBindingHolds); an Auto selected ON by then is
+--     turned OFF by the stop-only route and confirmed OFF, else nothing more
+--     happens; the assignment is removed only if it is the one that was
+--     asked about (ClearAssignmentVerified); only then is the option turned
+--     on. Auto stays OFF until the player starts it.
+-- Returns true when it asked, false when it acted at once, nil and a reason
+-- when it refused.
+function M.UseRarityAutoPick(done)
+    local words = Nexus.Readout.RarityText
+    local function Say(colour, id, args) print(colour .. "Nexus:|r " .. words(id, args)) end
+    local function Finish() if type(done) == "function" then pcall(done) end end
+    local function SavePending()
+        local editor = Nexus.WishlistEditor
+        return editor and type(editor.SavePendingNow) == "function" and editor.SavePendingNow() == true
+    end
+    local function Selected(target, stopped)
+        local now = M.RarityAutoPickStatus()
+        if now.assignment == "unassigned" then
+            Say("|cffffd200", "chat_selected", {target = target, status = now.mode.reason})
+        else
+            Say("|cffffd200", "chat_unconfirmed", {target = target})
+        end
+        if stopped then Say("|cffffd200", "chat_auto_stopped") end
+    end
+    local status = M.RarityAutoPickStatus()
+    if SavePending() then
+        Say("|cffff6060", "chat_pending_save")
+        Finish()
+        return nil, "pending_save"
+    end
+    if status.assignment ~= "unassigned" and status.assignment ~= "assigned" then
+        Say("|cffff6060", "chat_unknown", {target = status.target,
+            reason = words("reason_" .. tostring(status.reason))})
+        Finish()
+        return nil, status.reason or "unknown"
+    end
+    if status.assignment == "unassigned" and status.option then
+        if SetRarityOption(false) then Say("|cffffd200", "chat_deselected") end
+        Finish()
+        return false, "deselected"
+    end
+    if status.assignment == "unassigned" and not status.auto then
+        if SetRarityOption(true) then Selected(status.target) else Say("|cffff6060", "chat_option_failed") end
+        Finish()
+        return false
+    end
+    local dialog = type(StaticPopupDialogs) == "table" and StaticPopupDialogs[RARITY_POPUP] or nil
+    if type(StaticPopup_Show) ~= "function" or type(dialog) ~= "table" then
+        Say("|cffff6060", "chat_consent_unavailable")
+        Finish()
+        return nil, "consent_unavailable"
+    end
+    local question = status.assignment == "assigned"
+        and (words("popup_unassign", {wishlist = M.SafeName(status.wishlist, "?"), target = status.target})
+            .. "\n" .. words("popup_keep"))
+        or words("popup_select", {target = status.target})
+    question = question .. "\n" .. words(status.auto and "popup_auto_on" or "popup_auto_off")
+    dialog.text = question:gsub("%%", "%%%%")
+    dialog.button1, dialog.button2 = words("button_confirm"), words("button_cancel")
+    local owner, bound, target, answered = OwnerKeyNow(), status.bound, status.target, false
+    StaticPopup_Show(RARITY_POPUP, nil, nil, {accept = function()
+        if answered then return end
+        answered = true
+        if OwnerKeyNow() ~= owner then
+            Say("|cffff6060", "chat_owner_changed")
+        elseif SavePending() then
+            Say("|cffff6060", "chat_pending_save")
+        elseif not Nexus.GameAdapter.AssignmentBindingHolds(bound) then
+            Say("|cffff6060", "chat_changed")
+        else
+            -- Consent given and the destination verified: stop Auto before
+            -- anything is removed or enabled, and go on only once it is OFF.
+            local stopped = false
+            if M.AutoSelected() then
+                local stop = Nexus.DisableOrdinaryAutomation
+                local off = type(stop) == "function" and stop() == true
+                if not off or M.AutoSelected() then
+                    Say("|cffff6060", "chat_auto_not_stopped")
+                    Finish()
+                    return
+                end
+                stopped = true
+            end
+            local ok, why = Nexus.GameAdapter.ClearAssignmentVerified(bound)
+            if not ok then
+                Say("|cffff6060", why == "write_failed" and "chat_write_failed" or "chat_changed")
+                if stopped then Say("|cffffd200", "chat_auto_stopped") end
+            elseif SetRarityOption(true) then
+                pcall(M.RefreshAssociations)
+                Selected(target, stopped)
+            else
+                pcall(M.RefreshAssociations)
+                Say("|cffff6060", why == "already" and "chat_option_failed" or "chat_option_failed_removed")
+                if stopped then Say("|cffffd200", "chat_auto_stopped") end
+            end
+        end
+        Finish()
+    end})
+    return true
+end
+
 -- Guided setup receipt (core/GuidedSetup.lua): reports the outcome of an
 -- assignment the player chose in this chooser. It records only; it writes,
 -- requests and changes nothing, and a missing guide changes nothing.

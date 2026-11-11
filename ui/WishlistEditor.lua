@@ -1284,6 +1284,15 @@ function M.CancelWorkspaceSuspend()
     workspaceResume = nil
 end
 
+-- A read-only fact for an assignment action offered beside the editor (the
+-- Echo Journal's Auto-pick by rarity choice): true while a Save's
+-- confirmation is open or its apply is pending, as SuspendForWorkspace
+-- refuses to leave Plan then. Such an action waits instead of changing the
+-- assignment under a Save that is still deciding it. Changes nothing.
+function M.SavePendingNow()
+    return (SaveConfirmationOpen() or M.IsApplyPending()) and true or false
+end
+
 -- A read-only fact for the guided setup (ui/GuidedSetup.lua): nil while no
 -- unsaved Plan draft is set aside in another workspace, else whether the
 -- character and Saved Build it was set aside under are still the current ones

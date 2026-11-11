@@ -2490,7 +2490,7 @@ Nexus.LocalizationEnglish = {
     ["panel.value.target_lich_king"] = "Lich King",
     ["panel.value.target_training_dummy"] = "Training Dummy",
     ["panel.value.unknown_player"] = "Unknown",
-    ["panel.value.wishlist_random_rolling"] = "Random rolling",
+    ["panel.value.wishlist_rarity_mode"] = "Auto-pick by rarity ({state})",
     -- records (276)
     ["leaderboard.body.both_records_order"] = "Both-record builds are ordered by their highest valid single DPS result. The displayed average does not determine this rank.",
     ["leaderboard.body.no_both_records"] = "No builds have both Training Dummy and Lich King records yet.",
@@ -3752,7 +3752,7 @@ Nexus.LocalizationEnglish = {
     -- v8_source16_journal_names (2)
     ["journal.provider.generated_echo_name"] = "Echo name unavailable (#{id})",
     ["journal.provider.generated_tome_name"] = "Tome name unavailable: {echoes}",
-    -- wishlist (381)
+    -- wishlist (385)
     ["editor.body.role_help_plan_only"] = "This edits only the Wishlist plan; your character's Echoes are unchanged.",
     ["editor.body.role_help_targets"] = "Choose which copies this plan targets for locked Echo slots (at most six).",
     ["editor.button.assign_menu"] = "Assign...",
@@ -3778,6 +3778,7 @@ Nexus.LocalizationEnglish = {
     ["editor.button.open_new_draft"] = "Open new draft",
     ["editor.button.plan_alternatives"] = "Plan alternatives",
     ["editor.button.previous"] = "Previous",
+    ["editor.button.rarity_mode"] = "Auto-pick by rarity",
     ["editor.button.reference"] = "Reference",
     ["editor.button.remove"] = "Remove",
     ["editor.button.role_suggest"] = "Suggest matching locked targets",
@@ -3817,6 +3818,7 @@ Nexus.LocalizationEnglish = {
     ["editor.chat.import_pipe_dropped"] = "the {character} character is not kept in a wishlist name; this import is named \"{name}\".",
     ["editor.chat.imported_draft_many"] = "imported {count} Echo entries as new wishlist '{name}'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
     ["editor.chat.imported_draft_one"] = "imported {count} Echo entry as new wishlist '{name}'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
+    ["editor.chat.manage_restored_from_first_run"] = "\"{name}\" was removed from the first-run target and came back as Saved Build {slot}. The first-run target is unchanged: {state}.",
     ["editor.chat.manage_restored_moved"] = "\"{name}\" came back as Saved Build {slot}, because {from} now holds a different plan.",
     ["editor.chat.nothing_assigned"] = "Nothing was assigned.",
     ["editor.chat.plan_draft_suspended"] = "An unsaved Plan draft is open in another workspace. Return to Plan before replacing it.",
@@ -3865,6 +3867,8 @@ Nexus.LocalizationEnglish = {
     ["editor.menu.manage_undo"] = "Undo: bring back \"{name}\"",
     ["editor.menu.manage_undo_from"] = "removed from {index}",
     ["editor.menu.pager_next"] = "click for the next {count}",
+    ["editor.menu.rarity_mode"] = "No Wishlist: auto-pick by rarity",
+    ["editor.menu.rarity_mode_state"] = "No Wishlist: auto-pick by rarity ({state})",
     ["editor.menu.switch_empty"] = "No saved wishlists found",
     ["editor.menu.switch_index_not_saved_build"] = "(index {index} is not a Saved Build)",
     ["editor.menu.switch_more"] = "More wishlists ({first}-{last} of {total})",

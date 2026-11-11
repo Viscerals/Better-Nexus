@@ -851,3 +851,114 @@ setmetatable(M, {__index = function(_, name)
     if entry then return entry[1] .. T(entry[2], entry[3]) .. entry[4] end
     return nil
 end})
+
+------------------------------------------------------------------------
+-- Auto-pick by rarity: the optional leveling pick (settings.autoPickLeveling,
+-- "Random Roll" in Options and /nexus leveling) offered in Plan as the
+-- alternative to a Wishlist. Words only: nothing here reads a setting, an
+-- assignment or the runtime, and nothing here grants or starts anything.
+-- English only for now: these sentences have no reviewed catalog key (the
+-- catalog is a few entries under its 4096 cap; only the Plan button, the
+-- chooser row and the Play line are keys), so translations are deferred and
+-- a session in another language shows them in English.
+------------------------------------------------------------------------
+local RARITY = {
+    name = "Auto-pick by rarity",
+    rule = "Used instead of a Wishlist: at levels 2 to 79, Auto takes the highest-rarity Echo of an ordinary "
+        .. "level-up offer, the first current offer on a tie. It is not random (Options calls it Random Roll). "
+        .. "It never rerolls, banishes, freezes, spends, saves or uses Orbs.",
+    -- state = {short words for the Wishlist line, the whole reason}
+    states = {
+        off = {"off", "Not selected."},
+        running = {"ON", "Running: Auto is ON and takes the next eligible offer. Press Auto to stop."},
+        assigned = {"not in use", "Not in use: a Wishlist is assigned here, so that Wishlist is followed."},
+        unknown = {"not known", "Not in use yet: Nexus does not know whether a Wishlist is assigned here, and assumes nothing."},
+        level = {"levels 2-79 only", "Selected, not running: it picks only at levels 2 to 79."},
+        no_permission = {"autoPick off", "Selected, not running: the autoPick permission is off, and Nexus does not turn it on for you."},
+        paused = {"paused", "Selected, not running: Nexus is paused for this session."},
+        auto_off = {"Auto OFF", "Selected, not running: Auto is OFF. Press Auto on the main panel to start it; selecting this never starts Auto."},
+        waiting = {"waiting", "Selected and Auto is ON, but it is not picking right now (waiting or on hold)."},
+    },
+    text = {
+        popup_unassign = "Stop using '{wishlist}' on {target} and auto-pick by rarity instead?",
+        popup_keep = "The Wishlist stays saved; only this assignment is removed. No other Saved Build changes.",
+        popup_select = "Use auto-pick by rarity on {target}? No Wishlist is assigned there.",
+        popup_auto_off = "This does not start Auto. Press Auto on the main panel when you want it to pick.",
+        popup_auto_on = "Auto is ON: choosing this turns Auto OFF. Press Auto again when you want it to pick by rarity.",
+        button_confirm = "Use auto-pick",
+        button_cancel = "Cancel",
+        target_saved_build = "Saved Build '{name}' (slot {slot})",
+        target_slot = "Saved Build slot {slot}",
+        target_first_run = "your first run (no Saved Build in use)",
+        target_unknown = "the current Saved Build",
+        chat_selected = "Auto-pick by rarity is selected for {target}. {status}",
+        chat_deselected = "Auto-pick by rarity is turned off. Nothing was assigned or unassigned.",
+        chat_unknown = "Nothing was changed: Nexus cannot confirm right now whether a Wishlist is assigned to {target} "
+            .. "({reason}). Try again when it has loaded, or use Unassign Wishlist in the Echo Journal.",
+        chat_changed = "Nothing was changed: the Saved Build or its assignment changed while the question was open. "
+            .. "Check it and choose again.",
+        chat_owner_changed = "Nothing was changed: this character's saved data changed after you were asked.",
+        chat_write_failed = "Nothing was changed: the assignment could not be removed.",
+        chat_option_failed = "Auto-pick by rarity could not be turned on. Turn Random Roll on in Options.",
+        chat_option_failed_removed = "The assignment was removed, but auto-pick by rarity could not be turned on. "
+            .. "Turn Random Roll on in Options.",
+        chat_auto_stopped = "Auto was turned OFF. Press Auto when you want it to pick.",
+        chat_auto_not_stopped = "Nothing was changed: Auto could not be turned OFF, so auto-pick by rarity was not selected.",
+        chat_pending_save = "Nothing was changed: finish or cancel the pending Save first.",
+        chat_unconfirmed = "The assignment was removed. Nexus is still waiting to confirm that no Wishlist is assigned to {target}.",
+        chat_consent_unavailable = "Nothing was changed: the confirmation could not be shown.",
+        tip_heading = "Use auto-pick instead of a Wishlist",
+        tip_select = "Click to select it for {target}. It asks before it removes an assignment, and it never starts Auto.",
+        tip_deselect = "Click to turn it off. Nothing is assigned or unassigned.",
+        reason_loading = "still loading",
+        reason_restoring = "restoring",
+        reason_unavailable = "temporarily unavailable",
+        reason_empty_slot = "this Saved Build holds no Echoes",
+        reason_first_run_plan = "this Saved Build follows the first-run plan",
+        reason_first_run_plan_pending = "a first-run plan is stored and would be assigned here in its place",
+        reason_no_saved_build = "no Saved Build is selected",
+        reason_owner = "the character is not known",
+        reason_not_confirmed = "not confirmed",
+        reason_unreadable = "not readable",
+    },
+}
+
+-- The state of the mode from facts the caller read (all optional, anything
+-- but the exact value counts as absent): `option` the setting exactly true,
+-- `running` the runtime's own display fact as the panel admits it
+-- (Panel.RandomRollShown), `assignment` "unassigned" (positively known),
+-- "assigned" or anything else for unknown, `levelOk`, `autoPick`,
+-- `sessionPaused` and `auto` (selected ON). A selected option alone is never
+-- "running": only the runtime's fact is. The first reason that keeps it from
+-- picking is the one named, so "Auto OFF" is said only where pressing Auto
+-- would start it. Returns {state, selected, running, name, short, reason,
+-- rule}; `selected` is true only where the mode is what this destination uses.
+function M.RarityMode(f)
+    f = type(f) == "table" and f or {}
+    local state
+    if f.option ~= true then state = "off"
+    elseif f.running == true then state = "running"
+    elseif f.assignment == "assigned" then state = "assigned"
+    elseif f.assignment ~= "unassigned" then state = "unknown"
+    elseif f.levelOk ~= true then state = "level"
+    elseif f.autoPick ~= true then state = "no_permission"
+    elseif f.sessionPaused == true then state = "paused"
+    elseif f.auto ~= true then state = "auto_off"
+    else state = "waiting" end
+    local words = RARITY.states[state]
+    return {state = state, running = state == "running",
+        selected = state ~= "off" and state ~= "assigned" and state ~= "unknown",
+        name = RARITY.name, short = words[1], reason = words[2], rule = RARITY.rule}
+end
+
+-- One of the mode's sentences with its {slots} filled from `args` (values
+-- the caller already made safe to show); an unknown id or reason code is
+-- shown as it is, never as an empty line.
+function M.RarityText(id, args)
+    local text = RARITY.text[id]
+    if type(text) ~= "string" then return tostring(id or "") end
+    return (text:gsub("{(%w+)}", function(slot)
+        local value = type(args) == "table" and args[slot] or nil
+        return value ~= nil and tostring(value) or ""
+    end))
+end

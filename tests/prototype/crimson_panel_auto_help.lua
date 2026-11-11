@@ -296,7 +296,12 @@ end)
 -- in the view without a Wishlist. Rolling(): the model the runtime gives while
 -- Random Roll picks (its display fact, a selected Auto, a known unassigned
 -- destination, level 40), with one scenario's changes; ABSENT removes a field.
-local ACTIVE,NONE='Wishlist: Random rolling','Wishlist: None assigned'
+-- The running words are "Auto-pick by rarity (ON)" since the mode is offered
+-- as the alternative to a Wishlist (rarity_auto_pick_mode): honest rarity
+-- wording in place of "Wishlist: Random rolling", and the whole line, so it
+-- still fits at every font model. These synthetic models carry no
+-- positive unassigned fact, so every state but running stays None assigned.
+local ACTIVE,NONE='Auto-pick by rarity (ON)','Wishlist: None assigned'
 local ABSENT={}
 local function Line() return V.Plain(NexusPanel._contextWishlist:GetText()) end
 local function LineHover() return V.Plain(NexusPanel._contextWishlistHit._nexusFull) end
@@ -317,7 +322,9 @@ C.scenario('A14 no Wishlist while Random Roll picks: the Wishlist line says Rand
  for _,level in ipairs({2,40,79}) do
   C.expect(Shows({level=level})==ACTIVE,'A14: level '..level..': the line says Random rolling',Line())
  end
- C.expect(LineHover()==ACTIVE..'\n'..NONE,'A14: the hover gives the line whole, then the fact: no Wishlist is assigned',LineHover())
+ local hover=LineHover()
+ C.expect(hover:sub(1,#ACTIVE+1)==ACTIVE..'\n' and hover:sub(-#NONE-1)=='\n'..NONE and hover:find('Running: Auto is ON',1,true)~=nil
+  and hover:find('highest-rarity',1,true)~=nil,'A14: the hover gives the line whole, why it runs and the rule, then the fact: no Wishlist is assigned',hover)
  Shows({randomRoll=ABSENT})
  C.guard(LineHover()==NONE,'A14: without Random rolling the hover is the fact alone, as before',LineHover())
  Shows()

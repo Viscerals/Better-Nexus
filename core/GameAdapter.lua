@@ -3575,6 +3575,10 @@ function A.ForgottenWishlistPlans()
                 key = candidate.key,
                 assignmentId = candidate.assignmentId,
                 associationIndex = retained.loadoutSlot,
+                -- Removed from the first run. With no associationIndex it was
+                -- the first-run plan alone (A.ClearAssignmentVerified): its
+                -- origin is the first run, not a Saved Build index.
+                firstRun = retained.firstRun == true or nil,
                 mirrorSlot = candidate.slot,
                 rows = #(candidate.echoes or {}),
             }
@@ -3597,6 +3601,17 @@ end
 -- the caller is told which: the alternative is telling the player to remove
 -- whatever occupies it, and a removal would push this record further down its
 -- own list. A refusal here never asks for a destructive step.
+--
+-- A record removed from the first run alone carries no index (the shape
+-- A.ClearAssignmentVerified keeps). It goes back to the first run, and the
+-- result says so (detail.firstRun), only while the first run is still the
+-- destination and positively has nothing assigned (A.NoWishlistTarget), and
+-- its record is still the explicit Unassign or absent inside the write: a
+-- newer first-run plan or a Saved Build's assignment is never replaced. In
+-- every other case it lands on the lowest free Saved Build index as above
+-- and the first-run record is left exactly as it is; the result says that
+-- it came from the first run and what the first run holds
+-- (detail.fromFirstRun, detail.firstRunName).
 function A.RestoreForgottenWishlistPlan(selector)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     local state = Store and Store.State and Store.State()
@@ -3622,6 +3637,13 @@ function A.RestoreForgottenWishlistPlan(selector)
         return false, "nothing was removed in a way this can restore"
     end
     local landedOn, full = nil, false
+    local firstRunOnly = chosen.firstRun == true and chosen.associationIndex == nil
+    local firstRunOpen, firstRunName = false, nil
+    if firstRunOnly then
+        local okTarget, target = pcall(A.NoWishlistTarget)
+        firstRunOpen = okTarget and type(target) == "table" and target.state == "unassigned"
+            and type(target.destination) == "table" and target.destination.kind == "firstRun"
+    end
     local ok = UpdateStoreState(function(live)
         live.loadoutWishlists = live.loadoutWishlists or {}
         local list = RemovalList(live)
@@ -3629,6 +3651,16 @@ function A.RestoreForgottenWishlistPlan(selector)
         if type(retained) ~= "table" or type(retained.record) ~= "table" then
             return
         end
+        if firstRunOnly and firstRunOpen and retained.firstRun == true and retained.loadoutSlot == nil
+            and (live.firstRunWishlist == nil or live.firstRunWishlist == false) then
+            live.firstRunWishlist = retained.record
+            WishlistRoles.Wrote(nil, "first")
+            table.remove(list, chosen.position)
+            live.forgottenWishlist = list[1]
+            landedOn = "first"
+            return
+        end
+        firstRunName = type(live.firstRunWishlist) == "table" and live.firstRunWishlist.name or nil
         local index = retained.loadoutSlot
         if index == nil or live.loadoutWishlists[index] ~= nil then
             index = nil
@@ -3643,7 +3675,14 @@ function A.RestoreForgottenWishlistPlan(selector)
         end
         live.loadoutWishlists[index] = retained.record
         WishlistRoles.Wrote(nil, index)
-        if retained.firstRun and live.firstRunWishlist == nil then
+        -- The first-run record is refilled only for an INDEXED removal, which
+        -- took that record together with its Saved Build copy in one write
+        -- and puts both back. An entry removed from the first run alone has
+        -- no index: stored here under a Saved Build index, it leaves the
+        -- first-run record exactly as it is (absent after a later numbered
+        -- assignment as much as the explicit Unassign), so no plan waits to
+        -- be handed to a Saved Build the player did not choose.
+        if retained.firstRun and retained.loadoutSlot ~= nil and live.firstRunWishlist == nil then
             live.firstRunWishlist = retained.record
             WishlistRoles.Wrote(nil, "first")
         end
@@ -3660,9 +3699,12 @@ function A.RestoreForgottenWishlistPlan(selector)
         return false, "nothing was removed in a way this can restore"
     end
     MarkWishlistProjectionDirty()
+    if landedOn == "first" then return true, nil, {firstRun = true} end
     return true, nil, {loadoutSlot = landedOn,
         movedFrom = (tonumber(chosen.associationIndex) ~= landedOn)
-            and chosen.associationIndex or nil}
+            and chosen.associationIndex or nil,
+        fromFirstRun = firstRunOnly or nil,
+        firstRunName = firstRunOnly and firstRunName or nil}
 end
 
 -- What the supported client interface can do about a SERVER Wishlist. The
@@ -3933,6 +3975,182 @@ end
 
 function A.AssignedWishlist()
     return AssignmentMeasure("assignment.read", ReadAssignedWishlist)
+end
+
+-- What choosing "Auto-pick by rarity" instead of a Wishlist (the optional
+-- leveling pick, settings.autoPickLeveling) would act on now. Read-only: it
+-- writes, requests, selects and assumes nothing. `state` is
+--   "unassigned": the adapter positively knows nothing is assigned
+--       (A.AssignedWishlist's knownUnassigned, the runtime's own authority);
+--   "assigned": a resolved Wishlist is assigned and its stored record is the
+--       destination's own: a numbered Saved Build's association, or the
+--       first-run plan while no Saved Build is in use;
+--   "unknown" with a `reason`: loading, restoring, unavailable, an empty
+--       Saved Build, a first-run plan that a numbered Saved Build follows, a
+--       stored first-run plan that is not this destination's own and would
+--       be handed to it once its association goes, a native Wishlist slot
+--       with no kept Saved Build, an unknown owner or an unreadable
+--       assignment. Unknown is never treated as unassigned.
+-- `destination` names the target exactly ({kind = "savedBuild", slot, name}
+-- or {kind = "firstRun"}), `name` the assigned Wishlist, and `bound` what
+-- A.AssignmentBindingHolds compares before anything is removed: the owner
+-- and the destination's key, and for an assigned destination its current
+-- assignment-action token and the assignment's identity.
+function A.NoWishlistTarget()
+    local out = {state = "unknown", reason = "unreadable"}
+    local okRead, a = pcall(A.AssignedWishlist)
+    if not okRead or type(a) ~= "table" then return out end
+    if a.state == "loading" or a.state == "restoring" then
+        out.reason = a.state
+        return out
+    end
+    local slots = A.Slots()
+    local state = Store and Store.State and Store.State()
+    if type(slots) ~= "table" or slots.activeKnown == false or type(state) ~= "table" then
+        out.reason = "loading"
+        return out
+    end
+    if type(a.owner) ~= "string" or a.owner == "" then
+        out.reason = "owner"
+        return out
+    end
+    local active = tonumber(slots.activeSlot)
+    local selected, kept = WishlistRoles.SelectedSavedBuild(slots)
+    local target = kept and selected or active
+    local maxSlots = tonumber(slots.maxSlots) or 5
+    if type(target) ~= "number" or target < 0 or target > maxSlots then
+        out.reason = "no_saved_build"
+        return out
+    end
+    local key = target >= 1 and target or "first"
+    local row = target >= 1 and slots.bySlot and slots.bySlot[target] or nil
+    out.destination = target >= 1
+        and {kind = "savedBuild", slot = target, name = type(row) == "table" and row.name or nil}
+        or {kind = "firstRun"}
+    if a.knownUnassigned == true and type(a.unassignedKey) == "string" then
+        out.state, out.reason = "unassigned", nil
+        out.bound = {owner = a.owner, key = key}
+        return out
+    end
+    if a.emptySlot == true then
+        out.reason = "empty_slot"
+        return out
+    end
+    if a.state ~= "ready" then
+        out.reason = a.state == "unavailable" and "unavailable" or "not_confirmed"
+        return out
+    end
+    local record
+    if target >= 1 then
+        record = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[target] or nil
+        -- The Saved Build follows the first-run plan, not an association of
+        -- its own: its Unassign is the Echo Journal's, never guessed here.
+        if type(record) ~= "table" then
+            out.reason = "first_run_plan"
+            return out
+        end
+        -- A stored first-run plan is handed to a populated active Saved Build
+        -- that has no association (A.Wishlist's one automatic hand-off). It
+        -- is this destination's own only as the proven handoff pair of Saved
+        -- Build 1 (WishlistRoles.FirstRunHandoff). Any other first-run plan
+        -- would be assigned here the moment this association goes, and is
+        -- never removed on this destination's behalf: its Unassign is the
+        -- Echo Journal's.
+        if type(state.firstRunWishlist) == "table"
+            and not (target == 1 and WishlistRoles.FirstRunHandoff(state)) then
+            out.reason = "first_run_plan_pending"
+            return out
+        end
+    else
+        record = state.firstRunWishlist
+        if type(record) ~= "table" then
+            out.reason = "not_confirmed"
+            return out
+        end
+    end
+    out.state, out.reason, out.name = "assigned", nil, a.name
+    out.bound = {owner = a.owner, key = key, token = WishlistRoles.ActionToken(key),
+        identity = a.identity}
+    return out
+end
+
+-- Does `bound` (an A.NoWishlistTarget read's own binding) still hold? Read
+-- only. true, "assigned": the same owner and destination, no assignment
+-- action since (its token) and the same assignment. true, "already": the same
+-- owner and destination, by now positively unassigned, whatever happened in
+-- between; nothing is left to remove there. Otherwise false and the reason.
+-- A binding read as unassigned never answers "assigned": it carries no
+-- identity, and an assignment always has one.
+function A.AssignmentBindingHolds(bound)
+    if type(bound) ~= "table" or type(bound.owner) ~= "string" or bound.key == nil then
+        return false, "no_binding"
+    end
+    local now = A.NoWishlistTarget()
+    local current = type(now.bound) == "table" and now.bound or nil
+    if not current or current.owner ~= bound.owner or current.key ~= bound.key then
+        return false, now.state == "unknown" and now.reason or "changed"
+    end
+    if now.state == "unassigned" then return true, "already" end
+    if now.state ~= "assigned" or current.token ~= bound.token
+        or current.identity ~= bound.identity then
+        return false, "changed"
+    end
+    return true, "assigned"
+end
+
+-- Removes the assignment `bound` was read for, only while it still holds
+-- (A.AssignmentBindingHolds, read again here, immediately before the write).
+-- A destination already unassigned answers true, "already", and writes
+-- nothing. Anything else that does not hold answers false and a reason, and
+-- writes nothing.
+--   A numbered Saved Build's own association: the existing Unassign
+--   (A.ClearLoadoutWishlist), which keeps the removed plan recoverable.
+--   The first-run plan, and Saved Build 1's stamped copy of it (the proven
+--   handoff pair): ONE write removes every record that plan owns here (the
+--   first-run record, recorded as an explicit Unassign, and the stamped
+--   copy), so no later read hands it back, and keeps the exact plan as a
+--   recoverable entry in that same write (RememberRemoval, restorable by
+--   A.RestoreForgottenWishlistPlan). A first-run plan may have no server
+--   copy; A.ClearFirstRunWishlist keeps none, so it is not used here.
+-- No other Saved Build's assignment, no unrelated first-run plan and no
+-- setting is touched.
+function A.ClearAssignmentVerified(bound)
+    local holds, what = A.AssignmentBindingHolds(bound)
+    if not holds then return false, what end
+    if what == "already" then return true, "already" end
+    if A.DIAGNOSTIC_PASSIVE then return false, "write_failed" end
+    local key = bound.key
+    local state = Store and Store.State and Store.State()
+    if key ~= "first" and not (key == 1 and type(state) == "table"
+        and WishlistRoles.FirstRunHandoff(state)) then
+        if A.ClearLoadoutWishlist(key) ~= true then return false, "write_failed" end
+        return true
+    end
+    local removed = false
+    local wrote = UpdateStoreState(function(live)
+        local lists = type(live.loadoutWishlists) == "table" and live.loadoutWishlists or nil
+        local pair = lists ~= nil and WishlistRoles.FirstRunHandoff(live)
+        local record
+        if key == "first" then
+            record = live.firstRunWishlist
+        elseif pair then
+            record = lists[1]
+        end
+        if type(record) ~= "table" then return end
+        if pair then
+            lists[1] = nil
+            WishlistRoles.Wrote(nil, 1)
+        end
+        -- False records the explicit first-run Unassign (as A.ClearFirstRunWishlist).
+        live.firstRunWishlist = false
+        WishlistRoles.Wrote(nil, "first")
+        RememberRemoval(live, {record = record, loadoutSlot = pair and 1 or nil,
+            firstRun = true, source = "unassign"})
+        removed = true
+    end)
+    if not wrote or not removed then return false, "write_failed" end
+    MarkWishlistProjectionDirty()
+    return true
 end
 
 function A.GetLoadoutCandidates()

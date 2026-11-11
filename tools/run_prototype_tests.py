@@ -400,6 +400,8 @@ NAMES += ['crimson_panel_scale']
 NAMES += ['crimson_panel_pause']
 # Issue #169 (panelA): short Auto hover (state, next action, consequence; OFF, selected ON, held, refused click, session pause) naming Options > Auto explained, which opens the Help Auto page with every former disclosure and current permission values; Options > Questions (FAQ) page and tab; reading changes nothing (EXPECT fails at e1183fd by design; native tooltip drawing NOT_RUN).
 NAMES += ['crimson_panel_auto_help']
+# Auto-pick by rarity as the alternative to a Wishlist: Plan's button and chooser row, the guarded removal of only the verified destination's assignment (asked first, cancel and every changed, unknown, failed or pending-Save case change nothing), no Auto start, no permission change, and Play's selected / Auto OFF / paused / level / ON words from real facts.
+NAMES += ['rarity_auto_pick_mode']
 # Independent review of the panelA slices (#168, #170, #171, #169): a render's hide reaching the drag origin keeps the move while a real hide or origin removal ends it once; Charges, recommendation and Details-heading hovers fit their text; Callboard title/objective tooltips suppressed after their producers during a move; a centre saved at a fitted size survives a fresh load; FitToScreen refuses infinite sizes; an unreadable pause Status is unknown, not unpaused; a confirmed pause is the Auto hold over stale state words (EXPECT fails at 4358349 by design; native NOT_RUN).
 NAMES += ['crimson_panel_review_fixes']
 # Issue #171: whole-addon session pause (Nexus.SessionPause): ordinary Auto held without an OFF/ON toggle, Orb runs held and never resumed by Resume, Sync/share/DPS quiet, memory-only lifetime (synthetic fixtures; native NOT_RUN).

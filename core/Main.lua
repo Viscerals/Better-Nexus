@@ -750,7 +750,10 @@ local function BuildHudDisplayModel(base)
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
     HudPhaseFinish("hud.phase.assignment", phaseStarted)
     if assignment then
-        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot}
+        -- knownUnassigned: the adapter's positive fact, for the display of a
+        -- selected Auto-pick by rarity (Panel.RarityModeFacts). Display only.
+        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot,
+            knownUnassigned=assignment.knownUnassigned==true or nil}
     end
     if baseSnapshot.level == nil then
         input.level = DisplayCall(Adapter and Adapter.Level) or 0

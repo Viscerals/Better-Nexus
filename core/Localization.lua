@@ -2782,7 +2782,7 @@ local DECLARATIONS = {
     ["panel.value.target_lich_king"] = {kind = "text"},
     ["panel.value.target_training_dummy"] = {kind = "text"},
     ["panel.value.unknown_player"] = {kind = "text"},
-    ["panel.value.wishlist_random_rolling"] = {kind = "text"},
+    ["panel.value.wishlist_rarity_mode"] = {kind = "template", fields = {"state"}, slots = {"text"}, resultLimit = 256},
     -- records (276)
     ["leaderboard.body.both_records_order"] = {kind = "text"},
     ["leaderboard.body.no_both_records"] = {kind = "text"},
@@ -4044,7 +4044,7 @@ local DECLARATIONS = {
     -- v8_source16_journal_names (2)
     ["journal.provider.generated_echo_name"] = {kind = "template", fields = {"id"}, slots = {"text"}, resultLimit = 1100},
     ["journal.provider.generated_tome_name"] = {kind = "template", fields = {"echoes"}, slots = {"text"}, resultLimit = 2048},
-    -- wishlist (381)
+    -- wishlist (385)
     ["editor.body.role_help_plan_only"] = {kind = "text"},
     ["editor.body.role_help_targets"] = {kind = "text"},
     ["editor.button.assign_menu"] = {kind = "text"},
@@ -4070,6 +4070,7 @@ local DECLARATIONS = {
     ["editor.button.open_new_draft"] = {kind = "text"},
     ["editor.button.plan_alternatives"] = {kind = "text"},
     ["editor.button.previous"] = {kind = "text"},
+    ["editor.button.rarity_mode"] = {kind = "text"},
     ["editor.button.reference"] = {kind = "text"},
     ["editor.button.remove"] = {kind = "text"},
     ["editor.button.role_suggest"] = {kind = "text"},
@@ -4109,6 +4110,7 @@ local DECLARATIONS = {
     ["editor.chat.import_pipe_dropped"] = {kind = "template", fields = {"character", "name"}, slots = {"text", "text"}, resultLimit = 2048},
     ["editor.chat.imported_draft_many"] = {kind = "template", fields = {"count", "name"}, slots = {"count", "text"}, resultLimit = 2048, lines = true},
     ["editor.chat.imported_draft_one"] = {kind = "template", fields = {"count", "name"}, slots = {"count", "text"}, resultLimit = 2048, lines = true},
+    ["editor.chat.manage_restored_from_first_run"] = {kind = "template", fields = {"name", "slot", "state"}, slots = {"text", "text", "text"}, resultLimit = 2048},
     ["editor.chat.manage_restored_moved"] = {kind = "template", fields = {"name", "slot", "from"}, slots = {"text", "text", "text"}, resultLimit = 2048},
     ["editor.chat.nothing_assigned"] = {kind = "text"},
     ["editor.chat.plan_draft_suspended"] = {kind = "text"},
@@ -4157,6 +4159,8 @@ local DECLARATIONS = {
     ["editor.menu.manage_undo"] = {kind = "template", fields = {"name"}, slots = {"text"}, resultLimit = 1074},
     ["editor.menu.manage_undo_from"] = {kind = "template", fields = {"index"}, slots = {"text"}, resultLimit = 1064},
     ["editor.menu.pager_next"] = {kind = "template", fields = {"count"}, slots = {"count"}, resultLimit = 256},
+    ["editor.menu.rarity_mode"] = {kind = "text"},
+    ["editor.menu.rarity_mode_state"] = {kind = "template", fields = {"state"}, slots = {"text"}, resultLimit = 256},
     ["editor.menu.switch_empty"] = {kind = "text"},
     ["editor.menu.switch_index_not_saved_build"] = {kind = "template", fields = {"index"}, slots = {"text"}, resultLimit = 1096},
     ["editor.menu.switch_more"] = {kind = "template", fields = {"first", "last", "total"}, slots = {"count", "count", "count"}, resultLimit = 256},

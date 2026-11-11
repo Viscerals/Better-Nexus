@@ -905,17 +905,24 @@ function M.UpdateContextHeader(model, settled)
     local build = facts.preview and facts.kind == "none" and LT("panel.value.build_none_captured")
         or (facts.slot and fields[2].compact) or fields[2].value
     local wishlist = facts.empty and fields[3].compact or fields[3].value
-    -- With no Wishlist, while Random Roll is what picks (M.RandomRollShown):
-    -- its own words instead of "None assigned". The hover then gives the
-    -- line whole and keeps that fact below it.
-    local rolling = M.RandomRollShown(model)
-    if rolling then wishlist = LT("panel.value.wishlist_random_rolling") end
+    -- With no Wishlist, while Auto-pick by rarity is what this destination
+    -- uses (M.RarityModeFacts: running, or selected and positively
+    -- unassigned): the mode and its state take the place of the whole
+    -- "Wishlist: None assigned" line (no "Wishlist:" before them: it is what
+    -- is used instead of one, and the running words then fit the line whole
+    -- at every font scale): "(ON)" only from the runtime's own fact,
+    -- otherwise the reason it is not picking. The hover then gives the line
+    -- whole, that reason, the rule, and keeps the assignment fact below them.
+    local mode = M.RarityModeFacts(model)
     local lines = {
         {frame._contextTitle, frame._contextTitleHit, title},
         {frame._contextBuild, frame._contextBuildHit, LF("panel.label.context_build", {build = SafeText(build)})},
-        {frame._contextWishlist, frame._contextWishlistHit, LF("panel.label.context_wishlist", {wishlist = SafeText(wishlist)})},
+        {frame._contextWishlist, frame._contextWishlistHit, mode and LF("panel.value.wishlist_rarity_mode", {state = mode.short})
+            or LF("panel.label.context_wishlist", {wishlist = SafeText(wishlist)})},
     }
-    if rolling then lines[3][4] = lines[3][3] .. "\n" .. tostring(tooltip[3]) end
+    if mode then
+        lines[3][4] = lines[3][3] .. "\n" .. mode.reason .. "\n" .. mode.rule .. "\n" .. tostring(tooltip[3])
+    end
     -- C-03 (as M.UpdateDestinationRow): on a settled render (no layout pass)
     -- whose header words, hovers, widths and Auto state are the ones already
     -- applied, nothing is re-anchored, refitted or set again. A layout pass
@@ -5717,6 +5724,47 @@ function M.RandomRollShown(model)
         return false
     end
     return M.RandomRollAutoControl(false, tonumber(model.level) or 0) == true
+end
+
+-- Auto-pick by rarity (Random Roll's option chosen instead of a Wishlist), as
+-- this view may show it: Readout.RarityMode over the model's own facts and
+-- the two settings (the option and autoPick, read as M.RandomRollAutoControl
+-- does). "running" is M.RandomRollShown, the runtime's own fact, and nothing
+-- else; a selected option says "selected" only for a destination the adapter
+-- positively knows as unassigned (model.assignment.knownUnassigned, Main's
+-- copy of GameAdapter.AssignedWishlist), with no Wishlist name and no empty
+-- Saved Build. Loading, restoring, unavailable and unstated assignments
+-- and a named Wishlist never show the mode. Returns Readout.RarityMode's
+-- result while the mode is what this view shows, else nil: with the option
+-- off (the default), a Wishlist or an unknown assignment it returns before
+-- anything is built, so an ordinary render allocates nothing here. Display
+-- only.
+function M.RarityModeFacts(model)
+    local readout, store, policy = Nexus.Readout, Nexus.Store, Nexus.Policy
+    if type(model) ~= "table" or not (readout and type(readout.RarityMode) == "function"
+        and store and type(store.Settings) == "function"
+        and policy and type(policy.LevelingLevel) == "function") then return nil end
+    local ok, settings = pcall(store.Settings)
+    if not ok or type(settings) ~= "table" or settings.autoPickLeveling ~= true then return nil end
+    local running = M.RandomRollShown(model)
+    if not running then
+        local pr = type(model.progress) == "table" and model.progress or nil
+        local assignment = type(model.assignment) == "table" and model.assignment or nil
+        if (pr and pr.wishlistName) or not assignment or assignment.state ~= "unassigned"
+            or assignment.knownUnassigned ~= true or assignment.emptySlot == true then
+            return nil
+        end
+    end
+    return readout.RarityMode({
+        option = true,
+        running = running,
+        assignment = "unassigned",
+        levelOk = policy.LevelingLevel(tonumber(model.level) or 0) == true,
+        autoPick = settings.autoPick == true,
+        sessionPaused = model._nexusSessionPaused and true or false,
+        -- A selected Auto that a pause or hold stops is "waiting", not OFF.
+        auto = model.auto == true,
+    })
 end
 
 -- Auto keeps its existing consentful click handler, now in the header. The

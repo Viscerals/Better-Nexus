@@ -494,8 +494,12 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             local undoName = DisplayUntrusted(undoRow.name, 1024, false)
                 or T("editor.value.removed_wishlist_fallback")
             row._label:SetTextColor(0.45, 0.95, 0.6)
+            -- A plan removed from the first run alone has no Saved Build
+            -- index: its origin is said in words ("the first-run target").
+            local undoFrom = undoRow.associationIndex == nil and undoRow.firstRun == true
+                and T("journal.label.target_first_run") or tostring(undoRow.associationIndex)
             row._label:SetText(TF("editor.menu.manage_undo", {name = undoName}) .. "  |cff777777"
-                .. TF("editor.menu.manage_undo_from", {index = tostring(undoRow.associationIndex)}) .. "|r")
+                .. TF("editor.menu.manage_undo_from", {index = undoFrom}) .. "|r")
             row:Enable()
             -- Each row takes back ITS removal, by the identity that row
             -- names, so an older one can be recovered without disturbing a
@@ -506,6 +510,17 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 local ok, reason, detail = Controller.RestoreForgottenPlan(take)
                 if not ok then
                     print("|cffff9040Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason)))
+                elseif type(detail) == "table" and detail.firstRun == true then
+                    -- Back on the first run, which was still unassigned.
+                    print("|cff4dff80Nexus:|r " .. TF("editor.chat.candidate_first_run", {name = undoName}))
+                elseif type(detail) == "table" and detail.fromFirstRun then
+                    -- The first run is no longer the unassigned destination:
+                    -- where the plan is stored now, and what the first run holds.
+                    local firstRunName = DisplayUntrusted(detail.firstRunName, 1024, false)
+                    print("|cff4dff80Nexus:|r " .. TF("editor.chat.manage_restored_from_first_run",
+                        {name = undoName, slot = tostring(detail.loadoutSlot),
+                            state = firstRunName and TF("usertext.value.wishlist_assigned_named", {name = firstRunName})
+                                or T("usertext.value.wishlist_none_assigned")}))
                 elseif type(detail) == "table" and detail.movedFrom ~= nil then
                     print("|cff4dff80Nexus:|r " .. TF("editor.chat.manage_restored_moved",
                         {name = undoName, slot = tostring(detail.loadoutSlot), from = tostring(detail.movedFrom)}))
@@ -541,6 +556,151 @@ end
 
 local function HideWishlistSwitchMenu()
     if wishlistSwitchMenu then wishlistSwitchMenu:Hide() end
+end
+
+-- Auto-pick by rarity, the alternative to using a Wishlist: Plan's button
+-- (frame._rarityBtn) and the row under the saved Wishlists in the chooser
+-- (M.RarityModeRow). The choice, its confirmation and every check belong to
+-- the Echo Journal's assignment owner (JournalTab.UseRarityAutoPick); here
+-- are only the two controls and their hover. Reading the status (a hover, an
+-- opened chooser, a refresh) changes nothing, and the editor's draft, its
+-- pending Save and its context are never touched by the choice.
+function M.RarityStatus()
+    local journal = Nexus.JournalTab
+    if not (journal and type(journal.RarityAutoPickStatus) == "function") then return nil end
+    local ok, status = pcall(journal.RarityAutoPickStatus)
+    return ok and type(status) == "table" and type(status.mode) == "table" and status or nil
+end
+
+-- The cheap facts the mode's state words follow between view refreshes: the
+-- two settings and what the panel's last model says of Auto, the session
+-- pause, the level and the runtime's "it is picking" fact. No adapter or
+-- assignment read. M.RarityFollow compares it on every refresh.
+function M.RarityFingerprint()
+    local store, panel = Nexus.Store, Nexus.Panel
+    local ok, settings = pcall(function() return store.Settings() end)
+    settings = ok and type(settings) == "table" and settings or {}
+    local model = panel and type(panel._lastModel) == "table" and panel._lastModel or {}
+    local okRun, running = pcall(function() return panel.RandomRollShown(model) end)
+    return tostring(settings.autoPickLeveling) .. "|" .. tostring(settings.autoPick) .. "|"
+        .. tostring(model.auto) .. "|" .. tostring(model._nexusSessionPaused and true or false) .. "|"
+        .. tostring(model.level) .. "|" .. tostring(okRun and running == true)
+end
+
+-- One status read, kept for the two places Plan shows the mode with the
+-- chooser closed: the button is lit while the mode is what this destination
+-- uses, and frame._rarityMode holds its words and exact destination for the
+-- destination row (M.RarityDestination). Run on each view refresh, right
+-- after a choice, and when the cheap facts above changed (M.RarityFollow).
+function M.RarityButtonState()
+    local button = frame and frame._rarityBtn
+    if not button then return end
+    local status = M.RarityStatus()
+    local selected = status ~= nil and status.mode.selected == true
+    if selected then button:LockHighlight() else button:UnlockHighlight() end
+    button._nexusSelected = selected
+    local destination = selected and type(status.destination) == "table" and status.destination or nil
+    frame._rarityMode = destination and {kind = destination.kind, slot = tonumber(destination.slot),
+        text = TF("panel.value.wishlist_rarity_mode", {state = status.mode.short})} or nil
+    frame._rarityFingerprint = M.RarityFingerprint()
+end
+
+-- Warm or cold: read the status again only when Auto, the pause, the level,
+-- a setting or the runtime's fact changed since the last read.
+function M.RarityFollow()
+    if frame and frame._rarityBtn and frame._rarityFingerprint ~= M.RarityFingerprint() then
+        M.RarityButtonState()
+    end
+end
+
+-- The destination row's Wishlist cell says the mode and its state instead of
+-- "None assigned" / "Not known", only for the very destination the mode was
+-- read for (the same Saved Build slot, or the first run) and never over an
+-- assigned Wishlist or a preview. The descriptor is the controller's; only
+-- its display field is added. "Editing: <name>" on the chooser button stays
+-- what the editor holds, which is a different fact.
+function M.RarityDestination(descriptor)
+    local held = frame and frame._rarityMode
+    if type(descriptor) ~= "table" or type(held) ~= "table" then return descriptor end
+    local same = (held.kind == "firstRun" and descriptor.kind == "firstRun")
+        or (held.kind == "savedBuild" and descriptor.kind == "savedBuild"
+            and tonumber(descriptor.slot) == held.slot)
+    if same and descriptor.wishlistState ~= "assigned" and descriptor.wishlistState ~= "unavailable"
+        and descriptor.preview ~= true then
+        descriptor.wishlistMode = held.text
+    end
+    return descriptor
+end
+
+function M.ChooseRarityMode()
+    HideWishlistSwitchMenu()
+    local journal = Nexus.JournalTab
+    if not (journal and type(journal.UseRarityAutoPick) == "function") then return nil end
+    return journal.UseRarityAutoPick(function()
+        M.RarityButtonState()
+        requestRefresh()
+    end)
+end
+
+function M.RarityTooltip(owner)
+    if not GameTooltip then return end
+    local words = Nexus.Readout.RarityText
+    local status = M.RarityStatus()
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:AddLine(words("tip_heading"), 1, 0.8, 0.3)
+    if status then
+        GameTooltip:AddLine(status.mode.rule, 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(status.mode.reason, 1, 1, 1, true)
+        GameTooltip:AddLine(words(status.mode.selected and "tip_deselect" or "tip_select",
+            {target = status.target}), 0.8, 0.8, 0.8, true)
+    end
+    GameTooltip:Show()
+end
+
+-- The chooser's last row, set apart below the saved Wishlists (their rows
+-- and pager are as they were): checked while the mode is what this
+-- destination uses, with its state in a few words while the option is on.
+function M.RarityModeRow(menu, rowsAbove)
+    local row = menu.modeRow
+    if not row then
+        row = CreateFrame("Button", "NexusWishlistEditorRarityRow", menu)
+        row:SetSize(270, 22)
+        row:EnableMouse(true)
+        row:RegisterForClicks("LeftButtonUp")
+        row:SetFrameLevel(menu:GetFrameLevel() + 2)
+        row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        local check = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        check:SetPoint("LEFT", 7, 0)
+        check:SetText("+")
+        check:SetTextColor(0.3, 1, 0.5)
+        check:Hide()
+        local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 7, 0)
+        label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
+        label:SetJustifyH("LEFT")
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(label, row, 22) end
+        row._check, row._label = check, label
+        row:SetScript("OnClick", function() M.ChooseRarityMode() end)
+        row:SetScript("OnEnter", function(self) M.RarityTooltip(self) end)
+        row:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        menu.modeRow = row
+    end
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", 8, -10 - rowsAbove * 24)
+    local status = M.RarityStatus()
+    local selected = status and status.mode.selected
+    row._label:SetText((status and status.option)
+        and TF("editor.menu.rarity_mode_state", {state = status.mode.short})
+        or T("editor.menu.rarity_mode"))
+    if selected then
+        row._check:Show()
+        row._label:SetTextColor(1, 0.82, 0.2)
+    else
+        row._check:Hide()
+        row._label:SetTextColor(0.6, 0.85, 1)
+    end
+    row:Show()
+    return row
 end
 
 local function CandidateEvidenceSuffix(candidate)
@@ -593,7 +753,9 @@ local function ShowWishlistSwitchMenu(anchor, offset)
     local first = wishlistSwitchOffset
     local shown = math.min(perPage, total - first)
     local visible = shown + (paged and 1 or 0)
-    wishlistSwitchMenu:SetSize(286, 18 + math.max(1, visible) * 24)
+    -- One more row below the saved Wishlists: the alternative to using one
+    -- (M.RarityModeRow, placed after them).
+    wishlistSwitchMenu:SetSize(286, 18 + math.max(1, visible) * 24 + 26)
     wishlistSwitchMenu:ClearAllPoints()
     wishlistSwitchMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
     for i = 1, math.max(1, visible) do
@@ -698,6 +860,7 @@ local function ShowWishlistSwitchMenu(anchor, offset)
     for i = math.max(1, visible) + 1, #wishlistSwitchMenu.rows do
         wishlistSwitchMenu.rows[i]:Hide()
     end
+    M.RarityModeRow(wishlistSwitchMenu, math.max(1, visible))
     wishlistSwitchMenu:Show()
 end
 
@@ -1613,6 +1776,19 @@ local function EnsureFrame()
     frame._workspaceAssignBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
+    -- The alternative to using a Wishlist at all, on the row of the Create
+    -- and Save buttons and left of them (the header row above is full to
+    -- Display Settings): the same height and baseline, under the left list
+    -- and short of the divider. Its click asks the Journal's owner
+    -- (M.ChooseRarityMode); nothing is chosen by showing or hovering it.
+    frame._rarityBtn = CreateFrame("Button", "NexusWishlistEditorRarityButton", frame,
+        "UIPanelButtonTemplate")
+    frame._rarityBtn:SetSize(150, 26)
+    frame._rarityBtn:SetPoint("BOTTOMLEFT", 496, 24)
+    frame._rarityBtn:SetText(Nexus.Localization.Text("editor.button.rarity_mode"))
+    frame._rarityBtn:SetScript("OnClick", function() M.ChooseRarityMode() end)
+    frame._rarityBtn:SetScript("OnEnter", function(self) M.RarityTooltip(self) end)
+    frame._rarityBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Locked Echoes strip: one slot per occupied locked record the game
     -- reports (RefreshView shows at least the six authored target cells, and
@@ -2635,6 +2811,7 @@ local function RefreshView(catalogRevision)
             wishlistSwitchBtn:SetText(T("editor.button.new_wishlist_choose"))
         end
     end
+    M.RarityButtonState()
 
     if wishlistNameLabel and wishlistNameBox then
         if editingContext then
@@ -2999,11 +3176,12 @@ end
                 destinationRow._nexusEditorSelected = nil
                 destinationRow._nexusEditorSession = nil
             end
+            M.RarityFollow()
             panel.UpdateDestinationRow(destinationRow,
-                Controller.DestinationPresentation(
+                M.RarityDestination(Controller.DestinationPresentation(
                     destinationRow._nexusEditorSlots,
                     panel.CachedDestinationCharacter(),
-                    destinationRow._nexusEditorSelected),
+                    destinationRow._nexusEditorSelected)),
                 972, 18)
         end
         return result

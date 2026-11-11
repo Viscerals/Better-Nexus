@@ -890,6 +890,16 @@ function T.DestinationFields(d)
             and SayF("usertext.value.minimum_state_preview_captured", {mark = mark}, "PC" .. mark)
             or SayF("usertext.value.minimum_state_preview", {mark = mark}, "P" .. mark)
     end
+    -- d.wishlistMode (optional, a string already worded for display): what
+    -- this destination uses instead of a Wishlist (Auto-pick by rarity with
+    -- its state). The caller gives it only for a destination positively
+    -- known to have nothing assigned. It takes the Wishlist cell at its full
+    -- and compact widths; the assignment fact it replaces stays on the hover.
+    local modeFact
+    if type(d.wishlistMode) == "string" and d.wishlistMode ~= "" then
+        modeFact = wishlist
+        wishlist, wishlistCompact = d.wishlistMode, d.wishlistMode
+    end
     local fields = {
         {key = "character", label = Say("usertext.label.field_character", "Character"),
             value = p.character or Say("usertext.value.character_not_known", "Not known"),
@@ -905,6 +915,10 @@ function T.DestinationFields(d)
     for index = 1, #fields do
         local label, value = fields[index].label, fields[index].value
         tooltip[index] = SayF("usertext.tooltip.field_line", {label = label, value = value}, label .. ": " .. value)
+    end
+    if modeFact then
+        tooltip[#tooltip + 1] = SayF("usertext.tooltip.field_line", {label = fields[3].label, value = modeFact},
+            fields[3].label .. ": " .. modeFact)
     end
     if captured then
         -- The assignment words follow the facts given with it (review
