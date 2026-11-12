@@ -9,6 +9,11 @@
 -- and sizes, and the game-action, send and Auto counters. Real TOC boot;
 -- synthetic host services and models only. Native pixels, font coverage,
 -- label fit at large font scales and tooltip drawing are NOT RUN.
+-- Main-panel visual correction (P2): an offer row is a fixed grid (its
+-- icon, its name over its quality, its tag in a status column at the right)
+-- and the selected row is told by an accent outline around a dark fill. The
+-- former P2 band assertion (three one-line rows of small + 2 row gaps) is
+-- replaced by the grid's; the rows stay display only.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 local C=V.Checker('play_offer_cards')
@@ -164,7 +169,7 @@ C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready'
 Nexus.DisableOrdinaryAutomation()
 P.Show()
 
-C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and nothing chosen',function()
+C.scenario('P2 three offer rows in one grid, the Wishlist pick set apart, and nothing chosen',function()
  local before=Effects()
  C.setup(P.Render(Model({auto=false,cards=CARDS}))==true and NexusPanel:IsShown(),'P2: fixture: the HUD renders an offer with Auto OFF')
  local cards=NexusPanel._offerCards
@@ -183,12 +188,16 @@ C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and 
  C.expect(cards[1]._nexusLayout=='rows','P2: the offers are compact rows, one per offer',tostring(cards[1]._nexusLayout))
  C.expect(cards[1]._nexusFull=='Cinder Lattice (Epic) wanted','P2: the complete card line stays on its hover')
  C.expect(Heading():find('Current offer - you choose',1,true)~=nil,'P2: the heading says the player chooses',Heading())
- -- Geometry: disjoint full-width rows inside the roll area, within the card band.
+ -- Geometry: disjoint full-width rows inside the roll area.
  local area=NexusPanel._rollArea
  local layout=NexusPanel._responsiveLayout
- -- Offer-row spacing: a row is its small line with a row gap above and below, a row gap from the next.
+ -- The offer-row grid (main-panel visual correction): a row is two text
+ -- lines, the name's primary line over the quality's secondary line, with a
+ -- row gap above and below; rows are a row gap apart. The former check here
+ -- held a row to one small line (small + 2 row gaps): that one-line row is
+ -- intentionally gone, so its literal is replaced, not relaxed.
  local rowGap=layout and math.max(2,math.floor(layout.gap/3)) or 0
- local band=layout and 3*(layout.small+2*rowGap)+2*rowGap or 0
+ local modelRow=layout and layout.normal+layout.small+2*rowGap or 0
  local lastBottom,inside,first=nil,true,nil
  for i=1,3 do
   local point,relative,_,x,y=cards[i]:GetPoint()
@@ -197,9 +206,63 @@ C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and 
    or (lastBottom and -y<lastBottom) then inside=false end
   lastBottom=-y+cards[i]:GetHeight()
  end
- C.expect(inside,'P2: the offers are three disjoint rows inside the roll area')
- C.expect(layout and lastBottom and first and lastBottom-first<=band and cards[1]:GetHeight()==layout.small+2*rowGap,
-  'P2: the three rows stay within the band the card rows reserve',tostring(lastBottom)..'-'..tostring(first)..'/'..band)
+ C.expect(inside and lastBottom~=nil and lastBottom<=area:GetHeight(),'P2: the offers are three disjoint rows inside the roll area')
+ local h1,h2,h3=cards[1]:GetHeight(),cards[2]:GetHeight(),cards[3]:GetHeight()
+ C.expect(layout and select(2,Nexus.LayoutMetrics.OfferRows(layout.small,layout.gap,layout.normal))==modelRow
+  and h1>=modelRow and h1==h2 and h2==h3 and lastBottom-first==h1+h2+h3+2*rowGap,
+  'P2: the three rows share one height, at least the two-line grid row, a row gap apart',
+  h1..'/'..h2..'/'..h3..' model '..modelRow)
+ -- The grid inside each row: the name and, under it in the same column, its
+ -- quality; every name starts at one left edge after the icon column; every
+ -- tag is right-aligned to one right inset (the status column).
+ -- The grid's numbers are stated here for this fixture's reference rows (11
+ -- and 14 units with a 6-unit gap), not read from the layout engine under
+ -- test: the content is inset one gap (6), with the 2-unit row gap above and
+ -- below the lines; the icon is a square as tall as the two lines (14 + 11 =
+ -- 25); the text column starts one gap after it (6 + 25 + 6 = 37).
+ C.setup(layout~=nil and layout.small==11 and layout.normal==14 and layout.gap==6 and rowGap==2,
+  'P2: fixture: the reference rows (11 and 14 units, a 6-unit gap)',
+  layout and (tostring(layout.small)..' / '..tostring(layout.normal)..' / '..tostring(layout.gap)))
+ local grid={inset=6,pad=2,icon=25,textX=37}
+ local columns,notes=true,{}
+ for i=1,3 do
+  local np,nrel,_,nx,ny=cards[i].name:GetPoint()
+  local qp,qrel,_,qx,qy=cards[i].quality:GetPoint()
+  local tp,trel,trp,tx=cards[i].tag:GetPoint()
+  notes[#notes+1]=i..': name '..tostring(nx)..','..tostring(ny)..' quality '..tostring(qx)..','..tostring(qy)..' tag '..tostring(tp)..' '..tostring(tx)
+  if not (np=='TOPLEFT' and nrel==cards[i] and nx==grid.textX and qp=='TOPLEFT' and qrel==cards[i] and qx==nx
+   and -qy>=-ny+cards[i].name:GetHeight() and cards[i].quality:GetWidth()==cards[i].name:GetWidth()
+   and tp=='TOPRIGHT' and trel==cards[i] and trp=='TOPRIGHT' and tx==-grid.inset
+   and cards[i].tag:GetWidth()==cards[1].tag:GetWidth()
+   and nx+cards[i].name:GetWidth()<=cards[i]:GetWidth()-grid.inset-cards[i].tag:GetWidth()) then columns=false end
+ end
+ C.expect(columns,
+  'P2: each row is one grid: the name at 37 units with its quality under it in the same column, the tag in the status column ending 6 units from the row\'s right',
+  table.concat(notes,' | '))
+ -- The icon column: one square per row at the same inset, before the text column.
+ local icons=true
+ for i=1,3 do
+  local icon=cards[i]._nexusSlot and cards[i]._nexusSlot.icon
+  local ip,irel,_,ix,iy=nil,nil,nil,nil,nil
+  if icon then ip,irel,_,ix,iy=icon:GetPoint() end
+  if not (icon and ip=='TOPLEFT' and irel==cards[i] and ix==grid.inset and -iy==grid.pad
+   and icon:GetWidth()==grid.icon and icon:GetHeight()==grid.icon and ix+icon:GetWidth()<grid.textX) then icons=false end
+ end
+ C.expect(icons,'P2: every row keeps its 25-unit icon square at 6, 2 in the row, before its text')
+ -- The selected row (the marked offer): a dark fill and an outline on the
+ -- row's own four edges; no other row shows either.
+ local function Selected(card)
+  local edges=type(card.outline)=='table' and #card.outline or 0
+  local shown=0
+  for _,edge in ipairs(card.outline or {}) do if edge:IsShown() then shown=shown+1 end end
+  return edges,shown,card.fill~=nil and card.fill:IsShown()
+ end
+ local e1,s1,f1=Selected(cards[1])
+ local _,s2,f2=Selected(cards[2])
+ local _,s3,f3=Selected(cards[3])
+ C.expect(e1==4 and s1==4 and f1 and s2==0 and not f2 and s3==0 and not f3 and cards[1]._nexusMarked==true,
+  'P2: only the selected row shows its four-edge outline and its dark fill',
+  e1..' edges, shown '..s1..'/'..s2..'/'..s3..' fill '..tostring(f1)..'/'..tostring(f2)..'/'..tostring(f3))
  local clickable=false
  for i=1,3 do
   if cards[i]:GetScript('OnClick') or cards[i]:GetScript('OnMouseUp') or cards[i]:GetScript('OnMouseDown') then clickable=true end
@@ -306,8 +369,16 @@ local LARGE={name='125%',char=8.75,line=15,size=15}
 local function Fits(text) return text:GetStringWidth()<=text:GetWidth() end
 local function Rect(region) local ok,r=pcall(G.Rect,region,NexusPanel);return ok and r or nil end
 
+-- Count disclosure (play_panel_summary S32): the compact banish, reroll and
+-- freeze charges are counts and are on the panel only while Details is open.
+-- P7 asks that the heading fits its row BESIDE the charges; with Details
+-- closed there are no charges beside it any more (the heading has the whole
+-- row), so P7 renders with Details open, where the charges cell stands, and
+-- puts Details back. Its checks are unchanged.
 C.scenario('P7 at 125% text the offer heading and every card status line fit without moving meaning to a hover',function()
  local before=Effects()
+ local wasDetails=P._playDetails
+ P._playDetails=true
  G.UseFont(LARGE)
  local function Large(auto,cards)
   local m=Model({auto=auto,cards=cards})
@@ -356,6 +427,7 @@ C.scenario('P7 at 125% text the offer heading and every card status line fit wit
  C.expect(c1 and Visible(c1.quality:GetText())=='Epic - guaranteed' and Fits(c1.quality)
   and Visible(c1.tag:GetText())==R.OFFER_PICK_TAG and Fits(c1.tag),
   'P7: a marked guaranteed card shows its guarantee and the pick, both whole',c1 and Visible(c1.quality:GetText()))
+ P._playDetails=wasDetails
  G.UseFont(G.MODELS.default)
  P.Render(Model({auto=false}))
  C.setup(P.Render(Model({auto=false,cards=CARDS}))==true,'P7: fixture: the stock model again')

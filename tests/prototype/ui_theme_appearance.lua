@@ -303,4 +303,137 @@ Boot(function(d)d.settings.uiStyle='vista'end);T=Nexus.Theme
 T.SetStyle('slate')
 check(NexusDB.settings.uiPalette==nil and rowNamed(colourRows(),defaultText(slateOwn)).checked,
  'without a saved colour Slate checks its own Default')
+-- 13. The visual corrections of the main
+-- panel: the panel's own labels take their colour from the appearance's
+-- roles, explicitly. T.StyleTree styles buttons only, so a label kept the
+-- colour its font object or a fixed literal gave it, whatever the style.
+-- Now the title, names and values are the style's text colour; captions
+-- and secondary labels are its muted colour; the selected offer's tag and
+-- outline and the plan progress fill are the palette's accent, an
+-- unselected tag is ordinary text and an offer's quality is muted. They are
+-- registered through T.StyleLabel (no new Theme API), so a changed colour or
+-- style repaints them at once, with no render, texture, hook or tree walk.
+-- The exempt difficulty card's texts take no role: they state their own
+-- white base under the card's colour codes and no choice repaints them.
+-- The colour a text or a plain texture was last given is recorded here (the
+-- harness keeps none); the expected colours are read from the appearance's
+-- own resolved tables, never restated. These checks fail at aca67cf4 by
+-- design (no panel label was registered, the selected row had no outline,
+-- the card's texts stated no colour). Native colours and contrast: NOT RUN.
+-- The exempt mark (Theme.lua's header and T.Exempt: a marked frame keeps its
+-- own look, and styling never paints it): an offer row is painted by the
+-- appearance now, so it carries no mark; the difficulty card keeps its own.
+-- A tree walk that enters a row finds a plain frame with no control: it
+-- styles no button and adds no texture, hook or region. At aca67cf4 the rows
+-- were marked (their colours were fixed), so those checks fail there too.
+local G=dofile('tests/prototype/layout_geometry_support.lua')
+local function Record()
+ local RM=G.RegionMethods()
+ local setColor,setTexture=rawget(RM,'SetTextColor'),rawget(RM,'SetTexture')
+ RM.SetTextColor=function(self,r,g,b,a)
+  rawset(self,'_shownColor',{r,g,b})
+  if setColor then return setColor(self,r,g,b,a) end
+ end
+ RM.SetTexture=function(self,r,g,b,a)
+  if type(r)=='number' then rawset(self,'_shownFill',{r,g,b,a}) end
+  if setTexture then return setTexture(self,r,g,b,a) end
+ end
+end
+H=F.Boot(F.Database(),function(h) F.OrbService(h);Record() end);T=Nexus.Theme
+Nexus.Panel.Show()
+local offer={status='ready',level=40,auto=false,
+ cards={{text='Cinder Lattice (Epic) wanted',highlight=true},{text='Hollow Bell (Rare) wanted'},{text='Ashen Tithe (Uncommon)'}},
+ recommendation='Take Cinder Lattice.',serverStatus={tier='HC3',mode='HC3',ash='1,240',gain='+45%'},
+ progress={wishlistName='Synthetic roles plan',total=6,owned=2,missing={},shed={},toLock={},unknownTomes={}}}
+check(Nexus.Panel.Render(offer)==true and NexusPanel~=nil and NexusPanel:IsShown(),'SETUP: a Play panel with a selected offer renders')
+local hud=NexusPanel
+local rows=assert(hud._offerCards,'SETUP: the offer rows exist')
+check(rows[1]:IsShown() and rows[1]._nexusMarked==true and rows[2]._nexusMarked==false and (rows[2].tag:GetText() or '')~='',
+ 'SETUP: the first offer is the marked (selected) one and the second has a tag of its own')
+local function Colour(region) return region and rawget(region,'_shownColor') or nil end
+local function Same(c,want)
+ return type(c)=='table' and type(want)=='table' and c[1]==want[1] and c[2]==want[2] and c[3]==want[3]
+end
+local function Say(c) return type(c)=='table' and (tostring(c[1])..', '..tostring(c[2])..', '..tostring(c[3])) or 'no colour was set' end
+-- The plan progress caption: the text its fitted hover covers (the region
+-- that hover's first anchor names).
+local function Caption()
+ local hit=hud._progressLabelHit
+ local anchor=hit and hit.points and hit.points[1] and hit.points[1][2]
+ return type(anchor)=='table' and anchor or nil
+end
+local function RolesHold(tag)
+ local chosen=T.Resolve(NexusDB.settings.uiStyle,NexusDB.settings.uiPalette)
+ local text,muted,accent=chosen.style.text,chosen.style.disabledText,chosen.palette.accent
+ check(Same(Colour(hud._contextTitle),text),tag..': the title is the style text colour ('..Say(Colour(hud._contextTitle))..')')
+ check(Same(Colour(hud._contextBuild),text) and Same(Colour(hud._contextWishlist),text),
+  tag..': the Build and Wishlist names are the style text colour ('..Say(Colour(hud._contextBuild))..')')
+ check(Same(Colour(hud._contextBuildCaption),muted) and Same(Colour(hud._contextWishlistCaption),muted),
+  tag..': the Build and Wishlist captions are the muted colour ('..Say(Colour(hud._contextBuildCaption))..')')
+ check(Same(Colour(hud._rollStatus),text),tag..': the offer heading is the style text colour ('..Say(Colour(hud._rollStatus))..')')
+ check(Same(Colour(Caption()),muted),tag..': the plan progress caption is the muted colour ('..Say(Colour(Caption()))..')')
+ check(Same(Colour(rows[1].tag),accent) and Same(Colour(rows[2].tag),text),
+  tag..': the selected offer tag is the accent and an unselected tag ordinary text ('..Say(Colour(rows[1].tag))..' / '..Say(Colour(rows[2].tag))..')')
+ check(Same(Colour(rows[1].quality),muted) and Same(Colour(rows[2].quality),muted),
+  tag..': an offer quality is the muted colour ('..Say(Colour(rows[1].quality))..')')
+ local edges,drawn=#(rows[1].outline or {}),0
+ for _,edge in ipairs(rows[1].outline or {}) do
+  if edge:IsShown() and Same(rawget(edge,'_shownFill'),accent) then drawn=drawn+1 end
+ end
+ check(edges==4 and drawn==4,tag..': the selected row outline is four edges in the accent ('..drawn..' of '..edges..')')
+ local fill=hud._play and hud._play.fill
+ check(fill~=nil and fill:IsShown() and Same(rawget(fill,'_shownFill'),accent),
+  tag..': the plan progress fill is the accent ('..Say(fill and rawget(fill,'_shownFill'))..')')
+end
+check(T.Current().style=='vista' and T.Current().palette=='amethyst','SETUP: the default Nexus Vista with Nexus Amethyst')
+RolesHold('Nexus Vista, Nexus Amethyst')
+-- A changed colour, then a changed style: repainted through the registry at
+-- once, with no render in between and nothing added.
+local roleStats=T.Stats()
+check(T.SetPalette('ember')=='durable' and T.Current().palette=='ember','SETUP: Nexus Ember is chosen')
+RolesHold('Nexus Ember, with no render')
+check(T.SetStyle('slate')=='durable' and T.Current().style=='slate' and T.Current().palette=='ember','SETUP: Nexus Slate keeps the chosen Ember')
+RolesHold('Nexus Slate with Nexus Ember, with no render')
+local roleStats2=T.Stats()
+check(roleStats2.textures==roleStats.textures and roleStats2.hooks==roleStats.hooks and roleStats2.treeWalks==roleStats.treeWalks,
+ 'repainting the panel labels adds no texture or hook and walks no frame tree')
+-- The exempt difficulty card: its three texts state a white base and no
+-- choice repaints them.
+local statusCard
+for _,f in ipairs(H.frames)do if f._nexusThemeExempt and f:GetParent()==hud and f.intensityBar then statusCard=f end end
+check(statusCard~=nil and statusCard:IsShown(),'SETUP: the difficulty card is shown')
+local cardTexts={}
+for _,region in ipairs(statusCard and statusCard.regions or {})do if region.kind=='FontString' then cardTexts[#cardTexts+1]=region end end
+local white=#cardTexts>=3
+for i=1,math.min(3,#cardTexts) do if not Same(Colour(cardTexts[i]),{1,1,1}) then white=false end end
+check(white,'the difficulty card texts keep their own white base under every style and colour ('..Say(Colour(cardTexts[1]))..')')
+-- The mark and what the appearance does agree: no offer row is marked, and
+-- the card is.
+local markedRows=0
+for i=1,3 do if rows[i]._nexusThemeExempt~=nil then markedRows=markedRows+1 end end
+check(markedRows==0,'no offer row carries the theme-exempt mark: the appearance paints its tag, quality and outline ('..markedRows..' marked)')
+local exemptBefore=T.Stats().exemptTrees
+check(statusCard~=nil and statusCard._nexusThemeExempt==true and T.StyleTree(statusCard)==statusCard
+ and T.Stats().exemptTrees==exemptBefore+1,'the difficulty card keeps the mark: a tree walk does not enter it')
+-- A walk that enters the rows (the styled mark of an earlier walk is cleared
+-- first, so each row is really entered here).
+local walk0=T.Stats()
+local regionCount,sameRegions={},true
+for i=1,3 do
+ regionCount[i]=#(rows[i].regions or {})
+ rows[i]._nexusDarkTreeStyled=nil
+ T.StyleTree(rows[i])
+end
+local walk1=T.Stats()
+for i=1,3 do if #(rows[i].regions or {})~=regionCount[i] then sameRegions=false end end
+check(walk1.treeWalks==walk0.treeWalks+3 and walk1.exemptTrees==walk0.exemptTrees,
+ 'a tree walk enters each offer row: they are not exempt trees ('..(walk1.treeWalks-walk0.treeWalks)..' entered, '
+ ..(walk1.exemptTrees-walk0.exemptTrees)..' exempt)')
+check(walk1.nodesVisited==walk0.nodesVisited and walk1.buttonsStyled==walk0.buttonsStyled
+ and walk1.textures==walk0.textures and walk1.hooks==walk0.hooks and sameRegions,
+ 'and finds no control in a row: no child visited, no button styled, no texture, hook or region added')
+RolesHold('after a tree walk through the offer rows')
+T.SetStyle('vista');T.SetPalette(nil)
+check(T.Current().style=='vista' and T.Current().palette=='amethyst','the default appearance is back')
+RolesHold('Nexus Vista, Nexus Amethyst again')
 print('PASS ui_theme_appearance: Vista/Amethyst by default, one Default row per style by painted colour, explicit and unknown choices kept, owner-routed writes, no repaint allocation, exempt card untouched checks='..checks)

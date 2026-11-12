@@ -34,6 +34,13 @@
 -- correction (predicted from source to fail at a9ff2eda: no separate rows,
 -- no measured stack; not executed by the author), GUARD already held and must
 -- keep holding, SETUP is the fixture.
+-- Main-panel visual correction (font height): the heading over each name
+-- column is one line of the secondary text at the height the client measures
+-- for it (layout.lineSmall: 12, 17 and 15 units in the default, 16 px and
+-- 125% models here), where it was the modelled small row (11, 11 and 14),
+-- which was lower than its own line in each of these models. D1, D2 and D3
+-- stated a column's height with that modelled row; they state it with the
+-- measured line now. The name rows' own measured stack is unchanged.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local G=dofile('tests/prototype/layout_geometry_support.lua')
@@ -250,10 +257,13 @@ C.scenario('D1 default text: two names and +3 / +5 more, every line whole; the c
  if not need then return end
  local labelGap=math.max(3,math.floor(layout.gap/2))
  local stack=math.max(layout.small*3,3*MODEL.line)
- C.expect(layout.boxes.needed.h==layout.small+labelGap+stack and layout.boxes.shed.h==layout.boxes.needed.h
-  and stack>layout.small*3,
-  'D1: each column is its heading plus the three measured lines, taller than the modelled rows, with no extra band',
-  layout.boxes.needed.h..' = '..layout.small..'+'..labelGap..'+'..stack)
+ -- The heading's row is its measured line (main-panel visual correction:
+ -- layout.lineSmall, 12 units in this model; it was the modelled 11-unit
+ -- small row, which this check stated).
+ C.expect(layout.lineSmall==math.max(layout.small,MODEL.line) and layout.boxes.needed.h==layout.lineSmall+labelGap+stack
+  and layout.boxes.shed.h==layout.boxes.needed.h and stack>layout.small*3,
+  'D1: each column is its heading\'s measured line plus the three measured lines, taller than the modelled rows, with no extra band',
+  layout.boxes.needed.h..' = '..tostring(layout.lineSmall)..'+'..labelGap..'+'..stack)
  local text=ShownText()
  C.expect(not text:find('Rime Warden',1,true) and not text:find('Brine Oath',1,true)
   and not text:find('(Rare',1,true),'D1: the face shows only the first two names, without the quality breakdown',text)
@@ -280,8 +290,10 @@ C.scenario('D2 a taller face and names with a line break, under both readings of
    local need,sh,layout=CheckFace(tag,{'Rime Warden','Hollow Bell','+3 more'},{'Gloam Lantern','Ashen Tithe','+5 more - Show all'})
    if need then
     local labelGap=math.max(3,math.floor(layout.gap/2))
-    C.expect(layout.boxes.needed.h==layout.small+labelGap+3*MODEL.line,
-     tag..': the column holds three 17-unit lines',layout.boxes.needed.h)
+    -- Under a heading as tall as its own 17-unit line (layout.lineSmall;
+    -- it was the modelled 11-unit small row, which this check stated).
+    C.expect(layout.lineSmall==MODEL.line and layout.boxes.needed.h==layout.lineSmall+labelGap+3*MODEL.line,
+     tag..': the column holds three 17-unit lines under its 17-unit heading',layout.boxes.needed.h)
     local ok,miss=HoverHas(need,{'Warden','Rare:x1','Hollow Bell','Quill of Embers','Stoneveil Aegis','Cinder Lattice x2'})
     C.guard(ok,tag..': the hover keeps every missing name',miss)
     ok,miss=HoverHas(sh,{'Lantern','Ashen Tithe','Brine Oath','Sable Thorn','Vesper Coil','Duskmantle Cord','Ironpetal Ward'})
@@ -302,8 +314,11 @@ C.scenario('D3 125% text: the same face in the scaled font, every line whole',fu
  local need,shed,layout=CheckFace('D3',NEED_FACE,EXTRA_FACE)
  if not need then return end
  local labelGap=math.max(3,math.floor(layout.gap/2))
- C.expect(layout.boxes.needed.h==layout.small+labelGap+math.max(layout.small*3,3*MODEL.line),
-  'D3: each column is its heading plus the three measured 125% lines',layout.boxes.needed.h)
+ -- The heading's row is its measured 15-unit line (layout.lineSmall; it was
+ -- the modelled 14-unit small row, which this check stated).
+ C.expect(layout.lineSmall==math.max(layout.small,MODEL.line)
+  and layout.boxes.needed.h==layout.lineSmall+labelGap+math.max(layout.small*3,3*MODEL.line),
+  'D3: each column is its heading\'s measured line plus the three measured 125% lines',layout.boxes.needed.h)
  -- Approved panel cleanup (secondary floor 11): the main panel's secondary
  -- text, these columns included, is its own 11-unit font object, not the
  -- shared 10-unit small one. What is protected is unchanged: the added rows

@@ -18,6 +18,18 @@
 -- send, saved-data and Auto counters. Real TOC boot; synthetic host services
 -- and models only. Native pixels, font coverage, label fit at large font
 -- scales and tooltip drawing are NOT RUN.
+-- The visual corrections of the main panel:
+-- the panel's width follows the text scale (S13), the plan progress is a
+-- caption with the compact Details button at its right and a full-width bar
+-- below (S21), the three footer hubs are one width and span the footer row,
+-- with Help reached from Options (S22), the selected offer row is told by a
+-- thin accent outline around a dark fill (S26), and the difficulty card's
+-- tier and multiplier start on one line (S16). Each assertion of the former
+-- look that these replace is marked where it stood; it is replaced by the
+-- new look's own assertion, not relaxed.
+-- Count disclosure: the compact banish, reroll and freeze charges are counts
+-- and are on the panel only while Details is open (S32; S25 checks them
+-- whole with Details open).
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 local G=dofile('tests/prototype/layout_geometry_support.lua')
@@ -841,6 +853,14 @@ end)
 -- and value box is as wide as its text, inside the panel and apart from the
 -- others, so nothing is shortened. The scope note takes no row (it is on the
 -- best known hover, S4c). A regression model, not native font measurement.
+-- Main-panel visual correction: the panel's width follows the text scale
+-- (LayoutMetrics.PanelWidth), so at 2.0 text the 420-unit panel is what a
+-- screen too narrow for more leaves (here a 640-unit screen at the chosen
+-- 150%). The 2.0-text checks that stood here run there, unchanged: they were
+-- written for 420 units, which was the width at every text size. On a screen
+-- with the room the panel is 840 units wide at 2.0 text, and the two entries
+-- share one line again when their measured widths fit it: EXPECT, failing at
+-- aca67cf4 by design (420 units at every text size).
 C.scenario('S13 the DPS entries share one line while they fit and wrap as whole entries when they do not',function()
  local function Texts()
   local out={}
@@ -867,6 +887,8 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
   C.expect(ok and #texts==4,tag..': each label and value is whole, inside the panel and apart from the others',table.concat(detail,' ; '))
  end
  local both=Model({bestDps={dummy={dps=4812}},performance={dummy={global={dps=5130,player='Synthetic'}},lk={}}})
+ -- The screen and the chosen size this scenario sets, put back below.
+ local w0,h0=UIParent:GetWidth(),UIParent:GetHeight()
  local ok,err=pcall(function()
   G.UseFont(G.MODELS.default)
   C.setup(P.Render(both)==true,'S13: fixture: both records at default text')
@@ -877,7 +899,10 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
   Whole('S13 default text')
   local oneLine=NexusPanel:GetHeight()
   G.UseFont(G.MODELS.double)
-  C.setup(P.Render(both)==true,'S13: fixture: both records at 2.0 text')
+  -- The 420-unit panel at 2.0 text: a 640-unit screen at the chosen 150%.
+  UIParent:SetSize(640,4000)
+  P.SetPanelScale(1.5)
+  C.setup(P.Render(both)==true and NexusPanel:GetWidth()==420,'S13: fixture: both records at 2.0 text, in the 420-unit panel',NexusPanel:GetWidth())
   b=NexusPanel._responsiveLayout.boxes
   C.expect(b.bestDps~=nil and b.bestKnown~=nil and b.bestKnown.y>=b.bestDps.y+b.bestDps.h,
    'S13: at 2.0 text each entry takes its own line',b.bestDps and b.bestKnown and (b.bestDps.y..'+'..b.bestDps.h..' / '..b.bestKnown.y))
@@ -887,10 +912,44 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
    performance={dummy={global={dps=5130,player='Synthetic'}},lk={global={dps=3400,player='Synthetic'}}}})
   C.setup(P.Render(wide)==true,'S13: fixture: Training Dummy and Lich King records at 2.0 text')
   Whole('S13 2.0 text, both targets')
+  -- With the room for it (a 1920-unit screen at 100%) the panel is 840 units
+  -- wide at 2.0 text: 420 x the text scale.
+  P.ResetPanelScale()
+  UIParent:SetSize(1920,4000)
+  C.setup(P.Render(both)==true,'S13: fixture: both records at 2.0 text on a 1920-unit screen')
+  local l=NexusPanel._responsiveLayout
+  b=l.boxes
+  C.expect(NexusPanel:GetWidth()==840 and l.width==840,
+   'S13: at 2.0 text on a screen with the room the panel is 840 units wide (420 x the text scale)',NexusPanel:GetWidth())
+  local yours,best=l.recordYours,l.recordBest
+  if C.setup(type(yours)=='table' and type(best)=='table' and b.bestDps~=nil and b.bestKnown~=nil,
+   'S13: fixture: both entries are measured and laid out there') then
+   -- The rule the layout states: each entry is its label, one gap and its
+   -- value; the two share a line while both, two gaps apart, fit the block.
+   local need=math.ceil(yours[1]+l.gap+yours[2])+l.gap*2+math.ceil(best[1]+l.gap+best[2])
+   local shared=b.bestDps.y==b.bestKnown.y and not Nexus.LayoutMetrics.Overlap(b.bestDps,b.bestKnown)
+   print('OBSERVED','S13 2.0 text at '..tostring(l.width)..' units: the entries need '..need..' of '..tostring(l.full)..' units; shared='..tostring(shared))
+   C.guard(shared==(need<=l.full),'S13: the entries share one line exactly when their measured widths fit the block',need..' of '..tostring(l.full))
+   -- Where they fit, that they share the line follows from the rule above
+   -- (GUARD: the rule held at 420 units too). The red-ready check of this
+   -- part is the 840-unit width.
+   if need<=l.full then
+    C.guard(shared,'S13: with the room 840 units give, the two entries share one line again at 2.0 text',need..' of '..tostring(l.full))
+   end
+  end
+  Whole('S13 2.0 text, 840 units')
+  UIParent:SetSize(w0,h0)
   G.UseFont(G.MODELS.default)
   C.setup(P.Render(both)==true and NexusPanel:GetHeight()==oneLine,'S13: fixture: default text gives the one-line panel back',NexusPanel:GetHeight())
  end)
+ -- The chosen size (taken back while the screen is readable), the screen,
+ -- the font model, the applied size and the default anchor return.
+ UIParent:SetSize(1920,4000)
+ P.ResetPanelScale()
+ UIParent:SetSize(w0,h0)
  G.UseFont(G.MODELS.default)
+ NexusPanel:SetScale(1)
+ NexusPanel:ClearAllPoints();NexusPanel:SetPoint('RIGHT',UIParent,'RIGHT',-40,0)
  C.setup(ok,'S13: fixture: the DPS line scenario ran',err)
 end)
 
@@ -1026,6 +1085,18 @@ C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a
     tag..': the 6-unit Intensity bar is under the texts, inside the card',detail..' bar '..G.Text(b))
   end
  end
+ -- Main-panel visual correction: the tier and the multiplier both start at
+ -- the top of their cells, so they stand on one line (the multiplier was
+ -- centred in its cell beside a tier at the top of its own). The harness
+ -- keeps no vertical justification, so the requests are recorded for this
+ -- scenario (as native_details_measurement records them) and the method is
+ -- put back below.
+ local regions=G.RegionMethods()
+ local hadJustify=rawget(regions,'SetJustifyV')
+ regions.SetJustifyV=function(self,v)
+  rawset(self,'_justifyV',v)
+  if hadJustify then return hadJustify(self,v) end
+ end
  local ok,err=pcall(function()
   G.UseFont(G.MODELS.default)
   C.setup(P.Render(Model({serverStatus=Status('HC3',true)}))==true,'S16: fixture: a short tier with a validated Intensity scale')
@@ -1034,6 +1105,12 @@ C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a
   local box=NexusPanel._responsiveLayout.boxes.status
   C.expect(box~=nil and box.h==48 and card:GetHeight()==48,'S16: with short text and its bar the active card is 48 units',box and box.h)
   Check('S16 short',card,true)
+  local tierText,_,gainText=Parts(card)
+  local tierRect,gainRect=G.Rect(tierText,NexusPanel),G.Rect(gainText,NexusPanel)
+  -- EXPECT: fails at aca67cf4, where only the tier asked for the top.
+  C.expect(rawget(tierText,'_justifyV')=='TOP' and rawget(gainText,'_justifyV')=='TOP' and tierRect[2]==gainRect[2],
+   'S16: the tier and the multiplier start at the top of their cells, on one line',
+   tostring(rawget(tierText,'_justifyV'))..' / '..tostring(rawget(gainText,'_justifyV'))..' at '..tostring(tierRect[2])..' / '..tostring(gainRect[2]))
   C.guard(card._nexusThemeExempt==true,'S16: the card stays exempt from the theme')
   C.setup(P.Render(Model({serverStatus=Status('HC3',true),owned=6}))==true,'S16: fixture: the completed build')
   C.expect(card:IsShown() and card:GetHeight()==48,'S16: the completed card is 48 units too',card:GetHeight())
@@ -1050,6 +1127,7 @@ C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a
   C.expect(not card.intensityBar:IsShown() and card:GetHeight()<48,'S16: without a validated Intensity scale there is no bar and no room kept for it',card:GetHeight())
   Check('S16 no bar',card,false)
  end)
+ regions.SetJustifyV=hadJustify
  G.UseFont(G.MODELS.default)
  C.setup(ok,'S16: fixture: the card scenario ran',err)
 end)
@@ -1296,30 +1374,59 @@ C.scenario('S20 the opt-in DPS RECORDS section shows only records that exist; no
 end)
 
 -- Approved panel cleanup, progress: the run's count is hidden with the other
--- four counts until Details is opened, and takes no row while it is; the bar
--- sits on the heading row between the heading and the Details button while
--- they fit; with Details open the count has its own whole row. EXPECT fails
--- before the change by design (the count had its own row above the bar).
-C.scenario('S21 collapsed progress is one row: heading, bar and Details; the run count shows only with Details',function()
+-- four counts until Details is opened, and takes no row while it is; with
+-- Details open the count has its own whole row.
+-- Main-panel visual correction: the caption stands at the left of its row
+-- with the compact Details button at the row's right end, and the bar is a
+-- full-width row of its own under them. The check that stood here asked for
+-- the bar on the heading row, between the heading and the Details button
+-- (the approved cleanup's one-row progress); that squeezed bar is
+-- intentionally gone, so the check is replaced by the two rows' own checks,
+-- not relaxed. The Details button is as wide as the wider of its two labels
+-- needs and keeps that width and its place whichever label it shows, and
+-- the bar does not move when Details opens. EXPECT fails at aca67cf4 by
+-- design: the bar's own full-width row. GUARD, because the one-row progress
+-- had them too: the caption at the row's left with Details at its right end,
+-- the drawn bar and button standing in their boxes, a Details button of at
+-- most half the row, and its unmoved place and the bar's when Details opens.
+C.scenario('S21 collapsed progress is a caption with Details at its right and a full-width bar below; the run count shows only with Details',function()
  local ok,err=pcall(function()
   G.UseFont(G.MODELS.default)
   P._playDetails=false
   C.setup(P.Render(Model())==true,'S21: fixture: a build in progress, Details closed')
-  local b=NexusPanel._responsiveLayout.boxes
+  local l=NexusPanel._responsiveLayout
+  local b=l.boxes
   local p=NexusPanel._play
   C.expect(b.progressValue==nil and not ShownText():find('rolled copies',1,true),
    'S21: with Details closed the run count is not shown and has no row',ShownText())
-  C.expect(b.planBar~=nil and b.planDetails~=nil and b.progressHeader~=nil and b.progressHeader.y==b.planDetails.y
-   and b.planBar.y>=b.planDetails.y and b.planBar.y+b.planBar.h<=b.planDetails.y+b.planDetails.h
-   and b.planBar.x>=b.progressHeader.x+b.progressHeader.w and b.planBar.x+b.planBar.w<=b.planDetails.x,
-   'S21: the bar is on the heading row, between the heading and the Details button',
+  C.guard(b.planBar~=nil and b.planDetails~=nil and b.progressHeader~=nil and b.progressHeader.y==b.planDetails.y
+   and b.progressHeader.x==l.inset and b.planDetails.x>=b.progressHeader.x+b.progressHeader.w
+   and b.planDetails.x+b.planDetails.w==l.inset+l.full,
+   'S21: the caption is at the left of its row and the Details button at the row\'s right end',
+   b.progressHeader and b.planDetails and (b.progressHeader.x..'+'..b.progressHeader.w..' / '..b.planDetails.x..'+'..b.planDetails.w))
+  C.expect(b.planBar~=nil and b.progressHeader~=nil and b.planDetails~=nil and b.planBar.x==l.inset and b.planBar.w==l.full
+   and b.planBar.y>=math.max(b.progressHeader.y+b.progressHeader.h,b.planDetails.y+b.planDetails.h),
+   'S21: the bar is a full-width row of its own under the caption and the button',
    b.planBar and (b.planBar.x..','..b.planBar.y..' '..b.planBar.w..'x'..b.planBar.h))
+  local track,button=G.Rect(p.track,NexusPanel),G.Rect(p.details,NexusPanel)
+  C.guard(b.planBar~=nil and track[1]==b.planBar.x and track[2]==b.planBar.y and track[3]-track[1]==b.planBar.w
+   and button[1]==b.planDetails.x and button[2]==b.planDetails.y and button[3]-button[1]==b.planDetails.w,
+   'S21: the drawn bar and the Details button stand in those boxes',G.Text(track)..' '..G.Text(button))
+  -- Compact: as wide as the wider of its two labels needs with the
+  -- template's end caps (measured by the panel, so not restated here), and
+  -- never more than half of the row.
+  C.guard(b.planDetails.w>0 and b.planDetails.w*2<=l.full,'S21: the Details button is compact: at most half of the row',b.planDetails.w)
   C.guard(p.details:IsShown() and Plain(p.details)=='Show details' and p.track:IsShown(),'S21: the bar and Show details stay')
+  local closedBar,closedButton=b.planBar,b.planDetails
   p.details:Click()
   C.setup(P.Render(Model())==true and P._playDetails==true,'S21: fixture: Details opened')
   b=NexusPanel._responsiveLayout.boxes
   C.expect(b.progressValue~=nil and ShownText():find('2 / 6 rolled copies this run',1,true)~=nil,
    'S21: with Details open the run count has its own row',ShownText())
+  C.guard(Plain(p.details)=='Hide details' and b.planDetails.x==closedButton.x and b.planDetails.y==closedButton.y
+   and b.planDetails.w==closedButton.w and b.planBar.x==closedBar.x and b.planBar.y==closedBar.y and b.planBar.w==closedBar.w,
+   'S21: Hide details has the same width and place as Show details, and the bar does not move',
+   b.planDetails.x..'+'..b.planDetails.w..' / '..closedButton.x..'+'..closedButton.w..'; bar '..b.planBar.y..' / '..closedBar.y)
   WholeTexts('S21 Details',{'rolled copies','Still needed','Missing tomes','Extra copies','Locked targets'},5)
   p.details:Click()
   P.Render(Model())
@@ -1337,6 +1444,11 @@ end)
 -- its menu rows and the opened windows use, in full; it wraps inside its hub
 -- rather than being shortened. The hubs keep their routes (their own click
 -- handlers).
+-- Main-panel visual correction: the three hubs are one width and together
+-- span the footer row from its left inset to its right one (they were three
+-- 120-unit hubs with a 24-unit "?" after them, which left the row uneven).
+-- No help button stands in the footer; Help is reached from Options
+-- (owner14_panel_usability F1). EXPECT fails at aca67cf4 by design.
 C.scenario('S22 body blocks keep one compact inset; the footer hubs are two-line with what each opens',function()
  G.UseFont(G.MODELS.default)
  local ss={tier='HC3',mode='HC3',ash='1,240',gain='+45%'}
@@ -1371,6 +1483,30 @@ C.scenario('S22 body blocks keep one compact inset; the footer hubs are two-line
  end
  C.expect(#heights==3 and heights[1]==heights[2] and heights[2]==heights[3] and heights[1]==l.boxes.footer.h,
   'S22: the three hubs share the footer row\'s height',table.concat(heights,'/'))
+ local footer=l.boxes.footer
+ local rects,spans={}, {}
+ for i,key in ipairs({'plan','explore','orbs'}) do
+  rects[i]=hubs[key] and G.Rect(hubs[key],NexusPanel) or nil
+  spans[i]=rects[i] and G.Text(rects[i]) or 'no hub'
+ end
+ if C.setup(rects[1]~=nil and rects[2]~=nil and rects[3]~=nil and footer~=nil,'S22: fixture: the three hubs and the footer box are laid out') then
+  local w1,w2,w3=rects[1][3]-rects[1][1],rects[2][3]-rects[2][1],rects[3][3]-rects[3][1]
+  local g1,g2=rects[2][1]-rects[1][3],rects[3][1]-rects[2][3]
+  C.expect(w1==w2 and w2==w3 and rects[1][1]==footer.x and rects[3][3]==footer.x+footer.w and g1>0 and g2>0 and math.abs(g1-g2)<=1,
+   'S22: the three hubs are one width and span the footer row, with one gap between them (to a unit)',
+   table.concat(spans,' ')..' in '..footer.x..'+'..footer.w)
+  -- Every shown button of the panel itself that lies in the footer row is
+  -- one of the three hubs: no help button stands there.
+  local extra={}
+  for _,child in ipairs(NexusPanel.children or {}) do
+   if child.kind=='Button' and child:IsShown() and child~=hubs.plan and child~=hubs.explore and child~=hubs.orbs then
+    local okRect,r=pcall(G.Rect,child,NexusPanel)
+    if okRect and r and r[2]>=rects[1][2]-0.01 and r[4]<=rects[1][4]+0.01 then extra[#extra+1]=tostring(V.Plain(child:GetText() or ''))..' '..G.Text(r) end
+   end
+  end
+  C.expect(#extra==0 and not (NexusPanel._faqBtn and NexusPanel._faqBtn:IsShown()),
+   'S22: no other button stands in the footer row (no "?" beside the hubs)',table.concat(extra,' ; '))
+ end
 end)
 
 -- Approved panel cleanup, Auto ON takes no row of its own: the explanation
@@ -1451,10 +1587,17 @@ end)
 -- an offer's tag and the charges are shown whole on the panel (wrapped where
 -- they do not fit one line), not completed only by a hover; an offer whose
 -- quality is not known still says so beside its uncoloured name.
+-- Count disclosure (S32): the banish, reroll and freeze charges are counts
+-- and are on the panel only while Details is open. This scenario asked for
+-- them whole on a panel with Details closed; that always-visible row is
+-- intentionally gone, so the same checks run with Details open, where the
+-- row is shown. S32 has the closed panel.
 C.scenario('S25 the Orb run line, a long offer tag and the charges are whole on the panel; an unknown quality is said',function()
  local runtime=Nexus.OrbRuntime
  local compact=runtime.CompactStatus
+ local wasDetails=P._playDetails
  local ok,err=pcall(function()
+  P._playDetails=true
   runtime.CompactStatus=function()
    return {state='WAIT_RESULT',spent=2,limit=5,reserved=1,running=true,pending=true,canResume=false,
     uncertain=0,unconfirmedResults=0,historyKnown=true,remaining=3,limitKnown=true}
@@ -1487,48 +1630,81 @@ C.scenario('S25 the Orb run line, a long offer tag and the charges are whole on 
   end
  end)
  runtime.CompactStatus=compact
+ P._playDetails=wasDetails
  G.UseFont(G.MODELS.default)
  P.Render(Model())
  C.setup(ok,'S25: fixture: the full-text scenario ran',err)
 end)
 
--- Approved panel cleanup, the selected offer ("The selected row is a filled
--- band with a 2-unit accent bar, not an outline"): the one selected row (the
--- runtime's marked offer) shows a 2-unit bar along its left edge, as tall as
--- the row, just outside its icon; the other rows show none, and without a
--- selected offer no row does. No outline is drawn and the rows stay
--- display-only. EXPECT fails before the change by design (the selected row
--- was told by its tag alone).
-C.scenario('S26 the selected offer row is a band with a 2-unit accent bar; no outline, no click',function()
+-- Main-panel visual correction, the selected offer (a selected accent
+-- outline around a dark fill): the one selected row (the runtime's marked
+-- offer) shows a thin outline along its own four edges, in the appearance's
+-- accent (ui_theme_appearance), around a dark ground; the other rows show
+-- neither, without a selected offer no row does, and a row that goes leaves
+-- neither behind. No icon has an outline and the rows stay display-only.
+-- The check that stood here asked for a filled band with a 2-unit accent bar
+-- and no outline (the approved cleanup's look, which this correction
+-- replaces); it is replaced by the outline's own checks, not relaxed. EXPECT
+-- fails at aca67cf4 by design (a band and a bar, no outline).
+C.scenario('S26 the selected offer row has a thin accent outline around a dark fill; the other rows have neither; no click',function()
  G.UseFont(G.MODELS.default)
- local function Bars()
-  local c,shown=NexusPanel._offerCards,{}
-  for i=1,3 do shown[i]=(c[i].accent~=nil and c[i].accent:IsShown()) and true or false end
-  return c,shown
+ -- Per row: how many of its outline's edges are shown, and its fill.
+ local function Marks()
+  local c,shown,notes=NexusPanel._offerCards,{},{}
+  for i=1,3 do
+   local edges=0
+   for _,edge in ipairs(c[i].outline or {}) do if edge:IsShown() then edges=edges+1 end end
+   shown[i]={edges=edges,fill=(c[i].fill~=nil and c[i].fill:IsShown()) and true or false}
+   notes[i]=edges..' edges, fill '..tostring(shown[i].fill)
+  end
+  return c,shown,table.concat(notes,' / ')
  end
  local cards=LongOffer('Take Cinder Lattice.')
  C.setup(P.Render(Model({cards=cards,recommendation='Take Cinder Lattice.'}))==true,'S26: fixture: an offer whose first row is selected')
- local c,shown=Bars()
- C.expect(shown[1] and not shown[2] and not shown[3],'S26: only the selected row shows the accent bar',
-  tostring(shown[1])..'/'..tostring(shown[2])..'/'..tostring(shown[3]))
- if shown[1] then
-  local bar,row,icon=G.Rect(c[1].accent,NexusPanel),G.Rect(c[1],NexusPanel),G.Rect(c[1]._nexusSlot.icon,NexusPanel)
-  local area=G.Rect(NexusPanel._rollArea,NexusPanel)
-  C.expect(bar[3]-bar[1]==2 and bar[2]==row[2] and bar[4]==row[4] and bar[3]<=icon[1] and G.Inside(bar,area,0.01),
-   'S26: the bar is 2 units wide, as tall as the row, left of the icon and inside the offer block',G.Text(bar)..' row '..G.Text(row))
+ local c,shown,notes=Marks()
+ C.expect(shown[1].edges==4 and shown[1].fill and shown[2].edges==0 and not shown[2].fill and shown[3].edges==0 and not shown[3].fill,
+  'S26: only the selected row shows its four-edge outline and its fill',notes)
+ C.expect(c[1].accent==nil and c[2].accent==nil and c[3].accent==nil,'S26: no row has the former accent bar')
+ if shown[1].edges==4 then
+  local row,area=G.Rect(c[1],NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)
+  local sides,drawn,onRow={},{},true
+  for _,edge in ipairs(c[1].outline) do
+   local r=G.Rect(edge,NexusPanel)
+   local w,h=r[3]-r[1],r[4]-r[2]
+   drawn[#drawn+1]=G.Text(r)
+   -- One unit thin, on one side of the row's own box, as long as that side.
+   if h==1 and w==row[3]-row[1] and r[1]==row[1] and r[2]==row[2] then sides.top=true
+   elseif h==1 and w==row[3]-row[1] and r[1]==row[1] and r[4]==row[4] then sides.bottom=true
+   elseif w==1 and h==row[4]-row[2] and r[2]==row[2] and r[1]==row[1] then sides.left=true
+   elseif w==1 and h==row[4]-row[2] and r[2]==row[2] and r[3]==row[3] then sides.right=true
+   else onRow=false end
+  end
+  local fill=G.Rect(c[1].fill,NexusPanel)
+  C.expect(onRow and sides.top and sides.bottom and sides.left and sides.right
+   and fill[1]==row[1] and fill[2]==row[2] and fill[3]==row[3] and fill[4]==row[4] and G.Inside(row,area,0.01),
+   'S26: the outline is four 1-unit edges on the row\'s own box, around the fill, inside the offer block',
+   table.concat(drawn,' ')..' row '..G.Text(row)..' fill '..G.Text(fill))
+  -- The selected offer's reason is the offer block's own text inside the
+  -- row: the fill must be drawn under it, so it is a texture of the offer
+  -- block (under that block's texts), not of the row above them.
+  C.expect(c[1].fill:GetParent()==NexusPanel._rollArea,'S26: the fill is drawn under the reason, as a texture of the offer block')
  end
- local clickable,outlined=false,false
+ local clickable,iconOutlined=false,false
  for i=1,3 do
   if c[i]:GetScript('OnClick') or c[i]:GetScript('OnMouseUp') or c[i]:GetScript('OnMouseDown') then clickable=true end
-  if c[i].edges~=nil or (c[i]._nexusSlot and c[i]._nexusSlot.edges~=nil) then outlined=true end
+  if c[i].edges~=nil or (c[i]._nexusSlot and (c[i]._nexusSlot.edges~=nil or c[i]._nexusSlot.interior~=nil)) then iconOutlined=true end
  end
- C.guard(not clickable and not outlined,'S26: the rows stay display-only, with no outline')
+ C.guard(not clickable and not iconOutlined,'S26: the rows stay display-only and no icon has an outline')
  C.setup(P.Render(Model({cards={{text='Cinder Lattice (Epic)'},{text='Hollow Bell (Rare)'},{text='Ashen Tithe'}}}))==true,
   'S26: fixture: an offer with no selected row')
- c,shown=Bars()
- C.expect(not shown[1] and not shown[2] and not shown[3],'S26: without a selected offer no row shows the bar',
-  tostring(shown[1])..'/'..tostring(shown[2])..'/'..tostring(shown[3]))
+ c,shown,notes=Marks()
+ C.expect(shown[1].edges==0 and not shown[1].fill and shown[2].edges==0 and not shown[2].fill and shown[3].edges==0 and not shown[3].fill,
+  'S26: without a selected offer no row shows an outline or a fill',notes)
+ C.setup(P.Render(Model({cards=cards,recommendation='Take Cinder Lattice.'}))==true,'S26: fixture: the selected offer again')
  P.Render(Model())
+ c,shown,notes=Marks()
+ C.expect(not c[1]:IsShown() and shown[1].edges==0 and not shown[1].fill and shown[2].edges==0 and not shown[2].fill
+  and shown[3].edges==0 and not shown[3].fill,'S26: with the offer gone no outline or fill stays behind',notes)
 end)
 
 -- Approved panel cleanup ("no empty reserved space for hidden sections in
@@ -1574,6 +1750,26 @@ C.scenario('S27 no Wishlist with an Echo board: the footer follows the last setu
   C.expect(band==gap,tag..': the footer follows Create Wishlist by one gap (no empty band)',tostring(band)..' / '..tostring(gap))
   C.expect(closed,tag..': the panel ends 6 units under the footer, at the layout height',NexusPanel:GetHeight())
  end
+ -- Independent review of the first candidate of the main-panel visual
+ -- corrections (A1): the setup hint had two modelled lines whatever it said,
+ -- so a longer one lost its end. It is as tall as its wrapped text now (its
+ -- lines are counted here from the note's words in the stated font model,
+ -- not read from the row), and the buttons and the footer follow it as
+ -- before. EXPECT fails at aca67cf4 (22 units for a three-line note).
+ local NOTE='Synthetic setup note that is long enough to need several lines in the panel at every supported text size, '
+  ..'so a hint held to two modelled lines would lose its end.'
+ local noted=Setup()
+ noted.assignment={state='unavailable',note=NOTE}
+ C.setup(P.Render(noted)==true,'S27: fixture: the setup view with a long note renders')
+ band,gap,closed=Tail('S27 long note')
+ if band==nil then return end
+ local hintBox=NexusPanel._responsiveLayout.boxes.setupHint
+ local noteLines=hintBox and G.Rows(NOTE,hintBox.w,G.MODELS.default.char) or 0
+ C.setup(hintBox~=nil and noteLines>2,'S27: fixture: the note needs more than the two modelled lines of the hint',noteLines)
+ C.expect(hintBox~=nil and hintBox.h==noteLines*G.MODELS.default.line,
+  'S27: the hint row holds every line of a long note',tostring(hintBox and hintBox.h)..' for '..tostring(noteLines)..' lines')
+ C.guard(band==gap and closed,'S27: under a long note the footer still follows Create Wishlist by one gap and the panel ends 6 units under it',
+  tostring(band)..' / '..tostring(gap))
  P.Render(Model())
 end)
 
@@ -1873,6 +2069,179 @@ C.scenario('S31 the Orb controls strip attached under the panel draws no run cou
  P.Init({})
  P.Render(Model())
  C.setup(ok,'S31: fixture: the attached strip scenario ran',err)
+end)
+
+-- Count disclosure, the charges (approved cleanup: "Counts stay hidden until
+-- Details is opened"; the counts are read broadly). The compact banish,
+-- reroll and freeze row beside the offer heading is a count too, and it was
+-- the one count Details did not govern: it showed whenever the model carried
+-- charge facts. With Details closed it is not on the panel now: no row, no
+-- hover and no cell kept for it, so the heading has its whole row and the
+-- panel is exactly the panel of the same offer without charge facts. With
+-- Details open it is the row it was: the Readout's own wording of the real
+-- charge facts (an unknown count as the Readout says it, never a 0 in its
+-- place), whole in its cell at the right end of the heading row, once, with
+-- its legend on hover. Closing Details takes it away again. Details belongs
+-- to a build in progress, so the setup view (design/DESIGN_NOTES.md: no plan,
+-- counts "none") and the completed view, which have no Details control, show
+-- no charge counts whatever Details was left at. The difficulty card is not
+-- a count: its tier, Soul Ash, multiplier and Intensity bar stay.
+-- EXPECT fails at aca67cf4 by design: there the row was shown with Details
+-- closed and in the setup and completed views. GUARD: what the open panel
+-- shows, which is the row aca67cf4 always showed; the difficulty card; and
+-- that showing, hiding and pointing at the row takes no game action and
+-- saves nothing. The expected geometry is stated here (the heading row is
+-- the offer block less 4 units; the cell is 72 units at the reference text
+-- size, 4 units after the heading), not read from the layout engine. Native
+-- drawing: NOT RUN.
+C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover or cell with Details closed; the whole row, once, with its hover while Details is open',function()
+ local R=Nexus.Readout
+ local KNOWN={banish=2,reroll=1,freeze=0,trustworthy=true,arrived=true}
+ local wasDetails=P._playDetails
+ local before=Effects()
+ local ok,err=pcall(function()
+  G.UseFont(G.MODELS.default)
+  P._playDetails=false
+  local cards,rec=LongOffer('Take Cinder Lattice.')
+  local function Offer(charges)
+   local m=Model({cards=cards,recommendation=rec})
+   m.charges=charges
+   return m
+  end
+  local charges,hover,head=NexusPanel._chargesText,NexusPanel._chargesHover,NexusPanel._rollStatus
+  -- How many shown texts of the whole panel carry a line.
+  local function Count(line)
+   local n=0
+   for _,r in ipairs(G.Shown(NexusPanel)) do
+    if r.kind=='FontString' and V.Plain(r:GetText() or ''):find(line,1,true) then n=n+1 end
+   end
+   return n
+  end
+  local function Shape()
+   local roll=NexusPanel._responsiveLayout.boxes.roll
+   return {rollW=roll.w,rollH=roll.h,rollY=roll.y,panel=NexusPanel:GetHeight(),headW=head:GetWidth(),headH=head:GetHeight()}
+  end
+  local function Say(s)
+   return 'heading '..tostring(s.headW)..'x'..tostring(s.headH)..' in an offer block '..tostring(s.rollW)..'x'..tostring(s.rollH)
+    ..', panel '..tostring(s.panel)
+  end
+  local function Whole(fs) return fs:IsShown() and (fs:GetWidth()+0.5>=fs:GetStringWidth() or fs:GetHeight()+0.5>=fs:GetStringHeight()) end
+  -- The same offer without any charge fact: what the closed panel must equal.
+  C.setup(P.Render(Offer(nil))==true and NexusPanel._offerCards[1]:IsShown(),'S32: fixture: the offer with no charge facts')
+  local bare=Shape()
+  local line=R.ChargesLine(KNOWN)
+  local words=type(line)=='string' and V.Plain(line) or ''
+  if not C.setup(words~='' and bare.headW==bare.rollW-4 and not charges:IsShown(),
+   'S32: fixture: the Readout words the charge facts; without charge facts the heading has the whole row',words..'; '..Say(bare)) then return end
+
+  -- Details closed.
+  C.setup(P.Render(Offer(KNOWN))==true and P._playDetails~=true,'S32: fixture: the same offer with real charge facts, Details closed')
+  local closed=Shape()
+  C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0,
+   'S32: with Details closed the charge counts are not on the panel: no row and no hover',ShownText())
+  C.expect(closed.headW==closed.rollW-4 and closed.headH==bare.headH and closed.rollH==bare.rollH and closed.rollY==bare.rollY
+   and closed.panel==bare.panel,
+   'S32: and no room is kept for them: the heading has its whole row and the panel is the panel without charge facts',
+   Say(closed)..' / '..Say(bare))
+  -- The disclosure hides counts, not every number on the panel. The original
+  -- difficulty card is not a count: with Details closed it still shows its
+  -- tier, its Soul Ash (1,240 in the card's own short form, 1.2k), its
+  -- multiplier and, with a validated scale, its Intensity bar. GUARD: the
+  -- card is untouched; the charge counts beside it stay off the panel.
+  local carded=Offer(KNOWN)
+  carded.serverStatus={tier='HC3',mode='HC3',ash='1,240',gain='+45%',intensity=250,intensityMax=500,
+   intensityThresholds={100,200,300,400},intensityLevel=2}
+  C.setup(P.Render(carded)==true and P._playDetails~=true,'S32: fixture: the same offer with the difficulty card, Details closed')
+  local card,parts=StatusCard(),{}
+  for _,region in ipairs(card and card.regions or {}) do if region.kind=='FontString' then parts[#parts+1]=region end end
+  C.guard(card~=nil and card:IsShown() and card.intensityBar:IsShown() and #parts>=3
+   and parts[1]:IsShown() and Plain(parts[1])=='HC3' and parts[2]:IsShown() and Plain(parts[2]):find('1.2k',1,true)~=nil
+   and parts[3]:IsShown() and Plain(parts[3])=='+45%',
+   'S32: with Details closed the difficulty card still shows its tier, Soul Ash, multiplier and Intensity bar: the disclosure hides counts, not every number',
+   Plain(parts[1])..' | '..Plain(parts[2])..' | '..Plain(parts[3]))
+  C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0,
+   'S32: and beside that card the charge counts stay off the panel',ShownText())
+  C.setup(P.Render(Offer(KNOWN))==true and P._playDetails~=true,'S32: fixture: the offer without the card again')
+
+  -- Details open.
+  local p=NexusPanel._play
+  p.details:Click()
+  C.setup(P.Render(Offer(KNOWN))==true and P._playDetails==true and Plain(p.details)=='Hide details','S32: fixture: Details opened')
+  local open=Shape()
+  local c=NexusPanel._offerCards
+  local hr,cr,area=G.Rect(head,NexusPanel),G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)
+  C.guard(charges:IsShown() and Plain(charges)==words and Count(words)==1,
+   'S32: with Details open the charge counts are shown as the Readout words them, once on the whole panel',
+   Plain(charges)..' / '..words..' x'..Count(words))
+  C.guard(charges:GetWidth()==72 and open.headW==open.rollW-4-76 and cr[3]==area[3]-2 and cr[2]==hr[2] and hr[3]<=cr[1]-4+0.01
+   and G.Inside(cr,area,0.01) and Whole(charges) and Whole(head),
+   'S32: in their 72-unit cell at the right end of the heading row, 4 units after the heading, both whole',
+   G.Text(hr)..' '..G.Text(cr)..' in '..G.Text(area))
+  local apart=true
+  for i=1,3 do if not (c[i]:IsShown() and G.Apart(cr,G.Rect(c[i],NexusPanel)) and G.Apart(hr,G.Rect(c[i],NexusPanel))) then apart=false end end
+  C.guard(apart and open.rollH-bare.rollH==open.headH-bare.headH and open.rollY==bare.rollY,
+   'S32: the row overlaps no offer row, and the offer block is taller only by what its heading row needs',Say(open)..' / '..Say(bare))
+  local tipLines=V.TooltipLines(hover:GetScript('OnEnter'),hover)
+  C.guard(hover:IsShown() and tipLines[2]==charges:GetText() and #tipLines==2+#R.ChargesLegend(),
+   'S32: their hover gives its heading, the complete row and the legend',table.concat(tipLines,' | '))
+
+  -- Unknown counts stay unknown. The facts tried are the ways a count can be
+  -- missing; the first the Readout words with "?" is used.
+  local unknown,unknownWords
+  for _,facts in ipairs({{banish=2,trustworthy=true,arrived=true},{banish=2,reroll=1,freeze=0,trustworthy=true,arrived=false},
+   {trustworthy=true,arrived=false},{arrived=false},{}}) do
+   local said=R.ChargesLine(facts)
+   if type(said)=='string' and V.Plain(said):find('?',1,true) then unknown,unknownWords=facts,V.Plain(said) break end
+  end
+  if C.setup(unknown~=nil,'S32: fixture: charge facts the Readout words with "?" for a count it does not know') then
+   C.setup(P.Render(Offer(unknown))==true and P._playDetails==true,'S32: fixture: the offer with an unknown charge count, Details open')
+   C.guard(charges:IsShown() and Plain(charges)==unknownWords and Plain(charges):find('?',1,true)~=nil and Count(unknownWords)==1 and Whole(charges),
+    'S32: an unknown count is shown as the Readout says it, with its "?", whole and once',Plain(charges)..' / '..unknownWords)
+   p.details:Click()
+   C.setup(P.Render(Offer(unknown))==true and P._playDetails~=true,'S32: fixture: Details closed over the unknown count')
+   C.expect(not charges:IsShown() and not hover:IsShown() and Count(unknownWords)==0,
+    'S32: with Details closed an unknown count is not on the panel either',ShownText())
+   p.details:Click()
+   C.setup(P.Render(Offer(KNOWN))==true and P._playDetails==true,'S32: fixture: Details open over the known counts again')
+  end
+
+  -- Details closed again.
+  p.details:Click()
+  C.setup(P.Render(Offer(KNOWN))==true and P._playDetails~=true and Plain(p.details)=='Show details','S32: fixture: Details closed again')
+  local again=Shape()
+  C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0 and again.headW==bare.headW and again.headH==bare.headH
+   and again.rollH==bare.rollH and again.panel==bare.panel,
+   'S32: closing Details takes the charge counts, their hover and their cell away again: the panel without charge facts is back',
+   Say(again)..' / '..Say(bare))
+
+  -- The setup view has no Details control: no charge counts, whatever
+  -- Details was left at.
+  P._playDetails=true
+  local setup={status='ready',level=40,auto=false,cards=cards,recommendation=rec,charges=KNOWN,
+   progress={total=0,missing={},shed={},toLock={},unknownTomes={}},assignment={state='unassigned',knownUnassigned=true}}
+  if C.setup(P.Render(setup)==true and NexusPanel._offerCards[1]:IsShown() and NexusPanel._responsiveLayout.boxes.planDetails==nil,
+   'S32: fixture: the setup view with an Echo board and charge facts has no Details control') then
+   C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0
+    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-4,
+    'S32: the setup view, which has no Details, shows no charge counts and keeps no cell for them',ShownText())
+  end
+  -- The completed view (every target owned, none left to lock) has no
+  -- Details control either, and can still show an Echo board.
+  local done=Model({cards=cards,recommendation=rec,owned=6})
+  done.charges=KNOWN
+  if C.setup(P.Render(done)==true and NexusPanel._offerCards[1]:IsShown() and NexusPanel._responsiveLayout.play~=true
+   and NexusPanel._responsiveLayout.boxes.planDetails==nil,
+   'S32: fixture: the completed view with an Echo board and charge facts has no Details control') then
+   C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0
+    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-4,
+    'S32: the completed view, which has no Details, shows no charge counts and keeps no cell for them',ShownText())
+  end
+ end)
+ P._playDetails=wasDetails
+ G.UseFont(G.MODELS.default)
+ P.Render(Model())
+ C.setup(ok,'S32: fixture: the charge counts scenario ran',err)
+ C.guard(Effects()==before,'S32: showing, hiding and pointing at the charge counts takes no game action, sends and saves nothing and leaves Auto as it was',Effects())
 end)
 
 -- Approved panel cleanup ("actual Auto changes must update both chip and

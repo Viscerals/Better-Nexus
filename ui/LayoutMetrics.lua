@@ -453,6 +453,14 @@ local function RecordKey(entry)
     return entry and "1" or "0"
 end
 
+-- A measurement a caller took from the client (a line height, a label
+-- width): a finite number above 0, else 0 (not measured).
+local function Measured(value)
+    value = tonumber(value)
+    if value and value == value and value > 0 and value < math.huge then return value end
+    return 0
+end
+
 local function PanelKey(spec)
     return table.concat({
         Round(spec.width or 272,1),Round(spec.fontScale or 1,3),
@@ -479,7 +487,7 @@ local function PanelKey(spec)
         math.ceil(tonumber(spec.callboardTitleH) or 0),math.ceil(tonumber(spec.callboardDetailH) or 0),
         math.ceil(tonumber(spec.callboardLabelW) or 0),
         spec.performanceH == nil and "m" or math.ceil(tonumber(spec.performanceH) or 0),
-        math.ceil(tonumber(spec.progressLabelW) or 0),math.ceil(tonumber(spec.progressValueH) or 0),
+        math.ceil(tonumber(spec.progressValueH) or 0),
         type(spec.countRowsH) == "table" and (math.ceil(tonumber(spec.countRowsH[1]) or 0) .. ":"
             .. math.ceil(tonumber(spec.countRowsH[2]) or 0)) or 0,
         math.ceil(tonumber(spec.footerH) or 0),
@@ -491,23 +499,89 @@ local function PanelKey(spec)
         math.ceil(tonumber(spec.orbLineH) or 0),
         spec.orbDetail and 1 or 0,math.ceil(tonumber(spec.orbDetailH) or 0),
         math.ceil(tonumber(spec.headerTitleH) or 0),
+        math.ceil(Measured(spec.lineSmallH)),math.ceil(Measured(spec.planDetailsW)),
+        math.ceil(Measured(spec.setupTitleH)),math.ceil(Measured(spec.setupHintH)),
+        math.ceil(Measured(spec.completeTitleH)),math.ceil(Measured(spec.completeTextH)),
     }, "|")
 end
 
 -- The three offer rows of the roll box, in one place for the box's height
 -- (M.Panel) and their placement (Panel.PlaceOfferCards), from the panel's
--- small text line and section gap. A row is one small text line with a row
--- gap above and below it (room for a legible icon and for the text to
--- breathe); rows are a row gap apart, and the band keeps two row gaps under
--- the heading line and above the text below. Returns, from the roll box's
--- top: the first row's top, a row's height, the gap between rows and where
--- the text under the rows starts. At font scale 1 (small 11, gap 6):
--- 16, 15, 2 and 69.
-function M.OfferRows(small, gap)
+-- text lines and section gap. A row is a fixed grid of two text lines: the
+-- offer's name on its primary line (`normal`) and its quality on the
+-- secondary line under it (`small`), with a row gap above and below them
+-- (M.OfferRowGrid gives the columns). Every row has that same base height,
+-- so the three rows keep one rhythm; a row whose own text needs more grows
+-- by its measured height (M.Panel: spec.offerRowsH). Rows are a row gap
+-- apart, and the band keeps two row gaps under the heading line and above
+-- the text below. Returns, from the roll box's top: the first row's top, a
+-- row's height, the gap between rows and where the text under the rows
+-- starts. At font scale 1 (small 11, normal 14, gap 6): 16, 29, 2 and 111.
+-- A caller without the primary line gets the two lines' 14 : 11 share of
+-- the small line, the proportion the layout's own rows have.
+function M.OfferRows(small, gap, normal)
     local rowGap = math.max(2, math.floor(gap / 3))
-    local rowH = small + 2 * rowGap
+    normal = tonumber(normal) or math.ceil(small * 14 / 11)
+    local rowH = normal + small + 2 * rowGap
     local top = 1 + small + 2 * rowGap
     return top, rowH, rowGap, top + 3 * rowH + 4 * rowGap
+end
+
+-- The grid inside one offer row `width` units wide, for its placement and
+-- its measurement (Panel.PlaceOfferCards, Panel.MeasuredLayout): the row's
+-- content is inset one layout gap from both ends; the icon is a square as
+-- tall as the two text lines, at the left; the text column starts one gap
+-- after it and the status column ends at the right inset. `content` is the
+-- room the text and status columns share; `pad` is the row gap kept above
+-- and below the lines.
+function M.OfferRowGrid(small, gap, normal, width)
+    local _, rowH, rowGap = M.OfferRows(small, gap, normal)
+    normal = tonumber(normal) or math.ceil(small * 14 / 11)
+    local icon = normal + small
+    local textX = gap + icon + gap
+    return {
+        rowH=rowH,pad=rowGap,inset=gap,gap=gap,icon=icon,textX=textX,
+        nameH=normal,metaH=small,
+        content=math.max(1, math.floor(tonumber(width) or 0) - textX - gap),
+    }
+end
+
+-- The main panel's width for a text scale: the 420-unit reference width
+-- times the font scale the owned fonts follow (never narrower than the
+-- reference, and at most twice it: the largest supported scale), bounded by
+-- the room the screen leaves the panel at its chosen size (`screenWidth` in
+-- UIParent units less M.FitToScreen's 24-unit margin, over `panelScale`), so
+-- a wider panel is never one the fit would then have to scale down for its
+-- width. A screen width that is not plausible (M.FitToScreen's own 640-unit
+-- floor) bounds nothing. One deterministic value from its three inputs: the
+-- caller reads them once per render and nothing is fed back from the fitted
+-- size. Returns whole units.
+M.PANEL_BASE_WIDTH = 420
+function M.PanelWidth(fontScale, screenWidth, panelScale)
+    local base = M.PANEL_BASE_WIDTH
+    local scale = tonumber(fontScale)
+    if not (scale and scale == scale) then scale = 1 end
+    scale = Clamp(scale, 1, 2)
+    local width = math.floor(base * scale + 0.5)
+    screenWidth = tonumber(screenWidth)
+    if screenWidth and screenWidth == screenWidth and screenWidth >= 640 and screenWidth < math.huge then
+        panelScale = Measured(panelScale)
+        if panelScale <= 0 then panelScale = 1 end
+        width = math.min(width, math.floor((screenWidth - 24) / panelScale))
+    end
+    return math.max(base, width)
+end
+
+-- The three footer hubs across a row `full` units wide: three hubs of one
+-- width, `gap` apart, that together span the row exactly. What three equal
+-- whole widths leave over (0 to 2 units) goes to the two gaps, never to one
+-- hub. Returns the hub width and the two gaps.
+function M.FooterColumns(full, gap)
+    full = math.max(3, math.floor(tonumber(full) or 0))
+    gap = math.max(0, math.floor(tonumber(gap) or 0))
+    local hub = math.max(1, math.floor((full - 2 * gap) / 3))
+    local spare = math.max(0, full - 2 * gap - 3 * hub)
+    return hub, gap + math.ceil(spare / 2), gap + math.floor(spare / 2)
 end
 
 function M.Panel(spec)
@@ -526,9 +600,17 @@ function M.Panel(spec)
     local normal = math.ceil(14 * scale)
     local large = math.ceil(16 * scale)
     local gap = math.ceil(6 * scale)
+    -- One line of the panel's secondary text is as tall as the client
+    -- measures it (spec.lineSmallH), never under the modelled small row: a
+    -- face whose line is taller than its nominal size keeps its whole line
+    -- wherever a row holds one line of that text. Without a measurement the
+    -- small row stands, as before (the caller passes only a height the
+    -- client itself reported: Panel.ClientLineHeight).
+    local lineSmall = math.max(small, math.ceil(Measured(spec.lineSmallH)))
     local layout = {
         kind="panel",width=width,boxes={},required={},scale=scale,
         key=key,small=small,normal=normal,large=large,gap=gap,
+        lineSmall=lineSmall,
     }
     -- The charges cell of the offer heading row. 72 px holds the compact row
     -- at the 10 px small size, so the cell follows the font scale and is
@@ -660,11 +742,11 @@ function M.Panel(spec)
         if spec.cardRows then
             -- That least height was sized for three one-line rows (to
             -- test.163021: 3 x (small + row gap) under the heading). The
-            -- rows are taller now, and the box grows by exactly what they
-            -- gained (15 px at font scale 1), so the text under them keeps
-            -- the room it had.
+            -- rows are the two-line grid rows now (M.OfferRows), and the box
+            -- grows by exactly what they gained, so the text under them
+            -- keeps the room it had.
             local oneLineRows = bodyTop + 3 * (small + rowGap)
-            bodyTop = select(4, M.OfferRows(small, gap)) + headExtra
+            bodyTop = select(4, M.OfferRows(small, gap, normal)) + headExtra
             height = height + bodyTop - oneLineRows
         end
         -- Measured content (approved cleanup: full offer names, tags and the
@@ -675,7 +757,7 @@ function M.Panel(spec)
         -- that row taller than the model row, and the box grows by exactly
         -- that.
         if spec.cardRows and type(spec.offerRowsH) == "table" then
-            local _, rowH = M.OfferRows(small, gap)
+            local _, rowH = M.OfferRows(small, gap, normal)
             local extra = 0
             for index = 1, 3 do
                 extra = extra + math.max(0, math.ceil(tonumber(spec.offerRowsH[index]) or 0) - rowH)
@@ -823,10 +905,20 @@ function M.Panel(spec)
         cursor = cursor + height + gap
     end
     if spec.noBuild then
-        Add(layout,"setupTitle",inset,cursor,full,large)
-        cursor = cursor + large + gap
-        Add(layout,"setupHint",inset,cursor,full,small * 2)
-        cursor = cursor + small * 2 + gap
+        -- The setup view's title and hint are as tall as their wrapped text
+        -- measures in this row's width (spec.setupTitleH, spec.setupHintH:
+        -- Panel.MeasuredLayout), never under the modelled rows they had (one
+        -- large line; two small lines). A line taller than its modelled row
+        -- at a larger native size, and a hint that needs more than two
+        -- lines, are then whole, and the buttons and what follows move down
+        -- by what the text needs. Without a measurement the modelled rows
+        -- stand, as before.
+        local titleH = math.max(large, math.ceil(Measured(spec.setupTitleH)))
+        local hintH = math.max(small * 2, math.ceil(Measured(spec.setupHintH)))
+        Add(layout,"setupTitle",inset,cursor,full,titleH)
+        cursor = cursor + titleH + gap
+        Add(layout,"setupHint",inset,cursor,full,hintH)
+        cursor = cursor + hintH + gap
         local buttonHeight = math.max(24, normal + 8)
         Add(layout,"setupAssign",(width-146)/2,cursor,146,buttonHeight)
         cursor = cursor + buttonHeight + gap
@@ -834,10 +926,15 @@ function M.Panel(spec)
         cursor = cursor + buttonHeight + gap
     elseif spec.complete then
         if not spec.statusVisible then
-            Add(layout,"completeTitle",inset,cursor,full,normal)
-            cursor = cursor + normal + gap
-            Add(layout,"completeText",inset,cursor,full,small * 2)
-            cursor = cursor + small * 2 + gap
+            -- The completion view's badge and sentence, measured the same
+            -- way (spec.completeTitleH, spec.completeTextH), never under the
+            -- modelled rows they had (one normal line; two small lines).
+            local titleH = math.max(normal, math.ceil(Measured(spec.completeTitleH)))
+            local textH = math.max(small * 2, math.ceil(Measured(spec.completeTextH)))
+            Add(layout,"completeTitle",inset,cursor,full,titleH)
+            cursor = cursor + titleH + gap
+            Add(layout,"completeText",inset,cursor,full,textH)
+            cursor = cursor + textH + gap
         end
         Performance(small * 8 + gap * 5)
     else
@@ -849,35 +946,35 @@ function M.Panel(spec)
         -- behind them: the Still needed, Extra copies and To lock lists) is
         -- laid out only while details are shown (native QA test.163008):
         -- Hide details gives back its whole height.
-        -- Approved cleanup: collapsed, the progress is one row: the heading
-        -- (its measured width, spec.progressLabelW), the bar and Show
-        -- details. The run's count is hidden with the other four counts
-        -- until Details is opened and takes no row while it is. When the
-        -- heading and the button leave the bar too little room (large or
-        -- long text), the bar takes a row of its own under them. With
-        -- Details open the count has its own full-width row (its measured
-        -- height, spec.progressValueH), then the four counts in two rows
-        -- (their measured heights, spec.countRowsH), then the names.
+        -- Collapsed, the progress is its caption row and its bar: the heading
+        -- at the left and the compact Details control at the right of one
+        -- row, and the bar across the whole block on a row of its own under
+        -- them, at every text size (main-panel visual correction; the
+        -- bar no longer shares the caption's row, where it was a third of
+        -- the block). The run's count is hidden with the other four counts
+        -- until Details is opened and takes no row while it is. With Details
+        -- open the count has its own full-width row (its measured height,
+        -- spec.progressValueH), then the four counts in two rows (their
+        -- measured heights, spec.countRowsH), then the names.
+        -- Details is as wide as its own label needs (spec.planDetailsW: the
+        -- wider of its two measured labels with their end caps): no wider,
+        -- so it is compact, and no narrower, so a longer localized label is
+        -- not cut; it leaves the caption at least half of the row. Without
+        -- a measurement the modelled 12-character button stands. The caption
+        -- row holds one whole line of the heading (lineSmall).
         local rowGap = math.max(2,math.floor(gap/3))
         local char = M.ConservativeText(scale)
         local detailsW = math.min(full, math.ceil(12 * char) + 20)
-        local rowH = math.max(normal, small + 6)
+        local detailsNeed = math.ceil(Measured(spec.planDetailsW))
+        if detailsNeed > 0 then detailsW = math.max(1, math.min(detailsNeed, math.floor(full / 2))) end
+        local rowH = math.max(normal, small + 6, lineSmall)
         local barH = math.max(5, math.ceil(small / 2))
-        local labelW = math.ceil(tonumber(spec.progressLabelW) or (8 * char * 1.1))
-        local barW = full - labelW - detailsW - gap * 2
         layout.planDetailsW = detailsW
-        if barW >= 48 then
-            Add(layout,"progressHeader",inset,cursor,labelW,rowH)
-            Add(layout,"planBar",inset+labelW+gap,cursor+math.floor((rowH-barH)/2),barW,barH)
-            Add(layout,"planDetails",width-inset-detailsW,cursor,detailsW,rowH)
-            cursor = cursor + rowH
-        else
-            Add(layout,"progressHeader",inset,cursor,math.max(1,full-detailsW-gap),rowH)
-            Add(layout,"planDetails",width-inset-detailsW,cursor,detailsW,rowH)
-            cursor = cursor + rowH + rowGap
-            Add(layout,"planBar",inset,cursor,full,barH)
-            cursor = cursor + barH
-        end
+        Add(layout,"progressHeader",inset,cursor,math.max(1,full-detailsW-gap),rowH)
+        Add(layout,"planDetails",width-inset-detailsW,cursor,detailsW,rowH)
+        cursor = cursor + rowH + rowGap
+        Add(layout,"planBar",inset,cursor,full,barH)
+        cursor = cursor + barH
         if not spec.planDetails then
             cursor = cursor + gap
         else
@@ -911,13 +1008,15 @@ function M.Panel(spec)
             -- row; when the client measured those rows taller in their real
             -- font, width and text (Panel.PanelLayout, spec.detailNamesH),
             -- that measured stack instead, so the last row is never cut.
+            -- The heading over each column is one whole line of the secondary
+            -- text (lineSmall).
             local namesH = math.max(small * 3, math.ceil(tonumber(spec.detailNamesH) or 0))
-            local columnHeight = small + math.max(3,math.floor(gap/2)) + namesH
+            local columnHeight = lineSmall + math.max(3,math.floor(gap/2)) + namesH
             Add(layout,"needed",inset,cursor,columnWidth,columnHeight)
             Add(layout,"shed",rightX,cursor,rightW,columnHeight)
             cursor = cursor + columnHeight + gap
             if (tonumber(spec.toLockCount) or 0) > 0 then
-                local height = small * 3 + math.max(3,math.floor(gap/2))
+                local height = lineSmall * 3 + math.max(3,math.floor(gap/2))
                 Add(layout,"toLock",inset,cursor,full,height)
                 cursor = cursor + height + gap
             end
@@ -938,11 +1037,13 @@ function M.Panel(spec)
         -- the line puts its value on a second line under its label. Nothing
         -- is shortened. What best known means is on that entry's hover.
         local rowGap = math.max(2,math.floor(gap/3))
+        -- A line of an entry is one whole line of the secondary text
+        -- (lineSmall: its measured height when the caller gave one).
         local function Entry(entry)
-            if type(entry) ~= "table" then return full, small end
+            if type(entry) ~= "table" then return full, lineSmall end
             local need = math.ceil((tonumber(entry[1]) or 0) + gap + (tonumber(entry[2]) or 0))
-            if need <= full then return need, small end
-            return full, small * 2 + rowGap
+            if need <= full then return need, lineSmall end
+            return full, lineSmall * 2 + rowGap
         end
         local yours, best = spec.recordYours, spec.recordBest
         layout.recordYours, layout.recordBest = yours, best
@@ -950,10 +1051,10 @@ function M.Panel(spec)
             local yoursW, yoursH = Entry(yours)
             local bestW, bestH = Entry(best)
             if type(yours) == "table" and type(best) == "table"
-                and yoursH == small and bestH == small and yoursW + gap * 2 + bestW <= full then
-                Add(layout,"bestDps",inset,cursor,yoursW,small)
-                Add(layout,"bestKnown",inset+yoursW+gap*2,cursor,bestW,small)
-                cursor = cursor + small + gap
+                and yoursH == lineSmall and bestH == lineSmall and yoursW + gap * 2 + bestW <= full then
+                Add(layout,"bestDps",inset,cursor,yoursW,lineSmall)
+                Add(layout,"bestKnown",inset+yoursW+gap*2,cursor,bestW,lineSmall)
+                cursor = cursor + lineSmall + gap
             else
                 Add(layout,"bestDps",inset,cursor,yoursW,yoursH)
                 cursor = cursor + yoursH + rowGap

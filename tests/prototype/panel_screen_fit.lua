@@ -18,6 +18,11 @@ end
 -- progress), so the former model no longer outgrows the 600 px viewport at
 -- 2x font. The fixture needs a layout taller than the viewport: it carries
 -- three offers with long names, which wrap in full at 2x font.
+-- Main-panel visual correction: the panel is 776 units wide here (its
+-- width follows the text scale inside what the 800 px viewport leaves), each
+-- offer row is its name over its quality, and the progress is a caption row
+-- over a full-width bar. The first and third names still wrap at that width,
+-- and the layout is still taller than the 600 px viewport.
 local model = {
     status='ready', level=40, auto=false,
     cards={{text='Resonance of the Unbroken Covenant of the Northern Reach (Uncommon) wanted'},
@@ -50,12 +55,35 @@ Fits('initial render')
 
 -- A viewport change does not alter the model or font signature. Fit must
 -- still update on an otherwise settled render.
+-- Main-panel visual correction: the panel's width follows its text scale
+-- inside what the viewport's width leaves at the chosen size
+-- (LayoutMetrics.PanelWidth: at 2x font 840 units, or the viewport's width
+-- less the 24-unit margin when that is less), so a change of the viewport's
+-- WIDTH takes a layout pass now, by design. The settled-render guard is
+-- therefore kept on a change of the viewport's height alone, which leaves
+-- the width, and so the layout, as they were; the two width changes that
+-- stood here stay, each with the width it must give.
+assert(panel:GetWidth() == 776 and panel._responsiveLayout.width == 776,
+    'at 2x font the panel is as wide as the 800px viewport leaves: 776 units (800 - 24), not the reference 420 (width '
+    .. tostring(panel:GetWidth()) .. ')')
+local computed = Nexus.LayoutMetrics.Stats().computations
+UIParent:SetSize(800, 900)
+Render()
+assert(panel:GetScale() == 1, 'a taller viewport restores the native panel scale on a settled render (scale '
+    .. tostring(panel:GetScale()) .. ', panel ' .. tostring(panel:GetWidth()) .. 'x' .. tostring(panel:GetHeight()) .. ')')
+UIParent:SetSize(800, 600)
+Render()
+Fits('settled render after the viewport height shrinks')
+assert(panel:GetWidth() == 776 and Nexus.LayoutMetrics.Stats().computations == computed,
+    'a change of the viewport height alone keeps the width and computes no layout')
 UIParent:SetSize(1200, 900)
 Render()
 assert(panel:GetScale() == 1, 'a larger viewport restores the native panel scale')
+assert(panel:GetWidth() == 840, 'and gives the panel its 840 units at 2x font (width ' .. tostring(panel:GetWidth()) .. ')')
 UIParent:SetSize(800, 600)
 Render()
-Fits('settled render after viewport shrinks')
+Fits('render after viewport shrinks')
+assert(panel:GetWidth() == 776, 'the 800px viewport bounds the width at 776 units again (width ' .. tostring(panel:GetWidth()) .. ')')
 
 -- Fixture-local counters on the real widget methods: the harness's shared
 -- region methods (reached as layout_geometry_support does, no harness or
@@ -312,6 +340,6 @@ assert(panel:GetScale() == 1, 'a larger viewport still restores the native panel
     .. tostring(panel:GetHeight()) .. ')')
 UIParent:SetSize(800, 600)
 Render()
-Fits('settled render after header, hover and card value caching')
+Fits('render after header, hover and card value caching')
 
 print('PASS panel_screen_fit')

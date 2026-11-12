@@ -37,9 +37,11 @@
 --     keeps the full Releases address in its box and starts nothing.
 -- U2  review C-06: that box is found by the popup's editBox key or, for a
 --     template without it, by the named child "<popup name>EditBox".
--- F1 items 15 and 14: the footer "?" opens Help.Show('faq') once, fits the
---     420 px footer beside the hubs, leaves header line 1 to Auto, Options and
---     Close, and its hover says where the numbers are explained.
+-- F1 items 15 and 14: the FAQ is one choice away in Options and opens
+--     Help.Show('faq') once; that row's hover says where the numbers are
+--     explained; header line 1 stays Auto, Options and Close. Main-panel visual
+--     correction: the small "?" these items put after the footer hubs is
+--     gone, because the three hubs are one width and span the footer row.
 -- A1  item 10 excluded: the Auto button still reads "Auto OFF" / "Auto ON",
 --     and no panel text or menu row says "Auto: Off".
 -- The Readout-owned Automation settings row "Auto: OFF (the Auto button turns
@@ -614,36 +616,48 @@ C.scenario('U2 the Releases address reaches the popup box with or without its ed
  C.guard(Acts()==acts and F.Serialize(NexusDB)==saved,'U2: opening it takes no action, sends and writes nothing',Acts())
 end)
 
-C.scenario('F1 footer FAQ shortcut and number explanations',function()
+C.scenario('F1 the FAQ from Options, no footer shortcut, and number explanations',function()
  P.Render(Model(Extras(41)))
+ -- The visual corrections of the main panel:
+ -- the three footer hubs are one width and span the footer row, so the small
+ -- "?" that stood after them is gone. Help's FAQ stays one choice away in
+ -- Options, through the route the "?" shared (Help.Show("faq")), and what the
+ -- "?" hover said about the panel's numbers (item 14) is on that row's hover.
+ -- The checks that stood here asked for the "?" itself (shown, after the Orbs
+ -- hub, inside the 420 px footer, a 22 px target, one click to the FAQ, its
+ -- hover); they are replaced by the checks of the route that remains and of
+ -- the row the "?" left, not relaxed.
  local faq=NexusPanel._faqBtn
- C.expect(faq~=nil and faq:IsShown() and Plain(faq:GetText())=='?','F1: the footer has a ? shortcut')
- if faq then
-  local point,rel,relPoint,x=faq:GetPoint(1)
-  C.expect(rel==NexusPanel._orbsHubBtn and point=='LEFT' and relPoint=='RIGHT' and x>=8,'F1: it sits after the Orbs hub, a separate target')
-  -- Footer row: the left inset + 3 hubs + 2 gaps + gap + ? must stay inside
-  -- 420 px. Approved main panel cleanup: the row starts at the panel's
-  -- compact 8-unit inset with the hubs 6 units apart (it was 10 and 10), so
-  -- both are read from the hubs' own anchors.
-  local hub=NexusPanel._orbsHubBtn:GetWidth()
-  local hubs=NexusPanel._footerButtons
-  local _,_,_,left=hubs.plan:GetPoint(1)
-  local _,_,_,between=hubs.explore:GetPoint(1)
-  C.expect(left+3*hub+2*between+x+faq:GetWidth()<=420-8,'F1: the hubs and ? fit the 420 px footer',left+3*hub+2*between+x+faq:GetWidth())
-  C.expect(faq:GetWidth()>=22 and faq:GetHeight()>=22,'F1: a 22 px target at least',faq:GetWidth()..'x'..faq:GetHeight())
+ C.expect(faq==nil or not faq:IsShown(),'F1: no "?" stands in the footer')
+ -- Footer row: the left inset, three hubs of one width and the two gaps
+ -- between them reach the right inset exactly (read from the hubs' own
+ -- anchors, as before: 8 + 3 x 130 + 7 + 7 = 412 in the 420-unit panel).
+ local hubs=NexusPanel._footerButtons
+ local hub=hubs.plan:GetWidth()
+ local _,_,_,left=hubs.plan:GetPoint(1)
+ local _,_,_,first=hubs.explore:GetPoint(1)
+ local _,_,_,second=hubs.orbs:GetPoint(1)
+ C.expect(hubs.explore:GetWidth()==hub and hubs.orbs:GetWidth()==hub and left==8 and first>0 and second>0
+  and left+3*hub+first+second==NexusPanel:GetWidth()-8,
+  'F1: the three hubs are one width and span the footer between its 8-unit insets',
+  tostring(left)..' + 3 x '..tostring(hub)..' + '..tostring(first)..' + '..tostring(second)..' in '..tostring(NexusPanel:GetWidth()))
+ -- The route that remains: Options > Questions (FAQ), a direct choice (O1).
+ local row=Find(P.MoreMenuItems(NexusPanel._menuBtn),'Questions (FAQ)')
+ C.guard(row~=nil and type(row.func)=='function','F1: Questions (FAQ) is a direct choice in Options')
+ if row and type(row.func)=='function' then
   local before=Effects()
-  local spy=Spy(Nexus.Help,'Show',function() faq:Click() end)
-  C.expect(spy.n==1 and spy.args[1][1]=='faq','F1: one click opens Help.Show("faq") once',spy.n)
-  local tip=table.concat(V.TooltipLines(function() faq:GetScript('OnEnter')(faq) end),'\n')
-  C.expect(tip:find('Questions (FAQ)',1,true) and tip:find('Soul Ash',1,true) and tip:find('Intensity',1,true)
-   and tip:find('DPS',1,true),'F1: its hover says where the numbers are explained',tip)
+  local spy=Spy(Nexus.Help,'Show',function() Click(row) end)
+  C.guard(spy.n==1 and spy.args[1][1]=='faq','F1: one click opens Help.Show("faq") once',spy.n)
+  local tip=Plain(row.tooltipTitle)..'\n'..Plain(row.tooltipText)
+  C.expect(tip:find('Soul Ash',1,true) and tip:find('Intensity',1,true) and tip:find('DPS',1,true),
+   'F1: that row\'s hover says where the numbers are explained',tip)
   C.guard(Effects()==before,'F1: opening the FAQ changes nothing')
  end
  -- Header line 1 keeps Auto, Options and Close only (design/current).
  local headerChildren=0
  for _,c in ipairs({NexusPanel:GetChildren()}) do
   local p1={c:GetPoint(1)}
-  if c~=faq and c:IsShown() and c:GetObjectType()=='Button' and p1[1]=='TOPRIGHT' and p1[2]==NexusPanel and p1[5]==-P.HeaderSlots().top then
+  if c:IsShown() and c:GetObjectType()=='Button' and p1[1]=='TOPRIGHT' and p1[2]==NexusPanel and p1[5]==-P.HeaderSlots().top then
    headerChildren=headerChildren+1
   end
  end
