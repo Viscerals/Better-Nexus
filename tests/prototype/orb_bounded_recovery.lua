@@ -1171,10 +1171,19 @@ r2case('E full usage and compact strip hover',function()
   hit:GetScript('OnEnter')(hit)
   if fs==strip.summary then
    -- Independent Spec review of 24a40301: the attached strip is a surface
-   -- the main panel owns, so it draws no run count; its retained facts,
-   -- the usage among them, are complete on this hover and nowhere cut.
-   check(captured==fs._nexusFullText and captured:find('Orbs used',1,true)~=nil and captured:find('%d')~=nil
-    and not captured:find('...',1,true),'EXPECT the strip hover reveals the exact complete retained facts')
+   -- the main panel owns, so it draws no run count. The expectation is
+   -- unchanged: the hover reveals the exact complete retained facts. Until
+   -- the strip stopped drawing counts the label itself was those facts, so
+   -- the hover was compared with the label; now they are stated here, from
+   -- the retained run's own status, word for word as the strip showed them
+   -- before (usage against the approved maximum, the totals a reload lost,
+   -- the requested Orb, the state), and the hover must equal them exactly.
+   local s=M.CompactStatus()
+   assert(s and s.spent==1 and s.limit==6 and s.reserved==1 and s.historyKnown==false and s.limitKnown~=false,
+    'SETUP the retained run of this case: one used of six approved, one requested, totals lost by the reload')
+   local complete='Orbs used: '..s.spent..' / '..s.limit..' approved; earlier outcome/check totals unavailable after reload\n'
+    ..s.reserved..' Orb pending, not confirmed yet\nPrevious result is unresolved'
+   check(captured==complete,'EXPECT hover reveals exact complete retained facts')
    check(fs:GetText()~='' and not fs:GetText():find('%d') and not fs:GetText():find('Orbs used',1,true),
     'EXPECT the strip itself draws its retained state in words, with no count')
   else
