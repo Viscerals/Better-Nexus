@@ -3831,10 +3831,12 @@ end
 -- Nexus is paused. Options > Questions (FAQ) opens it (M.MoreMenuItems).
 -- Main-panel visual correction: the small "?" that also opened it from the
 -- right end of the footer is gone, because the three hubs now span the
--- footer's whole row; header line 1 stays Auto, Options and Close. What that
--- shortcut's hover said about the panel's numbers (owner-approved item 14:
--- each number's own hover explains it, with the facts that hover already
--- carries) is on the Options row's hover now.
+-- footer's whole row; header line 1 stays Auto, Options and Close. The
+-- Options row is the panel's one control that opens the FAQ now, so its
+-- hover says what both hovers said: its own explanation, the shortcut's note
+-- on opening the FAQ, and where the panel's numbers are explained
+-- (owner-approved item 14: each number's own hover explains it, with the
+-- facts that hover already carries).
 function M.ShowFaq()
     local help = Nexus.Help
     if not (help and type(help.Show) == "function") then return false end
@@ -3978,12 +3980,18 @@ function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
     Add(MenuTitle(LT("panel.menu.section_help"), "help"))
-    -- Short answers (M.ShowFaq): the panel's one FAQ route since the footer
-    -- "?" left, so this row's hover also says where the panel's numbers are
-    -- explained, in the words that shortcut's hover had.
+    -- Short answers (M.ShowFaq). Since the footer "?" left, this row is the
+    -- one control that opens the FAQ, and its hover is three reviewed texts,
+    -- each whole, a blank line between them: the row's own explanation, as
+    -- it always read; the note the "?" gave on opening the FAQ, which stood
+    -- on that shortcut only and came here with the route; and where the
+    -- panel's numbers are explained, in the words that shortcut's hover had.
+    -- The explanation and the note are two reviewed texts that begin alike;
+    -- each is shown as reviewed, neither cut nor merged.
     Add({ text = LT("panel.menu.faq"), notCheckable = true,
         tooltipTitle = LT("panel.tooltip.faq_title"),
-        tooltipText = LT("panel.tooltip.faq_reading") .. "\n\n" .. LT("panel.tooltip.numbers_hint"),
+        tooltipText = LT("panel.tooltip.faq_reading") .. "\n\n" .. LT("panel.tooltip.faq_opening")
+            .. "\n\n" .. LT("panel.tooltip.numbers_hint"),
         func = MenuAction(function() M.ShowFaq() end) })
     -- Setup / Welcome is the guided setup coach itself, as /nexus help and
     -- Help's own Setup / Welcome (the original guided design: "Reopen: Nexus

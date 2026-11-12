@@ -11,6 +11,11 @@
 --         Text produced by other owners is removed only as the exact bytes
 --         that owner's own API returns in this session (listed, narrow).
 --         Diagnostics record no fallback, wrong kind or bad argument.
+--         The header's Build and Wishlist rows show one reviewed line as a
+--         caption and a name, in two regions: each such row is read as its
+--         row, and only when it is proven to be the real seam's own line
+--         (HEADER ROWS below); an untranslated caption and an untranslated
+--         name are each still reported (negative controls).
 -- PASSIVE rendering, hovering and building menus change no saved table,
 --         send nothing and take no action.
 -- TEMPLATE unknown count shows "?", zero "0", long and non-ASCII names are
@@ -80,6 +85,90 @@ local function Hovers(root,out,seen)
  return out
 end
 
+-- HEADER ROWS. Main-panel visual correction ("Split Build/Wishlist captions
+-- from values"): the header shows each reviewed line, "Build: <name>" and
+-- "Wishlist: <name>", as its label in a caption column and the rest of the
+-- line beside it. One seam output then stands in two regions. In the pseudo
+-- session the caption holds the line's opening mark and the name its closing
+-- mark, so neither region is a whole marked text (S.Unmarked: an opener
+-- without its closer, a stray closer) and the scan below, which reads one
+-- region at a time, reports both. The words did pass the seam; what changed is
+-- that a region no longer holds the whole line.
+-- Such a row is therefore read as the player reads it, the caption and then
+-- the name, but only when it is PROVEN here to be the real seam's own line:
+--   * the caption and the name are both among the panel's visible texts now
+--     (S.VisibleTexts: shown and not empty; no product flag is read and the
+--     panel's own split is not called);
+--   * this test asks the real seam for the row's line itself,
+--     Localization.Format(<the row's reviewed key>, {<its slot> = <form>}),
+--     with a form the owner's own API gives for the model shown
+--     (UserText.DestinationFields over the model's destination facts, as
+--     the scenario takes its owner phrases: the row's value or its compact
+--     value);
+--   * that line begins with exactly the caption's bytes, ends with exactly
+--     the name's bytes and holds nothing between them but white space.
+-- So nothing shown is outside that line, nothing of the line is missing but
+-- the white space between the two columns, and the order is the line's own.
+-- A proven row's line then stands among the collected texts where the name
+-- stood, as often as the name was collected, with the caption's entries
+-- folded into it, and the unchanged scan reads every shown byte of the row as
+-- the one seam output it is. A row that is not proven keeps its two regions
+-- as they are, which the scan reports: an untranslated caption or name is
+-- part of no seam line of this session. Nothing is left out and no word is
+-- allowed by name. `seen` counts the rows shown split and the proven ones.
+local HEADER_ROWS={
+ {caption='_contextBuildCaption',name='_contextBuild',key='panel.label.context_build',slot='build',field=2},
+ {caption='_contextWishlistCaption',name='_contextWishlist',key='panel.label.context_wishlist',slot='wishlist',field=3},
+}
+-- The real seam's line for `row` that is made of exactly the shown pieces
+-- `caption` and `name`, or nil when no owner form gives such a line.
+local function SeamLine(row,caption,name,model)
+ local L,U,P=Nexus.Localization,Nexus.UserText,Nexus.Panel
+ if type(caption)~='string' or caption=='' or type(name)~='string' or name=='' then return nil end
+ if not (U and U.DestinationFields) then return nil end
+ local fields=U.DestinationFields(P.DestinationFacts(model) or {})
+ local field=type(fields)=='table' and fields[row.field] or nil
+ if type(field)~='table' then return nil end
+ for _,form in ipairs({'value','compact'}) do
+  local shown=field[form]
+  if type(shown)=='string' and shown~='' then
+   local line,source=L.Format(row.key,{[row.slot]=shown})
+   if type(line)=='string' and source~='unavailable' and #caption+#name<=#line
+    and line:sub(1,#caption)==caption and line:sub(#line-#name+1)==name
+    and line:sub(#caption+1,#line-#name):find('^%s*$') then return line end
+  end
+ end
+ return nil
+end
+-- The panel's visible texts (S.VisibleTexts), each proven header row as its
+-- one line. Every other text, and every row that is not proven, is as
+-- S.VisibleTexts gave it.
+local function PanelTexts(P,seen)
+ local visible=S.VisibleTexts(NexusPanel)
+ for _,row in ipairs(HEADER_ROWS) do
+  local caption,name=NexusPanel[row.caption],NexusPanel[row.name]
+  local captions,names=0,0
+  for _,item in ipairs(visible) do
+   if item.frame==caption then captions=captions+1 elseif item.frame==name then names=names+1 end
+  end
+  -- Shown split: the caption and the name are both among the visible texts.
+  if caption and name and captions>0 and names>0 then
+   seen.split=seen.split+1
+   local line=SeamLine(row,caption:GetText(),name:GetText(),P._lastModel)
+   if line then
+    local out={}
+    for _,item in ipairs(visible) do
+     if item.frame==name then out[#out+1]={text=line,frame=name}
+     elseif item.frame~=caption then out[#out+1]=item end
+    end
+    visible=out
+    seen.proven=seen.proven+1;seen[row.slot]=seen[row.slot]+1
+   end
+  end
+ end
+ return visible
+end
+
 local function Boot(mode,entries,english)
  if not english then S.InstallBootHook(mode,entries) end
  local H=F.Boot(F.Database(),function(h) F.OrbService(h) end)
@@ -87,9 +176,11 @@ local function Boot(mode,entries,english)
 end
 
 -- The panel scenario: renders, menus, hovers. Returns every collected text
--- (tagged), plus the foreign phrases their owners' APIs return now.
+-- (tagged), plus the foreign phrases their owners' APIs return now, plus the
+-- count of the header rows shown split and of those proven (PanelTexts).
 local function Scenario(H,P,langStatus)
  local texts,foreign={},{}
+ local rows={split=0,proven=0,build=0,wishlist=0}
  local function Add(tag,list) for _,t in ipairs(list) do texts[#texts+1]={tag=tag,text=type(t)=='table' and t.text or t} end end
  local function Foreign(v) if type(v)=='string' and v~='' then foreign[#foreign+1]=v end end
  local function ForeignList(list) for _,v in ipairs(list or {}) do Foreign(type(v)=='table' and (v.text or v.shown) or v) end end
@@ -126,7 +217,7 @@ local function Scenario(H,P,langStatus)
    if R.StatusParts then for _,k in ipairs({'ready','loading','unknown','unavailable','unconfirmed','awaiting'}) do local s=R.StatusParts(k);Foreign(s.glyph..' '..s.word..': ');Foreign(s.word) end end
   end
   Foreign(U and U.BEST_KNOWN);Foreign(U and U.RECORD_SCOPE)
-  Add(tag,S.VisibleTexts(NexusPanel))
+  Add(tag,PanelTexts(P,rows))
   Add(tag..' hover',Hovers(NexusPanel))
  end
  -- Setup (no Wishlist) and restoring.
@@ -201,10 +292,10 @@ local function Scenario(H,P,langStatus)
  Nexus.SessionPause={Status=function() if state=='unknown' then error('x') end return {paused=state=='paused',epoch=1} end,
   Pause=function() return {paused=true,epoch=2} end,Resume=function() return {paused=true,epoch=2} end}
  P.Render(Model{cards=CARDS,auto=true,extra={_nexusSessionPaused=true}})
- Add('paused',S.VisibleTexts(NexusPanel));Add('paused hover',Hovers(NexusPanel));Add('paused menu',MenuTexts(P.SessionMenuItems()))
+ Add('paused',PanelTexts(P,rows));Add('paused hover',Hovers(NexusPanel));Add('paused menu',MenuTexts(P.SessionMenuItems()))
  Add('paused auto',P.AutoSummaryLines());Add('paused detail',P.AutoDetailLines())
  state='unknown';P.UpdatePauseBanner()
- Add('pause unknown',S.VisibleTexts(NexusPanel));Add('pause unknown hover',Hovers(NexusPanel));Add('pause unknown menu',MenuTexts(P.SessionMenuItems()))
+ Add('pause unknown',PanelTexts(P,rows));Add('pause unknown hover',Hovers(NexusPanel));Add('pause unknown menu',MenuTexts(P.SessionMenuItems()))
  Add('pause unknown auto',P.AutoSummaryLines());Add('pause unknown detail',P.AutoDetailLines())
  state='running';P.UpdatePauseBanner();Add('pause menu',MenuTexts(P.SessionMenuItems()))
  Nexus.SessionPause=nil;Add('pause none menu',MenuTexts(P.SessionMenuItems()))
@@ -238,7 +329,7 @@ local function Scenario(H,P,langStatus)
  end
  if R and R.AutomationScopeLines then ForeignList(R.AutomationScopeLines({selected=true,settings=Nexus.Store.Settings()}));ForeignList(R.AutomationScopeLines({selected=false,settings=Nexus.Store.Settings()})) end
  local orbLine=P.OrbHubLine();Add('orb line',{orbLine});Add('shared line',{P.SharedDataLine()})
- return texts,foreign
+ return texts,foreign,rows
 end
 
 local LANG={active='frFR',pending=true,preferencePending=false,automatic=false,saved='frFR',activeAutomatic=false,
@@ -278,7 +369,7 @@ do
  local d0=L.Diagnostics()
  local saved,acts,sent=F.Serialize(NexusDB),#H.actions,#H.sent
  local saved2=F.Serialize(WishlistRealizerDB)
- local texts,foreign=Scenario(H,P,LANG)
+ local texts,foreign,rows=Scenario(H,P,LANG)
  -- Passivity: rendering, hovering and building menus wrote, sent and did nothing.
  -- (The Details toggle is memory only.)
  check(F.Serialize(NexusDB)==saved and F.Serialize(WishlistRealizerDB)==saved2,'PASSIVE: no saved table changed')
@@ -301,6 +392,57 @@ do
  check(#control==1,'PSEUDO: the scan reports plain English it is shown (negative control: '..#control..')')
  if #real>0 then for i=1,math.min(#real,40) do print('UNTRANSLATED',real[i]) end end
  check(#real==0,'PSEUDO: every visible code-owned word passed the seam ('..#real..' left)')
+ -- The header rows (HEADER ROWS above). The scan just passed with each proven
+ -- row read as its line; this says that such rows were there at all, in both
+ -- the Build and the Wishlist line, and that none shown split was left
+ -- unproven (an unproven row keeps its two regions, which the scan reports).
+ check(rows.split>0 and rows.proven==rows.split and rows.build>0 and rows.wishlist>0,
+  'PSEUDO: every header row shown as a caption and a name is the real seam\'s own line for its owner\'s value ('
+   ..rows.proven..' of '..rows.split..' rows; Build '..rows.build..', Wishlist '..rows.wishlist..')')
+ -- Negative controls for those rows: an untranslated caption and an
+ -- untranslated name are each still reported. A control puts plain English
+ -- into ONE shown region of a proven row through that region's own SetText
+ -- (nothing is rendered meanwhile), then takes the same collection
+ -- (PanelTexts) and the same scan (Leftovers) as above: the row must be left
+ -- unproven and the scan must name the injected text. The captions are the
+ -- exact English labels a caption that skipped the seam would show. The
+ -- region gets its own text back; at the end both rows are proven again.
+ do
+  P.Render(Model{})
+  local function HeaderTexts()
+   local seen,list={split=0,proven=0,build=0,wishlist=0},{}
+   for _,item in ipairs(PanelTexts(P,seen)) do
+    for _,row in ipairs(HEADER_ROWS) do
+     if item.frame==NexusPanel[row.caption] or item.frame==NexusPanel[row.name] then
+      list[#list+1]={tag='header control',text=item.text}
+     end
+    end
+   end
+   return list,seen
+  end
+  local list,seen=HeaderTexts()
+  check(seen.split==2 and seen.proven==2 and #list>0 and #Leftovers(list,foreign)==0,
+   'PSEUDO: control baseline: the Build and the Wishlist row are shown as a caption and a name, both are proven and pass the scan ('
+    ..seen.proven..' of '..seen.split..' rows, '..#list..' texts)')
+  for _,case in ipairs({{'_contextBuildCaption','Build:','Build caption'},{'_contextBuild','Untranslated build name','Build name'},
+   {'_contextWishlistCaption','Wishlist:','Wishlist caption'},{'_contextWishlist','Untranslated wishlist name','Wishlist name'}}) do
+   local region=NexusPanel[case[1]]
+   local kept=region:GetText()
+   region:SetText(case[2])
+   local bad,badSeen=HeaderTexts()
+   local reported=false
+   for _,line in ipairs(Leftovers(bad,foreign)) do
+    if line:sub(-(#case[2]+4))==' in '..case[2] then reported=true end
+   end
+   region:SetText(kept)
+   check(badSeen.split==2 and badSeen.proven==1 and reported,
+    'PSEUDO: an untranslated '..case[3]..' ("'..case[2]..'") is not read as a seam line and the scan reports it ('
+     ..badSeen.proven..' of '..badSeen.split..' rows proven, reported '..tostring(reported)..')')
+  end
+  local again,againSeen=HeaderTexts()
+  check(againSeen.split==2 and againSeen.proven==2 and #Leftovers(again,foreign)==0,
+   'PSEUDO: the controls left both header rows as they were ('..againSeen.proven..' of '..againSeen.split..' rows proven)')
+ end
  -- Chat lines and the Releases popup.
  local chat=S.CaptureChat(function()
   P.HideByPlayer()
@@ -353,10 +495,53 @@ do
  for _,want in ipairs({'Help and setup','Questions (FAQ)','Setup / Welcome','Auto explained (full details)','More help and windows','Settings',
   'Open Settings...','Automation settings','Show DPS records (now hidden)','Notices','Session','Panel','Main panel size: 100%','Reset Panel Position',
   'Hide Nexus Panel','Larger (+5%)','Smaller (-5%)','Reset to 100%',
-  'Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. Reading it changes nothing.',
   'Hide the Nexus panel. Hiding does not turn Nexus off or change Auto; type /nexus panel or click the Nexus minimap button to show it again.'}) do
   check(byText[want],'ENGLISH: Options menu shows exact "'..want..'"')
  end
+ -- The FAQ row's hover. Main-panel visual correction: the footer "?" is gone
+ -- (three hubs span the footer), so Options > Questions (FAQ) is the one
+ -- control that opens the FAQ, and its hover says, whole, what both hovers
+ -- said. The row's explanation ("... Reading it changes nothing.") stood in
+ -- the list above as one exact menu text while it was the whole hover; it is
+ -- the hover's first paragraph now and is checked here instead, at the row
+ -- itself and byte for byte, with the complete note on opening the FAQ that
+ -- the "?" carried after it. The third paragraph is the numbers legend that
+ -- "?" also carried: the catalog's own entry, whole. The hover is exactly
+ -- these three, a blank line between them, and nothing else.
+ local READING='Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. Reading it changes nothing.'
+ local OPENING='Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. Opening it changes nothing.'
+ local faq,faqRows=nil,0
+ local function CountFaqRows(list)
+  for _,item in ipairs(list or {}) do
+   if item.text=='Questions (FAQ)' then faqRows=faqRows+1 end
+   if type(item.menuList)=='table' then CountFaqRows(item.menuList) end
+  end
+ end
+ CountFaqRows(items)
+ for _,item in ipairs(items) do if item.text=='Questions (FAQ)' then faq=item end end
+ check(faq~=nil and faqRows==1 and type(faq.func)=='function' and not faq.disabled and not faq.isTitle and faq.menuList==nil,
+  'ENGLISH: Questions (FAQ) is a row of the Options menu once, at its top level, and a click acts on it ('..faqRows..')')
+ -- That row is the control that opens the FAQ: its own click calls Help's
+ -- route for the FAQ page, once (the route is recorded here, not opened).
+ local help,opened=Nexus.Help,{}
+ check(type(help)=='table' and type(help.Show)=='function','ENGLISH: Help and its route are loaded')
+ local realShow=help.Show
+ help.Show=function(page) opened[#opened+1]=page end
+ local clicked,why=pcall(faq.func,faq)
+ help.Show=realShow
+ check(clicked and #opened==1 and opened[1]=='faq','ENGLISH: the Questions (FAQ) row opens the FAQ: one Help.Show("faq") ('
+  ..tostring(clicked and #opened or why)..')')
+ local hover=faq.tooltipText
+ check(type(hover)=='string' and hover:sub(1,#READING)==READING,
+  'ENGLISH: the FAQ row\'s hover begins with its complete explanation, exact: '..tostring(hover):sub(1,#READING))
+ check(hover:sub(#READING+1,#READING+2)=='\n\n' and hover:sub(#READING+3,#READING+2+#OPENING)==OPENING,
+  'ENGLISH: after a blank line the FAQ row\'s hover gives the complete note on opening the FAQ, exact: '
+   ..hover:sub(#READING+3,#READING+2+#OPENING))
+ local legend,legendSource=L.Text('panel.tooltip.numbers_hint')
+ check(legendSource=='base' and legend:find('Soul Ash',1,true) and legend:find('Intensity',1,true) and legend:find('DPS',1,true),
+  'ENGLISH: the numbers legend is the catalog\'s English entry and names the difficulty card\'s Soul Ash and Intensity and the DPS rows')
+ check(hover==READING..'\n\n'..OPENING..'\n\n'..legend,
+  'ENGLISH: the FAQ row\'s hover is its explanation, the note on opening and the numbers legend, each whole, and nothing else')
  check(byText['Update notices: on, stable releases only'] or byText['Update notices: on, stable + test builds'] or byText['Update notices: off'],
   'ENGLISH: the Update notices row is one of its exact English forms')
  local lang=MenuTexts(P.LanguageMenuItems(function(fn) return fn end))
@@ -384,10 +569,14 @@ end
 ---------------------------------------------------------------- LONG
 do
  local H,P=Boot('long')
- local texts=Scenario(H,P,LANG)
+ local texts,_,rows=Scenario(H,P,LANG)
  local pseudo=0
  for _,t in ipairs(texts) do if S.IsPseudo(t.text) then pseudo=pseudo+1 end end
  check(pseudo>150,'LONG: expanded pseudo text is shown without error ('..pseudo..')')
+ -- No row is required to be shown split here (a longer caption may leave its
+ -- line whole); a row that is shown split is still the real seam's own line.
+ check(rows.proven==rows.split,'LONG: every header row shown as a caption and a name is the real seam\'s own line ('
+  ..rows.proven..' of '..rows.split..' rows)')
  local d=Nexus.Localization.Diagnostics()
  check(d.byReason.output_limit==0 and d.byReason.invalid_arguments==0,'LONG: no template refused its expanded output')
 end
