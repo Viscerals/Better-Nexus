@@ -162,8 +162,28 @@ local function CheckHeader(W,why)
  assert(r.build.x+r.build.w<=r.switch.x and r.wishlist.x+r.wishlist.w<=r.change.x,
   why..': Build and Wishlist end before My Builds and Change')
  assert(r.build.h==20 and r.wishlist.h==20 and r.title.h==20,why..': one-line header rows')
- assert(f._contextBuild:GetText():find('^Build: ') and f._contextWishlist:GetText():find('^Wishlist: '),
-  why..': two-line Build / Wishlist header')
+ -- Main-panel visual correction ("Split Build/Wishlist captions from
+ -- values"): each line's label is a caption of its own before the names
+ -- (f._contextBuildCaption, f._contextWishlistCaption) and the line's own
+ -- text is its value. The assertion that stood here looked for "Build: " and
+ -- "Wishlist: " at the start of the two lines' own texts. Both halves are
+ -- kept: the labels, each shown as its caption, before its value on the same
+ -- row; and the values, each the whole name without its label. The captions
+ -- join the pairwise overlap check below.
+ local buildCaption,wishlistCaption=f._contextBuildCaption,f._contextWishlistCaption
+ assert(buildCaption and buildCaption:IsShown() and buildCaption:GetText()=='Build:'
+  and wishlistCaption and wishlistCaption:IsShown() and wishlistCaption:GetText()=='Wishlist:',
+  why..': the Build and Wishlist lines keep their labels, each as a caption of its own')
+ r.buildCaption,r.wishlistCaption=Rect(buildCaption,W),Rect(wishlistCaption,W)
+ assert(r.buildCaption.x+r.buildCaption.w<=r.build.x and r.buildCaption.y==r.build.y
+  and r.wishlistCaption.x+r.wishlistCaption.w<=r.wishlist.x and r.wishlistCaption.y==r.wishlist.y
+  and r.build.x==r.wishlist.x,
+  why..': each caption stands before its value on the same row and the two values share one left edge: '
+   ..r.buildCaption.x..'+'..r.buildCaption.w..' / '..r.build.x..' / '..r.wishlist.x)
+ local buildValue,wishlistValue=f._contextBuild:GetText() or '',f._contextWishlist:GetText() or ''
+ assert(buildValue:find(LONG_BUILD,1,true) and not buildValue:find('^Build:')
+  and wishlistValue:find(LONG_WISHLIST,1,true) and not wishlistValue:find('^Wishlist:'),
+  why..': two-line Build / Wishlist header: each value is the whole name, without its label: '..buildValue..' / '..wishlistValue)
  local names={}
  for name in pairs(r)do names[#names+1]=name end
  table.sort(names)
@@ -202,11 +222,23 @@ for _,child in ipairs(f.children or {})do
 end
 assert(card,'fixture: the Difficulty / Soul Ash card is a child of the panel')
 local headerBy={}
+-- Main-panel visual correction ("Let this panel width follow text scale
+-- through a bounded deterministic rule against actual screen width";
+-- "Readability has priority over fixed420 width"): at this fixture's 125%
+-- text a render lays the panel out 420 x 1.25 = 525 units wide, and the
+-- mirrored status is that render's block. The widths forced below (420 and
+-- 640) move only the header's right-edge slots, as before; the status keeps
+-- the place its render gave it, so "inside the panel" is held against the
+-- render's own width at both forced widths (tighter than the forced 640 was,
+-- and 525 where the forced 420 stood). The assertion that stood here held it
+-- inside the forced width.
+local RENDERED=525
 for _,mode in ipairs({'nexus','server'})do
  status.SetMode(mode)
  assert(status.IsUsingNexusHud()==(mode=='nexus'),'fixture: the '..mode..' HUD is the preference')
  for _,complete in ipairs({false,true})do
   assert(P.Render(Model({notice=true,complete=complete,status=mode=='nexus'})),'render in '..mode..' mode')
+  assert(f:GetWidth()==RENDERED,'at 125% text the render lays the panel out '..RENDERED..' units wide (420 x 1.25): '..tostring(f:GetWidth()))
   local line=f._play and f._play.server
   for _,W in ipairs({420,640})do
    local why=mode..' HUD, '..(complete and 'finished' or 'in progress')..' at '..W..' px'
@@ -225,8 +257,9 @@ for _,mode in ipairs({'nexus','server'})do
      bottom=math.max(bottom,r[name].y+r[name].h)
      assert(not LM.Overlap(s,r[name]),why..': the mirrored status overlaps '..name)
     end
-    assert(s.y>=bottom and s.x>=0 and s.x+s.w<=W,
-     why..': the mirrored status sits below the header rows, inside the panel: y '..s.y..' < '..bottom)
+    assert(s.y>=bottom and s.x>=0 and s.x+s.w<=RENDERED,
+     why..': the mirrored status sits below the header rows, inside the panel its render laid out: y '..s.y..' < '..bottom
+      ..', right edge '..(s.x+s.w)..' of '..RENDERED)
    else
     assert(#shown==0,why..': with the server HUD the panel mirrors no status')
    end
@@ -669,11 +702,25 @@ do
  check(L.Text(KEY)=='Options' and select(2,L.Text(KEY))=='base','SETUP O1 English: the shipped data shows Options')
  check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
  Passive('O1 English render')
- local englishWishlist=NexusPanel._contextWishlist:GetText()
+ -- Main-panel visual correction ("Split Build/Wishlist captions from
+ -- values"): the Wishlist line's label is a caption of its own
+ -- (NexusPanel._contextWishlistCaption) and NexusPanel._contextWishlist holds
+ -- the value. The line is read as the player reads it, the shown caption and
+ -- then the value, so the reviewed line keeps its whole literal; the caption
+ -- and the value are then each checked on their own.
+ local englishCaption=NexusPanel._contextWishlistCaption
+ local englishValue=NexusPanel._contextWishlist:GetText()
+ local englishWishlist=englishValue
+ if englishCaption and englishCaption:IsShown() and (englishCaption:GetText() or '')~='' then
+  englishWishlist=englishCaption:GetText()..' '..tostring(englishValue)
+ end
  local englishOpened=Menu()
  local englishMenu,englishShape=TopTexts(englishOpened),TopShape(englishOpened)
  check(englishWishlist==LOCALE.enUS.wishlist and #englishMenu>10 and #englishMenu==#FRENCH_MENU,
   'SETUP O1 English: the escaped Wishlist name and the Options menu ('..tostring(englishWishlist)..', '..#englishMenu..' rows)')
+ check(englishCaption~=nil and englishCaption:IsShown() and englishCaption:GetText()=='Wishlist:'
+  and englishValue=='Synthetic |||| Wishlist Caf\195\169 (assigned)',
+  'SETUP O1 English: the label Wishlist: is a caption of its own and its value is the escaped name with its state ('..tostring(englishValue)..')')
  -- The English control keeps the English hover, notice and Auto OFF words.
  check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1 English: render with the notice')
  Header(420,'O1 English, trusted notice','Options',false,true)

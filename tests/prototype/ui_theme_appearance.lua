@@ -429,9 +429,32 @@ for i=1,3 do if #(rows[i].regions or {})~=regionCount[i] then sameRegions=false 
 check(walk1.treeWalks==walk0.treeWalks+3 and walk1.exemptTrees==walk0.exemptTrees,
  'a tree walk enters each offer row: they are not exempt trees ('..(walk1.treeWalks-walk0.treeWalks)..' entered, '
  ..(walk1.exemptTrees-walk0.exemptTrees)..' exempt)')
-check(walk1.nodesVisited==walk0.nodesVisited and walk1.buttonsStyled==walk0.buttonsStyled
- and walk1.textures==walk0.textures and walk1.hooks==walk0.hooks and sameRegions,
- 'and finds no control in a row: no child visited, no button styled, no texture, hook or region added')
+-- What the walk visits in a row. The harness lists a created FontString or
+-- Texture both as a region and as a child (layout_geometry_support, G.Shown),
+-- so Theme.StyleTree's loop over GetChildren visits a row's own regions as
+-- nodes here; the client's GetChildren answers frames only, of which a row
+-- has none. The check that stood here asked for no visited node at all, which
+-- no frame with a region can meet in this harness. What must hold either
+-- way is stated instead: every node the walk visits in a row is one of that
+-- row's own regions, a texture or a text and never a frame (so no control),
+-- and the walk styles no button and adds no texture, hook or region.
+local listed,foreign,frames=0,0,0
+for i=1,3 do
+ local own={}
+ for _,region in ipairs(rows[i].regions or {}) do own[region]=true end
+ for _,child in ipairs({rows[i]:GetChildren()}) do
+  listed=listed+1
+  if not own[child] then foreign=foreign+1 end
+  if child.kind~='Texture' and child.kind~='FontString' then frames=frames+1 end
+ end
+end
+check(walk1.nodesVisited-walk0.nodesVisited==listed and foreign==0 and frames==0,
+ 'and visits only the rows\' own textures and texts: a row holds no frame ('..(walk1.nodesVisited-walk0.nodesVisited)
+ ..' visited, '..listed..' listed, '..foreign..' not a region of its row, '..frames..' frames)')
+check(walk1.buttonsStyled==walk0.buttonsStyled and walk1.textures==walk0.textures and walk1.hooks==walk0.hooks and sameRegions,
+ 'and finds no control in a row: no button styled, no texture, hook or region added ('..(walk1.buttonsStyled-walk0.buttonsStyled)
+ ..' buttons, '..(walk1.textures-walk0.textures)..' textures, '..(walk1.hooks-walk0.hooks)..' hooks, regions '
+ ..(sameRegions and 'unchanged' or 'changed')..')')
 RolesHold('after a tree walk through the offer rows')
 T.SetStyle('vista');T.SetPalette(nil)
 check(T.Current().style=='vista' and T.Current().palette=='amethyst','the default appearance is back')

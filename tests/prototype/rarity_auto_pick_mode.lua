@@ -106,7 +106,23 @@ end
 local function Said(text) for _,line in ipairs(said) do if line:find(text,1,true) then return true end end return false end
 local function Option() return Nexus.Store.Settings().autoPickLeveling end
 local function Auto() return Nexus.RecomputeStats().autoEnabled==true end
-local function Line() return NexusPanel._contextWishlist:GetText() end
+-- Main-panel visual correction ("Split Build/Wishlist captions from values"):
+-- the Wishlist line's label is a caption of its own
+-- (NexusPanel._contextWishlistCaption) and NexusPanel._contextWishlist holds
+-- the value. Line() reads the line as the player does, the shown caption and
+-- then the value, so NONE below keeps its whole wording, the label included;
+-- where no caption is shown it is the text alone, as before. The mode's line
+-- is said whole and has no caption: a caption left beside it would make this
+-- read differ from ON and OFF. M2 checks the caption and the value apart.
+local function Caption()
+ local caption=NexusPanel._contextWishlistCaption
+ return caption and caption:IsShown() and (caption:GetText() or '') or ''
+end
+local function Value() return NexusPanel._contextWishlist:GetText() end
+local function Line()
+ local caption=Caption()
+ return caption~='' and (caption..' '..tostring(Value())) or Value()
+end
 local function Takes(L) local n=0;for _,a in ipairs(L.actions) do if a[1]=='take' then n=n+1 end end return n end
 local function LastTake(L) local id;for _,a in ipairs(L.actions) do if a[1]=='take' then id=a[2] end end return id end
 local function Record(r) return type(r)=='table' and (tostring(r.name)..'#'..tostring(r.key)) or tostring(r) end
@@ -159,6 +175,8 @@ C.scenario('M2 nothing assigned, Auto OFF: the choice only turns the option on; 
  local a=Nexus.GameAdapter.AssignedWishlist()
  C.setup(a.knownUnassigned==true and Option()==nil and not Auto(),'M2: fixture: first run, nothing assigned, option absent, Auto OFF')
  C.guard(Line()==NONE and not NexusPanel._autoBtn:IsShown(),'M2: before the choice Play says None assigned and has no Auto button',Line())
+ C.expect(Caption()=='Wishlist:' and Value()=='None assigned',
+  'M2: before the choice the label Wishlist: is a caption of its own and its value says None assigned',Caption()..' | '..tostring(Value()))
  local before=Facts(L)
  local s=Status()
  C.expect(s.assignment=='unassigned' and s.option==false and s.mode.state=='off' and type(s.destination)=='table'
@@ -173,6 +191,7 @@ C.scenario('M2 nothing assigned, Auto OFF: the choice only turns the option on; 
   'M2: only the option changed: permissions, assignments and Auto are as before',Facts(L))
  C.expect(Status().mode.state=='auto_off' and Status().mode.selected==true,'M2: the mode is selected and says Auto OFF',tostring(Status().mode.state))
  C.expect(Line()==OFF,'M2: Play says the mode and Auto OFF where the Wishlist name is',Line())
+ C.expect(Caption()=='' and Value()==OFF,'M2: the mode is said whole: no Wishlist: caption stands before it',Caption()..' | '..tostring(Value()))
  C.expect(tostring(NexusPanel._contextWishlistHit._nexusFull):find('selecting this never starts Auto',1,true)~=nil
   and tostring(NexusPanel._contextWishlistHit._nexusFull):find(NONE,1,true)~=nil,
   'M2: its hover gives the reason, the rule and keeps the assignment fact',NexusPanel._contextWishlistHit._nexusFull)

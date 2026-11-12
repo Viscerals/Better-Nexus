@@ -303,7 +303,24 @@ end)
 -- positive unassigned fact, so every state but running stays None assigned.
 local ACTIVE,NONE='Auto-pick by rarity (ON)','Wishlist: None assigned'
 local ABSENT={}
-local function Line() return V.Plain(NexusPanel._contextWishlist:GetText()) end
+-- Main-panel visual correction ("Split Build/Wishlist captions from values"):
+-- the line's label is a caption of its own (NexusPanel._contextWishlistCaption,
+-- in a column before the names) and NexusPanel._contextWishlist holds the
+-- value. Line() reads the line as the player does, the shown caption and then
+-- the value, so every expectation below keeps its whole wording, the label
+-- included; where no caption is shown it is the text alone, as before. The
+-- rarity mode's line is said whole and has no caption: a caption left beside
+-- it would make this read differ from the mode's words. A19 checks the
+-- caption and the value each on its own.
+local function Caption()
+ local caption=NexusPanel._contextWishlistCaption
+ return caption and caption:IsShown() and V.Plain(caption:GetText() or '') or ''
+end
+local function Value() return V.Plain(NexusPanel._contextWishlist:GetText()) end
+local function Line()
+ local caption=Caption()
+ return caption~='' and (caption..' '..Value()) or Value()
+end
 local function LineHover() return V.Plain(NexusPanel._contextWishlistHit._nexusFull) end
 local function Rolling(o)
  local m={noWishlist=true,level=40,auto=true,assignment={state='unassigned'},randomRoll=true}
@@ -465,6 +482,21 @@ C.scenario('A19 a change is shown by the next render without a layout pass; the 
     and G.Inside(l,p) and G.Apart(l,c),
     'A19: '..case[1]..' is shown whole on one line, inside the panel and clear of Change Wishlist'..tag,
     shown..' '..width..' in '..G.Text(l)..' / '..G.Text(c))
+   -- The label and the value, each on its own (the check above reads them
+   -- together): "Wishlist:" is a caption of its own, whole in its box, inside
+   -- the panel, before its value on the same row, and the value is the words
+   -- without the label; the rarity mode's whole line has no caption.
+   local caption=NexusPanel._contextWishlistCaption
+   if case[1]==NONE then
+    local k=caption and caption:IsShown() and Rect(caption) or nil
+    C.expect(k~=nil and Caption()=='Wishlist:' and Value()=='None assigned'
+     and G.Length('Wishlist:')*model.char<=k[3]-k[1]+0.01 and G.Inside(k,p) and k[3]<=l[1]+0.01 and math.abs(k[2]-l[2])<=0.01,
+     'A19: the label Wishlist: is a caption of its own, whole, before its value None assigned on the same row'..tag,
+     Caption()..' | '..Value()..' '..(k and G.Text(k) or 'no caption')..' / '..G.Text(l))
+   else
+    C.expect(caption~=nil and not caption:IsShown() and Caption()=='',
+     'A19: the rarity mode\'s whole line has no caption beside it'..tag,Caption())
+   end
   end
  end
  G.UseFont(G.MODELS.default)

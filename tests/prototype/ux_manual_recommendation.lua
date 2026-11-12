@@ -109,6 +109,29 @@ local function Render(change)
  assert(observer.Quiet('direct Render',Nexus.Panel.Render,model)~=false,'render')
  return View(),model
 end
+-- Count disclosure (approved main-panel design: "Counts stay behind Details",
+-- the compact charges among them). The charges are counts: with Details
+-- closed, as the panel opens, View().charges is nil (no row is shown) although
+-- the model carries the facts; the row and its hover are the open Details
+-- view's. The charge scenarios (R5, R6, R9) therefore observe the closed
+-- panel first, run their format, hover and producer checks with Details
+-- open, and observe the closed panel again afterwards.
+-- Details is the panel's own memory-only state (Panel._playDetails, what its
+-- Details control toggles): setting it saves nothing and runs no refresh
+-- step, so the measured read, request and action counts are untouched; the
+-- next render shows it. WithDetails puts it back as it was, also when its
+-- part raises, so no later scenario part runs with Details left open.
+-- Redraw renders the committed model again, unchanged (consumer redraw only:
+-- no decision, read or request), to show the panel in the current state.
+local function WithDetails(fn)
+ local P=Nexus.Panel
+ local was=P._playDetails
+ P._playDetails=true
+ local ok,err=pcall(fn)
+ P._playDetails=was
+ if not ok then error(err,0) end
+end
+local function Redraw() return (Render(function() end)) end
 
 C.scenario('R1 Auto OFF, unstepped Take: you choose, one marked card, named target',function()
  Boot()
@@ -198,6 +221,11 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  local charges=A.Charges
  A.Charges=function(...) reads=reads+1;return charges(...) end
  local acts,sent=Acts(),#H.sent
+ local closed,closedModel=Render(function(m) m.charges={banish=2,reroll=1,freeze=0,trustworthy=true,arrived=true} end)
+ C.expect(Nexus.Panel._playDetails~=true and closed.charges==nil and not NexusPanel._chargesHover:IsShown()
+  and type(closedModel.charges)=='table' and closedModel.charges.banish==2,
+  'R5: with Details closed the supplied charges are carried by the model and not shown: no row and no hover',tostring(closed.charges))
+ WithDetails(function()
  local v=Render(function(m) m.charges={banish=2,reroll=1,freeze=0,trustworthy=true,arrived=true} end)
  C.expect(v.charges=='B:2 R:1 F:0','R5: supplied charges are shown compactly',v.charges)
  v=Render(function(m) m.charges={banish=0,reroll=0,freeze=0,trustworthy=false,arrived=false} end)
@@ -270,6 +298,10 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  C.guard(bare=='B:2 R:1 F:0' and bareEstimate=='B:2 R:? F:0 ~' and bareUnknown=='B:? R:? F:?' and V.Same(bareInput,supplied),
   'R5: with no Localization module the real Readout fallback keeps the English row: unknown is ?, ~ follows the whole row, the caller facts are untouched',
   tostring(bare)..' | '..tostring(bareEstimate)..' | '..tostring(bareUnknown))
+ end)
+ local again=Render(function(m) m.charges={banish=2,reroll=1,freeze=0,trustworthy=true,arrived=true} end)
+ C.expect(Nexus.Panel._playDetails~=true and again.charges==nil and not NexusPanel._chargesHover:IsShown(),
+  'R5: closed again, the same supplied charges show no row and no hover',tostring(again.charges))
 end)
 
 
@@ -281,6 +313,10 @@ C.scenario('R5 full text recovery and degraded English template',function()
  local wanted=string.rep('Long reordered charges ',7)..'G:0 R:1 B:2 ~'
  local wrapped={};for k,v in pairs(seam)do wrapped[k]=v end
  wrapped.Format=function(key,args)return seam.Format(key,args,{['readout.charge_counts']=long})end
+ local hiddenRow=Render(function(m)m.charges={banish=2,reroll=1,freeze=0,arrived=true,trustworthy=false}end)
+ C.expect(Nexus.Panel._playDetails~=true and hiddenRow.charges==nil and not NexusPanel._chargesHover:IsShown(),
+  'R5: with Details closed the charge row and its hover are not on the panel',tostring(hiddenRow.charges))
+ WithDetails(function()
  Nexus.Localization=wrapped
  Render(function(m)m.charges={banish=2,reroll=1,freeze=0,arrived=true,trustworthy=false}end)
  local hover=NexusPanel._chargesHover
@@ -314,6 +350,10 @@ C.scenario('R5 full text recovery and degraded English template',function()
  Nexus.Localization=seam
  Render(function(m)m.charges={banish=2,reroll=1,freeze=0};m.recommendation='waiting for three-card board'end)
  C.guard(NexusPanel._chargesText:GetText()=='B:2 R:1 F:0','R5: normal English committed display restored')
+ end)
+ local hiddenAgain=Redraw()
+ C.expect(Nexus.Panel._playDetails~=true and hiddenAgain.charges==nil and not NexusPanel._chargesHover:IsShown(),
+  'R5: closed again, the restored English row and its hover are not on the panel',tostring(hiddenAgain.charges))
 end)
 
 -- Producer integration (M2-charge): the charges the runtime's own decision
@@ -346,6 +386,11 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  C.setup(decided>0 and type(used)=='table' and used.arrived==true and used.banish==20,
   'R6: fixture: the runtime decided on the board with the harness run data (20/20/10)',decided)
  C.guard(reads==decided,'R6: each decision reads charges exactly once (no extra read)',reads..' reads / '..decided..' decisions')
+ local closedLine=Shown()
+ C.expect(Nexus.Panel._playDetails~=true and closedLine==nil and Same(Nexus.Panel._lastModel.charges,used),
+  'R6: with Details closed the charges this decision read are carried by the model and not shown on the HUD',tostring(closedLine))
+ WithDetails(function()
+ Redraw()
  local line=Shown()
  print('OBSERVED','R6 known charges='..tostring(line))
  C.expect(line=='B:20 R:20 F:10' and Same(Nexus.Panel._lastModel.charges,used),
@@ -410,6 +455,10 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  H.run={remainingBanishes=20,totalRerolls=20,usedRerolls=0,totalFreezes=10,usedFreezes=0}
  observed=observer.Instrument();observed.Run(Step)
  C.guard(Shown()=='B:20 R:20 F:10','R6: the shipped English row returns with the real seam',Shown())
+ end)
+ Redraw()
+ C.expect(Nexus.Panel._playDetails~=true and Shown()==nil and type(Nexus.Panel._lastModel.charges)=='table',
+  'R6: closed again, the charges stay in the model and leave the HUD',tostring(Shown()))
  C.guard(Acts()==acts and Auto()==auto,'R6: Auto OFF throughout: no action was performed and Auto is unchanged')
  SlashCmdList.NEXUS('auto');H.Advance(.5)
  C.setup(Auto(),'R6: fixture: Auto is ON')
@@ -602,7 +651,15 @@ C.scenario('R9 Freeze controls: duplicate same Echo, unknown charges and a long 
  H.run={}
  Offer({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200050,quality=2}})
  v=View()
- C.setup(w.last and w.last.type=='take' and v.charges=='B:? R:? F:?','R9: fixture: unreported charges, the decision is a Take',Line(w.last)..' '..tostring(v.charges))
+ local unreported=Nexus.Panel._lastModel and Nexus.Panel._lastModel.charges
+ C.expect(Nexus.Panel._playDetails~=true and v.charges==nil and type(unreported)=='table' and unreported.arrived==false,
+  'R9: with Details closed the unreported charges are carried by the model and not shown',tostring(v.charges))
+ WithDetails(function()
+  local open=Redraw()
+  C.setup(w.last and w.last.type=='take' and open.charges=='B:? R:? F:?','R9: fixture: unreported charges, the decision is a Take',Line(w.last)..' '..tostring(open.charges))
+ end)
+ v=Redraw()
+ C.expect(Nexus.Panel._playDetails~=true and v.charges==nil,'R9: closed again, the unreported charges show no row',tostring(v.charges))
  local n,at=Marked(v)
  C.guard(n==1 and at==1 and Frozen(v)==0 and Shows(v,1,'Echo 1','Uncommon'),'R9: unknown charges keep the Take marker, no Freeze mark',table.concat(v.cards,' | '))
  C.guard(SameEffects(Effects(),e0),'R9: nothing performed')

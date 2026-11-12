@@ -90,7 +90,26 @@ local function Scale(s)
  _G.NexusFontNormal:SetFont('Fonts\\FRIZQT__.TTF',12*s,'');_G.NexusFontSmall:SetFont('Fonts\\FRIZQT__.TTF',10*s,'')
  for _=1,3 do Nexus.RequestRecompute();H.Advance(.4) end
  local layout=Nexus.LayoutMetrics.Panel({width=272,fontScale=s,activeRoll=true})
- check(NexusPanel._rollStatus:GetHeight()==layout.small,'scale '..s..': reached: the final layout pass ran at this scale')
+ -- Main-panel visual correction ("Measure actual line height for one-line
+ -- text too"): the offer heading's row is the small row of this scale or,
+ -- where the client measures the heading's own line taller, that line. The
+ -- harness measures every text as one 14-unit line (as stated below for the
+ -- Orb window), so here the row is the taller of the two: 14 units at 0.75
+ -- and 1.0, the small row from 1.25. The collapsed block lays out no heading
+ -- row and keeps the small row. The check that stood here took the
+ -- heading's height for the small row at every scale, as the proof that the
+ -- final layout pass ran at this scale; that proof is now read from the
+ -- applied layout's own small row, which only this scale gives (9, 11, 14,
+ -- 17 and 22 units), and the heading's height is checked against what this
+ -- scale and the measured line require.
+ local laid=NexusPanel._responsiveLayout or {}
+ local head=NexusPanel._rollStatus
+ local LINE=14
+ check(laid.noOffer or math.ceil(head:GetStringHeight() or 0)==LINE,
+  'scale '..s..': fixture: the harness measures the shown heading as one '..LINE..'-unit line: '..tostring(head:GetStringHeight()))
+ check(laid.small==layout.small and head:GetHeight()==(laid.noOffer and layout.small or math.max(layout.small,LINE)),
+  'scale '..s..': reached: the final layout pass ran at this scale (applied small row '..tostring(laid.small)..' of '..layout.small
+  ..', heading row '..tostring(head:GetHeight())..')')
  return layout
 end
 local function Top(region) local _,_,_,_,y=region:GetPoint(1);return -y end

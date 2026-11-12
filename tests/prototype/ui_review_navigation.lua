@@ -443,15 +443,45 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  local f=NexusPanel
  local title,build,wishlist=f._contextTitle,f._contextBuild,f._contextWishlist
  local change=f._contextChange
- C.expect(f:GetWidth()==420 and title and build and wishlist and change,
-  'V3a: the 420 px Play header has three named rows and a Change action')
+ -- Main-panel visual correction ("Let this panel width follow text scale
+ -- through a bounded deterministic rule against actual screen width";
+ -- "Readability has priority over fixed420 width"): at this scenario's 125%
+ -- text (the font reports 15 for the 12-unit reference) the Play panel is
+ -- 420 x 1.25 = 525 units wide, or what the screen leaves it at the chosen
+ -- 100% (its width less the 24-unit margin, on a screen of 640 units or
+ -- more) where that is less, and never under 420. The width is stated here
+ -- from the scenario's own font size and the screen; it is not read from the
+ -- layout engine. The check that stood here held the header to 420 units.
+ local screen=tonumber(UIParent:GetWidth())
+ local wantWidth=math.floor(420*large.size/12+0.5)
+ if screen and screen>=640 then wantWidth=math.min(wantWidth,math.floor(screen-24)) end
+ wantWidth=math.max(420,wantWidth)
+ C.setup(P.PanelScale()==1 and large.size/12==1.25,'V3a: fixture: 125% text at the chosen 100% panel size',P.PanelScale())
+ C.expect(f:GetWidth()==wantWidth and title and build and wishlist and change,
+  'V3a: at 125% text the Play header is as wide as the text scale gives it inside the screen ('..wantWidth
+   ..' units) and has three named rows and a Change action',f:GetWidth())
  local text=V.Plain(build:GetText() or '')..' '..V.Plain(wishlist:GetText() or '')
  -- design/current compact redesign: line 1 is the title with its state cue;
  -- the character is first on the title's hover.
  local titleTip=table.concat((V.TooltipLines(f._contextTitleHit:GetScript('OnEnter'),f._contextTitleHit)),'\n')
- C.expect(titleTip:find('TestCharacter',1,true)~=nil
-  and text:find('Build:',1,true) and text:find('Wishlist:',1,true),
-  'V3a: character (title hover), Build and Wishlist have separate readable labels',text..' / '..titleTip)
+ -- Main-panel visual correction ("Split Build/Wishlist captions from
+ -- values"): each line's label is a caption of its own before the names
+ -- (f._contextBuildCaption, f._contextWishlistCaption) and the line's own
+ -- text is its value. Both are checked: each caption's words, shown, whole in
+ -- its box and before its value; and each value, the whole name without its
+ -- label. The check that stood here looked for both labels inside the two
+ -- lines' own texts.
+ local function CaptionOf(region) return region and region:IsShown() and V.Plain(region:GetText() or '') or '' end
+ local buildCaption,wishlistCaption=f._contextBuildCaption,f._contextWishlistCaption
+ local captions=CaptionOf(buildCaption)..' / '..CaptionOf(wishlistCaption)
+ local bc,wc=buildCaption and Rect(buildCaption),wishlistCaption and Rect(wishlistCaption)
+ local bv,wv=Rect(build),Rect(wishlist)
+ C.expect(titleTip:find('TestCharacter',1,true)~=nil and captions=='Build: / Wishlist:'
+  and bc and wc and bv and wv and bc[3]<=bv[1]+0.01 and wc[3]<=wv[1]+0.01
+  and G.Length('Build:')*large.char<=bc[3]-bc[1]+0.01 and G.Length('Wishlist:')*large.char<=wc[3]-wc[1]+0.01
+  and V.Plain(build:GetText() or ''):find(long,1,true)~=nil and V.Plain(wishlist:GetText() or ''):find(long,1,true)~=nil
+  and not V.Plain(build:GetText() or ''):find('^Build:') and not V.Plain(wishlist:GetText() or ''):find('^Wishlist:'),
+  'V3a: character (title hover), Build and Wishlist have separate readable labels',captions..' / '..text..' / '..titleTip)
  local box={0,0,f:GetWidth(),f:GetHeight()}
  for _,pair in ipairs({{title,f._autoBtn},{build,f._switchBtn},{wishlist,change}}) do
   local left,right=Rect(pair[1]),Rect(pair[2])
@@ -495,19 +525,26 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  f._nexusOwnedFonts=false
  P.ApplyOwnedFonts()
  methods.SetFontObject,methods.SetNormalFontObject=oldFont,oldNormal
- -- Approved readable sizes: the title is its own 15-unit role ("title") and
- -- the Auto state cue is secondary text at the 11-unit floor ("secondary"),
- -- where they were the shared 12-unit and 10-unit fonts. Each is still one
- -- of Nexus's owned fonts, so it follows the same native-reference scale.
+ -- Approved readable sizes: the Auto state cue is secondary text at the
+ -- 11-unit floor ("secondary"), where it was the shared 10-unit font.
+ -- Main-panel visual correction ("Quiet header/chrome"; "The title can use a
+ -- quieter existing role without making body text smaller"): the title is
+ -- drawn in the owned primary role ("normal", the names' own), where it had
+ -- the 15-unit "title" role; the Build and Wishlist captions are secondary
+ -- text. Each is still one of Nexus's owned fonts, so it follows the same
+ -- native-reference scale, and no body role is smaller for it.
  local function Name(font) return tostring(type(font)=='table' and font.GetName and font:GetName() or font) end
- C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('title')
+ C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
   and build._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
   and wishlist._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
   and f._contextAutoState._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
+  and buildCaption~=nil and buildCaption._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
+  and wishlistCaption~=nil and wishlistCaption._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
   and change._testNormalFontObject==Nexus.LayoutMetrics.FontObject('normal'),
   'V3a: context and Change text join Nexus owned-font scaling at 125 percent',
   Name(title._testFontObject)..' '..Name(build._testFontObject)..' '..Name(wishlist._testFontObject)
-   ..' '..Name(f._contextAutoState._testFontObject)..' '..Name(change._testNormalFontObject))
+   ..' '..Name(f._contextAutoState._testFontObject)..' '..Name(buildCaption and buildCaption._testFontObject)
+   ..' '..Name(wishlistCaption and wishlistCaption._testFontObject)..' '..Name(change._testNormalFontObject))
  local plan=Spy(Nexus.FullUIWorkspaces,'ShowPlan',function() change:Click() end)
  C.expect(plan.n==1,'V3a: Change opens Plan without silently assigning a Wishlist')
  C.guard(GameplayEffects()==before,'V3a: header navigation and hover do not automate, spend or send')

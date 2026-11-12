@@ -1653,6 +1653,23 @@ do
  end
  check(NexusPanel.toLockLabel.wordWrap==false,'#143 candidate: LOCKED TARGETS is one line; its own row hover recovered it above')
  local uiScale=rawget(UIParent,'GetEffectiveScale')
+ -- Main-panel visual correction ("Let this panel width follow text scale
+ -- through a bounded deterministic rule against actual screen width";
+ -- "Readability has priority over fixed420 width"): the panel is 420 units
+ -- times the model's font scale (its size over 12, from 1 to 2), or what the
+ -- screen leaves it at its chosen size (the screen's width less the 24-unit
+ -- margin, over that size, on a screen of 640 units or more) where that is
+ -- less, and never under 420: 420 units at the default, 16 px and 0.75
+ -- models, more at 2.0. Stated here from the model, the screen and the chosen
+ -- size; not read from the layout engine. The checks below held the panel to
+ -- 420 units at every model. The setup buttons, My Builds and the headings
+ -- keep the boxes they had, whatever the panel's width.
+ local function PanelWidth(model)
+  local width=math.floor(420*math.max(1,math.min(2,model.size/12))+0.5)
+  local screen,chosen=tonumber(UIParent:GetWidth()),Nexus.Panel.PanelScale()
+  if screen and screen>=640 then width=math.min(width,math.floor((screen-24)/chosen)) end
+  return math.max(420,width)
+ end
  for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
   for _,ui in ipairs({1,0.64})do
    G.UseFont(model);rawset(UIParent,'GetEffectiveScale',function()return ui end)
@@ -1661,7 +1678,7 @@ do
    assert(Nexus.Panel.Render(Setup()))
    local layout=NexusPanel._responsiveLayout
    local assign,create=Child(P.assign),Child(P.create)
-   check(NexusPanel:GetWidth()==420 and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
+   check(NexusPanel:GetWidth()==PanelWidth(model) and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
     and create:GetWidth()==146 and create:GetHeight()==layout.boxes.setupCreate.h and assign:GetText()==CAND['panel.button.assign_wishlist']
     and create:GetText()==CAND['panel.button.create_wishlist'],tag..': the setup buttons keep their fixed boxes and the selected text')
    local tips=Tips(CANDT)
@@ -1679,7 +1696,7 @@ do
    -- is 106x20, where it was 106x22. Its width, and so what of the label is
    -- shown, is unchanged; Bounded below still requires the label's one-line
    -- box to be no taller than the button and at least one model line.
-   check(NexusPanel:GetWidth()==420 and switch:GetWidth()==106 and switch:GetHeight()==20 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x20 header box and keeps the selected text')
+   check(NexusPanel:GetWidth()==PanelWidth(model) and switch:GetWidth()==106 and switch:GetHeight()==20 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x20 header box and keeps the selected text')
    local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>switch:GetWidth()-12
    Bounded(switch,CAND['panel.button.my_builds'],shortSwitch,tag..': panel.button.my_builds')
    Hover(switch,shortSwitch and WithLabel(CANDT,tips,'switch') or tips.switch,
@@ -1689,8 +1706,22 @@ do
     {Region(P.extra),box.shed,'panel.heading.extra_copies',NexusPanel._shedLabelHit},
     {NexusPanel.toLockLabel,box.toLock,'panel.heading.locked_targets',NexusPanel.toLockHit}})do
     local label=h[1]
-    check(label:GetText()==CAND[h[3]] and label.wordWrap==false and label:GetWidth()==h[2].w and label:GetHeight()==layout.small
-     and G.Inside(G.Rect(label,NexusPanel),panel) and Nexus.LayoutMetrics.Shortened(label),tag..': '..h[3]..' stays one line in its unchanged layout box, shortened there')
+    -- Main-panel visual correction ("Measure actual line height for one-line
+    -- text too"): a one-line heading is as tall as one line of its face
+    -- measures (the font model's own line here) and never under the layout's
+    -- small row, so a face whose line is taller than its nominal size is not
+    -- cut. The progress heading takes the whole height of its row beside the
+    -- Details control ("left caption/compact right Details"), which is at
+    -- least that line. The check that stood here held every heading to the
+    -- modelled small row. One line, its box's width, inside the panel and
+    -- shortened there with the complete text on its hover: all as before.
+    local oneLine=math.max(layout.small,math.ceil(G.model.line))
+    local tall
+    if h[2]==box.progressHeader then tall=label:GetHeight()==h[2].h and h[2].h>=oneLine
+    else tall=label:GetHeight()==oneLine end
+    check(label:GetText()==CAND[h[3]] and label.wordWrap==false and label:GetWidth()==h[2].w and tall
+     and G.Inside(G.Rect(label,NexusPanel),panel) and Nexus.LayoutMetrics.Shortened(label),tag..': '..h[3]
+     ..' stays one line in its layout box, as tall as one measured line of its face, shortened there ('..tostring(label:GetHeight())..' for a '..oneLine..'-unit line)')
     if h[4]==NexusPanel.toLockHit then
      -- #143: the locked-target row owns its hover alone. Through the real
      -- Tooltip helper with the plain and the synthetic clearing SetOwner (no
@@ -1843,8 +1874,17 @@ do
    ..(#lockWant>#lockBody and ', after the complete heading' or ', with no added heading'))
   local charges=NexusPanel._chargesText
   local cell,cellScale=ChargeCell()
-  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==cell and (cellScale>1 or charges:GetWidth()==72) and charges:GetHeight()==NexusPanel._responsiveLayout.small,
-   'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px)')
+  -- Main-panel visual correction ("Measure actual line height for one-line
+  -- text too"): the charge row shares the offer heading's row, which is as
+  -- tall as the taller of the two one-line texts measures and never under
+  -- the layout's small row (this boot measures with the harness's own
+  -- default, as the fixture's Boot states). The check that stood here held
+  -- the row to the modelled small row. Text, cell and width: as before.
+  local headingRow=math.max(NexusPanel._responsiveLayout.small,math.ceil(charges:GetStringHeight() or 0),
+   math.ceil(NexusPanel._rollStatus:GetStringHeight() or 0))
+  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==cell and (cellScale>1 or charges:GetWidth()==72) and charges:GetHeight()==headingRow,
+   'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its cell (72 px at font scale 1, the layout-derived width above it: '..cell
+   ..' px), as tall as the heading row\'s measured line ('..tostring(charges:GetHeight())..' of '..headingRow..')')
   -- The legend in this pack's own input entries (as for the locked-target lines above), with
   -- the code-owned "?: " and "~: " markers; Readout.ChargesLegend must give the same lines.
   local legend={entries['readout.tooltip.charges_legend_letters'],'?: '..entries['readout.tooltip.charges_legend_unknown'],

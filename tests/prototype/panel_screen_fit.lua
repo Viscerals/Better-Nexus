@@ -66,16 +66,52 @@ Fits('initial render')
 assert(panel:GetWidth() == 776 and panel._responsiveLayout.width == 776,
     'at 2x font the panel is as wide as the 800px viewport leaves: 776 units (800 - 24), not the reference 420 (width '
     .. tostring(panel:GetWidth()) .. ')')
-local computed = Nexus.LayoutMetrics.Stats().computations
+-- The guard's baseline is a settled panel, so the panel is settled first, at
+-- the unchanged 800x600 viewport. The render above is the first after the
+-- font model changed. Panel M.MeasureContextHeader measures the Build and
+-- Wishlist rows against the normal row of the layout already applied (20
+-- units before that render, 28 at 2x font; the same code stood at aca67cf4),
+-- so the next render of the same model can measure them once more, against
+-- its own layout, and compute one more layout. Such a step belongs to the
+-- font change, not to the viewport (the C-03 section below also renders
+-- once more before it measures a settled render). No viewport read is a
+-- layout input: the harness answers GetEffectiveScale with 1 whatever
+-- UIParent's size, and the layout's spec takes the screen's width (through
+-- the panel's width) and never its height. This correction's own earlier
+-- form of the guard below (the fixture at aca67cf4 counted no layout
+-- computations here) took its count right after the first render and so
+-- charged that later computation to the viewport's height.
+-- The renders below run until one computes no layout; that must happen
+-- within three, and which one it was is printed, not assumed.
+local stats = Nexus.LayoutMetrics.Stats
+local settledAfter
+for attempt = 1, 3 do
+    local before = stats().computations
+    Render()
+    if stats().computations == before then
+        settledAfter = attempt
+        break
+    end
+end
+assert(settledAfter, 'fixture: at the unchanged 800x600 viewport the same model settles within three renders'
+    .. ' (a render that computes no layout)')
+print('OBSERVED', 'panel_screen_fit: at the unchanged viewport render ' .. settledAfter
+    .. ' after the first computed no layout; panel ' .. tostring(panel:GetWidth()) .. 'x' .. tostring(panel:GetHeight()))
+assert(panel:GetWidth() == 776 and panel._responsiveLayout.width == 776,
+    'settling at the unchanged viewport keeps the 776-unit width (width ' .. tostring(panel:GetWidth()) .. ')')
+local computed = stats().computations
 UIParent:SetSize(800, 900)
 Render()
 assert(panel:GetScale() == 1, 'a taller viewport restores the native panel scale on a settled render (scale '
     .. tostring(panel:GetScale()) .. ', panel ' .. tostring(panel:GetWidth()) .. 'x' .. tostring(panel:GetHeight()) .. ')')
+assert(stats().computations == computed, 'the taller viewport computes no layout: the fit alone follows it ('
+    .. (stats().computations - computed) .. ' computed)')
 UIParent:SetSize(800, 600)
 Render()
 Fits('settled render after the viewport height shrinks')
-assert(panel:GetWidth() == 776 and Nexus.LayoutMetrics.Stats().computations == computed,
-    'a change of the viewport height alone keeps the width and computes no layout')
+assert(panel:GetWidth() == 776 and stats().computations == computed,
+    'a change of the viewport height alone keeps the width and computes no layout (width '
+    .. tostring(panel:GetWidth()) .. ', ' .. (stats().computations - computed) .. ' computed)')
 UIParent:SetSize(1200, 900)
 Render()
 assert(panel:GetScale() == 1, 'a larger viewport restores the native panel scale')

@@ -138,14 +138,45 @@ local function HudSession()
  end
  out.headingOff=NexusPanel._rollStatus:GetText()
  out.bodyOff=NexusPanel._rollRec:GetText()
- out.charges=NexusPanel._chargesText:GetText()
- local hover=NexusPanel._chargesHover
- out.legend=S.CaptureTooltip(hover:GetScript('OnEnter'),hover)
- -- Unknown counts (arrived=false) and an all-zero trusted row.
- Pn.Render(Model({auto=false,cards=CARDS,charges={banish=2,reroll=2,freeze=2,arrived=false}}))
- out.chargesUnknown=NexusPanel._chargesText:GetText()
- Pn.Render(Model({auto=false,cards=CARDS,charges={banish=0,reroll=0,freeze=0,trustworthy=true,arrived=true}}))
- out.chargesZero=NexusPanel._chargesText:GetText()
+ -- Count disclosure (approved main-panel design: "Counts stay behind
+ -- Details", the compact charges among them). The charges are counts: with
+ -- Details closed, as the panel opens, the compact row and its hover are not
+ -- on the panel; they are the open Details view's. This session therefore
+ -- observes the closed panel first, opens Details for the charge-format and
+ -- legend reads only, and observes the closed panel again afterwards.
+ -- Details is the panel's own memory-only state (Panel._playDetails, what
+ -- its Details control toggles; nothing is saved). It is put back as it was
+ -- also when a read raises, so nothing later in the session runs with it
+ -- left open.
+ local function ChargeRow()
+  local text,hit=NexusPanel._chargesText,NexusPanel._chargesHover
+  return {shown=text:IsShown() and true or false,hover=hit:IsShown() and true or false,text=text:GetText() or ''}
+ end
+ local function Charged()
+  return Model({auto=false,cards=CARDS,recommendation='Take a needed Echo',
+   charges={banish=0,reroll=nil,freeze=3,trustworthy=false,arrived=true}})
+ end
+ out.detailsAtStart=Pn._playDetails==true
+ out.chargesClosed=ChargeRow()
+ local wasDetails=Pn._playDetails
+ local okCharges,errCharges=pcall(function()
+  Pn._playDetails=true
+  Pn.Render(Charged())
+  out.chargesOpen=ChargeRow()
+  out.charges=NexusPanel._chargesText:GetText()
+  local hover=NexusPanel._chargesHover
+  out.legend=S.CaptureTooltip(hover:GetScript('OnEnter'),hover)
+  -- Unknown counts (arrived=false) and an all-zero trusted row.
+  Pn.Render(Model({auto=false,cards=CARDS,charges={banish=2,reroll=2,freeze=2,arrived=false}}))
+  out.chargesUnknown=NexusPanel._chargesText:GetText()
+  Pn.Render(Model({auto=false,cards=CARDS,charges={banish=0,reroll=0,freeze=0,trustworthy=true,arrived=true}}))
+  out.chargesZero=NexusPanel._chargesText:GetText()
+ end)
+ Pn._playDetails=wasDetails
+ if not okCharges then error(errCharges,0) end
+ Pn.Render(Charged())
+ out.detailsAtEnd=Pn._playDetails==true
+ out.chargesClosedAgain=ChargeRow()
 
  -- Auto ON: recommended tag, Auto scope row; waiting and paused notes.
  Pn.Render(Model({auto=true,cards=CARDS}))
@@ -280,6 +311,16 @@ check(hud.cards[3] and hud.cards[3].tag=='['..P('Guaranteed offer')..']'
 check(HasForm(hud.headingOff,{'Current offer - you choose','Offer - you choose','You choose'},P),
  'offer heading (Auto OFF, a fitting form) reaches the heading row',hud.headingOff)
 check(hud.bodyOff:find(P('Cinder Lattice ('..P('Epic')..')'),1,true)~=nil,'recommendation target reaches the body',hud.bodyOff)
+-- Charges are counts, behind Details: closed, open, closed again (HudSession).
+local function Row(row) return type(row)=='table' and (tostring(row.shown)..'/'..tostring(row.hover)..'/['..tostring(row.text)..']') or 'not read' end
+check(hud.detailsAtStart==false and type(hud.chargesClosed)=='table' and hud.chargesClosed.shown==false
+ and hud.chargesClosed.hover==false and hud.chargesClosed.text=='',
+ 'count disclosure: with Details closed the compact charge row and its hover are not on the panel',Row(hud.chargesClosed))
+check(type(hud.chargesOpen)=='table' and hud.chargesOpen.shown==true and hud.chargesOpen.hover==true and hud.chargesOpen.text==hud.charges,
+ 'count disclosure: with Details open the compact charge row and its hover are shown',Row(hud.chargesOpen))
+check(hud.detailsAtEnd==false and type(hud.chargesClosedAgain)=='table' and hud.chargesClosedAgain.shown==false
+ and hud.chargesClosedAgain.hover==false and hud.chargesClosedAgain.text=='',
+ 'count disclosure: closed again, the same model shows no charge row or hover',Row(hud.chargesClosedAgain))
 -- Charges: unknown ? and zero 0 distinct; " ~" code-owned after the whole row.
 check(hud.charges==P('B:0 R:? F:3')..' ~','compact row: zero is 0, unknown is ?, the estimate marker follows the row',hud.charges)
 check(hud.chargesUnknown==P('B:? R:? F:?'),'unreported counts stay ? (never 0)',hud.chargesUnknown)
@@ -449,6 +490,9 @@ local R=Nexus.Readout
 check(en.cards[1].quality=='Epic' and en.cards[1].tag=='> Wishlist pick' and en.cards[3].tag=='[Guaranteed offer]'
  and en.cards[3].full=='[Guaranteed offer] Ashen Tithe (Uncommon)','English cards are byte-identical',en.cards[3].full)
 check(en.charges=='B:0 R:? F:3 ~' and en.chargesUnknown=='B:? R:? F:?' and en.chargesZero=='B:0 R:0 F:0','English charge rows')
+check(en.detailsAtStart==false and en.chargesClosed.shown==false and en.chargesClosed.text=='' and en.chargesOpen.shown==true
+ and en.chargesOpen.text=='B:0 R:? F:3 ~' and en.detailsAtEnd==false and en.chargesClosedAgain.shown==false and en.chargesClosedAgain.text=='',
+ 'English count disclosure: no charge row with Details closed, the row with Details open, none again once closed')
 check(en.legend[3]=='B, R and F: the Banish, Reroll and Freeze charges left this run, as the game reported them when Nexus made its last decision.'
  and en.legend[6]=='Shown with Auto OFF, where you choose; with Auto ON Nexus uses these charges itself.','English legend')
 check(en.bodyOff:find('Cinder Lattice (Epic)',1,true)~=nil and en.scope=='Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.',

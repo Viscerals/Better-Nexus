@@ -904,13 +904,19 @@ function M.WrapTitle(label)
     if type(label.SetNonSpaceWrap) == "function" then pcall(label.SetNonSpaceWrap, label, true) end
 end
 
-function M.UpdateContextHeader(model, settled)
+-- `renderWidth` (optional) is given only by the measurement that precedes a
+-- layout pass which will resize the panel (M.MeasureContextHeader).
+function M.UpdateContextHeader(model, settled, renderWidth)
     if not (frame and frame._contextTitle) then return false end
     local facts = M.DestinationFacts(model) or {}
     local fields, tooltip = Nexus.UserText.DestinationFields(facts)
-    -- The width this render lays the panel out at (M.Render decides it once,
-    -- before the header is measured: M.TargetPanelWidth), else the frame's.
-    local width = math.max(240, tonumber(M._panelWidth) or tonumber(frame:GetWidth()) or 420)
+    -- The header follows the panel's own width, as it always did: a caller
+    -- that has sized the panel and applies its header gets that size, and a
+    -- render applies it once its layout pass has sized the panel. Only the
+    -- measurement before such a pass names the width the panel is about to
+    -- get (`renderWidth`): the frame still has its earlier width then, and
+    -- the lines must be measured at the width they will be laid out at.
+    local width = math.max(240, tonumber(renderWidth) or tonumber(frame:GetWidth()) or 420)
     local labelWidth = math.max(100, width - 134)
     -- The title runs from after the grip to the Auto slot (M.HeaderSlots):
     -- 150 px at 420 px, more on a wider panel.
@@ -1103,8 +1109,18 @@ end
 -- panel (frame._nexusHeaderRows) for this render's layout spec.
 function M.MeasureContextHeader(model)
     if not (frame and frame._contextBuild and Nexus.LayoutMetrics) then return "0:0:0" end
-    M.UpdateContextHeader(model, true)
+    -- The width this render gives the panel (M.Render: M._panelWidth) is named
+    -- only while the applied layout was laid out at another width, or there
+    -- is none yet: the first render, or a changed text scale, screen width or
+    -- chosen size. The width is part of the layout key, so each of those takes
+    -- a layout pass that then sizes the frame, and the lines are measured at
+    -- the width they will be laid out at. Otherwise the frame's own width
+    -- stands, as a settled render and every other caller read it, a width a
+    -- caller gave the frame included.
     local held = frame._responsiveLayout
+    local target = tonumber(M._panelWidth)
+    local ahead = target and (type(held) ~= "table" or tonumber(held.width) ~= target) and target or nil
+    M.UpdateContextHeader(model, true, ahead)
     local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
     -- The heights belong to the fonts the lines hold (Build and Wishlist
     -- share one owned font object, the title has its own): each face and

@@ -156,7 +156,24 @@ do
  local ACTIVE,NONE='Auto-pick by rarity (ON)','Wishlist: None assigned'
  local function Mode(state) return 'Auto-pick by rarity ('..state..')' end
  local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
- local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
+ -- Main-panel visual correction ("Split Build/Wishlist captions from values"):
+ -- the Wishlist line's label is a caption of its own
+ -- (NexusPanel._contextWishlistCaption) and NexusPanel._contextWishlist holds
+ -- the value. Line() reads the line as the player does, the shown caption and
+ -- then the value, so NONE keeps its whole wording, the label included; where
+ -- no caption is shown it is the text alone, as before. The mode's line is
+ -- said whole and has no caption: a caption left beside it would make this
+ -- read differ from the mode's words.
+ local function Caption()
+  local caption=NexusPanel and NexusPanel._contextWishlistCaption
+  return caption and caption:IsShown() and (caption:GetText() or '') or ''
+ end
+ local function Value() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
+ local function Line()
+  local caption,value=Caption(),Value()
+  if caption~='' and value~=nil then return caption..' '..value end
+  return value
+ end
  local function Is(want,label,line)
   check(Shown()==(want and true or nil) and Line()==(want and ACTIVE or line or NONE),
    'Random rolling shown, '..label..': '..tostring(Shown())..' / '..tostring(Line()))
@@ -164,10 +181,17 @@ do
  -- Between boards: every fact is needed, and each one taken away ends it.
  local L=LBoot(10);L.Advance(.5)
  Is(false,'first install, Auto OFF, option absent')
+ -- The label and the value, each on its own (Line() reads them together).
+ check(Caption()=='Wishlist:' and Value()=='None assigned',
+  'Random rolling shown, first install: the label Wishlist: is a caption of its own and its value says None assigned: '
+  ..Caption()..' | '..tostring(Value()))
  SlashCmdList.NEXUS('auto');L.Advance(.5)
  Is(false,'Auto ON, option absent')
  SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('leveling on');L.Advance(.5)
  Is(false,'option on, Auto OFF',Mode('Auto OFF'))
+ check(Caption()=='' and Value()==Mode('Auto OFF'),
+  'Random rolling shown, option on, Auto OFF: the mode is said whole, with no Wishlist: caption before it: '
+  ..Caption()..' | '..tostring(Value()))
  SlashCmdList.NEXUS('auto');L.Advance(.5)
  Is(true,'option on, Auto ON, between boards')
  SlashCmdList.NEXUS('pause');L.Advance(.5)
@@ -219,7 +243,14 @@ end
 do
  local ACTIVE='Auto-pick by rarity (ON)'
  local function Shown() local m=Nexus.Panel._lastModel;return type(m)=='table' and m.randomRoll or nil end
- local function Line() return NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil end
+ -- The Wishlist line as the player reads it: the shown caption, then the
+ -- value (as in the block above); the mode's whole line has no caption.
+ local function Line()
+  local caption=NexusPanel and NexusPanel._contextWishlistCaption
+  local value=NexusPanel and NexusPanel._contextWishlist and NexusPanel._contextWishlist:GetText() or nil
+  if caption and caption:IsShown() and (caption:GetText() or '')~='' and value~=nil then return caption:GetText()..' '..value end
+  return value
+ end
  local function Never(label) check(Shown()==nil and Line()~=ACTIVE,'Random rolling not shown, '..label..': '..tostring(Shown())..' / '..tostring(Line())) end
  local L=LBoot(10);SlashCmdList.NEXUS('leveling on')
  L.Board({{spellId=200001,quality=1},{spellId=200004},{spellId=200002,quality=2}});L.Notify()

@@ -249,17 +249,43 @@ C.scenario('P5 M2 N9: the charges line explains "?" and "~" on hover; hovering c
  C.setup(not Auto(),'P5: fixture: Auto is OFF')
  Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
  local charges=NexusPanel._chargesText
- C.setup(charges~=nil and charges:IsShown(),'P5: fixture: the charges line is shown on the Auto OFF board')
  local hover=NexusPanel._chargesHover
- local before=Counters()
+ -- Count disclosure (approved main-panel design: "Counts stay behind
+ -- Details", the compact charges among them). The charges are counts, so
+ -- with Details closed, as the panel opens, the line and its hover are not
+ -- on the Auto OFF board although the model carries the read; with Details
+ -- open they are, and the hover is read there; closed again, they are gone.
+ -- Details is opened and closed through the panel's own toggle (what its
+ -- Details control calls: memory only), the committed model is rendered
+ -- again after each toggle (as play_panel_summary S1 does after its Details
+ -- click), and Details is closed again also when the open part raises. The
+ -- guard on the hover keeps its own window: the counters are taken right
+ -- before the hover and compared right after it, as before.
+ local P=Nexus.Panel
+ local function Line() return charges~=nil and charges:IsShown() and true or false end
+ local function Hit() return hover~=nil and hover:IsShown() and true or false end
+ local carried=type(P._lastModel)=='table' and type(P._lastModel.charges)=='table'
+ C.setup(carried,'P5: fixture: the Auto OFF board\'s model carries the charges the decision read')
+ C.expect(P._playDetails~=true and not Line() and not Hit(),
+  'P5: with Details closed the charges line and its hover are not on the Auto OFF board',tostring(Line())..'/'..tostring(Hit()))
  local text=''
- if hover and hover:GetScript('OnEnter') then
-  text=V.Plain(table.concat(V.TooltipLines(function() hover:GetScript('OnEnter')(hover) end),'\n'))
- end
- print('OBSERVED','P5 legend='..text)
- C.expect(hover~=nil and hover:IsShown() and text:find('?: the game has not reported that count yet',1,true)~=nil
-  and text:find('~: estimated',1,true)~=nil,'P5: hovering the charges line explains "?" and "~"',text)
- C.guard(Same(Counters(),before),'P5: hovering acts, requests and sends nothing',Show(Counters()))
+ local ok,err=pcall(function()
+  C.setup(P.TogglePlanDetails()==true and P.Render(P._lastModel)==true and Line(),
+   'P5: fixture: with Details open the charges line is shown on the Auto OFF board')
+  local before=Counters()
+  if hover and hover:GetScript('OnEnter') then
+   text=V.Plain(table.concat(V.TooltipLines(function() hover:GetScript('OnEnter')(hover) end),'\n'))
+  end
+  print('OBSERVED','P5 legend='..text)
+  C.expect(Hit() and text:find('?: the game has not reported that count yet',1,true)~=nil
+   and text:find('~: estimated',1,true)~=nil,'P5: hovering the charges line explains "?" and "~"',text)
+  C.guard(Same(Counters(),before),'P5: hovering acts, requests and sends nothing',Show(Counters()))
+ end)
+ if P._playDetails==true then P.TogglePlanDetails() end
+ if not ok then error(err,0) end
+ C.setup(P.Render(P._lastModel)==true,'P5: fixture: the committed model rendered again after Details was closed')
+ C.expect(P._playDetails~=true and not Line() and not Hit(),
+  'P5: closed again, the charges line and its hover are gone from the board',tostring(Line())..'/'..tostring(Hit()))
 end)
 
 C.scenario('P6 M2 N7: the Panel route closes the open editor only when it opens; it requests nothing',function()

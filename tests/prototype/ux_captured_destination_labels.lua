@@ -742,13 +742,42 @@ C.scenario('the Play header keeps an empty long-named Saved Build 123 readable a
   local all=table.concat(shown,' / ')
   print('OBSERVED','R-HUD header='..all)
   C.expect(#bad==0,'R-HUD: three visible, placed lines with working full-text hover',table.concat(bad,'; '))
-  C.expect(panel:GetWidth()==420 and shown[1]:find('Nexus [Empty]',1,true)
-   and shown[2]:find('Build: #123',1,true)
-   and shown[3]:find('Wishlist: Refused',1,true)
+  -- Main-panel visual correction, two approved requirements.
+  -- "Let this panel width follow text scale through a bounded deterministic
+  -- rule against actual screen width" ("Readability has priority over
+  -- fixed420 width"): at 2x text the panel is 420 x 2 = 840 units wide, or
+  -- what the screen leaves it at its chosen size (the screen's width less the
+  -- 24-unit margin, over that size, on a screen of 640 units or more) where
+  -- that is less, and never under 420. Stated here from the model's own size,
+  -- the screen and the chosen size; not read from the layout engine.
+  -- "Split Build/Wishlist captions from values": the labels Build: and
+  -- Wishlist: are captions of their own before the names, so each cue is
+  -- checked where it stands: the label in its caption, shown, whole and
+  -- inside the panel; the slot and the refusal at the start of their values,
+  -- whole on the value's line. The check that stood here held the panel to
+  -- 420 units and looked for label and cue in one text.
+  local screen,chosen=tonumber(UIParent:GetWidth()),Nexus.Panel.PanelScale()
+  local wantWidth=math.floor(420*G.MODELS.double.size/12+0.5)
+  if screen and screen>=640 then wantWidth=math.min(wantWidth,math.floor((screen-24)/chosen)) end
+  wantWidth=math.max(420,wantWidth)
+  local captioned,captions=true,{}
+  for i,want in ipairs({'Build:','Wishlist:'}) do
+   local caption=i==1 and panel._contextBuildCaption or panel._contextWishlistCaption
+   local text=caption and caption:IsVisible() and V.Plain(caption:GetText() or '') or ''
+   local placed,r=pcall(G.Rect,caption,panel)
+   captions[i]=text
+   captioned=captioned and text==want and G.Length(want)*G.MODELS.double.char<=caption:GetWidth()+0.01
+    and placed and r[1]>=0 and r[3]<=panel:GetWidth() and r[2]>=0 and r[4]<=panel:GetHeight()
+  end
+  C.expect(panel:GetWidth()==wantWidth and shown[1]:find('Nexus [Empty]',1,true)
+   and captioned
+   and shown[2]:find('#123',1,true)==1
+   and shown[3]=='Refused'
    and G.Length('Nexus [Empty]')*G.MODELS.double.char<=labels[1]:GetWidth()
-   and G.Length('Build: #123')*G.MODELS.double.char<=labels[2]:GetWidth()
-   and G.Length('Wishlist: Refused')*G.MODELS.double.char<=labels[3]:GetWidth(),
-   'R-HUD: at 420px and 2x text the Empty, slot and refusal cues fit before long names',all)
+   and G.Length('#123')*G.MODELS.double.char<=labels[2]:GetWidth()
+   and G.Length('Refused')*G.MODELS.double.char<=labels[3]:GetWidth(),
+   'R-HUD: at 2x text the Empty, slot and refusal cues fit before long names, the Build and Wishlist labels each in a caption of its own',
+   all..' / captions '..table.concat(captions,' | ')..' / panel '..tostring(panel:GetWidth())..' of '..wantWidth)
   local disclosure=table.concat(tip,'\n')
   C.expect(disclosure:find('Character: '..CHARACTER,1,true)
    and disclosure:find('slot 123)',1,true)
@@ -818,6 +847,13 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   local texts,visible={},true
   for i=1,3 do visible=visible and labels[i]:IsVisible();texts[i]=V.Plain(labels[i]:GetText()) end
   C.setup(visible,'C: Play header labels are shown ('..label..')')
+  -- The Build and Wishlist labels: captions of their own before the names
+  -- (main-panel visual correction, "Split Build/Wishlist captions from
+  -- values"); '' where a caption is not shown.
+  local captions={}
+  for i,caption in ipairs({NexusPanel._contextBuildCaption or false,NexusPanel._contextWishlistCaption or false}) do
+   captions[i]=caption and caption:IsVisible() and V.Plain(caption:GetText() or '') or ''
+  end
   local lines,ran,healthy={},0,true
   for _,hit in ipairs(hits) do
    local enter=type(hit)=='table' and type(hit.GetScript)=='function' and hit:GetScript('OnEnter')
@@ -831,7 +867,7 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   end
   C.setup(ran==3 and healthy,'C: all Play header lines disclose on hover ('..label..')',ran)
   local state=hits[1]._nexusFull and hits[1]._nexusFull:match('State:[^\n]*') or ''
-  return {facts=facts,cells=texts,state=state,tip=table.concat(lines,'\n')}
+  return {facts=facts,cells=texts,captions=captions,state=state,tip=table.concat(lines,'\n')}
  end
  P.Show()
  for _,state in ipairs({'unassigned',false}) do
@@ -848,14 +884,19 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   C.guard(NonePreview(plain.state),'C: untitled Preview discloses none under Preview ('..label..')',plain.state)
   C.expect(NonePreview(titled.state),
    'C: titled Preview discloses none under Preview, not unconfirmed ('..label..')',titled.state)
+  -- "Split Build/Wishlist captions from values": the label Build: is a
+  -- caption of its own and the Build line's text is its value, so the label
+  -- and the value are each checked where they stand (the check that stood
+  -- here looked for "Build: None captured" in one text).
   C.expect(NexusPanel:GetWidth()==420
    and titled.cells[1]:find('Nexus [Preview]',1,true)
    and plain.cells[1]:find('Nexus [Preview]',1,true)
-   and titled.cells[2]:find('Build: None captured',1,true)
+   and titled.captions[1]=='Build:' and plain.captions[1]=='Build:'
+   and titled.cells[2]:find('None captured',1,true)==1
    and G.Length('Nexus [Preview]')*(G.model and G.model.char or G.MODELS.default.char)
     <=NexusPanel._contextTitle:GetWidth(),
    'C: the 420px header visibly distinguishes a Preview with no captured Build ('..label..')',
-   table.concat(titled.cells,' / '))
+   table.concat(titled.cells,' / ')..' / captions '..table.concat(titled.captions,' | '))
   local same,named=true,false
   for i=1,3 do
    same=same and titled.cells[i]==plain.cells[i]
