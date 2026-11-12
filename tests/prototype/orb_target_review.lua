@@ -104,9 +104,26 @@ local function KindOnly(text,word)
  end
  return true
 end
+-- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+-- The strip's target row: the whole quoted name and its kind, with the
+-- wait in words when there is one (a requested Orb, or the last action
+-- not settled) and never a count. The counted fact (StripFact) is the
+-- strip's hover.
+local function StripWords(text,c)
+ local t=tostring(text or ''):lower()
+ if t:find('%d') or t:find('cop',1,true) or t:find('pending',1,true) then return false end
+ if (c.reserved or 0)>0 then return t:find('awaiting orb result',1,true)~=nil end
+ if c.pending then return t:find('not settled',1,true)~=nil end
+ return not t:find('not settled',1,true) and not t:find('awaiting',1,true)
+end
 local function StripRow(text,name,c,word)
  local row,outside=TargetRow(text,name)
- return row~=nil and StripFact(outside,c) and KindOnly(outside,word)
+ return row~=nil and row:find("'"..name.."'",1,true)~=nil and StripWords(outside,c) and KindOnly(outside,word)
+end
+-- The strip's words are whole: its label is as tall as its wrapped text.
+local function StripWhole(bar)
+ return not (bar.summary:GetText() or ''):find('...',1,true)
+  and bar.summary:GetHeight()+0.5>=(bar.summary:GetStringHeight() or 0)
 end
 -- The mini missing row: the rolled copies missing, tied to "missing".
 local function MiniCount(text,n)
@@ -163,15 +180,14 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
  local bar=Strip()
  C.setup(bar~=nil,'A: the main-panel strip exists')
  local summary=bar.summary:GetText()
- -- F5 current-contract adaptation: the strip row keeps the actual fact
- -- (copies left, pending or not settled) beside the bounded name and its
- -- short kind; the complete "New target: ..." caption and the complete fact
- -- are on the strip's actual hover; the review instruction stays shown.
+ -- The strip row is the whole name and its short kind, with no count
+ -- (StripRow); it wraps instead of being cut. The complete "New target:
+ -- ..." caption and the counted fact are on the strip's actual hover; the
+ -- review instruction stays shown.
  local sc=M.CompactStatus() or {}
- local srow=TargetRow(summary,'New legitimate target')
- C.expect(StripRow(summary,'New legitimate target',sc,'new') and Chars(srow)*7<=bar.summary:GetWidth()
+ C.expect(StripRow(summary,'New legitimate target',sc,'new') and StripWhole(bar)
   and summary:find('review it in the Orb window',1,true)~=nil,
-  'A: the strip names the new target and where to review it',summary)
+  'A: the strip names the new target, whole, and where to review it',summary)
  local swhole=Hover(bar.summaryHit)[1] or ''
  C.expect(swhole==bar.summary._nexusFullText and swhole:find("New target: 'New legitimate target'",1,true)~=nil
   and StripFact(swhole,sc) and swhole:find('review it in the Orb window',1,true)~=nil,
@@ -341,15 +357,14 @@ C.scenario('D pending original: every surface names the operation Resume continu
  C.expect(f.status:GetText():find("Resume continues the original operation for 'Orb test'",1,true)~=nil,'D: the full window names it',f.status:GetText())
  local bar=Strip()
  C.setup(bar~=nil,'D: the strip exists')
- -- F5 current-contract adaptation, as in A: the strip row keeps the actual
- -- fact beside the bounded name and its kind (same: the original operation),
+ -- As in A: the strip row is the whole name and its kind (same: the original
+ -- operation) with the wait in words and no count,
  -- the mini missing row the rolled copies beside the name, and the reason
  -- row the actual reason; the complete "Resume uses: ..." caption and the
  -- facts are on the actual hovers.
  local dc=M.CompactStatus() or {}
  local dsum=bar.summary:GetText() or ''
- local drow=TargetRow(dsum,'Orb test')
- C.expect(StripRow(dsum,'Orb test',dc,'same') and Chars(drow)*7<=bar.summary:GetWidth(),'D: the strip names it',dsum)
+ C.expect(StripRow(dsum,'Orb test',dc,'same') and StripWhole(bar),'D: the strip names it, whole',dsum)
  local dwhole=Hover(bar.summaryHit)[1] or ''
  C.expect(dwhole==bar.summary._nexusFullText and dwhole:find("Resume uses: 'Orb test'",1,true)~=nil and StripFact(dwhole,dc),
   'D: hovering the strip gives the complete original target and its fact',dwhole)
@@ -492,9 +507,11 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  C.setup(not MiniRow("New target: 'Main'",'Main',2) and not MiniRow(c.reason,'Main',2)
   and not MiniRow('Rolled target copies missing: 2','Main',2) and not MiniRow("Missing: 3 for 'Main'",'Main',2)
   and MiniRow("Missing: 2 for 'Main'",'Main',2),'G: oracle: the mini row needs the target and its true count together')
- C.setup(not StripRow("'Main' (new)",'Main',c,'new') and not StripRow(c.reason,'Main',c,'new')
-  and not StripRow('2 copies left','Main',c,'new') and not StripRow("2 copies left; 'Main' (same)",'Main',c,'new')
-  and StripRow("new 'Main': 2 copies left",'Main',c,'new'),'G: oracle: the strip row needs the target, its true fact and its kind together')
+ C.setup(StripRow("'Main' (new)",'Main',c,'new') and not StripRow(c.reason,'Main',c,'new')
+  and not StripRow('2 copies left','Main',c,'new') and not StripRow("'Main' (same)",'Main',c,'new')
+  and not StripRow("2 copies left; 'Main' (new)",'Main',c,'new') and not StripRow("'Mai...' (new)",'Main',c,'new')
+  and StripFact("new 'Main': 2 copies left",c) and not StripFact("'Main' (new)",c),
+  'G: oracle: the strip row needs the whole target and its kind and no count; the counted fact is a separate check')
  C.setup(not ReasonShown("New target: 'Main'",c.reason) and not ReasonShown('',c.reason) and ReasonShown(c.reason,c.reason),
   'G: oracle: a target caption or an empty row is not the reason')
  local bar=Strip()
@@ -506,8 +523,9 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  UI.Refresh()
  local summary=bar.summary:GetText() or ''
  local row=TargetRow(summary,'Main')
- C.expect(StripRow(summary,'Main',c,'new') and row~=nil and row:find("'Main'",1,true)~=nil and Chars(row)*7<=bar.summary:GetWidth(),
-  'G: the strip shows the whole short target, its kind and the two copies left on one bounded line',summary)
+ C.expect(StripRow(summary,'Main',c,'new') and row~=nil and row:find("'Main'",1,true)~=nil and Chars(row)*7<=bar.summary:GetWidth()
+  and not summary:find('%d'),
+  'G: the strip shows the whole short target and its kind on one bounded line, with no count',summary)
  C.guard(summary:find('review it in the Orb window',1,true)~=nil,'G: the strip still says where to review it',summary)
  local missing=mini.missing:GetText() or ''
  C.expect(MiniRow(missing,'Main',2) and missing:find("'Main'",1,true)~=nil and Chars(missing)*7<=mini.missing:GetWidth(),
@@ -518,9 +536,12 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  C.guard(mini.state:GetText()=='Paused - review the new target in Open Orbs','G: the mini state says where to review',mini.state:GetText())
  local whole=Hover(bar.summaryHit)[1] or ''
  local wl,sl=Lines(whole),Lines(summary)
+ -- The hover is where the usage and the two copies left are; its last line
+ -- is the strip's own (where to review).
  C.expect(whole==bar.summary._nexusFullText and whole:find("New target: 'Main'",1,true)~=nil and StripFact(whole,c)
-  and wl[1]==sl[1] and wl[#wl]==sl[#sl] and whole:find('review it in the Orb window',1,true)~=nil,
-  'G: hovering the strip gives the complete target and fact with the usage and where to review',whole)
+  and tostring(wl[1]):find('Orbs used',1,true)~=nil and not summary:find('Orbs used',1,true)
+  and wl[#wl]==sl[#sl] and whole:find('review it in the Orb window',1,true)~=nil,
+  'G: hovering the strip gives the complete target and counted fact with the usage and where to review',whole)
  local missFull=Hover(mini.missingHit)[1] or ''
  C.expect(missFull==mini.missing._nexusFullText and missFull:find("New target: 'Main'",1,true)~=nil and MiniCount(missFull,2)
   and not missFull:find('...',1,true),'G: hovering the missing row gives the complete count and target',missFull)
@@ -536,8 +557,8 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  local cols=math.floor(bar.summary:GetWidth()/G.MODELS.double.char)
  local lead=G.Visible(row or ''):sub(1,cols)
  local la,lb=lead:find("'Main'",1,true)
- C.expect(la~=nil and StripFact(lead:sub(1,la-1)..' '..lead:sub(lb+1),c),
-  'G: the short target and its copies left lie within the first '..cols..' synthetic columns of the strip line',lead)
+ C.expect(la~=nil and KindOnly(lead:sub(1,la-1)..' '..lead:sub(lb+1),'new'),
+  'G: the short target and its kind lie within the first '..cols..' synthetic columns of the strip line',lead)
  C.expect(Chars(missing)*G.MODELS.double.char<=mini.missing:GetWidth(),
   'G: the short mini missing row lies within its width in the same synthetic columns',Chars(missing))
  local sumRect,miniRect=G.Rect(bar.summary,bar),G.Rect(mini,mini)

@@ -953,6 +953,96 @@ C.scenario('N10 the title is 15 units and whole with every state cue: it wraps i
 end)
 
 ----------------------------------------------------------------------------
+-- N11: the Orb controls strip attached under the panel is the panel's text.
+----------------------------------------------------------------------------
+-- Independent Spec review of 24a40301 (the attached strip is a surface the
+-- main panel owns). Its words were the shared stock small font in a fixed
+-- 252 x 52 box, cut at 36 characters. They are the panel's own secondary
+-- role (11 units x the native reference) on that one label, they wrap at the
+-- label's width, the label is as tall as they measure (at least its 52
+-- units), and the strip and its row of controls move down by what the words
+-- need beyond that. EXPECT fails before the correction; GUARD: no shared or
+-- game font object changes, the paused target's name is whole, and where
+-- the words fit the strip keeps its 100-unit height with the controls at 65.
+-- The strip is reached through the real panel with time advanced (its own
+-- scheduled read). Widths are this fixture's stated model, not native glyphs.
+C.scenario('N11 the attached Orb strip draws its words at the panel\'s secondary role, wrapped; its controls move under them',function()
+ local runtime=Nexus.OrbRuntime
+ if not C.setup(type(runtime)=='table' and type(runtime.CompactStatus)=='function','N11: fixture: the Orb runtime read exists') then return end
+ local compact=runtime.CompactStatus
+ local NAME='Rank 2 Covenant of the Unbroken Synthetic Choir'
+ -- A paused run whose target changed: the strip names the target and says
+ -- the review instruction, its two longest lines.
+ runtime.CompactStatus=function()
+  return {state='PAUSED',spent=41,limit=97,reserved=0,running=false,pending=false,canResume=true,uncertain=0,
+   unconfirmedResults=0,historyKnown=true,remaining=58,limitKnown=true,resumeTarget={kind='changed',name=NAME}}
+ end
+ -- Time is advanced below; the host's own schedule then refreshes the panel
+ -- with `shown`, the model this scenario drew (Panel.Init keeps one table).
+ local shown
+ P.Init({RefreshDisplay=function() return shown and P.Render(shown) or false end})
+ local stockBefore=Size(GameFontHighlightSmall)
+ local ok,err=pcall(function()
+  local grew=0
+  for _,native in ipairs({10,12.5}) do
+   local tag='N11 native '..tostring(native)
+   SetNative(native)
+   shown=Play()
+   C.setup(Render(shown)==true,tag..': fixture: the Play panel renders')
+   H.Advance(.3)
+   local bar=NexusPanel._orbControls
+   if C.setup(bar~=nil and bar:GetParent()==NexusPanel and bar:IsVisible() and bar.summary:IsVisible(),
+    tag..': fixture: the attached strip is shown after its scheduled read') then
+    local label=bar.summary
+    local text=G.Visible(label:GetText() or '')
+    local rect,strip=Rect(label),Rect(bar)
+    local needs=math.ceil(label:GetStringHeight())
+    local box=rect[4]-rect[2]
+    local extra=math.max(0,needs-52)
+    print('OBSERVED',tag,'font='..tostring(Size(label)),'label '..Text(rect),'needs='..tostring(needs),'strip '..Text(strip),
+     'text='..text:gsub('\n',' / '))
+    C.expect(Near(Size(label),Role('secondary')),tag..': the strip\'s words are the panel\'s secondary role (11 x the native scale)',Size(label))
+    C.expect(box+0.5>=needs and math.abs(box-math.max(52,needs))<=0.01 and not text:find('...',1,true),
+     tag..': the words are whole: wrapped in a box as tall as they measure, at least 52 units',tostring(box)..' for '..tostring(needs))
+    -- (Before the correction the name was cut to fit one line, so this
+    -- guard asks for its beginning only; the whole name is expected below.)
+    C.guard(text:find("'Rank 2",1,true)~=nil and text:find('Paused - review it in the Orb window',1,true)~=nil,
+     tag..': the strip names the paused target and says its instruction',text)
+    C.expect(text:find("'"..NAME.."' (new)",1,true)~=nil,tag..': the target\'s name is whole, with its kind',text)
+    C.expect(math.abs((strip[4]-strip[2])-(100+extra))<=0.01,tag..': the strip is its 100 units plus what the words need beyond 52',
+     tostring(strip[4]-strip[2])..' / '..tostring(100+extra))
+    local placed=true
+    for _,b in ipairs({bar.pause,bar.resume,bar.stop,bar.details}) do
+     local r=b:IsVisible() and Rect(b) or nil
+     if not (r and math.abs(r[2]-(strip[2]+65+extra))<=0.01 and r[2]>=rect[4]-0.01 and G.Inside(r,strip,0.01)) then placed=false end
+    end
+    C.expect(placed,tag..': Pause, Resume, Stop and Details sit in one row under the whole words, inside the strip',
+     'row wanted at '..tostring(strip[2]+65+extra)..', words end '..tostring(rect[4]))
+    if extra==0 then
+     C.guard(math.abs((strip[4]-strip[2])-100)<=0.01 and math.abs(box-52)<=0.01,tag..': words that fit leave the strip at 100 units and the label at 52')
+    else
+     grew=grew+1
+    end
+    C.guard(bar.pause:GetScript('OnClick')~=nil and bar.resume:GetScript('OnClick')~=nil and bar.stop:GetScript('OnClick')~=nil
+     and bar.details:GetScript('OnClick')~=nil and not bar.pause:IsEnabled() and not bar.resume:IsEnabled() and bar.stop:IsEnabled(),
+     tag..': the controls keep their handlers and gates (a changed target resumes only after review)')
+   end
+  end
+  C.expect(grew>=1,'N11: at 125% the words need more than 52 units and the strip grew for them',grew)
+  C.guard(Near(Size(GameFontHighlightSmall),NATIVE.height) and NATIVE.nativeSets==0,
+   'N11: the shared stock small font is untouched and no game font object is set',tostring(Size(GameFontHighlightSmall))..' sets '..tostring(NATIVE.nativeSets))
+ end)
+ runtime.CompactStatus=compact
+ shown=Play()
+ SetNative(10)
+ Render(shown)
+ H.Advance(.3)
+ -- No host callback from here on: Panel.Refresh renders its last model.
+ P.Init({})
+ C.setup(stockBefore~=nil and ok,'N11: fixture: the attached strip scenario ran',err)
+end)
+
+----------------------------------------------------------------------------
 -- N8: what must not change.
 ----------------------------------------------------------------------------
 C.scenario('N8 display-only cards, collapsed Details, header slots and the grip are unchanged',function()

@@ -79,8 +79,13 @@ C.scenario('D1 a settled finished strip offers Hide; only the strip hides, and i
  C.setup(FinishRun(1),'D1: the run finished at its limit',M.Status().state)
  local bar=Strip()
  C.setup(bar and bar:IsVisible(),'D1: the attached strip is shown below the main panel')
- C.guard(Has(bar.summary,'Orbs used: 1 / 1 approved') and Has(bar.summary,'Finished - limit reached')
-  and Has(bar.summary,'target copies remaining'),'D1: the strip shows the finished run truthfully',bar.summary:GetText())
+ C.guard(Has(bar.summary,'Finished - limit reached'),'D1: the strip shows the finished run truthfully',bar.summary:GetText())
+ -- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+ -- The usage and the remaining copies are its hover.
+ local d1Whole=tostring(bar.summary._nexusFullText or '')
+ C.expect(not bar.summary:GetText():find('%d') and d1Whole:find('Orbs used: 1 / 1 approved',1,true)~=nil
+  and d1Whole:find('target copies remaining',1,true)~=nil and d1Whole:find('Finished - limit reached',1,true)~=nil,
+  'D1: the strip draws no count; its hover keeps the usage and the remaining copies',bar.summary:GetText()..' / '..d1Whole)
  C.guard(not bar.pause:IsEnabled() and not bar.resume:IsEnabled() and not bar.stop:IsEnabled(),
   'D1: a finished run offers no run action')
  C.expect(bar.dismiss~=nil and bar.dismiss:IsVisible() and bar.dismiss:IsEnabled()
@@ -265,7 +270,10 @@ C.scenario('D6 a finished run with unknown outcomes stays shown; its matched set
   and s.unconfirmedResults==2 and s.remaining==2,'D6: settled-looking, with two unknown outcomes retained',
   s.uncertain..'/'..tostring(s.unconfirmedResults)..'/'..tostring(s.remaining))
  bar=Strip()
- C.setup(bar and Has(bar.summary,'unknown spend exposure: 2'),'D6: the strip discloses the exposure',bar and bar.summary:GetText())
+ -- The exposure is said in words on the strip; its count is the hover.
+ C.setup(bar and Has(bar.summary,'spend not confirmed') and not bar.summary:GetText():find('%d')
+  and tostring(bar.summary._nexusFullText):find('unknown spend exposure: 2',1,true)~=nil,
+  'D6: the strip discloses the exposure in words and its hover the count',bar and bar.summary:GetText())
  C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D6: a run with unknown outcomes is shown without Hide')
  C.guard(bar.pause:IsShown() and bar.stop:IsShown() and not bar.stop:IsEnabled(),'D6: the row keeps its disabled actions')
  local before=Effects()

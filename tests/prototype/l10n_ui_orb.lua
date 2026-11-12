@@ -225,12 +225,21 @@ end
 check(mini.pending:GetText()=='Pending: 1 Orb requested, not confirmed yet','mini pending English: '..mini.pending:GetText())
 local strip=assert(Strip(),'the main-panel Orb strip is attached by the real panel')
 strip.refresh()
-check(strip.summary:GetText():find('Orbs used: 0 / 3 approved\n1 Orb pending, not confirmed yet\n',1,true)==1,'strip English: '..strip.summary:GetText())
+-- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+-- Its words say the wait without a count; the usage and the pending count are
+-- the strip's hover (its complete text), in the same English as before.
+check(strip.summary:GetText():find('awaiting Orb result\n',1,true)==1 and not strip.summary:GetText():find('%d'),
+ 'strip English, words only: '..strip.summary:GetText())
+check(tostring(strip.summary._nexusFullText):find('Orbs used: 0 / 3 approved\n1 Orb pending, not confirmed yet\n',1,true)==1,
+ 'strip hover English: '..tostring(strip.summary._nexusFullText))
 mini.pause:Click()
 check(mini.notice:GetText()=='Paused.','mini outcome English')
 strip.refresh()
-check(strip.summary:GetText():find("^Orbs used: 0 / 3 approved\n1 Orb pending; 'Za.- %(same%)\nPaused %- 1 Orb pending$")~=nil,
- 'strip: a paused run with a pending Orb says so once on its state line: '..strip.summary:GetText())
+check(strip.summary:GetText():find("^awaiting Orb result; 'Za.-' %(same%)\nPaused$")~=nil,
+ 'strip: a paused run with a pending Orb says the wait once, in words, beside its whole target: '..strip.summary:GetText())
+check(tostring(strip.summary._nexusFullText):find('^Orbs used: 0 / 3 approved\n')~=nil
+ and tostring(strip.summary._nexusFullText):find('\nPaused %- 1 Orb pending$')~=nil,
+ 'strip hover: the paused run with a pending Orb keeps its counted state line: '..tostring(strip.summary._nexusFullText))
 UI.Refresh()
 check(f.pause:GetText()=='Pause' and f.resume:GetText()=='Resume','fixed Pause/Resume English')
 local log=UI.ShowLog()
@@ -258,7 +267,15 @@ local READOUT_WORDS={}
 local function allow(word,text)
  local rest=S.Unmarked(text)
  -- Data may be shortened in its cell ("'Za..."): a word of a data value.
- for _,v in ipairs(DATA) do if v:find(word,1,true) and rest:find(word,1,true) then return true end end
+ -- It may also be shown whole inside the code-owned quotes that name it
+ -- (the attached strip no longer cuts a target's name): the scan's word
+ -- then ends with the closing quote, which is punctuation, not a word to
+ -- translate. Only a word that is data once its quotes are taken off is
+ -- accepted this way.
+ local bare=word:gsub("^'+",''):gsub("'+$",'')
+ for _,v in ipairs(DATA) do
+  if rest:find(word,1,true) and (v:find(word,1,true) or (bare~='' and bare~=word and v:find(bare,1,true))) then return true end
+ end
  for _,v in ipairs(PENDING_RUNTIME) do if v:find(word,1,true) and rest:find(v,1,true) then return true end end
  for _,v in ipairs(READOUT_WORDS) do if v:find(word,1,true) and rest:find(v,1,true) then return true end end
  return false

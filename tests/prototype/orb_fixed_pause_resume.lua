@@ -107,9 +107,13 @@ C.scenario('F2 main-panel strip: fixed Pause and Resume; the one-button entry is
  end
  C.expect(ordered,'F2: Pause, Resume, Stop and Details are on one row, distinct, padded and readable')
  C.expect(X(bar.details)+bar.details:GetWidth()<=262,'F2: the row stays within the earlier strip width')
- local summary=bar.summary:GetText()
+ -- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+ -- The one usage form is the strip's hover; its drawn words say the wait.
+ local summary=tostring(bar.summary._nexusFullText or '')
  C.expect(summary:find('Orbs used: 0 / 3 approved',1,true)~=nil and summary:find('1 Orb pending, not confirmed yet',1,true)~=nil,
-  'F2: the strip uses the one usage form',summary)
+  'F2: the strip\'s hover uses the one usage form',summary)
+ C.expect(bar.summary:GetText():find('awaiting Orb result',1,true)~=nil and not bar.summary:GetText():find('%d'),
+  'F2: the strip itself says the wait in words, with no count',bar.summary:GetText())
 
  bar.pause:Click()
  C.setup(M.Status().state=='PAUSED','F2: the strip Pause paused the run')

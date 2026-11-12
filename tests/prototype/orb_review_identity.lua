@@ -154,14 +154,16 @@ C.scenario('I3 a target that changed and came back is called back, and still nee
   C.guard(not f.resume:IsEnabled() and f.review:IsShown(),'I3: Resume still waits for Review target')
   local bar=Strip()
   local summary=bar and bar.summary:GetText() or ''
-  -- F5 current-contract adaptation: the strip row keeps the actual fact
-  -- beside the bounded name and the short returned kind, called back, not
-  -- new; the complete "Target back to ..." caption with the exact name, the
-  -- complete fact and the review instruction are on the strip's hover.
+  -- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+  -- The strip row is the whole name and the short returned kind, called
+  -- back, not new, with no count; the complete "Target back to ..."
+  -- caption with the exact name, the counted fact and the review
+  -- instruction are on the strip's hover.
   local sc=M.CompactStatus() or {}
   local row,outside=TargetRow(summary,'Orb test')
   C.expect(row~=nil and V.Names(outside,'back') and not V.Names(outside,'new') and not V.Names(outside,'same')
-   and StripFact(outside,sc) and #row*7<=bar.summary:GetWidth(),'I3: the strip calls it back',summary)
+   and not outside:find('%d') and row:find("'Orb test'",1,true)~=nil and #row*7<=bar.summary:GetWidth(),
+   'I3: the strip calls it back, by its whole name, with no count',summary)
   local tip,tipOK={},false
   if bar then
    tip,tipOK=V.TooltipLines(function()bar.summaryHit:GetScript('OnEnter')(bar.summaryHit)end)

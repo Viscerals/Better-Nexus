@@ -1169,7 +1169,17 @@ r2case('E full usage and compact strip hover',function()
   check(hit~=nil and hit._nexusText==fs,'EXPECT full text helper covers actual usage and compact strip')
   fs.GetStringHeight=function()return 120 end -- independent overflow model only
   hit:GetScript('OnEnter')(hit)
-  check(captured==fs:GetText(),'EXPECT hover reveals exact complete retained facts')
+  if fs==strip.summary then
+   -- Independent Spec review of 24a40301: the attached strip is a surface
+   -- the main panel owns, so it draws no run count; its retained facts,
+   -- the usage among them, are complete on this hover and nowhere cut.
+   check(captured==fs._nexusFullText and captured:find('Orbs used',1,true)~=nil and captured:find('%d')~=nil
+    and not captured:find('...',1,true),'EXPECT the strip hover reveals the exact complete retained facts')
+   check(fs:GetText()~='' and not fs:GetText():find('%d') and not fs:GetText():find('Orbs used',1,true),
+    'EXPECT the strip itself draws its retained state in words, with no count')
+  else
+   check(captured==fs:GetText(),'EXPECT hover reveals exact complete retained facts')
+  end
  end
  GameTooltip=tooltip;check(H.Count('orb-spend')==before,'GUARD hovering sends no action')
 end)

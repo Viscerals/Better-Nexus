@@ -318,8 +318,12 @@ C.scenario('L5 one usage form on the window, strip, mini panel and history',func
  local bar=NexusPanel and NexusPanel._orbControls
  C.setup(bar~=nil,'L5: the strip exists')
  bar.refresh()
- local lines=Lines(bar.summary:GetText())
- C.expect(lines[1]=='Orbs used: 0 / 3 approved' and lines[2]=='1 Orb pending, not confirmed yet','L5: the strip',bar.summary:GetText())
+ -- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+ -- The usage and the pending count are its hover; it draws the wait in words.
+ local lines=Lines(bar.summary._nexusFullText)
+ C.expect(lines[1]=='Orbs used: 0 / 3 approved' and lines[2]=='1 Orb pending, not confirmed yet','L5: the strip\'s hover',tostring(bar.summary._nexusFullText))
+ C.expect(Lines(bar.summary:GetText())[1]=='awaiting Orb result' and not bar.summary:GetText():find('%d'),
+  'L5: the strip says the wait in words, with no count',bar.summary:GetText())
  local mini=Nexus.OrbPanel.ShowMini()
  C.guard(mini.usage:GetText()=='Orbs used: 0 of 3 approved' and mini.pending:GetText()=='Pending: 1 Orb requested, not confirmed yet',
   'L5: the mini panel keeps its words',mini.usage:GetText())

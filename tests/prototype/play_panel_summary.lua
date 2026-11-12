@@ -1706,6 +1706,175 @@ C.scenario('S30 a real offer annotation is words only: no ownership number on an
  P.Render(Model())
 end)
 
+-- Independent Spec review of 24a40301, required finding: the Orb controls
+-- strip attached under the main panel (NexusPanel._orbControls, a child of
+-- the panel, shown with it) is a surface the panel owns, so the count rule
+-- applies to it too: "Counts (plan, per-offer ownership, Orb run) appear only
+-- inside expanded Details." It drew "Orbs used: N / M approved", the pending
+-- or remaining-copies count and "Paused - N Orbs pending" whatever Details
+-- was. It keeps its own state and wait words, the paused target's whole name
+-- and kind, and its Pause / Resume / Stop / Details controls and gates; the
+-- run's numbers are in the open Details row (S29) and on the strip's hover.
+-- The strip is reached as the player gets it: the real panel is rendered and
+-- time is advanced, so the strip's own scheduled read (four times a second)
+-- draws it. S29 never advanced time and so never saw it.
+-- The count fields of the synthetic run are numbers that appear nowhere else
+-- (41 used, 97 approved, 13 pending, 58 remaining, 29 unknown exposure, 31
+-- unconfirmed outcomes); the target's name contains a digit of its own, which
+-- is identity and must stay whole. EXPECT fails before the correction; GUARD:
+-- the words, the name and kind, the controls' gates, the hover and the effect
+-- counters.
+C.scenario('S31 the Orb controls strip attached under the panel draws no run count, with Details closed or open',function()
+ G.UseFont(G.MODELS.default)
+ local runtime=Nexus.OrbRuntime
+ if not C.setup(type(runtime)=='table' and type(runtime.CompactStatus)=='function','S31: fixture: the Orb runtime read exists') then return end
+ local compact,status=runtime.CompactStatus,nil
+ runtime.CompactStatus=function() return status end
+ local wasDetails=P._playDetails
+ -- Time is advanced below, and the host's own schedule then refreshes the
+ -- panel: the refresh renders `shown`, the model this scenario last drew
+ -- (Panel.Init keeps one table; S28, the last scenario, installs its own).
+ local shown
+ P.Init({RefreshDisplay=function() return shown and P.Render(shown) or false end})
+ local NAME='Rank 2 Covenant'
+ local COUNTS={41,97,13,58,29,31}
+ local function Run(o)
+  local s={state='WAIT_RESULT',spent=41,limit=97,reserved=13,running=true,pending=true,canResume=false,
+   uncertain=0,unconfirmedResults=0,historyKnown=true,remaining=58,limitKnown=true}
+  for k,v in pairs(o or {}) do s[k]=v end
+  return s
+ end
+ local function Paused(target,o)
+  local s=Run({state='PAUSED',running=false,pending=false,reserved=0,canResume=true,resumeTarget=target})
+  for k,v in pairs(o or {}) do s[k]=v end
+  return s
+ end
+ -- {what, the run, words the strip already said and must keep, numberless
+ -- words that replace a counted line (nil: none), the target's kind word
+ -- (nil: no target row), {Pause, Resume, Stop} enabled}. The gates are the
+ -- strip's established ones: Pause while running; Resume for a paused run
+ -- that may resume and whose target did not change; Stop while running,
+ -- pending or paused.
+ local CASES={
+  {'running with requested Orbs',Run(),{'Waiting for result confirmation'},{'awaiting Orb result'},nil,{true,false,true}},
+  {'running with an unsettled result',Run({reserved=0}),{'Waiting for result confirmation','Last Orb action is not settled'},nil,nil,{true,false,true}},
+  {'running with an unknown spend',Run({reserved=0,pending=false,uncertain=29,unconfirmedResults=31}),
+   {'Waiting for result confirmation'},{'spend not confirmed'},nil,{true,false,true}},
+  {'paused, Resume uses the same target',Paused({kind='same',name=NAME}),{'Paused'},nil,'(same)',{false,true,true}},
+  {'paused, the target is new',Paused({kind='changed',name=NAME}),{'Paused - review it in the Orb window'},nil,'(new)',{false,false,true}},
+  {'paused, the target came back',Paused({kind='changed',name=NAME,returned=true}),{'Paused - review it in the Orb window'},nil,'(back)',{false,false,true}},
+  {'paused with requested Orbs',Paused({kind='same',name=NAME},{reserved=13,pending=true,canResume=false}),
+   {'Paused'},{'awaiting Orb result'},'(same)',{false,false,true}},
+  {'a recovery being checked',Run({state='RECOVERY',running=false,pending=false,reserved=0,recoveryPhase='checking',recoveryKind='automatic'}),
+   {'Recovery: Checking','Previous result is unresolved'},nil,nil,{false,false,false}},
+ }
+ local cards,rec=LongOffer('Take Cinder Lattice.')
+ local function Has(text,words)
+  for _,word in ipairs(words or {}) do if not text:find(word,1,true) then return false end end
+  return true
+ end
+ local ok,err=pcall(function()
+  -- Time is advanced here, and the host's own schedule writes its saved
+  -- bookkeeping as time passes, so the saved data is not compared across
+  -- this scenario: game actions, sends and the Auto selection are.
+  local function Acts()
+   return 'actions='..#H.actions..' sent='..#H.sent..' auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)
+  end
+  local before=Acts()
+  for _,case in ipairs(CASES) do
+   for _,details in ipairs({false,true}) do
+    local tag='S31 '..case[1]..(details and ', Details open' or ', Details closed')
+    status=case[2]
+    P._playDetails=details
+    shown=Model({cards=cards,recommendation=rec,missing={'Hollow Bell'}})
+    C.setup(P.Render(shown)==true,tag..': fixture: the Play panel renders')
+    H.Advance(.3)
+    local bar=NexusPanel._orbControls
+    if C.setup(bar~=nil and bar:GetParent()==NexusPanel and bar:IsVisible() and bar.summary~=nil and bar.summary:IsVisible(),
+     tag..': fixture: the attached strip is shown under the panel after its scheduled read') then
+     -- Everything the strip draws: its label and the text of each shown control.
+     local drawn={}
+     for _,r in ipairs(G.Shown(bar)) do
+      if r.kind=='FontString' then drawn[#drawn+1]=Plain(r) end
+     end
+     local all=table.concat(drawn,'\n')
+     local label=Plain(bar.summary)
+     -- A count field: its number standing alone, or any of the count labels.
+     local counted={}
+     for _,n in ipairs(COUNTS) do
+      if all:find('%f[%d]'..n..'%f[%D]') then counted[#counted+1]=tostring(n) end
+     end
+     for _,word in ipairs({'Orbs used','approved','pending','remaining','copies left','copy left','exposure','outcomes:'}) do
+      if all:find(word,1,true) then counted[#counted+1]=word end
+     end
+     C.expect(#counted==0,tag..': the strip draws no usage, approved, pending, remaining or exposure count',table.concat(counted,', ')..' in: '..all)
+     -- Apart from the target's own name, nothing drawn on the strip is a number.
+     local rest=all:gsub(NAME:gsub('%p','%%%0'),'')
+     C.expect(not rest:find('%d'),tag..': apart from the target\'s name, the strip draws no digit',all)
+     C.guard(Has(label,case[3]),tag..': the strip still says its state in its own words ('..table.concat(case[3],' / ')..')',label)
+     if case[4] then
+      C.expect(Has(label,case[4]),tag..': the wait a count used to state is said in words ('..table.concat(case[4],' / ')..')',label)
+     end
+     if case[5] then
+      -- Identity: the name is whole, digit included, with its kind after it.
+      C.expect(label:find("'"..NAME.."' "..case[5],1,true)~=nil,
+       tag..': the paused target is named whole, digit included, with its kind '..case[5],label)
+      C.guard(label:find(case[5],1,true)~=nil and label:find("'Rank 2",1,true)~=nil,
+       tag..': the paused target row names the target and its kind',label)
+     end
+     local rect=G.Rect(bar.summary,NexusPanel)
+     C.expect(rect[4]-rect[2]+0.5>=bar.summary:GetStringHeight() and not label:find('...',1,true),
+      tag..': the strip\'s words are whole: not cut, in a box as tall as its lines',
+      G.Text(rect)..' needs '..tostring(bar.summary:GetStringHeight())..': '..label)
+     -- The controls: shown, in one row under the words, inside the strip, with their gates.
+     local strip=G.Rect(bar,NexusPanel)
+     local row,inside,below=nil,true,true
+     for _,b in ipairs({bar.pause,bar.resume,bar.stop,bar.details}) do
+      local r=b:IsVisible() and G.Rect(b,NexusPanel) or nil
+      if not r then inside=false else
+       row=row or r[2]
+       if r[2]~=row or not G.Inside(r,strip,0.01) then inside=false end
+       if r[2]<rect[4]-0.01 then below=false end
+      end
+     end
+     C.guard(inside and below,tag..': Pause, Resume, Stop and Details are shown in one row inside the strip, under its words',
+      G.Text(strip)..' words '..G.Text(rect))
+     C.guard((bar.pause:IsEnabled() and true or false)==case[6][1] and (bar.resume:IsEnabled() and true or false)==case[6][2]
+      and (bar.stop:IsEnabled() and true or false)==case[6][3] and (bar.details:IsEnabled() and true or false)==true
+      and V.Plain(bar.pause:GetText() or '')=='Pause' and V.Plain(bar.resume:GetText() or '')=='Resume'
+      and V.Plain(bar.stop:GetText() or '')=='Stop' and V.Plain(bar.details:GetText() or '')=='Details',
+      tag..': the controls keep their names and gates',tostring(bar.pause:IsEnabled())..'/'..tostring(bar.resume:IsEnabled())..'/'..tostring(bar.stop:IsEnabled()))
+     -- The numbers are not lost. They are on the strip's hover (the strip
+     -- drew them itself before the correction, so this hover is new)...
+     local whole=tostring(bar.summary._nexusFullText or '')
+     C.expect(whole:find('%f[%d]41%f[%D]')~=nil and whole:find('%f[%d]97%f[%D]')~=nil,
+      tag..': the strip\'s hover gives the run\'s complete numbered text',whole)
+     -- ...and in the open Details row, which is the panel's place for them.
+     local detail=NexusPanel._play and NexusPanel._play.orbDetail
+     if details then
+      local text=detail and detail:IsShown() and Plain(detail) or ''
+      C.guard(text:find('%f[%d]41%f[%D]')~=nil and text:find('%f[%d]97%f[%D]')~=nil,
+       tag..': the open Details row shows the run\'s numbers',text)
+     else
+      C.guard(not (detail and detail:IsShown()),tag..': with Details closed there is no Details Orb row')
+     end
+    end
+   end
+  end
+  C.guard(Acts()==before,'S31: drawing the strip takes no game action, sends nothing and leaves Auto as it was',Acts())
+ end)
+ status=nil
+ shown=Model()
+ P.Render(shown)
+ H.Advance(.3)
+ runtime.CompactStatus=compact
+ P._playDetails=wasDetails
+ -- No host callback from here on: Panel.Refresh renders its last model.
+ P.Init({})
+ P.Render(Model())
+ C.setup(ok,'S31: fixture: the attached strip scenario ran',err)
+end)
+
 -- Approved panel cleanup ("actual Auto changes must update both chip and
 -- offer heading/instruction; stale Random Roll data must not claim resumed
 -- picking"). The runtime does not render for a toggle, so the panel draws the

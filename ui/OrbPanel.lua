@@ -2456,8 +2456,15 @@ function UI.AttachMainPanel(parent)
     f:SetPoint("TOPLEFT",parent,"BOTTOMLEFT",0,-2);f:SetSize(parent:GetWidth(),100);f:SetFrameLevel(parent:GetFrameLevel()+3)
     f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"});f:SetBackdropColor(.035,.04,.05,.95)
     f.summary=text(f,8,-6,252,52)
-    -- Three lines (a recovery phase line first while one is owned); a shortened
-    -- name or long exposure text is complete in the tooltip.
+    -- This strip is a child of the main panel and shown with it, so it is part
+    -- of that panel's text: its words take the panel's own secondary role (11
+    -- units on the native reference, LayoutMetrics "secondary") on this label
+    -- only. No shared font object and no font of the Orb window is changed.
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FontObject then
+        pcall(f.summary.SetFontObject,f.summary,Nexus.LayoutMetrics.FontObject("secondary"))
+    end
+    -- The strip's words carry no count (f.refresh); the run's complete
+    -- numbered text is on this hover.
     if Nexus.LayoutMetrics then f.summaryHit=Nexus.LayoutMetrics.FullTextTooltip(f.summary,f) end
     -- The legacy one-button entry (Pause while running, Resume while paused):
     -- hidden, so it cannot be clicked, and kept for programmatic callers with
@@ -2514,24 +2521,12 @@ function UI.AttachMainPanel(parent)
         f.refresh()
     end)
     f.dismiss:Hide()
-    -- One line of the conservative 7 px model; the name is cut on a character
-    -- boundary, then pipes are doubled so they show as written.
-    local STRIP_CHARS=math.floor(252/7)
-    local function stripLine(v)
-        local cut=v
-        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then cut=Nexus.LayoutMetrics.Truncate(v,STRIP_CHARS)
-        elseif #v>STRIP_CHARS then cut=v:sub(1,STRIP_CHARS-3):gsub("[\192-\255][\128-\191]*$","").."..." end
-        return (cut:gsub("|","||")),(v:gsub("|","||"))
-    end
-    -- A paused target line: the second line's fact first, then the target
-    -- name, cut on a character boundary so the short kind caption after it
-    -- stays on the line; stripLine still bounds and escapes the whole line.
-    local function targetLine(fact,n,tag)
-        local room=math.max(4,STRIP_CHARS-#fact-#tag-3)
-        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then n=Nexus.LayoutMetrics.Truncate(n,room)
-        elseif #n>room then n=n:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
-        return fact.."; "..n.." "..tag
-    end
+    -- The controls and their fixed x: one row under the words, which moves
+    -- down with the strip's bottom when the words need more than their 52
+    -- units (f.refresh). Nothing else about a control changes.
+    local ROW={{f.primary,8},{f.pause,8},{f.resume,69},{f.stop,137},{f.details,191},{f.dismiss,8}}
+    -- Pipes are doubled so a name shows as written.
+    local function piped(v) return (v:gsub("|","||")) end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f.dismissed,f.shownRun=nil,nil;f:Hide();return end
@@ -2572,39 +2567,86 @@ function UI.AttachMainPanel(parent)
         if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then
             third=T("orb.status.compact_paused_result");plainThird=false;pausedLabel=false
         end
-        local shown,full=stripLine(second)
-        -- While paused, the target shares the second line: that line's fact in
-        -- short first, then the bounded name and a short kind caption. The
-        -- tooltip keeps the complete target and fact lines; a pending Orb then
-        -- also stays on the third.
+        -- The strip's own state words, before a count is put into them for
+        -- the hover below.
+        local stateWords,plainWords=third,plainThird
+        -- The complete numbered text (usage, exposure, the pending or
+        -- remaining count, a paused target's caption and the state): the
+        -- strip's hover. It is not drawn on the strip.
+        local full=piped(second)
         if what then
-            local t=s.resumeTarget
-            local fact=s.reserved>0 and TF(s.reserved==1 and "orb.status.fact_pending_one" or "orb.status.fact_pending_many",{count=N(s.reserved)})
-                or (s.pending and T("orb.status.fact_not_settled"))
-                or TF(s.remaining==1 and "orb.status.fact_copy_left" or "orb.status.fact_copies_left",{count=N(s.remaining)})
-            local line=fact.."; "..what
-            if t.kind~="unavailable" then
-                line=targetLine(fact,t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or T("orb.value.unnamed_wishlist"),
-                    T(t.kind=="changed" and (t.returned and "orb.value.target_tag_back" or "orb.value.target_tag_new") or "orb.value.target_tag_same"))
-            end
-            local _,whatFull=stripLine(what)
-            shown,full=stripLine(line),whatFull.."\n"..full
+            full=piped(what).."\n"..full
             if s.reserved>0 and pausedLabel then
                 third=TF(s.reserved==1 and "orb.status.compact_paused_pending_one" or "orb.status.compact_paused_pending_many",{count=N(s.reserved)})
                 plainThird=false
             end
         end
-        local body,whole=usage.."\n"..shown,usage.."\n"..full
+        local whole=usage.."\n"..full
         -- An owned recovery phase comes first, before the exposure totals; it
         -- already names the state, so a plain state line is not repeated.
         if recoveryPhases[s.recoveryPhase] then
-            local phase=phaseText(s)
-            body,whole=phase.."\n"..body,phase.."\n"..whole
-            if not plainThird then body,whole=body.."\n"..third,whole.."\n"..third end
+            whole=phaseText(s).."\n"..whole
+            if not plainThird then whole=whole.."\n"..third end
         else
-            body,whole=body.."\n"..third,whole.."\n"..third
+            whole=whole.."\n"..third
         end
-        setFull(f.summary,body,whole)
+        -- What the strip draws. Approved panel cleanup: a run's counts (Orbs
+        -- used and approved, pending, target copies remaining, exposure and
+        -- unconfirmed outcomes) are drawn only inside the main panel's open
+        -- Details, never on a surface the panel owns outside it, and this
+        -- strip is one. It keeps its words, each an existing whole label
+        -- chosen by the same conditions as before: an owned recovery phase;
+        -- an unknown spend or a history that a reload lost; what the run
+        -- waits on (a requested Orb, or the last action not settled); while
+        -- paused, the Resume target's whole name and its kind (a digit in a
+        -- name is the name's own and stays); then the state or its
+        -- instruction. No text is shortened: the words wrap in their box.
+        local drawn={}
+        if recoveryPhases[s.recoveryPhase] then drawn[#drawn+1]=phaseText(s) end
+        local unknown=((s.uncertain or 0)>0 or (s.unconfirmedResults or 0)>0) and T("orb.status.line_spend_unconfirmed") or nil
+        if s.historyKnown==false then unknown=(unknown and (unknown.."; ") or "")..T("orb.status.segment_history_reload") end
+        if unknown then drawn[#drawn+1]=unknown end
+        local awaiting=s.reserved>0 and T("orb.status.segment_awaiting_result") or nil
+        if what then
+            local t=s.resumeTarget
+            local named=what
+            if t.kind~="unavailable" then
+                named=(t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or T("orb.value.unnamed_wishlist")).." "
+                    ..T(t.kind=="changed" and (t.returned and "orb.value.target_tag_back" or "orb.value.target_tag_new") or "orb.value.target_tag_same")
+            end
+            local fact=awaiting or (s.pending and T("orb.status.fact_not_settled")) or nil
+            drawn[#drawn+1]=piped((fact and (fact.."; ") or "")..named)
+        else
+            local waits=awaiting or (s.pending and T("orb.status.strip_not_settled"))
+                or (s.remaining==nil and T("orb.status.strip_target_unavailable")) or nil
+            if waits then drawn[#drawn+1]=waits end
+        end
+        if not (recoveryPhases[s.recoveryPhase] and plainWords) then drawn[#drawn+1]=stateWords end
+        local words=table.concat(drawn,"\n")
+        setFull(f.summary,words,whole)
+        -- The words wrap at the label's width and the label is as tall as
+        -- they measure, at least its 52 units; the strip and its row of
+        -- controls move down by what the words need beyond that. Measured
+        -- only when the words, the font scale or the face changed, on the
+        -- strip's existing refresh (no timer of its own).
+        local LM,need=Nexus.LayoutMetrics,52
+        if LM and LM.WrapHeight then
+            local revision=LM.RuntimeMetrics and select(3,LM.RuntimeMetrics()) or 0
+            local key=words.."\031"..tostring(revision)
+            if f.wordsKey~=key or not rawequal(f.wordsFace,f.summary.GetFont) then
+                f.wordsKey,f.wordsFace=key,f.summary.GetFont
+                f.wordsH=LM.WrapHeight(f.summary,252,52)
+            end
+            need=f.wordsH or 52
+        end
+        local extra=math.max(0,need-52)
+        if f.extra~=extra then
+            f.extra=extra
+            f:SetHeight(100+extra)
+            for _,item in ipairs(ROW) do
+                item[1]:ClearAllPoints();item[1]:SetPoint("TOPLEFT",item[2],-65-extra)
+            end
+        end
         local resumable=not s.running and s.canResume and not changedTarget(s.resumeTarget)
         f.primary:SetText(T(s.running and "orb.button.pause" or "orb.button.resume"));enable(f.primary,s.running or resumable)
         enable(f.pause,s.running);enable(f.resume,resumable)

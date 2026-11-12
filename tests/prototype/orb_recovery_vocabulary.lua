@@ -97,8 +97,14 @@ C.scenario('W3 a restored receipt without its approved maximum: the fallback gat
  Nexus.Panel.Show();H.Advance(.3)
  local bar=NexusPanel and NexusPanel._orbControls
  if bar then bar.refresh() end
- local first=bar and Lines(bar.summary:GetText() or '')[1] or ''
- C.expect(Has(first,'max not recorded') and not Has(first,'approved'),'W3: the strip says so',first)
+ -- Independent Spec review of 24a40301: the attached strip is a surface the main panel owns, so it draws no run count (counts only inside expanded Details).
+ -- The usage line, with the maximum that is not recorded, is its hover; the
+ -- strip itself draws no usage and never says 'approved'.
+ local first=bar and Lines(bar.summary._nexusFullText or '')[1] or ''
+ C.expect(Has(first,'max not recorded') and not Has(first,'approved'),'W3: the strip\'s hover says so',first)
+ local drawn=bar and bar.summary:GetText() or ''
+ C.expect(not Has(drawn,'approved') and not Has(drawn,'Orbs used') and not drawn:find('%d'),
+  'W3: the strip draws no usage and claims no approved maximum',drawn)
  local mini=Nexus.OrbPanel.ShowMini()
  C.expect(Has(mini.usage:GetText(),'(maximum not recorded)') and not Has(mini.usage:GetText(),'approved'),'W3: the mini panel says so',mini.usage:GetText())
  mini:Hide()
