@@ -7655,6 +7655,14 @@ end
 -- and whether the lines stand on the title's line (then their own height is
 -- 0: they take no row). The arrangement is kept on the panel for the
 -- placement (PlaceCallboardBox).
+-- An objective the Callboard owner established from one of the game's own
+-- sources (summary.source) can stand in for the game's trackers, and the
+-- owner lets those stand aside only while both rows shown here are at least
+-- 17 units high (ui/CallboardStatus.lua, ReplacementCovered). Neither row of
+-- such an objective is therefore measured under that minimum; lines on the
+-- title's line share its row. Where the draft's line or the text is already
+-- that tall nothing changes, and a summary that names no game source keeps
+-- the draft's rows.
 function M.MeasureCallboard(summary, width)
     if not FillCallboard(summary) then return nil end
     local labelW = math.ceil(M.LineWidth(frame._callboardLabel, frame._callboardLabel:GetText() or "")) + 1
@@ -7672,7 +7680,8 @@ function M.MeasureCallboard(summary, width)
         end
     end
     frame._callboardPlan = plan
-    return M.WrappedHeight(title, titleW, 1), plan.inline and 0 or M.WrappedHeight(line, detailW, 1), labelW,
+    local least = type(summary.source) == "string" and 17 or 1
+    return M.WrappedHeight(title, titleW, least), plan.inline and 0 or M.WrappedHeight(line, detailW, least), labelW,
         plan.inline and true or false
 end
 

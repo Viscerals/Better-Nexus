@@ -6,8 +6,10 @@
 -- or rewards to the callboard objective. A throwing quest-log getter stays
 -- inside the scanner, summary, and panel refresh. Unchanged quest events do
 -- not rebuild the HUD. Objective rows hold one whole line of their text (never
--- shorter than the client measures it, nor than the compact design's row), and
--- a shortened title is recoverable from its tooltip.
+-- shorter than the client measures it, nor than the compact design's row); the
+-- observed objective's rows are tall enough for the owner to let the stock
+-- trackers stand aside, on two rows and on one line alike; and a shortened
+-- title is recoverable from its tooltip.
 local checks=0
 local function check(v,m) assert(v,m); checks=checks+1 end
 local H=dofile('tests/prototype/harness.lua')
@@ -137,17 +139,21 @@ local panel=_G.NexusPanel
 check(panel and panel:IsShown(),'fixture: the panel is shown for the replacement')
 local title=panel._callboardTitle
 local line=panel._callboardLine
--- One whole line each. The former layout held both rows to the conservative
--- text model's 17-unit line (PlaceCallboardBox: math.max(lineH, ...), lineH
--- never under 17), and this check stated that figure. The approved compact
--- Callboard (design draft, Callboard addendum) draws the title on a 20-pixel
--- line and an objective line on an 18-pixel one, and a row is as tall as the
--- client measures its text when that needs more: ui/Panel.lua
--- M.MeasureCallboard reads each text's height at the width it will have
--- (M.WrappedHeight), ui/LayoutMetrics.lua M.Panel lays
--- Block(20, spec.callboardTitleH) and Block(18, spec.callboardDetailH), and
--- PlaceCallboardBox gives each row that height. So the fit is stated, not a
--- figure: a row is never shorter than the height the client reports for its
+-- One whole line each. The 17 this check once stated is the least the
+-- Callboard owner accepts of both rows before it lets the stock trackers stand
+-- aside (ui/CallboardStatus.lua, ReplacementCovered); the former layout gave
+-- it to every row. That decision is asserted as what the owner does, for the
+-- objective it observed itself: by the suppression checks right below (two
+-- rows) and further down (one line). This check is the fit that holds for
+-- every Callboard objective, a summary without a game source included (the
+-- later sections of this file). The approved compact Callboard (design draft,
+-- Callboard addendum) draws the title on a 20-pixel line and an objective
+-- line on an 18-pixel one, and a row is as tall as the client measures its
+-- text when that needs more: ui/Panel.lua M.MeasureCallboard reads each
+-- text's height at the width it will have (M.WrappedHeight),
+-- ui/LayoutMetrics.lua M.Panel lays Block(20, spec.callboardTitleH) and
+-- Block(18, spec.callboardDetailH), and PlaceCallboardBox gives each row that
+-- height. So a row is never shorter than the height the client reports for its
 -- own text, and never under its draft line. One draft pixel is 284 / 420 unit
 -- x the layout's font scale, and a draft length is the whole units under or
 -- over it where it stands (the layout rounds its cursor, not each length), so
@@ -184,6 +190,35 @@ Nexus.Panel.Hide()
 check(otf.alpha==0.35 and otf.mouse==true,'hiding the panel restores the exact tracker alpha and mouse')
 check(tracker.alpha==0.8 and tracker.mouse==true and collapse.mouse==true,
  'hiding the panel restores the exact quest tracker and collapse control')
+
+-- The one-line arrangement is a replacement too. A short observed objective
+-- stands with its one progress line on the title's line (the approved compact
+-- Callboard), and the owner weighs both rows there as well: the stock trackers
+-- stand aside for it as they do for the two-row objective above, and come back
+-- exactly when the panel hides. With rows under the owner's minimum the
+-- game's tracker and the Nexus line would both show the objective. The
+-- two-row objective is observed again afterwards, as the sections below
+-- expect it.
+do
+ local twoRows=objective
+ objective={title='Callboard Quest',questId=77,objectiveText='0/2'}
+ AdvanceScan()
+ Nexus.Panel.Show()
+ Nexus.Panel.Refresh()
+ AdvanceScan()
+ local _,_,_,titleX,titleY=title:GetPoint(1)
+ local _,_,_,lineX,lineY=line:GetPoint(1)
+ check(panel:IsShown() and title:IsShown() and line:IsShown() and title:GetText()=='Callboard Quest'
+  and line:GetText()=='0/2' and lineY==titleY and lineX>titleX,
+  'fixture: a short observed objective stands on one line, its progress on the title\'s line')
+ check(otf.alpha==0 and tracker.alpha==0 and otf.mouse==false and collapse.mouse==false and tracker.mouse==true,
+  'a one-line replacement suppresses the stock trackers as the two-row one does')
+ Nexus.Panel.Hide()
+ check(otf.alpha==0.35 and otf.mouse==true and tracker.alpha==0.8 and tracker.mouse==true and collapse.mouse==true,
+  'hiding the one-line replacement restores the exact tracker alpha and mouse')
+ objective=twoRows
+ AdvanceScan()
+end
 
 -- Review C-01: the same hold and restore under the client convention, in
 -- which IsMouseEnabled answers 1 or nil (H.SetClientBooleans,
