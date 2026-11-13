@@ -5,8 +5,9 @@
 -- hide an unrelated tooltip, and it does not attach another quest's progress
 -- or rewards to the callboard objective. A throwing quest-log getter stays
 -- inside the scanner, summary, and panel refresh. Unchanged quest events do
--- not rebuild the HUD. Objective rows are at least one 17px line, and a
--- shortened title is recoverable from its tooltip.
+-- not rebuild the HUD. Objective rows hold one whole line of their text (never
+-- shorter than the client measures it, nor than the compact design's row), and
+-- a shortened title is recoverable from its tooltip.
 local checks=0
 local function check(v,m) assert(v,m); checks=checks+1 end
 local H=dofile('tests/prototype/harness.lua')
@@ -136,8 +137,32 @@ local panel=_G.NexusPanel
 check(panel and panel:IsShown(),'fixture: the panel is shown for the replacement')
 local title=panel._callboardTitle
 local line=panel._callboardLine
-check(title and title:GetHeight()>=17 and line and line:GetHeight()>=17,
- 'objective rows are at least one 17px line')
+-- One whole line each. The former layout held both rows to the conservative
+-- text model's 17-unit line (PlaceCallboardBox: math.max(lineH, ...), lineH
+-- never under 17), and this check stated that figure. The approved compact
+-- Callboard (design draft, Callboard addendum) draws the title on a 20-pixel
+-- line and an objective line on an 18-pixel one, and a row is as tall as the
+-- client measures its text when that needs more: ui/Panel.lua
+-- M.MeasureCallboard reads each text's height at the width it will have
+-- (M.WrappedHeight), ui/LayoutMetrics.lua M.Panel lays
+-- Block(20, spec.callboardTitleH) and Block(18, spec.callboardDetailH), and
+-- PlaceCallboardBox gives each row that height. So the fit is stated, not a
+-- figure: a row is never shorter than the height the client reports for its
+-- own text, and never under its draft line. One draft pixel is 284 / 420 unit
+-- x the layout's font scale, and a draft length is the whole units under or
+-- over it where it stands (the layout rounds its cursor, not each length), so
+-- the whole units under it are the least it can be (13 and 12 at the
+-- reference text size). An objective line that stands on the title's line has
+-- the title's row, which is under neither.
+local function WholeRow(row,pixels)
+ local layout=panel._responsiveLayout
+ local unit=284/420*(layout and tonumber(layout.scale) or 1)
+ return row~=nil and row:GetHeight()>=row:GetStringHeight() and row:GetHeight()>=math.floor(pixels*unit)
+end
+check(WholeRow(title,20) and WholeRow(line,18),
+ 'objective rows are at least their measured text line and the compact design row: title '
+ ..tostring(title and title:GetHeight())..'/'..tostring(title and title:GetStringHeight())
+ ..' detail '..tostring(line and line:GetHeight())..'/'..tostring(line and line:GetStringHeight()))
 check(otf.alpha==0 and tracker.alpha==0,
  'visible committed replacement suppresses the stock trackers')
 check(otf.mouse==false and collapse.mouse==false and tracker.mouse==true,
@@ -359,8 +384,8 @@ do
   and not backText:find('more',1,true)
   and not backText:find('braziers',1,true),'the returning rows show the current objective text (every line, no "+N more")')
  check(SamePlace(titleHit,panel._callboardTitle) and SamePlace(lineHit,panel._callboardLine)
-  and panel._callboardTitle:GetHeight()>=17 and panel._callboardLine:GetHeight()>=17,
-  'the returning hover areas cover the current one-line title and detail rows')
+  and WholeRow(panel._callboardTitle,20) and WholeRow(panel._callboardLine,18),
+  'the returning hover areas cover the current title and detail rows, each a whole line of its text')
  local titleTip=table.concat(HoverTitle(),'|')
  check(titleTip:find(newTitle,1,true)~=nil and not titleTip:find('Ember Watch',1,true),
   'the returning title hover shows the complete current title and not the earlier one')

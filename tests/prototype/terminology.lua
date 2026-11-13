@@ -527,13 +527,44 @@ do
   and auto.InitializeActiveLanguage('automatic')=='enUS' and select(3,auto.ActiveLanguage())==true and auto.Diagnostics().base.undeclared==0,
   'R: with the declaration registry, Automatic still resolves English without an alias')
  -- R-P1: an undeclared but otherwise valid English entry.
- local undeclared=copyOf(realData);undeclared['parity.undeclared']='Undeclared parity text'
+ -- An entry is judged only inside the entry budget: above CAP entries the
+ -- loader refuses the whole base before it looks at one (core/Localization.lua,
+ -- English base: "above MAX_BASE_ENTRIES it adopts nothing, sets
+ -- oversized=true and rejected to the whole entry count"). The real English
+ -- now fills that budget, so the real English plus one test entry is CAP+1
+ -- entries and no longer shows how an undeclared entry is judged. The rule is
+ -- stated on both sides of the cap instead. Each input is counted here before
+ -- it is loaded, and each expectation follows from that count and the
+ -- contract, whatever the size of the real English:
+ --  * inside the budget, the undeclared entry in place of one declared static
+ --    entry (as many entries as the real English has): it alone is rejected,
+ --    as undeclared, and the declared key it stands for is the one meaning
+ --    left without English;
+ --  * exactly CAP entries, the real English filled up with undeclared entries
+ --    (none while it is CAP entries itself): still judged one by one;
+ --  * one entry more: refused whole, so no entry is judged or counted as
+ --    undeclared, and every declared meaning is left without English.
+ local undeclared=copyOf(realData);undeclared['panel.button.options']=nil;undeclared['parity.undeclared']='Undeclared parity text'
+ check(realData['panel.button.options']~=nil and realData['parity.undeclared']==nil and count(undeclared)==REAL_TOTAL and REAL_TOTAL<=CAP,'SETUP R-P1: the undeclared entry stands in place of one declared static entry, inside the entry budget')
  local u=assert(reload(undeclared),'loader with an undeclared English entry');checks=checks+1
  local ud=u.Diagnostics()
- check(ud.base.accepted==REAL_TOTAL and ud.base.rejected==1 and ud.base.undeclared==1 and ud.base.missingDeclared==0 and ud.base.formatted==REAL_FORMATTED and not ud.base.oversized,'R-P1: an undeclared English entry is rejected and counted')
+ check(ud.base.accepted==REAL_TOTAL-1 and ud.base.rejected==1 and ud.base.undeclared==1 and ud.base.missingDeclared==1 and ud.base.formatted==REAL_FORMATTED and not ud.base.oversized,'R-P1: an undeclared English entry is rejected and counted')
  local text,source,why=u.Resolve('parity.undeclared',{['parity.undeclared']='Pack text'})
  check(not u.Has('parity.undeclared') and u.Kind('parity.undeclared')==nil and text==U and source=='unavailable' and why=='unknown_key','R-P1: an undeclared key is unavailable, and a pack cannot add it')
  check(ud.packs.adopted==6 and ud.packs.refused==0 and #u.Languages()==7,'R-P1: the six packs stay adopted and offered')
+ local atCap=copyOf(realData)
+ for i=1,CAP-REAL_TOTAL do atCap['parity.fill_'..i]='Undeclared fill text '..i end
+ check(count(atCap)==CAP,'SETUP R-P1: the real English filled up with undeclared entries is exactly CAP entries')
+ local ab=assert(reload(atCap),'loader with exactly CAP English entries').Diagnostics().base;checks=checks+1
+ check(ab.present and not ab.oversized and ab.accepted==REAL_TOTAL and ab.rejected==CAP-REAL_TOTAL and ab.undeclared==CAP-REAL_TOTAL and ab.missingDeclared==0 and ab.formatted==REAL_FORMATTED,'R-P1: exactly CAP entries are judged one by one: every real entry is admitted and each fill entry is rejected as undeclared')
+ local over=copyOf(atCap);over['parity.undeclared']='Undeclared parity text'
+ check(count(over)==CAP+1,'SETUP R-P1: with the undeclared entry that base is CAP+1 entries')
+ local o=assert(reload(over),'loader with CAP+1 English entries');checks=checks+1
+ local od=o.Diagnostics()
+ check(od.base.present and od.base.oversized and od.base.accepted==0 and od.base.rejected==CAP+1 and od.base.undeclared==0 and od.base.missingDeclared==REAL_TOTAL and od.base.formatted==0,'R-P1: one entry above CAP the whole base is refused; the undeclared entry is not judged, so it is not counted as undeclared')
+ text,source,why=o.Resolve('parity.undeclared',{['parity.undeclared']='Pack text'})
+ check(not o.Has('parity.undeclared') and o.Kind('parity.undeclared')==nil and #o.Keys()==0 and text==U and source=='unavailable' and why=='unknown_key','R-P1: above CAP the undeclared key is unavailable like every other key, and a pack cannot add it')
+ check(od.packs.adopted==6 and od.packs.refused==0 and #o.Languages()==7,'R-P1: above CAP the six packs stay adopted and offered (their entries are then left out)')
  -- R-P3: a declared meaning without English, and one with invalid English.
  local missing=copyOf(realData);missing['panel.button.options']=nil
  local m=assert(reload(missing),'loader without one declared English entry');checks=checks+1
@@ -558,10 +589,13 @@ do
  -- Every other key keeps its own real declaration (text, block or template).
  local REAL_DECL={}
  for key,decl in runtimeSource:gmatch('\n    %["([^"]+)"%] = (%b{})')do REAL_DECL[key]=decl end
- local function block(charge,extra)
+ -- (`without`: real keys the caller leaves out of the block, with their
+ -- English, where a test declaration needs their room in the budget.)
+ local function block(charge,extra,without)
   local lines={'local DECLARATIONS = {'}
   for key in pairs(realData)do
-   if key=='readout.charge_counts' then
+   if without and without[key] then
+   elseif key=='readout.charge_counts' then
     if charge then lines[#lines+1]='    ["readout.charge_counts"] = '..charge..',' end
    else lines[#lines+1]=('    ["%s"] = %s,'):format(key,assert(REAL_DECL[key],'real declaration of '..key)) end
   end
@@ -601,10 +635,26 @@ do
    and fWhy==(static and 'wrong_key_kind' or 'unknown_key'),'R: '..case[1]..': the charge template is not admitted as a template')
   check(fb.undeclared==((static or case[1]=='other field name') and 0 or 1) and fb.missingDeclared==(case[1]=='other field name' and 1 or 0),'R: '..case[1]..': counted as undeclared or missing as declared')
  end
+ -- The declarations and the English each hold at most CAP entries, and the
+ -- real ones now fill both budgets: one more declaration declares nothing and
+ -- two more entries refuse the whole base (the CAP+1 fixtures here and above),
+ -- so neither would show how a malformed declaration is judged. The malformed
+ -- declaration and the two test entries therefore take the room of two
+ -- declared static meanings, left out of the block and of the English alike
+ -- (ROOM): the block is one declaration under the real count, the English is
+ -- exactly as large as the real one, and every entry is judged. Each entry
+ -- the block declares is admitted; the two test entries are the rejected,
+ -- undeclared ones, as before.
+ local ROOM={['panel.button.options']=true,['panel.button.my_builds']=true}
  for _,case in ipairs({{'invalid key','    ["Bad Key"] = {kind = "text"},'},{'text with a field','    ["parity.extra"] = {kind = "text", fields = {"a"}},'},{'unknown kind','    ["parity.extra"] = {kind = "plural"},'}})do
   local extra=copyOf(realData);extra['Bad Key']='Bad';extra['parity.extra']='Extra'
-  local xb=assert(reloadWith(extra,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}',case[2]))).Diagnostics().base
-  check(xb.accepted==REAL_TOTAL and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
+  for key in pairs(ROOM)do
+   check(REAL_DECL[key]=='{kind = "text"}' and extra[key]~=nil,'SETUP a declared static meaning makes room: '..key)
+   extra[key]=nil
+  end
+  check(count(extra)==REAL_TOTAL and REAL_TOTAL<=CAP,'SETUP the two test entries stand in place of two declared static entries, inside the entry budget ('..case[1]..')')
+  local xb=assert(reloadWith(extra,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}',case[2],ROOM))).Diagnostics().base
+  check(not xb.oversized and xb.accepted==REAL_TOTAL-2 and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
  end
  -- More than CAP declarations, or no declaration table: nothing is declared.
  local tooMany={'local DECLARATIONS = {'}
@@ -803,16 +853,30 @@ do
  check(L.ActiveLanguage()=='enUS' and select(2,L.ActiveLanguage())==true,'the English profile starts with English active, initialized once')
  local d=L.Diagnostics()
  check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
- -- Full visible-UI catalog (#143-#148): every real pack holds one valid entry
- -- for every reviewed English key, so each pack row admits the complete key
- -- set (4078 at this pin) and rejects nothing. The six-message and Panel
- -- cohorts below remain named subsets of that complete set.
+ -- Full visible-UI catalog (#143-#148). The reviewed English is whole and
+ -- strict: its 4096 keys, each with admitted English. A real pack may be
+ -- partial (the partial-locale disposition): it holds valid entries for
+ -- reviewed English keys only, the six-message and Panel cohorts below among
+ -- them, and a meaning it has no entry for is shown in its exact English. A
+ -- pack is therefore judged against its own supplied entries, not against
+ -- the English catalog. They are counted here from the pack data (the data
+ -- file decoded apart from the addon, and compared entry for entry with the
+ -- table the addon loaded) before the real loader reads them again below,
+ -- never from a load's own facts: every supplied entry is admitted and none
+ -- is rejected.
  local englishKeys=L.Keys()
- check(#englishKeys==4078 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4078 keys, each with English')
- for i,row in ipairs(d.packs.rows)do check(row.id==IDS[i+1] and row.accepted==#englishKeys and row.rejected==0,'real pack '..row.id..' admits all '..#englishKeys..' catalog entries and rejects none ('..row.accepted..'/'..row.rejected..')')end
+ check(#englishKeys==4096 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4096 keys, each with English')
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
+ local supplied={}
+ for i=2,#IDS do
+  local id=IDS[i];local pack,loaded=packData[id],Nexus.LocalizationPacks[id]
+  check(type(pack)=='table' and type(pack.entries)=='table' and getmetatable(pack.entries)==nil and type(loaded)=='table' and getmetatable(loaded)==nil and type(loaded.entries)=='table' and getmetatable(loaded.entries)==nil,'SETUP pack '..id..' is supplied with a plain entries table, by the data file and to the addon')
+  supplied[id]=count(pack.entries)
+  check(supplied[id]>=1 and count(loaded.entries)==supplied[id] and same(loaded,pack),'SETUP pack '..id..': the table the addon loaded is the data file\'s pack, entry for entry ('..supplied[id]..' supplied)')
+ end
+ for i,row in ipairs(d.packs.rows)do check(row.id==IDS[i+1] and row.accepted==supplied[row.id] and row.rejected==0,'real pack '..row.id..' admits every supplied entry and rejects none ('..row.accepted..'/'..row.rejected..' of '..tostring(supplied[row.id])..' supplied)')end
  -- The normative original pack cohort (issue #123): the three static status
  -- messages with their existing exact English bytes, kept as a named control.
  -- Each real pack now also holds the issue #142 six-message additions: the two
@@ -833,18 +897,22 @@ do
  for _,case in ipairs(cohort)do if not packKeys[case[2]] then newer[#newer+1]=case end end
  check(#packCohort==3 and #newer==2 and #cohort==#packCohort+#newer and newer[1][2]=='reason.wait_three_choices' and newer[2][2]=='reason.wait_pending_pick_count','SETUP the original pack cohort is three of the five static English meanings; the two newer ones are the issue #142 wait reasons')
  for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
+ -- lacking[id]: the reviewed meanings a pack has no entry for, in key order
+ -- (none for a complete pack). Each is asked under that pack further below.
+ local lacking={}
  for i=2,#IDS do
   local id=IDS[i];local pack=packData[id]
-  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==#englishKeys,'pack '..id..': its own name and exactly one entry per English key ('..count(pack.entries)..')')
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and supplied[id]<=#englishKeys,'pack '..id..': its own name and at most one entry per English key ('..count(pack.entries)..' of '..#englishKeys..')')
   local onlyEnglish,missing=true,{}
   for key in pairs(pack.entries)do onlyEnglish=onlyEnglish and data[key]~=nil and L.Has(key) end
   for _,key in ipairs(englishKeys)do if pack.entries[key]==nil then missing[#missing+1]=key end end
-  check(onlyEnglish and #missing==0,'pack '..id..' holds exactly the English key set: no extra key and none missing ('..(missing[1] or '')..')')
+  check(onlyEnglish and #missing==#englishKeys-supplied[id],'pack '..id..' holds only reviewed English keys: no extra key, and the meanings it has no entry for are exactly the rest of the catalog ('..#missing..')')
+  lacking[id]=missing
   local cohortPresent=true
   for key in pairs(packKeys)do cohortPresent=cohortPresent and pack.entries[key]~=nil end
   for key in pairs(AUTHORED[id])do cohortPresent=cohortPresent and pack.entries[key]~=nil end
   for key in pairs(panelEnglish)do cohortPresent=cohortPresent and pack.entries[key]~=nil end
-  check(cohortPresent,'pack '..id..' keeps the six-message and Panel cohorts as a subset of its complete key set')
+  check(cohortPresent,'pack '..id..' keeps the six-message and Panel cohorts as a subset of its key set')
   for _,case in ipairs(panelCohort)do
    local key,text=case[1],pack.entries[case[1]]
    local copied=false
@@ -898,6 +966,24 @@ do
   Nexus.Localization,Nexus.LocalizationPacks=real,realPacks
   return ok and module~=real and module or nil
  end
+ -- The supplied entries were counted above, before this load. The real
+ -- loader on the real packs admits every one of them and rejects none, and
+ -- admits the whole reviewed English beside them: a pack that lacks
+ -- meanings never loosens the English.
+ do
+  local counted=assert(reloadPacks(realPacks),'loader with the real packs, after their supplied entries were counted');checks=checks+1
+  local cd=counted.Diagnostics()
+  check(cd.packs.present and cd.packs.adopted==6 and cd.packs.refused==0 and #cd.packs.rows==6,'every real pack is adopted by a load made after its entries were counted')
+  for i,row in ipairs(cd.packs.rows)do check(row.id==IDS[i+1] and row.accepted==supplied[row.id] and row.rejected==0,'counted before the load, real pack '..row.id..' has every supplied entry admitted and none rejected ('..row.accepted..'/'..row.rejected..' of '..tostring(supplied[row.id])..' supplied)')end
+  check(cd.base.present and not cd.base.oversized and cd.base.accepted==#englishKeys and cd.base.rejected==0 and cd.base.undeclared==0 and cd.base.missingDeclared==0,'the same load admits the whole reviewed English, strictly, beside packs that may be partial')
+ end
+ -- Whether a reviewed key is declared a static meaning (text or block), read
+ -- from the declaration block's own text.
+ local function staticMeaning(key)
+  return runtimeSource:find('\n    ["'..key..'"] = {kind = "text"},',1,true)~=nil
+   or runtimeSource:find('\n    ["'..key..'"] = {kind = "block"},',1,true)~=nil
+ end
+ check(staticMeaning(K) and not staticMeaning(CHK) and not staticMeaning('reason.not_reviewed'),'SETUP the declaration text tells a static meaning from a template and from an undeclared key')
  -- Issue #142 six-message cohort: each real pack, selected once through the
  -- fixed-session initialization, gives its exact authored draft for every
  -- message through ordinary Text and Format calls (no explicit pack), and the
@@ -927,7 +1013,27 @@ do
     text,source,why=m.Resolve(case[1])
     check(text==case[2] and source=='base' and why==nil,'Resolve stays the exact Panel English under '..id..': '..case[1])
    end
-   check(m.Diagnostics().misses==m0.misses,'the complete real '..id..' pack records no fallback')
+   check(m.Diagnostics().misses==m0.misses,'the real '..id..' pack records no fallback for the six-message and Panel cohorts it holds')
+   -- A real pack may be partial. Each reviewed static meaning it has no entry
+   -- for (lacking[id], from the pack data and the English data, not from this
+   -- load) is shown as its exact English: an intentional fallback, counted
+   -- once, never a draft of another meaning and never the safe status. A
+   -- lacking meaning that is not static must be a declared template: its
+   -- English needs its arguments, so it is not asked here (the charge-row
+   -- cases of the deliberately partial fixture below cover that fallback).
+   -- No lacking meaning is passed over.
+   local g0,shownEnglish=m.Diagnostics(),0
+   for _,key in ipairs(lacking[id])do
+    if staticMeaning(key) then
+     local text,source,why=m.Text(key)
+     check(type(data[key])=='string' and text==data[key] and source=='base' and why=='missing_candidate','active '..id..' shows the exact English of a meaning its pack has no entry for: '..key)
+     shownEnglish=shownEnglish+1
+    else
+     check(L.Kind(key)=='template' or L.Kind(key)=='format','a meaning the '..id..' pack has no entry for is static or a declared template: '..key)
+    end
+   end
+   local g1=m.Diagnostics()
+   check(g1.misses-g0.misses==shownEnglish and g1.byReason.missing_candidate-g0.byReason.missing_candidate==shownEnglish and #g1.keys==#g0.keys and g1.keysNotKept==g0.keysNotKept,'each English fallback for a meaning the real '..id..' pack has no entry for is counted once as missing_candidate and keeps no key ('..shownEnglish..')')
    Nexus.Localization=m
    local line,wait=Nexus.Readout.ChargesLine({banish=0,freeze=7}),T.Message('waiting: waiting for pending-pick count')
    Nexus.Localization=real
@@ -963,7 +1069,7 @@ do
   check(fresh.Resolve(case[2],{[case[2]]='Fixture text'})=='Fixture text' and fresh.Text(case[2],{[case[2]]='Fixture text'})=='Fixture text','an explicit pack still decides alone: '..case[2])
  end
  local active1=fresh.Diagnostics()
- check(active1.misses==active0.misses and active1.byReason.missing_candidate==active0.byReason.missing_candidate and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'the complete real frFR pack records no fallback for its five static messages (partial-pack fallback is covered by fixtures below)')
+ check(active1.misses==active0.misses and active1.byReason.missing_candidate==active0.byReason.missing_candidate and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'the real frFR pack records no fallback for its five static messages (partial-pack fallback is covered above for the real packs and by fixtures below)')
  local charge={banish={known=true,value=2},reroll={known=false},freeze={known=true,value=0}}
  local ct,cs,cw=fresh.Format('readout.charge_counts',charge)
  check(fresh.Kind('readout.charge_counts')=='format' and ct=='Ban:2 Rel:? Gel:0' and cs=='candidate' and cw==nil,'with frFR selected a formatted meaning without an explicit pack uses the active frFR template and typed known/unknown counts')
@@ -1036,9 +1142,12 @@ do
  local pm=assert(reloadPacks(fixture))
  check(pm.InitializeActiveLanguage('plPL')=='plPL' and pm.Text(K)==E and pm.Text('reason.saved_data_reading')=='Fixture read text','a function entry is left out; its valid neighbour is shown')
  check(touched==touched0,'pack metamethods are never invoked')
- -- Issue #142 bridge: every real pack is complete now, so deliberate partial
- -- and malformed fixture packs keep the missing-key fallback and the load-time
- -- template refusal covered. reloadPacks restores the real seam and packs.
+ -- Issue #142 bridge: every real pack holds the six-message cohort, and a
+ -- real pack may or may not lack other meanings, so a deliberately partial
+ -- copy of the real frFR pack (its three original entries alone) and
+ -- malformed fixture packs keep the missing-key fallback and the load-time
+ -- template refusal covered whatever the real packs hold. reloadPacks
+ -- restores the real seam and packs.
  do
   local CK='readout.charge_counts'
   local args={banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}}
@@ -1176,6 +1285,14 @@ do
   check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks,'real seam and packs restored after the Automatic checks')
  end
  check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks and L.ActiveLanguage()=='enUS' and L.Text(K)==E,'the real seam, data and active language are untouched by the loader checks')
+ -- The original pack tables after every load above: still the data file's
+ -- packs, entry for entry (none lost, altered or added), and as many entries
+ -- as were counted before the loads.
+ for i=2,#IDS do
+  local id=IDS[i]
+  check(same(realPacks[id],packData[id]) and count(realPacks[id].entries)==supplied[id],'the real '..id..' pack table still holds exactly its supplied entries after every load')
+ end
+ check(count(realPacks)==6,'the real pack data still holds its six packs and nothing else')
 end
 check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous seam calls cause no observed action, send, StaticPopup or chat')
 check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam leaves the Auto selection unchanged')

@@ -1151,9 +1151,28 @@ do
  end
  check(sets>=3,'SETUP O1 expanded: the control was set on creation and on renders ('..sets..')')
  -- Charges and names keep their own semantics beside the expanded label.
+ -- v12 (Root's focused run stopped at the check below): the charge counts
+ -- are counts, and the panel shows them only while Details is open
+ -- (Panel.ChargesLineShown; the base, eef1608f, has the same rule, and the
+ -- check never ran there: it stood behind the '4078' stop). This render had
+ -- Details closed, as the panel opens, and asked for the row. Both states
+ -- are asked now. Closed: no row is shown, while the model still carries the
+ -- charge facts (nothing is dropped, only not drawn). Open (the panel's own
+ -- memory-only switch, what its Details control toggles; set and put back
+ -- here as ux_manual_recommendation's WithDetails does): the real row with
+ -- the copied frFR template, known 0, unknown ?, known 7, exactly as the
+ -- check stated it. EXPECT: that row with Details closed.
+ check(P.Render(Model({offer=true})) and P._playDetails~=true and not f._chargesText:IsShown()
+  and type(P._lastModel.charges)=='table' and P._lastModel.charges.banish==0 and P._lastModel.charges.freeze==7,
+  'O1 expanded: with Details closed the charge counts are not drawn; the model keeps the facts')
+ local wasDetails=P._playDetails
+ P._playDetails=true
  check(P.Render(Model({offer=true})) and f._chargesText:IsShown() and f._chargesText:GetText()=='Ban:0 Rel:? Gel:7',
   'O1 expanded: the real charge row keeps the copied frFR template: known 0, unknown ?, known 7')
  Passive('O1 expanded, offer with charges')
+ P._playDetails=wasDetails
+ check(P.Render(Model({offer=true})) and P._playDetails~=true and not f._chargesText:IsShown(),
+  'O1 expanded: with Details closed again the charge row is gone')
  check(Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})=='Ban:0 Rel:? Gel:7 ~'
   and L.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}},{})=='B:0 R:? F:7',
   'O1 expanded: the estimate mark follows the whole row; an explicit {} pack gives the English row')

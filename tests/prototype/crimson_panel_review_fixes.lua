@@ -634,6 +634,23 @@ function S.BaseRow(height)
  local need=2*L.pad+math.ceil(G.model.line)
  return height>=need and (height==need or S.Drawn(28,height))
 end
+-- v12 (REG-SLOT-3): the offer box in parts, read from the placed regions:
+-- its top, how far under it the first row starts (the heading row and the
+-- gap under it), the two gaps between the three rows, what stands under the
+-- last row inside the box (the gap to the text under the rows when there is
+-- one, then that text to the box's lower edge), the box's height and what
+-- the panel holds under the box. `height` is the panel's. nil when a row or
+-- the box has no rectangle.
+function S.BoxParts(height)
+ local roll=S.Rect(root._rollArea)
+ local rows={}
+ for i=1,3 do rows[i]=S.Rect(root._offerCards[i]) end
+ if not (roll and rows[1] and rows[2] and rows[3]) then return nil end
+ local rec=root._rollRec:IsShown() and G.Visible(root._rollRec:GetText() or '')~='' and S.Rect(root._rollRec) or nil
+ local under=rec~=nil and rec[2]>=rows[3][4]-0.01
+ return {top=roll[2],box=roll[4]-roll[2],head=rows[1][2]-roll[2],gaps={rows[2][2]-rows[1][4],rows[3][2]-rows[2][4]},
+  tailGap=under and rec[2]-rows[3][4] or nil,tailRest=under and roll[4]-rec[2] or roll[4]-rows[3][4],below=height-roll[4]}
+end
 -- The appearance's roles (approved: "apply existing theme text/muted/accent
 -- roles explicitly"), from the appearance's own resolved tables, never
 -- restated here: ordinary text, muted text and the palette's accent.
@@ -1138,6 +1155,8 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
   -- (They were the two-line grid row: a line of name over one of quality.)
   local short={}
   for i=1,3 do short[i]=root._offerCards[i]:GetHeight() end
+  -- (v12: where the short board's rows stand in the box, for the guard below.)
+  local a0=S.BoxParts(h0)
   C.expect(S.BaseRow(short[1]) and S.BaseRow(short[2]) and S.BaseRow(short[3]) and math.abs(short[1]-short[2])<=1 and math.abs(short[2]-short[3])<=1,
    'REG-SLOT: at '..pct..' the three short rows are the one-line compact row: the draft\'s 28 pixels, never under their measured line and pads',
    tostring(short[1])..'/'..tostring(short[2])..'/'..tostring(short[3]))
@@ -1155,9 +1174,50 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
   -- one-line compact row now.
   local extra=0
   for i=1,3 do extra=extra+math.max(0,root._offerCards[i]:GetHeight()-short[i]) end
-  C.guard(extra>0 and h1==h0+extra and r0~=nil and r1~=nil and math.abs((r1[4]-r1[2])-(r0[4]-r0[2])-extra)<0.01 and c1==c0,
-   'REG-SLOT: at '..pct..' long names wrap: the panel and the roll box grow by exactly their rows\' extra height; the recommendation and controls stay',
-   tostring(h0)..'->'..tostring(h1)..' extra '..extra..' '..c0..'->'..c1)
+  -- v12 (Root's focused run: "295->377 extra 81" at every size). The guard
+  -- asked for the panel and the box to grow by the sum of the three rows'
+  -- own growth, which was the arithmetic of the former fixed rows. The
+  -- approved compact layout places every block and gap from one running
+  -- sum of the draft's pixels and takes each top as that sum in whole units
+  -- (LayoutMetrics.Panel: Gap, Block), so that no rounding adds up down the
+  -- panel. A length of the draft is therefore one of two whole numbers of
+  -- units, the one below or the one above it, where it stands (S.Drawn),
+  -- and a wrapped name moves what follows it to another place of that sum.
+  -- Here the rows grow by 81 and the 2-pixel gap between rows 2 and 3
+  -- (1.35 units) is 2 units where it was 1: the box and the panel grow by
+  -- 82. Nothing overlaps and no room is added that the draft does not draw.
+  -- The growth is asked part by part, each exactly or within its own two
+  -- values, and never as a tolerance on the total:
+  --   the box's top does not move, and the first row starts as far under it
+  --   as before (nothing above the first row changed);
+  --   each gap between two rows is the draft's 2 pixels where it stands, on
+  --   both boards; the text under the rows starts the draft's 3 pixels under
+  --   the last row, on both boards, and from that text's top to the box's
+  --   lower edge nothing changed (the same text);
+  --   so the box grows by exactly the rows' extra height and what those
+  --   gaps changed, which the first line of the condition states as a sum;
+  --   under the box stand the same blocks on both boards: one length of the
+  --   draft, in whole units where it stands, so the two boards' values are
+  --   equal or one unit apart (none of those blocks holds content exactly
+  --   one unit taller than its own row at one place only, which is the one
+  --   case that could add a second unit), and the panel grows by the box's
+  --   growth and that difference.
+  -- EXPECT: "h1==h0+extra" and the box's growth equal to `extra`.
+  local a1=S.BoxParts(h1)
+  local parts=a0~=nil and a1~=nil
+  local gapsChange=parts and (a1.gaps[1]+a1.gaps[2]+(a1.tailGap or 0))-(a0.gaps[1]+a0.gaps[2]+(a0.tailGap or 0)) or 0
+  C.guard(parts and extra>0 and math.abs((a1.box-a0.box)-(extra+gapsChange))<0.01
+   and math.abs(a1.top-a0.top)<0.01 and math.abs(a1.head-a0.head)<0.01
+   and S.Drawn(2,a0.gaps[1]) and S.Drawn(2,a0.gaps[2]) and S.Drawn(2,a1.gaps[1]) and S.Drawn(2,a1.gaps[2])
+   and (a0.tailGap==nil)==(a1.tailGap==nil) and (a0.tailGap==nil or (S.Drawn(3,a0.tailGap) and S.Drawn(3,a1.tailGap)))
+   and math.abs(a1.tailRest-a0.tailRest)<0.01
+   and math.abs((a1.below-a0.below))<=1.01 and math.abs((h1-h0)-((a1.box-a0.box)+(a1.below-a0.below)))<0.01
+   and c1==c0,
+   'REG-SLOT: at '..pct..' long names wrap: the roll box grows by exactly its rows\' extra height and the draft\'s gaps where they stand, the panel by the box\'s growth; the recommendation and controls stay',
+   parts and string.format('%s->%s extra %s; box %s->%s, gaps %s/%s/%s->%s/%s/%s, under the box %s->%s; %s->%s',
+    tostring(h0),tostring(h1),tostring(extra),tostring(a0.box),tostring(a1.box),tostring(a0.gaps[1]),tostring(a0.gaps[2]),tostring(a0.tailGap),
+    tostring(a1.gaps[1]),tostring(a1.gaps[2]),tostring(a1.tailGap),tostring(a0.below),tostring(a1.below),c0,c1)
+    or (tostring(h0)..'->'..tostring(h1)..' extra '..extra..' (a row or the box has no rectangle)'))
   local want={2,4,nil}
   for i=1,3 do
    local o=S.Observe(i)

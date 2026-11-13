@@ -75,6 +75,8 @@ local function Model(o)
  return {status='ready',level=o.level or 40,auto=false,cards=o.cards or {},recommendation=o.recommendation or '',
   progress={wishlistName=o.wishlist or 'Ash',total=6,owned=2,missing={'Cinder Lattice x2 (Rare:x2)','Hollow Bell'},
    shed={'Ashen Tithe'},toLock={'Gravecall Chorus'},unknownTomes={'Frostwake Sigil'}},
+  -- (v12: only R7's short-name render gives one; every other model is as it was.)
+  assignment=o.assignment,
   bestDps={dummy={dps=1200}}}
 end
 local function Effects()
@@ -274,7 +276,47 @@ C.scenario('R7 hover areas fit the text each label shows',function()
  C.expect(hr[1]==lr[1] and hr[2]==lr[2] and hr[4]==lr[4] and hr[3]-hr[1]<lr[3]-lr[1]
   and hr[3]-hr[1]>=textW and hr[3]-hr[1]<=textW+4,
   'R7: the short Wishlist line\'s hover covers its text and pad, not the rest of the row',G.Text(hr)..' in '..G.Text(lr))
- C.expect(lr[3]-hr[3]>=50,'R7: at least 50 px of the row beside it is left to the background drag',lr[3]-hr[3])
+ -- v12 (Root's focused run: "at least 50 px of the row beside it is left to
+ -- the background drag [5]"). That figure was read inside the Wishlist
+ -- text's own box, lr[3]-hr[3], and belonged to the 420-unit row: this
+ -- model states no assignment, so the line reads "Ash (assignment not
+ -- known)", 26 characters, 143 units in this font model, in a value column
+ -- that the approved 284-unit row makes 152 units wide; the text-sized hover
+ -- (asked above, and held) leaves 5 of them. Nothing about the hover
+ -- changed: the row is narrower and these words nearly fill their column.
+ -- What the figure stood for is asked of the row itself, in two parts.
+ -- (1) On this row as it is, the room beside the text is the background's:
+ -- from the hover's right edge to the row's own button (Change) there is
+ -- room, the text's box ends the draft's 6 pixels before that button
+ -- (4 units at this text size: 6 x 284 / 420 rounded), so the room is
+ -- exactly what the text leaves of its box plus that gap, and no other
+ -- passive surface of the panel (Surfaces, the list R1 drags from) reaches
+ -- into it: a drag started there starts on the root.
+ -- (2) A short text leaves at least the 50 units the check asked for: with
+ -- the Wishlist stated as assigned the approved line shows its name alone,
+ -- "Ash", and the same text-sized hover then leaves the rest of the column.
+ -- EXPECT: "lr[3]-hr[3]>=50" on the first render.
+ local change=G.Rect(root._contextChange,root)
+ local gap=math.max(1,math.floor(6*284/420+0.5))
+ local room={hr[3],lr[2],change[1],lr[4]}
+ local taken={}
+ for _,surface in ipairs(Surfaces()) do
+  local hit=surface[2]
+  if hit and hit~=root and hit~=wish and hit:IsVisible() then
+   local ok,r=pcall(G.Rect,hit,root)
+   if ok and r and not G.Apart(r,room) then taken[#taken+1]=surface[1] end
+  end
+ end
+ C.expect(change[1]-lr[3]==gap and room[3]-room[1]==(lr[3]-lr[1])-(hr[3]-hr[1])+gap and room[3]>room[1]
+  and G.Inside(room,{0,0,root:GetWidth(),root:GetHeight()}) and #taken==0,
+  'R7: the room beside the Wishlist text, up to the row\'s button, is what the text leaves of its box and the draft\'s 6-pixel gap, and only the background takes a drag there',
+  string.format('%.1f beside %s, button %s, taken by [%s]',room[3]-room[1],G.Text(hr),G.Text(change),table.concat(taken,', ')))
+ P.Render(Model({wishlist='Ash',assignment={state='ready',name='Ash'}}))
+ lr,hr=G.Rect(wishText,root),G.Rect(wish,root)
+ if C.setup(G.Visible(wishText:GetText())=='Ash','R7: fixture: a Wishlist stated as assigned shows its name alone',wishText:GetText()) then
+  C.expect(hr[1]==lr[1] and hr[3]-hr[1]<=3*G.MODELS.default.char+4 and lr[3]-hr[3]>=50,
+   'R7: at least 50 px of the row beside it is left to the background drag',lr[3]-hr[3])
+ end
  local long='Wishlist '..string.rep('Long Name ',20)
  P.Render(Model({wishlist=long}))
  lr,hr=G.Rect(wishText,root),G.Rect(wish,root)

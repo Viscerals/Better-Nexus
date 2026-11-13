@@ -2029,6 +2029,12 @@ local function RollPresentation(model)
         -- a reserved block keeps it (its content-sized box would otherwise
         -- shrink through the gap and the panel would jump).
         heldHeight=held and held.height or nil,
+        -- The design lengths that block was laid out with (LayoutMetrics
+        -- .Panel: layout.rollSteps), kept with its height: a kept block ends
+        -- where the board's ended, so the blocks under it, and the panel's
+        -- height, are the board's to the unit (the stable footprint of an
+        -- Auto cycle).
+        heldSteps=held and held.steps or nil,
         -- What a successful commit of this render leaves for the next one.
         nextRoll=continuing and (hasContent or reserved)
             and {context=context,cards=cardRows,reserved=reserved} or nil,
@@ -8616,6 +8622,9 @@ local function ApplyModel(model, signatures, roll)
                 -- shown: a reserved block, a wait or a hold) the block keeps
                 -- at least the height it had, so the panel does not jump.
                 reservedRollH=type(roll) == "table" and #cards == 0 and roll.heldHeight or nil,
+                -- (With the design lengths it had: the kept block then ends
+                -- where the board's ended and what is under it stays put.)
+                reservedRollSteps=type(roll) == "table" and #cards == 0 and roll.heldSteps or nil,
                 toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
                 unknownTomes=type(pr.unknownTomes) == "table"
                     and #pr.unknownTomes or 0,
@@ -9330,6 +9339,8 @@ function M.Render(model)
         local laid = frame._responsiveLayout
         local box = type(laid) == "table" and type(laid.boxes) == "table" and laid.boxes.roll or nil
         renderState.roll.height = box and box.h or nil
+        -- And the design lengths it was laid out with (heldSteps above).
+        renderState.roll.steps = box and type(laid.rollSteps) == "table" and laid.rollSteps or nil
     end
     renderState.rawText = rawText
     renderState.statusPresentation = {text=candidate.status, localized=localized==true}

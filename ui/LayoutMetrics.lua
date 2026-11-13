@@ -500,6 +500,8 @@ local function PanelKey(spec)
         type(spec.offerReason) == "table" and (tostring(spec.offerReason.row) .. ":"
             .. math.ceil(tonumber(spec.offerReason.top) or 0)) or 0,
         spec.measured and 1 or 0,math.ceil(tonumber(spec.reservedRollH) or 0),
+        -- (The design lengths a kept offer block is ended with: below.)
+        type(spec.reservedRollSteps) == "table" and table.concat(spec.reservedRollSteps, ":") or 0,
         math.ceil(tonumber(spec.orbLineH) or 0),
         spec.orbDetail and 1 or 0,math.ceil(tonumber(spec.orbDetailH) or 0),
         math.ceil(tonumber(spec.headerTitleH) or 0),
@@ -761,13 +763,19 @@ function M.Panel(spec)
     -- where the next block starts. `closing`: the design gap given last.
     local unit = M.PANEL_BASE_WIDTH / M.PANEL_DESIGN_WIDTH * scale
     local drawn, grown, cursor, closing = 0, 0, 0, 0
+    -- `steps`: while a table, the design lengths given from here on, in
+    -- order (the offer block keeps its own: a block kept between boards is
+    -- ended with them, below).
+    local steps
     local function Gap(pixels)
+        if steps and pixels ~= 0 then steps[#steps + 1] = pixels end
         drawn = drawn + pixels * unit
         cursor = math.floor(drawn + 0.5) + grown
         closing = pixels
     end
     local function Block(pixels, need)
         local top = cursor
+        if steps and pixels ~= 0 then steps[#steps + 1] = pixels end
         drawn = drawn + pixels * unit
         local height = math.floor(drawn + 0.5) + grown - top
         need = math.ceil(tonumber(need) or 0)
@@ -911,6 +919,14 @@ function M.Panel(spec)
         -- the passive Open Orbs... row closes the block. The block is exactly
         -- its content; one kept through a gap between boards keeps the
         -- height it had (spec.reservedRollH), so the panel does not jump.
+        -- It also ends where it ended in the design (spec.reservedRollSteps:
+        -- the design lengths the block was laid out with, layout.rollSteps):
+        -- every block's top is the design's running sum in whole units, so a
+        -- kept block that had only its height would leave what is under it
+        -- at another place of that sum, where a row or a gap can round one
+        -- unit differently and the panel's height with it.
+        local topDrawn = drawn
+        steps = {}
         local top, headH = Block(18, spec.headingH)
         layout.headingH, layout.headingExtra = headH, headH - compact.headingH
         -- The control of the Auto scope line shares the heading row while
@@ -1009,9 +1025,29 @@ function M.Panel(spec)
             Block(0, buttonH)
         end
         if spec.measured then
-            -- A block kept between boards is never shorter than it was.
-            Block(0, math.ceil(tonumber(spec.reservedRollH) or 0) - (cursor - top))
+            local reserved = math.ceil(tonumber(spec.reservedRollH) or 0)
+            local held = type(spec.reservedRollSteps) == "table" and spec.reservedRollSteps or nil
+            if held and reserved > 0 and cursor - top <= reserved then
+                -- A block kept between boards, with content that fits the
+                -- height it had: it ends exactly where it ended, in units
+                -- (its height) and in the design (the same lengths added in
+                -- the same order from the block's top), so what is under it
+                -- is laid out as it was under the board.
+                drawn = topDrawn
+                for index = 1, #held do drawn = drawn + (tonumber(held[index]) or 0) * unit end
+                grown = top + reserved - math.floor(drawn + 0.5)
+                cursor = top + reserved
+                closing = 0
+                steps = held
+            else
+                -- A block kept between boards is never shorter than it was.
+                Block(0, reserved - (cursor - top))
+            end
         end
+        -- The design lengths this block was laid out with, for a later
+        -- render that keeps it (the caller hands them back with its height).
+        layout.rollSteps = steps
+        steps = nil
         Add(layout,"roll",inset,top,full,cursor-top)
         Gap(5)
         -- The Auto scope line under the offer (the Auto ON note) is behind

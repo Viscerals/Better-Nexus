@@ -20,6 +20,11 @@
 -- pilot expectation. runtimeCap.controls add the current 4096/4097 English,
 -- declaration and pack boundaries in memory. A bound registry row checks its
 -- change from the unedited real load, so no catalog count is fixed here.
+-- That change is entry-level, so it holds where entries are judged one by
+-- one: an edited input above the cap (a row that adds an entry while the real
+-- English fills the budget) is checked against the whole-base refusal, and
+-- the row's own prediction is then checked on the same edit at exactly the
+-- cap (see "The entry budget of a bound row" below).
 -- P8 is the intended divergence: a Lua constructor keeps the last duplicate
 -- value. P19 (Lua 5.1 versus LuaJIT escapes) and P20 (UTF-8 BOM) native WoW
 -- behaviour is UNKNOWN: their controls only record the harness fact and
@@ -384,6 +389,71 @@ local function packRowsAfter(rows,removed)
  end
  return out
 end
+-- The entry budget of a bound row. What a row predicts (its change from the
+-- unedited load, its pack rows, its probes) is entry-level: it holds where
+-- the loader judges entries one by one, which is at most CAP.current English
+-- entries. Above that the contract of core/Localization.lua decides alone
+-- (English base: "above MAX_BASE_ENTRIES it adopts nothing, sets
+-- oversized=true and rejected to the whole entry count"; every declared
+-- meaning is then left without English and resolves as an unknown key; a pack
+-- is still adopted, and none of its entries is copied). So the edited input
+-- is counted before it is loaded:
+--  * at most the cap: the row's own prediction, as before;
+--  * above it: the refusal, predicted from that count, the declaration lines
+--    of the real block and the contract (aboveCap), and then the row's own
+--    prediction on the same edit at exactly the cap: the edit less as many
+--    declared static entries as it is over (fitted). Those are the first
+--    static-text declarations in byte order that the row does not name. Each
+--    is one declared meaning left without English (one fewer accepted, one
+--    more missing), its real pack entries are rejected as a removed key's
+--    are, and nothing else of the row's prediction changes.
+-- The safe status text is the documented one, stated here.
+local UNAVAILABLE='This status cannot be shown right now.'
+local staticText,declarationLines={},0
+do
+ local block=runtimeBytes:sub(#head+1,-#tail-1)
+ for key in block:gmatch('\n    %["([^"]+)"%] = {kind = "text"},')do staticText[key]=true end
+ local _,lines=block:gsub('\n    %["[^"]+"%] = {','')
+ declarationLines=lines
+end
+local function aboveCap(o,supplied,want,label)
+ check(declarationLines>0 and declarationLines<=CAP.current,'the real block declares at most the cap: '..declarationLines)
+ local refused={present=true,oversized=true,accepted=0,rejected=supplied,formatted=0,undeclared=0,missingDeclared=declarationLines}
+ check(same(o.base,refused),'registry base load facts above the cap '..label..': '..show(o.base)..' predicted '..show(refused))
+ check(o.packs.present and o.packs.adopted==#registry.enum-1 and o.packs.refused==0,'every real pack stays adopted above the cap '..label)
+ local rows={}
+ for index=2,#registry.enum do
+  local id,entries=registry.enum[index],0
+  for _ in pairs(realPacks[id].entries)do entries=entries+1 end
+  rows[#rows+1]={id=id,accepted=0,rejected=entries}
+ end
+ check(same(o.packs.rows,rows),'no real pack entry is copied above the cap '..label..': '..show(o.packs.rows))
+ check(same(o.languages,registry.enum),'every enum language stays offered above the cap '..label..': '..show(o.languages))
+ check(#o.probes==#want.probes,'registry probe count above the cap '..label)
+ for i,p in ipairs(want.probes)do
+  check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=UNAVAILABLE,source='unavailable',reason=validKey(p.key) and 'unknown_key' or 'invalid_key'}),
+   'registry probe '..i..' above the cap '..label..': '..show(o.probes[i]))
+ end
+end
+-- The edit at exactly the cap, and every key it is then without (the row's
+-- removed key and the entries left out here).
+local function fitted(english,supplied,want,removed)
+ local named,keys={},{}
+ for key in pairs(removed)do named[key]=true end
+ for _,p in ipairs(want.probes)do named[p.key]=true end
+ for key in pairs(realEnglish)do
+  if staticText[key] and english[key]~=nil and not named[key] then keys[#keys+1]=key end
+ end
+ table.sort(keys)
+ local out,without,count={},{},0
+ for key in pairs(removed)do without[key]=true end
+ for index=1,supplied-CAP.current do without[assert(keys[index],'a declared static entry the row does not name')]=true end
+ for key,value in pairs(english)do
+  if not without[key] then out[key]=value;count=count+1 end
+ end
+ check(count==CAP.current,'the fitted edit holds exactly the cap: '..count)
+ return out,without
+end
 for _,row in ipairs(registry.rows)do
  check(row.state==registry.bound,'registry row is bound: '..row.id)
  local want=row.expect and row.expect.runtime
@@ -402,7 +472,7 @@ for _,row in ipairs(registry.rows)do
    for name in pairs(part)do check(type(unedited.base[name])=='number','baseChange names a load fact: '..name)end
   end
   local wantRows=packRowsAfter(unedited.packs.rows,removed)
-  local seen
+  local seen,seenFitted
   for _,ev in ipairs(variants(englishBytes,row.id..'/english'))do
    for _,pv in ipairs(variants(packsBytes,'data/LocalizationPacks.lua'))do
     local label=row.id..' english '..ev[1]..' packs '..pv[1]
@@ -410,9 +480,24 @@ for _,row in ipairs(registry.rows)do
     local packs=assert(loadData(pv[2],'packs','LocalizationPacks'))
     local o=outcome(english,packs,{enum=registry.enum},true,want)
     if seen then check(same(seen,o),'LF and CRLF give equal registry outcomes: '..label) else seen=o end
-    check(same(o.base,wantBase),'registry base load facts '..label..': '..show(o.base)..' predicted '..show(wantBase))
+    local expectBase,expectRows=wantBase,wantRows
+    local supplied=0
+    for _ in pairs(english)do supplied=supplied+1 end
+    if supplied>CAP.current then
+     aboveCap(o,supplied,want,label)
+     local over=supplied-CAP.current
+     local inside,without=fitted(english,supplied,want,removed)
+     expectBase={}
+     for name,value in pairs(wantBase)do expectBase[name]=value end
+     expectBase.accepted,expectBase.missingDeclared=wantBase.accepted-over,wantBase.missingDeclared+over
+     expectRows=packRowsAfter(unedited.packs.rows,without)
+     label=label..' at exactly the cap'
+     o=outcome(inside,packs,{enum=registry.enum},true,want)
+     if seenFitted then check(same(seenFitted,o),'LF and CRLF give equal registry outcomes: '..label) else seenFitted=o end
+    end
+    check(same(o.base,expectBase),'registry base load facts '..label..': '..show(o.base)..' predicted '..show(expectBase))
     check(o.packs.present and o.packs.adopted==#registry.enum-1 and o.packs.refused==0,'every real pack stays adopted '..label)
-    check(same(o.packs.rows,wantRows),'real pack copies change only by removed keys '..label..': '..show(o.packs.rows))
+    check(same(o.packs.rows,expectRows),'real pack copies change only by removed keys '..label..': '..show(o.packs.rows))
     check(same(o.languages,registry.enum),'every enum language stays offered '..label..': '..show(o.languages))
     check(#o.probes==#want.probes,'registry probe count '..label)
     for i,p in ipairs(want.probes)do
