@@ -508,6 +508,16 @@ function M.ShowSetup()
     if f.title then f.title:SetText(SetupTitle()) end
     if f.hint then f.hint:SetText(SetupHint()) end
     FitClose(f)
+    -- The one-time release note (ui/Changelog.lua) is a dialog of this
+    -- window's strata and level, so the two would draw through each other
+    -- (each one's buttons over the other's body). Showing the note already
+    -- closes this window; asking for this window now hides a shown note, as
+    -- this window's own buttons do (CloseOtherSetupWindows). Display only:
+    -- the hide records nothing (the note is recorded when it is displayed,
+    -- and only where that can be saved), and the note is not offered again
+    -- in this session.
+    local note = _G.NexusChangelogPopup
+    if note and note.IsShown and note:IsShown() then pcall(note.Hide, note) end
     SyncNote(f):Show()
     return true
 end
