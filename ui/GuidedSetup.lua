@@ -2457,6 +2457,13 @@ function U.Show()
     f.waiting, f.waitingKind, f.buildsRoute, f.planAsk, note = nil, nil, nil, nil, nil
     -- A reopened coach shows its step from the top (Bound resets the view).
     view.planDraft, view.scrollKey = false, nil
+    -- Settings (ui/SettingsWindow.lua) is a dialog of this window's strata
+    -- and level, so the two would draw through each other: it gives way
+    -- (its own Hide, display only) just before the coach is shown.
+    local settings = Nexus.SettingsWindow
+    if settings and type(settings.IsShown) == 'function' and type(settings.Hide) == 'function' and settings.IsShown() then
+        pcall(settings.Hide)
+    end
     f:Show()
     U.Render()
     return true
@@ -2475,6 +2482,11 @@ function U.ShowFirstUse(onClose)
     if f.waiting and not f:IsShown() then return true end
     f.waiting, f.waitingKind, f.buildsRoute, f.planAsk, note = nil, nil, nil, nil, nil
     view.planDraft, view.scrollKey = false, nil
+    -- As U.Show: Settings gives way just before the coach is shown.
+    local settings = Nexus.SettingsWindow
+    if settings and type(settings.IsShown) == 'function' and type(settings.Hide) == 'function' and settings.IsShown() then
+        pcall(settings.Hide)
+    end
     f:Show()
     U.Render()
     return true

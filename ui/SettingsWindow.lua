@@ -342,6 +342,16 @@ function M.Show(category)
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
         Nexus.LayoutMetrics.FitToScreen(frame, 20)
     end
+    -- The guided setup coach (ui/GuidedSetup.lua) is a dialog of this
+    -- window's strata and level, so the two would draw through each other.
+    -- It gives way through its own raw hide (GuidedSetupUI.Hide): that
+    -- records no first use and keeps its first-use callback, so only its
+    -- deliberate Close still acknowledges first use, and first use is
+    -- offered again as for any other hide. Display only.
+    local coach, coachFrame = Nexus.GuidedSetupUI, _G.NexusGuidedSetup
+    if coach and type(coach.Hide) == "function" and coachFrame and coachFrame.IsShown and coachFrame:IsShown() then
+        pcall(coach.Hide)
+    end
     frame:Show()
     return true
 end

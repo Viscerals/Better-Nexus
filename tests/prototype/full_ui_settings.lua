@@ -245,4 +245,269 @@ do
     check(F.Serialize(NexusDB)==before and #L.actions==acted and not Nexus.RecomputeStats().autoEnabled,
         'A23: reading them changes no saved data, action or Auto')
 end
+----------------------------------------------------------------------------
+-- W1-W4: Settings and the guided setup coach never draw through each other.
+-- Native finding (test.163027-eb4df21c): with Settings open from the panel's
+-- Options, the real Nexus.GuidedSetupUI.Show() returned true and both windows
+-- were shown, Settings' title, categories, rows and paging interleaved with
+-- the coach's body and footer. Both are DIALOG windows of UIParent with no
+-- level of their own (ui/SettingsWindow.lua EnsureFrame; ui/GuidedSetup.lua
+-- Ensure), each with the opaque base Theme.StyleWindow puts one level under
+-- it, and neither Show closes the other.
+-- Real calls only: Settings through its Options row ("Open Settings...", the
+-- route checked above) and Settings.Show/Hide; the coach through
+-- GuidedSetupUI.Show/Hide (Options > Setup / Welcome, Help.OpenGuide and
+-- /nexus help all reach it) and, for first use, QuickStart.ShowIfFirstTime.
+-- EXPECT (by reading, expected to fail at 5a8b6922; Root runs it): whenever
+-- both windows are shown, every frame of one window's tree draws below every
+-- frame of the other's (strata, then level; texts and textures draw with
+-- their frame; equal strata and level is not an order). Either may be the
+-- front window, and hiding the earlier window is also accepted. Asked
+-- Settings first, coach first, each with the other reopened, and over a
+-- first-use coach.
+-- GUARD (hard, as above): each route still opens its window when asked; an
+-- open warning still refuses the coach, and that refusal leaves Settings as
+-- it was; a first-use coach is acknowledged only by its own deliberate Close
+-- (a hide by another window records nothing, and first use is then offered
+-- again); opening writes no saved data; no game action, no send, Auto OFF.
+-- MODEL, this block only (the shared harness answers level 1 and MEDIUM for
+-- every frame whatever its parent). Installed by each boot's `before` hook,
+-- on every frame made through CreateFrame and on UIParent: strata is the
+-- frame's own or its nearest ancestor's (setting a frame's strata clears its
+-- descendants' own, so they follow it; UIParent MEDIUM); level is the
+-- frame's own SetFrameLevel (absolute, floored, at least 0) or its parent's
+-- + 1, read when asked (UIParent 0); order is (strata, level), equal keys
+-- unordered. Raise, Lower and SetToplevel are recorded, named in the EXPECT
+-- message and change no level. Not modelled: the client's re-levelling of
+-- children, raising on click, draw layers inside a frame, geometry and mouse
+-- hits (the two windows' overlap is the native finding's, not modelled here).
+-- Offline model only; native order must still be seen in the game.
+do
+    local STRATA={BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,FULLSCREEN=6,FULLSCREEN_DIALOG=7,TOOLTIP=8}
+    local ORDER={unmodelled={}}
+    local function Modelled(f) return type(f)=='table' and rawget(f,'_orderModel')==true end
+    local function Strata(f)
+        local o,guard=f,0
+        while type(o)=='table' and guard<64 do
+            local s=rawget(o,'_orderStrata') or rawget(o,'strata')
+            if STRATA[s] then return s end
+            o=rawget(o,'parent');guard=guard+1
+        end
+        return 'MEDIUM'
+    end
+    local function Level(f,depth)
+        depth=(depth or 0)+1
+        local own=rawget(f,'_orderLevel')
+        if own then return own end
+        local parent=rawget(f,'parent')
+        if Modelled(parent) and depth<64 then return Level(parent,depth)+1 end
+        if type(parent)=='table' then return (tonumber(parent:GetFrameLevel()) or 0)+1 end
+        return 0
+    end
+    local function ClearStrata(f)
+        for _,child in ipairs(rawget(f,'children') or {}) do
+            if Modelled(child) then rawset(child,'_orderStrata',nil);ClearStrata(child) end
+        end
+    end
+    local function Adopt(f)
+        if type(f)~='table' then return f end
+        rawset(f,'_orderModel',true)
+        rawset(f,'GetFrameLevel',function(self) return Level(self) end)
+        rawset(f,'SetFrameLevel',function(self,v)
+            v=tonumber(v)
+            if v then rawset(self,'_orderLevel',math.max(0,math.floor(v))) end
+        end)
+        rawset(f,'GetFrameStrata',function(self) return Strata(self) end)
+        rawset(f,'SetFrameStrata',function(self,s)
+            if STRATA[s] then rawset(self,'_orderStrata',s);ClearStrata(self) end
+        end)
+        for _,call in ipairs({'Raise','Lower','SetToplevel'}) do
+            rawset(f,call,function(self)
+                ORDER.unmodelled[#ORDER.unmodelled+1]=call..' on '..tostring(rawget(self,'name') or rawget(self,'kind'))
+            end)
+        end
+        return f
+    end
+    -- F.Boot's `before` hook: after the harness loads, before the TOC. Window
+    -- names of an earlier session are cleared so none is read as this one's.
+    local function InstallOrder(h,keepWarnings)
+        NexusSettingsWindow,NexusGuidedSetup,NexusGuidedSetupEscape=nil,nil,nil
+        NexusChangelogPopup,NexusQuickStart,NexusQuickStartEscape=nil,nil,nil
+        ORDER.unmodelled={}
+        if keepWarnings then h.keepOverwriteWarningPrompts=true end
+        Adopt(UIParent);rawset(UIParent,'_orderLevel',0)
+        local create=CreateFrame
+        CreateFrame=function(kind,name,parent,...) return Adopt(create(kind,name,parent,...)) end
+    end
+    local function Frames(root,out)
+        out=out or {}
+        if Modelled(root) and root:IsVisible() then out[#out+1]=root end
+        for _,child in ipairs(rawget(root,'children') or {}) do
+            if Modelled(child) then Frames(child,out) end
+        end
+        return out
+    end
+    local function Key(f) return STRATA[Strata(f)]*65536+Level(f) end
+    local function Describe(f)
+        local text=rawget(f,'text')
+        local label=rawget(f,'name') or (tostring(rawget(f,'kind'))..((type(text)=='string' and text~='') and (' "'..text..'"') or ''))
+        return label..' '..Strata(f)..'/'..Level(f)
+    end
+    local function Span(root)
+        local low,high,lowFrame
+        for _,f in ipairs(Frames(root)) do
+            local k=Key(f)
+            if not low or k<low then low,lowFrame=k,f end
+            if not high or k>high then high=k end
+        end
+        return low,high,lowFrame
+    end
+    local function Reach(back,floor)
+        local out={}
+        for _,f in ipairs(Frames(back)) do if Key(f)>=floor then out[#out+1]=Describe(f) end end
+        return out
+    end
+    local layers,misses=0,{}
+    local function Layers(tag)
+        layers=layers+1
+        local a,b=NexusSettingsWindow,NexusGuidedSetup
+        if not (a and b and a:IsVisible() and b:IsVisible()) then return end
+        local aLow,aHigh,aFloor=Span(a)
+        local bLow,bHigh,bFloor=Span(b)
+        check(aLow and bLow,tag..': fixture: both windows have shown frames')
+        if aHigh<bLow or bHigh<aLow then return end
+        misses[#misses+1]=tag..': Settings and the coach interleave. Coach frames at or above Settings\' lowest frame ('
+            ..Describe(aFloor)..'): '..table.concat(Reach(b,aLow),', ')
+            ..'. Settings frames at or above the coach\'s lowest frame ('..Describe(bFloor)..'): '
+            ..table.concat(Reach(a,bLow),', ')
+            ..(#ORDER.unmodelled>0 and ('. Unmodelled order calls: '..table.concat(ORDER.unmodelled,', ')) or '')
+    end
+    local function Pending() return #misses>0 and (' (interleaving so far: '..table.concat(misses,' | ')..')') or '' end
+    local function Coach() local g=NexusGuidedSetup;return g~=nil and g:IsShown() and true or false end
+    local function Seen() return type(NexusDB)=='table' and rawget(NexusDB,'hasSeenQuickStart') or nil end
+    local function OpenSettings(tag)
+        local row
+        for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
+            if item.text=='Open Settings...' then row=item end
+        end
+        check(row and type(row.func)=='function',tag..': fixture: the Options row Open Settings... exists'..Pending())
+        row.func()
+        check(Nexus.SettingsWindow.IsShown(),tag..': Settings opens when asked'..Pending())
+    end
+    local function OpenCoach(tag)
+        local shown,why=Nexus.GuidedSetupUI.Show()
+        check(shown==true and Coach(),tag..': the coach opens when asked: '..tostring(why)..Pending())
+    end
+    local function Quiet(L,tag,acts,sent)
+        check(#L.actions==acts and #L.sent==sent and not Nexus.RecomputeStats().autoEnabled,
+            tag..': no game action, no send, Auto OFF: actions '..(#L.actions-acts)..', sends '..(#L.sent-sent)..Pending())
+    end
+    -- A settled session that has seen first use and the release note, so no
+    -- startup window takes part (synthetic data only).
+    local function Settled(extra)
+        return F.Database({mutate=function(d)
+            d.hasSeenQuickStart=true
+            d.lastChangelogSeen='prototype-P1.6-assigned-orbs'
+            d.settings.lastChangelogSeen='prototype-P1.6-assigned-orbs'
+            if extra then extra(d) end
+        end})
+    end
+    local function Boot(db,keepWarnings)
+        local L=F.Boot(db,function(h) F.OrbService(h);InstallOrder(h,keepWarnings) end)
+        L.Advance(3,.05)
+        return L
+    end
+
+    -- W1. Settings first, then the coach (the native order); then Settings
+    -- closed and opened again while the coach is shown.
+    do
+        local tag='W1 Settings first'
+        local L=Boot(Settled())
+        local saved,acts,sent=F.Serialize(NexusDB),#L.actions,#L.sent
+        OpenSettings(tag)
+        OpenCoach(tag)
+        Layers(tag..', coach opened over Settings')
+        Nexus.SettingsWindow.Hide()
+        check(not Nexus.SettingsWindow.IsShown(),tag..': Settings closes'..Pending())
+        OpenSettings(tag..' (reopened)')
+        Layers(tag..', Settings reopened over the coach')
+        check(F.Serialize(NexusDB)==saved,tag..': opening and reopening write no saved data'..Pending())
+        check(Seen()==true,tag..': first use stays as it was'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- W2. The coach first, then Settings; then the coach hidden and shown
+    -- again while Settings is shown.
+    do
+        local tag='W2 coach first'
+        local L=Boot(Settled())
+        local saved,acts,sent=F.Serialize(NexusDB),#L.actions,#L.sent
+        OpenCoach(tag)
+        OpenSettings(tag)
+        Layers(tag..', Settings opened over the coach')
+        Nexus.GuidedSetupUI.Hide()
+        check(not Coach(),tag..': the coach hides'..Pending())
+        OpenCoach(tag..' (reopened)')
+        Layers(tag..', coach reopened over Settings')
+        check(F.Serialize(NexusDB)==saved,tag..': opening and reopening write no saved data'..Pending())
+        check(Seen()==true,tag..': first use stays as it was'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- W3. A first-use coach (a session that has not seen first use), then
+    -- Settings. Opening Settings, or a hide by it, must not acknowledge first
+    -- use; only the coach's own Close does.
+    do
+        local tag='W3 first-use coach'
+        local L=Boot(F.Database())
+        Nexus.QuickStart.ShowIfFirstTime()
+        check(Coach() and type(rawget(NexusGuidedSetup,'firstUse'))=='function' and Seen()==nil,
+            tag..': fixture: the first-use coach is shown and first use is not recorded'..Pending())
+        local acts,sent=#L.actions,#L.sent
+        OpenSettings(tag)
+        Layers(tag..', Settings opened over the first-use coach')
+        check(Seen()==nil,tag..': opening Settings records no first use'..Pending())
+        if Coach() then
+            local close
+            for _,c in ipairs(rawget(NexusGuidedSetup,'children') or {}) do
+                local label=(tostring(c:GetText() or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''))
+                if rawget(c,'kind')=='Button' and c:IsShown() and label=='X' then close=c end
+            end
+            check(close~=nil,tag..': fixture: the coach offers its Close'..Pending())
+            close:Click()
+            check(not Coach() and Seen()==true,tag..': the coach\'s deliberate Close records first use'..Pending())
+        else
+            check(Seen()==nil,tag..': a coach hidden by another window records nothing'..Pending())
+            Nexus.QuickStart.ShowIfFirstTime()
+            check(Coach() and Seen()==nil,tag..': first use is offered again'..Pending())
+        end
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- W4. An open warning still refuses the coach, and that refusal leaves
+    -- Settings shown as it was (no hide before the refusal).
+    do
+        local tag='W4 warning open'
+        local L=Boot(Settled(function(d) d.overwriteWarnings=nil end),true)
+        if not Nexus.OverwriteWarning.IsOpen() then Nexus.OverwriteWarning.EnsureOnboarding() end
+        check(Nexus.OverwriteWarning.IsOpen(),tag..': fixture: the onboarding warning is open and unanswered'..Pending())
+        local acts,sent=#L.actions,#L.sent
+        OpenSettings(tag)
+        local saved=F.Serialize(NexusDB)
+        local shown,why=Nexus.GuidedSetupUI.Show()
+        check(shown==false and why=='warning-open' and not Coach(),tag..': the coach refuses over the open warning: '
+            ..tostring(shown)..'/'..tostring(why)..Pending())
+        check(Nexus.SettingsWindow.IsShown() and Nexus.OverwriteWarning.IsOpen(),
+            tag..': the refusal leaves Settings shown and the warning unanswered'..Pending())
+        Layers(tag..', coach refused')
+        check(F.Serialize(NexusDB)==saved,tag..': the refusal writes nothing'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- The collected EXPECT fails only after every check above ran.
+    if #misses>0 then
+        error('full_ui_settings: EXPECT Settings and the guided setup coach never interleave ('..#misses..' of '
+            ..layers..' layer checks): '..table.concat(misses,' | '),0)
+    end
+end
 print('PASS full UI Settings owner routes and passive navigation')
