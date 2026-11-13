@@ -98,6 +98,27 @@
 -- after stays a GUARD and the draft's geometry is an EXPECT beside it.
 -- The N3 placement guard is given content-sized rows, as a render gives
 -- them, so it cannot hold on the grid of eef1608f.
+-- The typography correction (text sizes that looked uneven on the installed
+-- panel). EXPECT, failing at 50f78c94 by design: the words on the panel's
+-- controls are one role, the 11-unit secondary font x the native scale, a
+-- step under the 12-unit names and values. In this fixture that role is seen
+-- where a control is sized from its own words: header line 1 and the Build
+-- and Wishlist rows' button column (Line1, N7, N8, N10: every width they pin
+-- is worked out again from the same words in the same font model at the
+-- role's size, none is relaxed), and in the Auto control's own font object,
+-- which is a copy of that role and not of the primary one (T1). The setup
+-- view's hint stands in the panel's middle, 24 design pixels or more from
+-- each side, as narrow as its lines stay even without another line, and is
+-- measured and drawn at that one width (M1). GUARD, unchanged: every other
+-- role and size, whole names, measured heights, the gaps around the hint
+-- and that nothing takes a game action. Standards R1: the role is also asked
+-- of the controls themselves. The font model installed below records the
+-- font object a button is given for its normal, highlight and disabled
+-- states, and T1 asks, at both native sizes, that each of the nine controls
+-- (Options, My Builds, Change, the two setup actions, the three footer hubs
+-- and Details) was given the owned secondary font and the Auto control its
+-- own font object. EXPECT, failing at 50f78c94 by design: eight of the nine
+-- were given the normal font there and Details none of the panel's own.
 -- Native pixels, glyph coverage, real font faces and tooltip drawing: NOT RUN.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
@@ -120,6 +141,20 @@ local function SetNative(height)
   font._fontPath,font._fontSize,font._fontFlags=PATH,height*ratio,''
  end
 end
+
+-- The font object a button is given for each of its three states (Standards
+-- R1). The panel gives a control's label its font through the button's own
+-- three setters, by the owned font's name or, for the Auto control, by that
+-- control's own font object. Install records what each setter is given, on
+-- the widget it is given to (its _buttonFonts: normal, highlight, disabled;
+-- the last one given stands), and then does whatever this harness did for
+-- that setter before: nothing, where it had none. Nothing else of the model
+-- follows the record: no label takes its face from it and no width or
+-- height is measured from it. RECORDER keeps the three recording functions,
+-- so a check can state that the widget it reads is one whose setters are
+-- the recorded ones.
+local BUTTON_FONT={SetNormalFontObject='normal',SetHighlightFontObject='highlight',SetDisabledFontObject='disabled'}
+local RECORDER={}
 
 local function Install()
  local m=G.RegionMethods()
@@ -174,6 +209,22 @@ local function Install()
  m.GetStringHeight=function(self)
   local _,size=m.GetFont(self)
   return math.max(1,G.Rows(self.text,tonumber(self.width) or 0,CHAR*size))*math.ceil(size*LINE)
+ end
+ for setter,state in pairs(BUTTON_FONT) do
+  -- What the harness answers for this setter today, if anything: read as a
+  -- widget reads it (a method table may answer through an index of its
+  -- own), protected, and called after the record with what it was given.
+  local ok,had=pcall(function() return m[setter] end)
+  if not (ok and type(had)=='function') then had=nil end
+  RECORDER[setter]=function(self,font,...)
+   if type(self)=='table' then
+    local given=rawget(self,'_buttonFonts')
+    if type(given)~='table' then given={};rawset(self,'_buttonFonts',given) end
+    given[state]=font
+   end
+   if had then return had(self,font,...) end
+  end
+  m[setter]=RECORDER[setter]
  end
  CreateFont=function(name) return CreateFrame('Font',name) end
  for name in pairs(RATIOS) do
@@ -274,14 +325,19 @@ local function LabelRoom() return math.max(Design(14),14) end
 -- its label fit keeps clear), each held to three tenths of the panel, the
 -- three 6 apart; the title from 6 after the grip to 6 before the Auto
 -- control.
+-- Typography correction: the words on a control are the panel's 11-unit
+-- secondary role (CONTROL), a step under the names and values, so a control
+-- is as wide as its words are in that role. EXPECT: these widths were worked
+-- out with the words in the 12-unit 'normal' role, which the controls had.
+local CONTROL='secondary'
 local function Line1()
  local limit=math.floor(NexusPanel:GetWidth()*0.3)
  local widest=0
  for _,key in ipairs({'panel.button.auto_on','panel.button.auto_off','panel.button.auto_unknown'}) do
-  widest=math.max(widest,Wide((Nexus.Localization.Text(key)),'normal'))
+  widest=math.max(widest,Wide((Nexus.Localization.Text(key)),CONTROL))
  end
  local s={edge=Inset(),close=Design(24),gap=Design(6),grip=Grip(),height=Design(22)}
- s.options=math.min(limit,math.ceil(Wide(NexusPanel._menuBtn:GetText() or '','normal'))+LabelRoom())
+ s.options=math.min(limit,math.ceil(Wide(NexusPanel._menuBtn:GetText() or '',CONTROL))+LabelRoom())
  s.auto=math.min(limit,math.ceil(widest)+math.max(Design(16),12))
  s.reserved=s.edge+s.close+s.gap+s.options+s.gap+s.auto+s.gap
  s.titleLeft=s.edge+s.grip+s.gap
@@ -1331,13 +1387,15 @@ C.scenario('N7 a native height of 10, or no readable reference, keeps 10 / 12 / 
  -- caption and 6 pixels), the 6 pixels before the buttons and the button
  -- column (the wider of the two labels and their room, LabelRoom: 14
  -- pixels and never under 14 units; at most two fifths of the panel).
+ -- (Typography correction: the two labels are worded in the controls' role,
+ -- CONTROL, where they were in the 'normal' role.)
  local buildLine,wishlistLine=NexusPanel._contextBuild,NexusPanel._contextWishlist
  local captionColumn=0
  for _,caption in ipairs({NexusPanel._contextBuildCaption,NexusPanel._contextWishlistCaption}) do
   if caption:IsShown() then captionColumn=math.max(captionColumn,math.ceil(Natural(caption))+Design(6)) end
  end
  local buttonColumn=math.min(math.floor(NexusPanel:GetWidth()*0.4),
-  math.ceil(math.max(Wide(NexusPanel._switchBtn:GetText() or '','normal'),Wide(NexusPanel._contextChange:GetText() or '','normal')))+LabelRoom())
+  math.ceil(math.max(Wide(NexusPanel._switchBtn:GetText() or '',CONTROL),Wide(NexusPanel._contextChange:GetText() or '',CONTROL)))+LabelRoom())
  local nameColumn=NexusPanel:GetWidth()-2*Inset()-captionColumn-Design(6)-buttonColumn
  C.setup(Natural(buildLine)<=nameColumn and captionColumn>Design(6),
   'N7: fixture: the Build line\'s words fit one line of the names\' column',
@@ -1366,16 +1424,19 @@ C.scenario('N7 a native height of 10, or no readable reference, keeps 10 / 12 / 
  -- design pixels after the names' column, in the draft's 20-pixel height
  -- (never taller than its row), so the two rows 2 pixels apart do not
  -- overlap. EXPECT: they were 106 x 20 units; the compact buttons are one
- -- column as wide as the wider label needs (My Builds here: 60 units of
+ -- column as wide as the wider label needs (My Builds here: 55 units of
  -- words and 14 of room, LabelRoom: the draft's 14 pixels are 9 units at
  -- this size, under the 14 its label's end caps need). The routes and the
  -- labels are unchanged (N8).
+ -- (Typography correction, EXPECT: the column was 74 units, for the 60
+ -- units those nine characters are in the 12-unit primary role; in the
+ -- 11-unit control role they are 54.45, so 55, in this model.)
  C.expect(switch and change and switch[2]==build[2] and change[2]==wishlist[2]
-  and switch[3]-switch[1]==buttonColumn and change[3]-change[1]==buttonColumn and buttonColumn==74
+  and switch[3]-switch[1]==buttonColumn and change[3]-change[1]==buttonColumn and buttonColumn==69
   and switch[3]==NexusPanel:GetWidth()-Inset() and change[3]==switch[3] and switch[1]==build[3]+Design(6)
   and switch[4]-switch[2]==math.min(Design(20),buildLine:GetHeight())
   and change[4]-change[2]==math.min(Design(20),wishlistLine:GetHeight()) and G.Apart(switch,change),
-  'N7: My Builds and Change are one 74-unit column at the right inset, each at its line\'s top in the draft\'s 20-pixel height, apart',Text(switch)..' '..Text(change))
+  'N7: My Builds and Change are one 69-unit column at the right inset, each at its line\'s top in the draft\'s 20-pixel height, apart',Text(switch)..' '..Text(change))
  local card,tier,ash,gain=StatusCard()
  -- The difficulty band (the approved compact panel, presentation B) at the
  -- reference size: the panel's width less its insets; the tier and Soul Ash
@@ -1554,6 +1615,113 @@ C.scenario('T1 main panel text is at least 11 units, names 12, at the native-ref
   -- is intentionally gone; no body text is smaller for it (the floor above).
   C.expect(Near(Size(NexusPanel._contextTitle),12*scale),tag..': the panel title is the 12-unit primary role, x the native scale',
    tostring(Size(NexusPanel._contextTitle)))
+  -- Typography correction: the Auto control draws its label in a font
+  -- object of its own, so that no shared font object is ever sized for it.
+  -- That object is a copy of the controls' role, the 11-unit secondary font
+  -- x the native scale: its fit must not put the label back in the 12-unit
+  -- primary role. EXPECT fails at 50f78c94, where it was a copy of the
+  -- primary font. (The object is read by the client-wide name the panel
+  -- gives it; the shared fonts' guard below still holds beside it.)
+  local autoFont=_G.NexusAutoButtonFont
+  C.expect(autoFont~=nil and Near(Size(autoFont),11*scale),
+   tag..': the Auto control\'s own font is the 11-unit control role, x the native scale, not the primary one',
+   autoFont and tostring(Size(autoFont)) or 'no such font object')
+  -- Standards R1: the role on the controls themselves. The widths above and
+  -- in N7, N8 and N10 only show which font a control is MEASURED in; a
+  -- control put back in the normal role would still pass them, its label
+  -- then drawn wider than it was measured. So the font each control is
+  -- GIVEN is asked here, on the widget, for its normal, highlight and
+  -- disabled states (the three setters this fixture records: Install).
+  -- The nine controls are reached as the panel's own widgets: the fields it
+  -- keeps for Options, My Builds, Change and Details; its own list of the
+  -- three footer hubs (P.FooterHubs); and, for the two setup actions, which
+  -- it keeps no field for, the one button among its children that carries
+  -- the action's reviewed label.
+  -- EXPECT, failing at 50f78c94 by design (there eight of the nine were
+  -- given the 12-unit normal font and Details none of the panel's own):
+  -- each of the nine was given the owned secondary font object, which is 11
+  -- units x the native scale at this native height and is not the primary
+  -- one. The Auto control, given that role first, was then given its own
+  -- font object for all three states (GUARD of its fit: the object was a
+  -- copy of the primary font before, and is asked for its size above).
+  local STATES={'normal','highlight','disabled'}
+  local secondary,primary=_G[LM.FontObject('secondary')],_G[LM.FontObject('normal')]
+  local function PanelButton(key)
+   local label,found=(Nexus.Localization.Text(key)),nil
+   for _,child in ipairs(NexusPanel.children or {}) do
+    if type(child)=='table' and child.kind=='Button' and type(child.GetText)=='function' and child:GetText()==label then
+     -- (Two buttons with one label would not name one control.)
+     if found then return nil end
+     found=child
+    end
+   end
+   return found
+  end
+  -- The font a widget was last given for a state, as a font object (the
+  -- panel names an owned font; a name is read as the object it names).
+  local function Given(button,state)
+   local given=type(button)=='table' and rawget(button,'_buttonFonts') or nil
+   local font=type(given)=='table' and given[state] or nil
+   if type(font)=='string' and _G[font]~=nil then font=_G[font] end
+   return font
+  end
+  local function Named(font)
+   if font==nil then return 'no font given' end
+   if type(font)~='table' then return tostring(font) end
+   local name=(font==secondary and 'the secondary font') or (font==primary and 'the normal font')
+    or (font==autoFont and 'the Auto control\'s own font') or 'another font'
+   return name..(type(font.GetFont)=='function' and (' at '..tostring(Size(font))) or '')
+  end
+  local hubs=type(P.FooterHubs)=='function' and P.FooterHubs() or {}
+  local play=NexusPanel._play
+  local controls={
+   {'Options',NexusPanel._menuBtn},{'My Builds',NexusPanel._switchBtn},{'Change',NexusPanel._contextChange},
+   {'Assign Wishlist',PanelButton('panel.button.assign_wishlist')},{'Create Wishlist',PanelButton('panel.button.create_wishlist')},
+   {'the Wishlist hub',hubs[1]},{'the Builds hub',hubs[2]},{'the Orbs hub',hubs[3]},
+   {'Details',type(play)=='table' and play.details or nil},
+  }
+  local auto=NexusPanel._autoBtn
+  local apart,recorded,seen,lost=true,type(auto)=='table',{},{}
+  for _,control in ipairs(controls) do
+   local button=control[2]
+   if type(button)~='table' or seen[button] or button==auto then
+    apart=false;lost[#lost+1]=control[1]
+   else
+    seen[button]=true
+    for setter in pairs(BUTTON_FONT) do
+     if not rawequal(button[setter],RECORDER[setter]) then recorded=false end
+    end
+   end
+  end
+  if type(auto)=='table' then
+   for setter in pairs(BUTTON_FONT) do
+    if not rawequal(auto[setter],RECORDER[setter]) then recorded=false end
+   end
+  end
+  if C.setup(#controls==9 and apart and recorded and hubs[3]==NexusPanel._orbsHubBtn
+   and type(secondary)=='table' and type(primary)=='table' and secondary~=primary,
+   tag..': fixture: the nine controls are nine widgets of the panel beside the Auto control, their font setters are the ones this fixture records, and the owned secondary and normal fonts are two objects',
+   'not found, or found twice: '..table.concat(lost,', ')..'; setters recorded: '..tostring(recorded)) then
+   local roles,notes=true,{}
+   for _,control in ipairs(controls) do
+    for _,state in ipairs(STATES) do
+     local font=Given(control[2],state)
+     if not (font~=nil and font==secondary and font~=primary and Near(Size(font),11*scale)) then
+      roles=false;notes[#notes+1]=control[1]..', '..state..': '..Named(font)
+     end
+    end
+   end
+   C.expect(roles,
+    tag..': Options, My Builds, Change, both setup actions, the three footer hubs and Details were each given the owned secondary font, 11 units x the native scale, for their normal, highlight and disabled states',
+    table.concat(notes,'; '))
+   local own,ownNotes=autoFont~=nil,{}
+   for _,state in ipairs(STATES) do
+    local font=Given(auto,state)
+    if not (font~=nil and font==autoFont) then own=false;ownNotes[#ownNotes+1]=state..': '..Named(font) end
+   end
+   C.guard(own,tag..': the Auto control was given its own font object for its normal, highlight and disabled states',
+    table.concat(ownNotes,'; '))
+  end
   C.expect(Near(Size(NexusPanel._rollStatus),11*scale) and Near(Size(NexusPanel._rollRec),11*scale)
    and Near(Size(NexusPanel._chargesText),11*scale),tag..': the offer heading, the recommendation and the charges are secondary (11)',
    tostring(Size(NexusPanel._rollStatus))..' / '..tostring(Size(NexusPanel._rollRec))..' / '..tostring(Size(NexusPanel._chargesText)))
@@ -1722,9 +1890,12 @@ end)
 -- The approved compact header: line 1 is the draft's (Line1 above states
 -- it): the grip at the body's inset, the title 6 pixels after it, and at
 -- the right the Auto control, Options and Close, each as wide as its own
--- words need, so the title's slot is what they leave: 92 units of the
+-- words need, so the title's slot is what they leave: 100 units of the
 -- 284-unit panel at the reference size (it was 150 of 420 with fixed
--- slots). The line-1 literals this scenario pinned (the title at 36, 8; the
+-- slots; and 92 of 284 while the controls' words were the 12-unit primary
+-- role: the typography correction words them in the 11-unit control role,
+-- so the controls are narrower by what their words lost and the title has
+-- the rest). The line-1 literals this scenario pinned (the title at 36, 8; the
 -- grip at 8, 6; the Build row at 32; the 4 units under the Wishlist row)
 -- are the former header's and are replaced by the draft's places here, each
 -- marked where it stood. The third pass was native 12.5 in the 420-unit
@@ -1824,11 +1995,14 @@ C.scenario('N10 the title is one fixed role and whole with every state cue: it w
       -- fixture's own words and font model), which the panel's own slots
       -- must give too. EXPECT: the slot was from x 36, y 8 to the fixed
       -- Auto slot, 150 units of the 420-unit panel.
+      -- (Typography correction, EXPECT: 92 units in the 284-unit panel
+      -- while the controls' words were the primary role; 100 with them in
+      -- the control role: 284 less the 151 reserved and the title's 33.)
       local line1,drawn=P.HeaderSlots(),Line1()
-      C.expect(slot==NexusPanel:GetWidth()-drawn.reserved-drawn.titleLeft and (NexusPanel:GetWidth()~=284 or slot==92)
+      C.expect(slot==NexusPanel:GetWidth()-drawn.reserved-drawn.titleLeft and (NexusPanel:GetWidth()~=284 or slot==100)
        and line1.reserved==drawn.reserved and line1.titleLeft==drawn.titleLeft
        and rect~=nil and rect[1]==drawn.titleLeft and rect[2]==DesignY(5),
-       tag..': the title keeps its slot (from 6 pixels after the grip, 5 pixels under the top, to the Auto control: 92 units in the 284-unit panel)',
+       tag..': the title keeps its slot (from 6 pixels after the grip, 5 pixels under the top, to the Auto control: 100 units in the 284-unit panel)',
        Text(rect)..' slot '..tostring(slot)..' reserved '..tostring(line1.reserved)..' / '..tostring(drawn.reserved))
       -- The grip: at the body's inset, the draft's 24 pixels and never
       -- under 24 x 24 units, centred on line 1's row for its controls (the
@@ -1857,19 +2031,24 @@ C.scenario('N10 the title is one fixed role and whole with every state cue: it w
   -- here pinned the former fixed slots (top 7, height 22, 234 units
   -- reserved, the title from 36). The compact slots are the draft's at this
   -- text scale: the controls 15 units high (its 22 pixels) in the middle of
-  -- line 1's 22-unit row, 159 units reserved for Close (16), Options (its
-  -- 47 units of words and the 14 of room its label's end caps need: the
+  -- line 1's 22-unit row, 151 units reserved for Close (16), Options (its
+  -- 43 units of words and the 14 of room its label's end caps need: the
   -- draft's 14 pixels are 9 units here) and the Auto control (its widest
-  -- label's 53 units and the 12 its label fit keeps clear), 4 units apart
+  -- label's 49 units and the 12 its label fit keeps clear), 4 units apart
   -- and after the 5-unit inset; the title from 33 (the inset, the 24-unit
   -- grip, 4).
+  -- (Typography correction, EXPECT: 159 units were reserved while the
+  -- controls' words were the 12-unit primary role, 47 units for "Options"
+  -- and 53 for the widest Auto label; in the 11-unit control role those
+  -- seven and eight characters are 42.35 and 48.4 units in this model, so
+  -- 43 and 49.)
   SetNative(10)
   local s=C.setup(Render(Play())==true,'N10: fixture: the Play panel at native 10 again') and P.HeaderSlots() or {}
   local drawn=Line1()
-  C.expect(s.reserved==drawn.reserved and s.reserved==159 and s.titleLeft==drawn.titleLeft and s.titleLeft==33
+  C.expect(s.reserved==drawn.reserved and s.reserved==151 and s.titleLeft==drawn.titleLeft and s.titleLeft==33
    and s.height==Design(22) and s.height==15 and s.top==DesignY(5)+math.floor((22-15)/2) and s.top==6
    and s.gripWidth==24 and s.gripHeight==24,
-   'N10: at the reference size the header line 1 slots are the compact draft\'s: the controls\' own widths, 159 units reserved, the title from 33',
+   'N10: at the reference size the header line 1 slots are the compact draft\'s: the controls\' own widths, 151 units reserved, the title from 33',
    tostring(s.top)..' '..tostring(s.height)..' '..tostring(s.reserved)..' '..tostring(s.titleLeft)..' '..tostring(s.gripWidth)..'x'..tostring(s.gripHeight))
   C.guard(NATIVE.nativeSets==0,'N10: no game font object is set',NATIVE.nativeSets)
  end)
@@ -2273,10 +2452,20 @@ end)
 -- (the draft's 5 pixels; it was the layout's 6-unit gap x the scale), with
 -- the footer the draft's 12 pixels under the last block and the panel
 -- ending 6 pixels under the footer.
+-- Typography correction: the setup hint alone no longer spans the body. It
+-- stands in the panel's middle in a row of its own, 24 design pixels or
+-- more from each side and as narrow as its lines stay even (stated where it
+-- is asked, below). It is still measured, whole and at its place in the
+-- order, and the gaps over and under it are the same.
 C.scenario('M1 the setup and completion texts are measured: whole at native 16 and with long words',function()
  local NOTE='Synthetic setup note that is long enough to need several lines in the panel at every supported text size, '
   ..'so a hint held to two modelled lines would lose its end.'
  local NAME='Synthetic Wishlist with a name as long as a localized one that the completion sentence keeps whole'
+ -- Typography correction: a hint that is one long word, as a compound of a
+ -- localized language can be (synthetic, this file's ASCII; 29 characters:
+ -- wider than half the hint's room and narrower than the room at each size
+ -- below, which the fixture check there states).
+ local WORD='Wunschlistenzuweisungsvorgang'
  local function Setup(note)
   return {status='ready',level=40,auto=false,cards={},recommendation='',character='SyntheticHero',
    progress={total=0,missing={},shed={},toLock={},unknownTomes={}},assignment={state='unavailable',note=note}}
@@ -2302,19 +2491,28 @@ C.scenario('M1 the setup and completion texts are measured: whole at native 16 a
   local size=Size(region)
   return math.max(1,G.Rows(region:GetText() or '',width,CHAR*size))*math.ceil(size*LINE)
  end
- -- One text on its box, in a row as wide as the block.
- local function Row(tag,what,box,modelled,row)
+ -- One text on its box, in a row as wide as the block. With `left` (the
+ -- setup hint, which no longer spans the block) the row is the text's own:
+ -- `row` wide from `left`.
+ local function Row(tag,what,box,modelled,row,left)
   local region=box and TextAt(box) or nil
   if not C.setup(region~=nil,tag..': fixture: the '..what..' is shown on its box') then return nil end
   local needs=Needs(region,row)
   local want=math.max(modelled,needs)
-  local detail=what..': box '..tostring(box.w)..'x'..tostring(box.h)..', text '..tostring(region:GetHeight())..' for '
+  local detail=what..': box '..tostring(box.w)..'x'..tostring(box.h)..' at '..tostring(box.x)..', text '..tostring(region:GetHeight())..' for '
    ..tostring(region:GetStringHeight())..', needs '..tostring(needs)..' in '..tostring(row)..' ('..tostring(modelled)..' modelled)'
   print('OBSERVED',tag,detail)
-  -- (The row's width is the compact body's, between the draft's insets:
-  -- an EXPECT, as it was the panel less 16 units. The height check is what
-  -- it was.)
-  C.expect(box.w==row and box.x==Inset(),tag..': the '..what..' spans the body between its insets',detail)
+  if left==nil then
+   -- (The row's width is the compact body's, between the draft's insets:
+   -- an EXPECT, as it was the panel less 16 units. The height check is what
+   -- it was.)
+   C.expect(box.w==row and box.x==Inset(),tag..': the '..what..' spans the body between its insets',detail)
+  else
+   -- (Typography correction, EXPECT: its own row, and the text is drawn at
+   -- the width it is measured for below: its region is that row wide.)
+   C.expect(box.w==row and box.x==left and region:GetWidth()==row,
+    tag..': the '..what..' has a row of its own, '..tostring(row)..' units wide from '..tostring(left)..', and is drawn at that width',detail)
+  end
   ;(needs>modelled and C.expect or C.guard)(box.h==want and region:GetHeight()==want
    and region:GetHeight()+0.5>=region:GetStringHeight(),
    tag..': the '..what..' is whole in its row: as tall as its wrapped text, never under its modelled rows',detail)
@@ -2333,8 +2531,8 @@ C.scenario('M1 the setup and completion texts are measured: whole at native 16 a
    -- Two blocks, or a block and the footer, the draft's `px` apart.
    local function Apart(above,below,px) return Drawn(px,below.y-(above.y+above.h)) end
    -- The setup view: its title, and a note as its hint.
-   for _,note in ipairs({'Synthetic hint.',NOTE}) do
-    local tag=where..', setup, '..(note==NOTE and 'a long note' or 'a short note')
+   for _,note in ipairs({'Synthetic hint.',NOTE,WORD}) do
+    local tag=where..', setup, '..(note==NOTE and 'a long note' or (note==WORD and 'one long word' or 'a short note'))
     if C.setup(P.Render(Setup(note))==true,tag..': fixture: the setup view renders') then
      local layout=NexusPanel._responsiveLayout
      local b=layout.boxes
@@ -2342,12 +2540,52 @@ C.scenario('M1 the setup and completion texts are measured: whole at native 16 a
      if C.setup(b.setupTitle and b.setupHint and b.setupAssign and b.setupCreate and b.footer and (not held or NexusPanel:GetWidth()==410),
       tag..': fixture: the layout holds the title, the hint, both buttons and the footer',NexusPanel:GetWidth()) then
       Row(tag,'setup title',b.setupTitle,layout.large,row)
-      local hint=Row(tag,'setup hint',b.setupHint,2*layout.small,row)
-      C.setup(hint~=nil and G.Visible(hint:GetText() or '')==note,tag..': fixture: the hint is the note, whole',hint and hint:GetText())
+      -- Typography correction. EXPECT: the hint spanned the body between its
+      -- insets, so a sentence could run from edge to edge over a short last
+      -- line. Its room is now the panel less 24 design pixels at each side,
+      -- and in that room it stands in the panel's middle as narrow as its
+      -- lines stay even: the narrowest width at which its words need no more
+      -- lines than across the whole room, never under half the room and
+      -- never under its longest word (a hint with a word as wide as the room
+      -- keeps the whole room). That width is counted here from the note's
+      -- words in the secondary role in this fixture's model (G.Rows, as
+      -- Needs counts; a word's width as N10 counts it); nothing is read from
+      -- the box. What the hint needs is then asked at that width, which is
+      -- also the width its text is drawn at (Row).
+      local wide=NexusPanel:GetWidth()
+      local room=wide-2*Design(24)
+      local hintSize=Role('secondary')
+      local function HintLines(width) return math.max(1,G.Rows(note,width,CHAR*hintSize)) end
+      local across=HintLines(room)
+      local longest=0
+      for word in note:gmatch('%S+') do longest=math.max(longest,G.Length(word)*CHAR*hintSize) end
+      local even=room
+      for width=math.max(math.ceil(room/2),math.ceil(longest)),room do
+       if HintLines(width)<=across then even=width;break end
+      end
+      local hintLeft=math.floor((wide-even)/2+0.5)
+      C.setup(room>=2 and even>=math.ceil(room/2) and even<=room and hintLeft>=Design(24) and wide-(hintLeft+even)>=Design(24)
+       and longest<=room and (note~=WORD or math.ceil(longest)>math.ceil(room/2)),
+       tag..': fixture: the hint\'s room is the panel less 24 design pixels at each side, and its even width stands inside it',
+       tostring(even)..' of '..tostring(room)..' from '..tostring(hintLeft)..' in '..tostring(wide)..', '..tostring(across)
+       ..' line(s), longest word '..string.format('%.1f',longest))
+      local hint=Row(tag,'setup hint',b.setupHint,2*layout.small,even,hintLeft)
+      C.setup(hint~=nil and G.Visible(hint:GetText() or '')==note and Near(Size(hint),hintSize),
+       tag..': fixture: the hint is the note, whole, in the secondary role',hint and hint:GetText())
+      -- No word is cut for even lines: the hint's row is at least as wide
+      -- as its longest word. GUARD: it held while the hint spanned the body
+      -- and must hold in the hint's own row. The one-word note is what asks
+      -- it there: its word is wider than half the room, so a row held to
+      -- its lines alone would be narrower than the word.
+      C.guard(longest<=b.setupHint.w+0.01,
+       tag..': no word of the hint is wider than its row',string.format('%.1f',longest)..' in '..tostring(b.setupHint.w))
       -- EXPECT: the order is as it was; the distances are the draft's (the
       -- guard that stood here asked for the layout's own gap between each
-      -- pair and 6 units under the footer).
-      C.expect(b.setupTitle.x==Inset() and b.setupHint.x==Inset()
+      -- pair and 6 units under the footer). (The hint's left edge was the
+      -- body's inset and is its own row's now, asked above. The gaps over
+      -- and under the hint, the buttons, the footer and the panel's end are
+      -- as they were.)
+      C.expect(b.setupTitle.x==Inset()
        and Apart(b.setupTitle,b.setupHint,5) and Apart(b.setupHint,b.setupAssign,5)
        and Apart(b.setupAssign,b.setupCreate,5) and Apart(b.setupCreate,b.footer,12)
        and NexusPanel:GetHeight()==layout.height and Drawn(6,layout.height-(b.footer.y+b.footer.h)),
@@ -2591,20 +2829,26 @@ C.scenario('N8 display-only cards, collapsed Details and the passive grip are un
  -- 36, the grip 24 x 24 at 8). The approved compact header's are the
  -- draft's at this text scale (Line1 states them from the controls' own
  -- words): at native 16 the inset is 8 units, Close 26, the gaps 6, Options
- -- 89 (its 74 units of words and the draft's 14 pixels), the Auto control
- -- 102 (its widest label's 85 units and 16 pixels), so 243 units are
+ -- 83 (its 68 units of words and the draft's 14 pixels), the Auto control
+ -- 95 (its widest label's 78 units and 16 pixels), so 230 units are
  -- reserved and the title starts at 40, after the 26-unit grip (the draft's
  -- 24 pixels; never under 24 units). The controls are the draft's 22 pixels
  -- high in the middle of line 1's row.
+ -- (Typography correction, EXPECT: Options was 89 and the Auto control 102,
+ -- with 243 units reserved, while their words were the 12-unit primary role
+ -- x 1.6: 74 and 85 units. In the 11-unit control role x 1.6 the same seven
+ -- and eight characters are 67.76 and 77.44 units in this model, so 68 and
+ -- 78. The room around them, the gaps, Close, the inset and the grip are
+ -- unchanged.)
  local s,drawn=P.HeaderSlots(),Line1()
  local controls=math.max(Design(22),Grip()-2*Design(1))
  C.expect(s.top==DesignY(5)+math.floor((controls-Design(22))/2) and s.height==Design(22) and s.gap==Design(6) and s.gap==6
   and s.edge==Inset() and s.edge==8 and s.closeWidth==Design(24) and s.closeWidth==26
-  and s.options==drawn.edge+drawn.close+drawn.gap and s.optionsWidth==drawn.options and s.optionsWidth==89
-  and s.auto==s.options+s.optionsWidth+drawn.gap and s.autoWidth==drawn.auto and s.autoWidth==102
-  and s.reserved==drawn.reserved and s.reserved==243 and s.titleLeft==drawn.titleLeft and s.titleLeft==40
+  and s.options==drawn.edge+drawn.close+drawn.gap and s.optionsWidth==drawn.options and s.optionsWidth==83
+  and s.auto==s.options+s.optionsWidth+drawn.gap and s.autoWidth==drawn.auto and s.autoWidth==95
+  and s.reserved==drawn.reserved and s.reserved==230 and s.titleLeft==drawn.titleLeft and s.titleLeft==40
   and s.gripX==Inset() and s.gripWidth==Grip() and s.gripHeight==Grip() and Grip()==26,
-  'N8: the header line 1 slots are the compact draft\'s at this text scale: each control as wide as its words need, 243 units reserved, the title from 40',
+  'N8: the header line 1 slots are the compact draft\'s at this text scale: each control as wide as its words need, 230 units reserved, the title from 40',
   tostring(s.top)..' '..tostring(s.height)..' '..tostring(s.gap)..' '..tostring(s.edge)..' '..tostring(s.closeWidth)..' '..tostring(s.options)..'+'
   ..tostring(s.optionsWidth)..' '..tostring(s.auto)..'+'..tostring(s.autoWidth)..' '..tostring(s.reserved)..' '..tostring(s.titleLeft)..' '..tostring(s.gripWidth))
  local grip=P.EnsureHeaderGrip()

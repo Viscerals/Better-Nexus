@@ -33,9 +33,10 @@ local runtimeSignature, runtimeRevision = nil, 1
 
 -- small / normal / large are the shared fonts of every Nexus window.
 -- secondary is the main panel's own secondary text (labels, headings, tags,
--- reasons): 11 units, the panel's readable floor, where the shared small
--- font is 10. title is the main panel's own title, 15 units. Both follow the
--- same native reference; no shared size changes.
+-- reasons, and the words on its controls): 11 units, the panel's readable
+-- floor, where the shared small font is 10. title is the main panel's own
+-- title, 15 units. Both follow the same native reference; no shared size
+-- changes.
 local FONT_NAMES = {
     small="NexusFontSmall",
     normal="NexusFontNormal",
@@ -511,6 +512,7 @@ local function PanelKey(spec)
         math.ceil(Measured(spec.listHeadingH)),
         math.ceil(Measured(spec.headerControlsH)),math.ceil(Measured(spec.planDetailsH)),
         math.ceil(Measured(spec.progressLabelH)),
+        math.ceil(Measured(spec.setupHintW)),
     }, "|")
 end
 
@@ -1114,15 +1116,30 @@ function M.Panel(spec)
     end
     if spec.noBuild then
         -- The setup view's title and hint are as tall as their wrapped text
-        -- measures in this row's width (spec.setupTitleH, spec.setupHintH:
-        -- Panel.MeasuredLayout), never under the modelled rows they had (one
-        -- large line; two small lines), and the buttons and what follows
-        -- move down by what the text needs.
+        -- measures at the width each has here (spec.setupTitleH,
+        -- spec.setupHintH: Panel.MeasuredLayout; the title's is this row's,
+        -- the hint's is given below), never under the modelled rows they had
+        -- (one large line; two small lines), and the buttons and what
+        -- follows move down by what the text needs.
         local top, height = Block(0, math.max(large, math.ceil(Measured(spec.setupTitleH))))
         Add(layout,"setupTitle",inset,top,full,height)
         Gap(5)
+        -- The hint is a block of its own in the panel's middle, not a line
+        -- from edge to edge. Its room is the panel less 24 design pixels at
+        -- each side (layout.setupHintRoom). Inside that room it is as wide
+        -- as the caller found its lines even (spec.setupHintW:
+        -- Panel.BalancedWidth, a width at which the text is no taller than
+        -- across the whole room). The caller measures the hint's height at
+        -- that same width and the panel draws it there, so what is measured
+        -- is what is shown. Without such a width, or with one outside the
+        -- room, the hint has the whole room. Its words, its font and the
+        -- gaps above and below it are unchanged.
+        local hintRoom = math.max(1, width - 2 * math.max(inset, M.Design(24, scale)))
+        local hintW = math.ceil(Measured(spec.setupHintW))
+        if hintW <= 0 or hintW > hintRoom then hintW = hintRoom end
+        layout.setupHintRoom = hintRoom
         top, height = Block(0, math.max(small * 2, math.ceil(Measured(spec.setupHintH))))
-        Add(layout,"setupHint",inset,top,full,height)
+        Add(layout,"setupHint",(width-hintW)/2,top,hintW,height)
         Gap(5)
         local buttonWidth = math.min(146, full)
         top, height = Block(0, math.max(24, normal + 8))

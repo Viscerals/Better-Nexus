@@ -902,12 +902,28 @@ function M.BodyInset()
     return c and c.inset or 8
 end
 
--- The widest of the given words on one line in the panel's primary font
--- (LayoutMetrics "normal", the header controls' and buttons' own), in whole
--- units: measured on a hidden text of `owner`, made once, and measured again
--- only for other words or another face (its nominal font and size, or a new
--- GetFont reader, as the header rows are keyed). nil while it cannot be
--- measured: no words, no owned font, an owner that makes no text.
+-- The main panel's control labels are one role (typography correction): the
+-- words on Auto, Options, My Builds, Change, the two setup actions, Details
+-- and the three footer hubs are drawn in the panel's own secondary font
+-- (LayoutMetrics "secondary": 11 units, the panel's readable floor), one
+-- step under the names and values beside them, which stay primary text (the
+-- "normal" role, 12). One role for all of them, never a size fitted to one
+-- button: a label wider than its control's room still wraps there, whole,
+-- and the control grows (M.FitControlLabel). The role is one of the owned
+-- font objects, so it follows the client's text size as they do; no font
+-- object is changed for it and no other window takes it from here.
+-- Whatever measures a control's words measures them in this role
+-- (M.PrimaryWidth, AUTO_LABEL.Fit, M.MeasureFooter), so a control is sized
+-- for the label it shows.
+M.CONTROL_ROLE = "secondary"
+
+-- The widest of the given words on one line in the control labels' font
+-- (M.CONTROL_ROLE, the header controls' and buttons' own; the name is from
+-- when their labels were primary text), in whole units: measured on a hidden
+-- text of `owner`, made once, and measured again only for other words or
+-- another face (its nominal font and size, or a new GetFont reader, as the
+-- header rows are keyed). nil while it cannot be measured: no words, no
+-- owned font, an owner that makes no text.
 function M.PrimaryWidth(owner, ...)
     local metrics = Nexus.LayoutMetrics
     if not (owner and metrics and type(metrics.FontObject) == "function"
@@ -920,7 +936,7 @@ function M.PrimaryWidth(owner, ...)
     if #words == 0 then return nil end
     local probe = owner._nexusWidthProbe
     if not probe then
-        local text = owner:CreateFontString(nil, "OVERLAY", metrics.FontObject("normal"))
+        local text = owner:CreateFontString(nil, "OVERLAY", metrics.FontObject(M.CONTROL_ROLE))
         if not text then return nil end
         text:Hide()
         probe = {text = text}
@@ -1011,7 +1027,8 @@ function M.CreateContextHeader(parent)
 end
 
 -- The title is primary text: the panel's 12-unit normal role, the size of
--- the three controls beside it, in the appearance's ordinary text colour
+-- the names under it (the three controls beside it are a step smaller:
+-- M.CONTROL_ROLE), in the appearance's ordinary text colour
 -- (M.ApplyOwnedFonts, M.ApplyTextRoles; main-panel visual correction: the
 -- title is a quieter existing role, it was its own 15-unit role in the stock
 -- gold, and no body text is smaller for it). It is one fixed role whatever
@@ -2245,14 +2262,16 @@ local function SetOwnedButtonFont(widget, font)
 end
 
 -- Fit of the Auto labels to this button (see AUTO_LABEL). The button uses its
--- own font object, a copy of the owned normal font: the shared objects are
+-- own font object, a copy of the control labels' font (M.CONTROL_ROLE, the
+-- owned secondary font Options and the other controls show: the fit never
+-- puts the Auto label back in the primary role): the shared objects are
 -- never changed. Runs from the one-shot font pass and the footer layout, not
 -- per frame; the result is cached until the base font or the button width
 -- changes. Returns { width, budget, fits, size, baseSize, adjustable }.
 function AUTO_LABEL.Fit(force)
     if not autoBtn then return nil end
     local layout = Nexus.LayoutMetrics
-    local base = layout and _G[layout.FontObject("normal")]
+    local base = layout and _G[layout.FontObject(M.CONTROL_ROLE)]
     local path, size, flags
     if base and type(base.GetFont) == "function" then
         local ok, p, s, f = pcall(base.GetFont, base)
@@ -2270,14 +2289,14 @@ function AUTO_LABEL.Fit(force)
         local ok, created = pcall(CreateFont, AUTO_LABEL.font)
         if ok and created then
             font = created
-            -- Colour and shadow come from the owned normal font.
+            -- Colour and shadow come from the control labels' font.
             if type(font.SetFontObject) == "function" then
                 pcall(font.SetFontObject, font, base)
             end
         end
     end
     -- A font string needs a font before SetText; with neither font there is
-    -- nothing to measure, and the button keeps the owned normal font.
+    -- nothing to measure, and the button keeps the control labels' font.
     if not (font or base) then return nil end
     local probe = autoBtn._nexusFitProbe
     if not probe then
@@ -2318,7 +2337,7 @@ function AUTO_LABEL.Fit(force)
 end
 
 -- The Auto control's width in the compact header: its widest label on one
--- line in the panel's primary font (M.PrimaryWidth) with the design's room
+-- line in the control labels' font (M.PrimaryWidth) with the design's room
 -- around it, and never less room than the fit above keeps clear at both
 -- ends, so every label fits its own control. nil while the labels cannot be
 -- measured. Also returns that widest label's own width and the room kept
@@ -2606,6 +2625,8 @@ function M.ApplyOwnedFonts()
     local small = layout.FontObject("secondary")
     local normal = layout.FontObject("normal")
     local large = layout.FontObject("large")
+    -- The words on the panel's controls: one role (M.CONTROL_ROLE).
+    local control = layout.FontObject(M.CONTROL_ROLE)
     if not frame._nexusOwnedFonts then
         frame._nexusOwnedFonts = true
         for _, widget in ipairs({
@@ -2625,20 +2646,24 @@ function M.ApplyOwnedFonts()
             dummyValue,dummyGlobalValue,lkValue,lkGlobalValue,completeBadge,
             frame._contextBuild,frame._contextWishlist,
             -- The panel's title is primary text too (M.WrapTitle): the size
-            -- of the controls beside it. LayoutMetrics keeps its 15-unit
+            -- of the names under it. LayoutMetrics keeps its 15-unit
             -- "title" font object; this panel no longer draws with it.
             frame._contextTitle,
         }) do SetOwnedFont(widget, normal) end
         SetOwnedFont(frame._contextAutoState, small)
         SetOwnedFont(setupText, large)
+        -- The controls' labels, a step under the names and values (they were
+        -- the normal role). Details takes the same role where it is built
+        -- (M.EnsurePlayWidgets).
         for _, widget in ipairs({
             switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,planBtn,
             exploreBtn,menuBtn,frame._orbsHubBtn,frame._contextChange,
-        }) do SetOwnedButtonFont(widget, normal) end
+        }) do SetOwnedButtonFont(widget, control) end
         SetOwnedButtonFont(frame._orbsBtn, small)
         SetOwnedButtonFont(frame._orbMiniBtn, small)
-        -- The Auto button then takes its own fitted font (AUTO_LABEL.Fit);
-        -- if none can be made it keeps the owned normal font above.
+        -- The Auto button then takes its own fitted font (AUTO_LABEL.Fit), a
+        -- copy of that same role; if none can be made it keeps the font
+        -- above.
         AUTO_LABEL.Fit(true)
         -- Colours: the card's own, then every label's role.
         M.StyleStatusCardText()
@@ -6436,6 +6461,52 @@ function M.WrappedHeight(text, width, minimum)
     return (Nexus.LayoutMetrics.WrapHeight(text, math.max(1, width), minimum))
 end
 
+-- Even lines for a wrapped text that stands in the middle of its room (the
+-- setup view's hint): the narrowest whole width at which the text is no
+-- taller than it is across the whole room, never under half of `room` and
+-- never under the text's longest word. Its lines are then about one length
+-- instead of one full line over a short one, it has no more lines than the
+-- room gives it, no word is cut or broken for it, and this code breaks no
+-- line itself: the client wraps the text's own words at that width,
+-- whatever the language. A text with a word as wide as the room keeps the
+-- whole room.
+-- Found with the measurements the panel's texts already have, on the text
+-- itself: each word's own line (M.LineWidth; the text's words are put back)
+-- and the wrapped height at a width (M.WrappedHeight: the client's, or the
+-- conservative model without one), by halving, so a new text is measured a
+-- few times and an unchanged one never: the width is kept on the text until
+-- its words, the room or its face change (its nominal font and size, or a
+-- new GetFont reader). The caller measures the text's height at the
+-- returned width and has it laid out at that same width (M.MeasuredLayout),
+-- so what is measured is what is shown. nil without a text, a layout engine
+-- or a room of at least 2 units.
+function M.BalancedWidth(text, room)
+    local metrics = Nexus.LayoutMetrics
+    room = math.floor(tonumber(room) or 0)
+    if not (text and metrics and type(metrics.WrapHeight) == "function" and room >= 2) then return nil end
+    local words = tostring(text:GetText() or "")
+    local reader = text.GetFont
+    local ok, path, size = pcall(reader, text)
+    local key = words .. "\031" .. room .. "\031"
+        .. (ok and (tostring(path) .. "\031" .. tostring(size)) or "?")
+    if text._nexusBalanceKey ~= key or not rawequal(text._nexusBalanceFace, reader) then
+        local low, high = math.ceil(room / 2), room
+        for word in words:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gmatch("%S+") do
+            low = math.max(low, math.ceil(M.LineWidth(text, word)))
+        end
+        text:SetText(words)
+        if low < high then
+            local tall = M.WrappedHeight(text, room, 1)
+            while low < high do
+                local mid = math.floor((low + high) / 2)
+                if M.WrappedHeight(text, mid, 1) <= tall + 0.5 then high = mid else low = mid + 1 end
+            end
+        end
+        text._nexusBalanceKey, text._nexusBalanceFace, text._nexusBalanceWidth = key, reader, high
+    end
+    return text._nexusBalanceWidth
+end
+
 -- With every text of this pass worded (ApplyModel), the measured heights of
 -- the texts that may wrap, at the widths they will have, and the layout
 -- computed again with them (LayoutMetrics.Panel), so nothing is shortened or
@@ -6450,7 +6521,8 @@ end
 --   the Orb run line (spec.orbLineH);
 --   the setup view's title and hint, and the completion view's badge and
 --   sentence (spec.setupTitleH, spec.setupHintH, spec.completeTitleH,
---   spec.completeTextH).
+--   spec.completeTextH); the hint at the width its lines are even at
+--   (spec.setupHintW), which is the width it is then laid out and drawn at.
 -- The collapsed level-80 block keeps its own model; a pass without a spec
 -- keeps `layout`.
 function M.MeasuredLayout(layout)
@@ -6575,11 +6647,19 @@ function M.MeasuredLayout(layout)
     -- modelled lines whatever they said, which cut the end of a hint or
     -- sentence longer than two lines and part of every line at a larger
     -- native size. Main-panel states too: nothing in them is shortened.
+    -- The hint stands in the panel's middle with even lines (typography
+    -- correction): inside the room the layout keeps for it
+    -- (layout.setupHintRoom: the panel less the design's 24 pixels at each
+    -- side) it is as wide as its lines are even (M.BalancedWidth), and its
+    -- height is measured at that very width, the one the layout then gives
+    -- its box (spec.setupHintW) and the panel draws it at.
     if boxes.setupTitle and boxes.setupHint then
         spec.setupTitleH = Needed(setupText, boxes.setupTitle.w, 1)
-        spec.setupHintH = Needed(setupHint, boxes.setupHint.w, 1)
+        local hintRoom = tonumber(layout.setupHintRoom) or boxes.setupHint.w
+        spec.setupHintW = M.BalancedWidth(setupHint, hintRoom)
+        spec.setupHintH = Needed(setupHint, spec.setupHintW or hintRoom, 1)
     else
-        spec.setupTitleH, spec.setupHintH = nil, nil
+        spec.setupTitleH, spec.setupHintH, spec.setupHintW = nil, nil, nil
     end
     if boxes.completeTitle and boxes.completeText then
         spec.completeTitleH = Needed(completeBadge, boxes.completeTitle.w, 1)
@@ -6713,6 +6793,12 @@ function M.EnsurePlayWidgets()
     -- Show / Hide details: shows or collapses the detail section (the four
     -- counts and the Echo names behind them).
     p.details = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    -- Its label is the controls' one role (M.CONTROL_ROLE), as Options' is:
+    -- an owned font, where it had the template's own. Its width is measured
+    -- from the label it then shows (M.DetailsWidth).
+    if metrics and metrics.FontObject then
+        SetOwnedButtonFont(p.details, metrics.FontObject(M.CONTROL_ROLE))
+    end
     p.details:SetScript("OnClick", function() M.TogglePlanDetails() end)
     p.details:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
@@ -8158,16 +8244,17 @@ function M.FooterHubs()
 end
 
 -- The height a hub needs for its one line: one line of the hubs' own face
--- (the owned normal font, as the client measures it: M.OneLineHeight, on a
--- hidden text at a width nothing wraps at, so no hub's label is read at
--- whatever width it happens to have) inside the hub's padding.
+-- (the control labels' font, M.CONTROL_ROLE, as the client measures it:
+-- M.OneLineHeight, on a hidden text at a width nothing wraps at, so no hub's
+-- label is read at whatever width it happens to have) inside the hub's
+-- padding.
 -- LayoutMetrics.Panel holds the row at the design's height and grows it only
 -- for this (spec.footerH). 0 while the client reports no height for that
 -- line: the design's row then stands.
 function M.MeasureFooter()
     local c = M.Compact()
     local pad = c and c.hubPad or M.FOOTER.pad
-    local line = M.OneLineHeight("normal") or 0
+    local line = M.OneLineHeight(M.CONTROL_ROLE) or 0
     return line > 0 and (line + pad * 2) or 0
 end
 
