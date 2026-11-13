@@ -4379,12 +4379,11 @@ function M.EnsureHeaderGrip()
         grip:SetFrameLevel(frame:GetFrameLevel() + 8)
         grip:EnableMouse(true)
         grip:RegisterForDrag("LeftButton")
+        -- The border, fill and hover are placed below with the grip's size
+        -- (the drawn box, centred in the target).
         grip.edge = grip:CreateTexture(nil, "BORDER")
-        grip.edge:SetAllPoints()
         grip.edge:SetTexture(0.32, 0.32, 0.38, 0.55)
         grip.fill = grip:CreateTexture(nil, "ARTWORK")
-        grip.fill:SetPoint("TOPLEFT", grip, "TOPLEFT", 1, -1)
-        grip.fill:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1)
         grip.fill:SetTexture(0.03, 0.03, 0.05, 0.9)
         grip.dots = {}
         -- The 9 x 13 dot cluster centred in the grip, in whole units.
@@ -4401,7 +4400,6 @@ function M.EnsureHeaderGrip()
             end
         end
         local hover = grip:CreateTexture(nil, "HIGHLIGHT")
-        hover:SetAllPoints()
         hover:SetTexture(1, 1, 1, 0.12)
         grip.hover = hover
         grip:SetScript("OnEnter", function(self)
@@ -4434,6 +4432,33 @@ function M.EnsureHeaderGrip()
                 -(dotTop + math.floor((index - 1) / 2) * 5))
         end
         grip._nexusDotsAt = size
+    end
+    -- What the grip draws is the draft's grip, not the whole target: a box of
+    -- the design's 24 pixels at this text scale (LayoutMetrics.Design), never
+    -- under 15 units (the 9 x 13 dot cluster and a one-unit edge round it),
+    -- never over 20 units (so a larger text scale, where the design's 24
+    -- pixels fill the whole target, still draws a smaller box) and never over
+    -- the target, centred in the target. The button itself, its size, place
+    -- and passive Shift drag are unchanged above: only the border, the fill
+    -- (one unit inside the border) and the hover highlight follow the drawn
+    -- box. Each is cleared first, so no earlier anchor stays.
+    local metrics = Nexus.LayoutMetrics
+    local c = slots.compact
+    local design = metrics and type(metrics.Design) == "function" and metrics.Design(24, c and c.scale or 1) or 16
+    local art = math.min(slots.gripWidth, slots.gripHeight, 20, math.max(15, design))
+    local drawn = size .. ":" .. art
+    if grip._nexusArtAt ~= drawn then
+        local left = math.floor((slots.gripWidth - art) / 2)
+        local top = math.floor((slots.gripHeight - art) / 2)
+        for _, texture in ipairs({grip.edge, grip.hover}) do
+            texture:ClearAllPoints()
+            texture:SetPoint("TOPLEFT", grip, "TOPLEFT", left, -top)
+            texture:SetSize(art, art)
+        end
+        grip.fill:ClearAllPoints()
+        grip.fill:SetPoint("TOPLEFT", grip, "TOPLEFT", left + 1, -(top + 1))
+        grip.fill:SetSize(art - 2, art - 2)
+        grip._nexusArtAt = drawn
     end
     grip:Show()
     return grip

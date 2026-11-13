@@ -2677,9 +2677,10 @@ local miniNotice={}
 local miniSeen={}
 local MINI_W,MINI_H,MINI_PAD,MINI_LINE=356,196,12,17
 local MINI_TEXT_W=MINI_W-2*MINI_PAD
--- A shown line holds at most this many characters: one line of the
--- conservative 7 px model (docs/UI_TEXT_LAYOUT.md). A longer value is cut on
--- a character boundary and is complete in the line's tooltip.
+-- A shown line holds at most this many characters: two rows of the
+-- conservative 7 px model (docs/UI_TEXT_LAYOUT.md) at the mini's current
+-- width (set again by the mini's width pass, f._nexusWidth). A longer value
+-- is cut on a character boundary and is complete in the line's tooltip.
 local MINI_CHARS=math.floor(MINI_TEXT_W/7)
 -- Line tops, top to bottom; every line is one MINI_LINE box.
 local MINI_Y={state=-30,reason=-48,usage=-68,pending=-86,missing=-104,notice=-124,note=-142}
@@ -2936,6 +2937,8 @@ local function clampMini()
 end
 -- Returns the read error, if the read failed, so it can be reported once.
 local function miniRender()
+    -- The width first: the lines below are shortened to the width they get.
+    if mini._nexusWidth then mini._nexusWidth() end
     local v=miniView()
     setFull(mini.state,miniText(miniStateText(v)))
     setFull(mini.reason,miniReason(v))
@@ -2953,6 +2956,7 @@ local function miniRender()
     local pause,resume,stop=miniGates(v)
     enable(mini.pause,pause and not miniBusy);enable(mini.resume,resume and not miniBusy)
     enable(mini.stop,stop and not miniBusy)
+    if mini._nexusStack then mini._nexusStack() end
     clampMini()
     if v.kind=="error" then return tostring(v.error) end
 end
@@ -2975,6 +2979,7 @@ miniRefresh=function()
         setFull(mini.usage,T("orb.status.mini_usage_unavailable"))
         setFull(mini.pending,T("orb.status.mini_pending_unavailable"))
         setFull(mini.missing,TF("orb.status.mini_rolled_missing",{value=T("orb.value.unavailable")}))
+        if mini._nexusStack then pcall(mini._nexusStack) end
     end
     -- Reported once per failure, not four times a second.
     if miniFailing then return end
@@ -3051,9 +3056,9 @@ local function miniTip(widget,tip)
     end)
     widget:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
 end
--- One line and its hover area. The line never wraps: text the client draws
--- wider than the box, even within MINI_CHARS, is shortened there instead of
--- spilling out of its MINI_LINE box. Hovering a line that holds text always
+-- One line and its hover area. Created as one MINI_LINE row; ensureMini then
+-- lets it wrap, and the mini's layout (f._nexusStack) gives it the height
+-- its rows need, so its text is not cut by its box. Hovering a line that holds text always
 -- shows its complete text (flattened and escaped, as shown) and, when given,
 -- what the line means.
 local function miniLine(f,key,about)
@@ -3100,6 +3105,14 @@ local function ensureMini()
     miniLine(f,"missing",T("orb.tooltip.mini_missing"))
     miniLine(f,"notice");miniLine(f,"note")
     f.note:SetText(T("orb.note.mini_close_keeps_run"))
+    -- Every line is shown whole: it wraps in the mini's width (OneLineLabel
+    -- above turned wrapping off) and is as tall as its rows (f._nexusStack
+    -- below). A value longer than MINI_CHARS (two rows) is still cut there,
+    -- with its complete text in the line's hover.
+    for _,key in ipairs({"state","reason","usage","pending","missing","notice","note"}) do
+        local fs=f[key]
+        if type(fs.SetWordWrap)=="function" then pcall(fs.SetWordWrap,fs,true) end
+    end
     -- Pause and Resume are separate buttons in fixed places, so a repeated
     -- press of one can never become the other.
     f.pause=button(f,MINI_PAD,MINI_BUTTON_Y,66,T("orb.button.pause"),function()miniAct("pause")end)
@@ -3110,6 +3123,132 @@ local function ensureMini()
     miniTip(f.resume,T("orb.tooltip.mini_resume"))
     miniTip(f.stop,T("orb.tooltip.mini_stop"))
     miniTip(f.open,T("orb.tooltip.mini_open"))
+    -- Content fit. The mini is as wide as the main panel's base width at the
+    -- client's text scale (LayoutMetrics.PANEL_BASE_WIDTH x the scale: 284
+    -- units at the normal font, 454 at 1.6), never the size the player chose
+    -- for the main panel, and as tall as what it shows: the status lines one
+    -- under another, each as tall as its wrapped rows; the notice row only
+    -- while a notice is shown; the closing note (whole) at the same small
+    -- gap; then the footer: one row where Pause, Resume, Stop and Open Orbs
+    -- fit side by side, else Open Orbs on a second row. A line's height is
+    -- the larger of what the client measures for its text at the line's
+    -- width (LayoutMetrics.WrapHeight) and its rows in the conservative text
+    -- model (LayoutMetrics.ConservativeText: 7 units a character and a
+    -- 17-unit row at the normal font, wider and taller with the text scale),
+    -- so a face the client measures short is never clipped. Controls grow
+    -- with the text scale and are never under their normal-font sizes.
+    -- MINI_W / MINI_H are only the first size before the first refresh.
+    -- Laid out again only when the text scale or a shown text changes: the
+    -- refresh four times a second compares the seven texts with the ones
+    -- laid out and creates nothing.
+    local fit={text={}}
+    local KEYS={"state","reason","usage","pending","missing","notice","note"}
+    local LINES={"state","reason","usage","pending","missing"}
+    local GAPS={state=0,reason=1,usage=3,pending=1,missing=1}
+    local function Scaled(n) return math.max(n,math.floor(n*(fit.scale or 1)+0.5)) end
+    local function Place(widget,x,y) widget:ClearAllPoints();widget:SetPoint("TOPLEFT",x,y) end
+    -- Rows of a line's shown text at the line's width in the conservative
+    -- model: escaped pipes read as the one character they show, greedy word
+    -- wrap, a word longer than a row broken across rows.
+    local function Rows(text)
+        local per=fit.per or 1
+        local rows=0
+        for row in (tostring(text or ""):gsub("||","|").."\n"):gmatch("(.-)\n") do
+            rows=rows+1
+            local used=0
+            for word in row:gmatch("%S+") do
+                local n=#(word:gsub("[\128-\191]",""))
+                local gap=used>0 and 1 or 0
+                if used>0 and used+gap+n>per then rows=rows+1;used=0;gap=0 end
+                while n>per do rows=rows+1;n=n-per end
+                used=used+gap+n
+            end
+        end
+        return math.max(1,rows)
+    end
+    -- Sizes one line for its text and returns its height.
+    local function Fit(fs)
+        local least=Rows(fs:GetText())*(fit.row or MINI_LINE)
+        local metrics=Nexus.LayoutMetrics
+        if metrics and type(metrics.WrapHeight)=="function" then
+            local ok,height=pcall(metrics.WrapHeight,fs,MINI_TEXT_W,least)
+            if ok and tonumber(height) then return math.max(least,tonumber(height)) end
+        end
+        fs:SetSize(MINI_TEXT_W,least)
+        return least
+    end
+    f._nexusWidth=function()
+        local scale=1
+        local font=_G.NexusFontNormal
+        if font and type(font.GetFont)=="function" then
+            local ok,_,size=pcall(font.GetFont,font)
+            size=ok and tonumber(size) or nil
+            if size and size>0 then scale=math.max(1,math.min(2,size/12)) end
+        end
+        if fit.scale==scale then return end
+        fit.scale=scale
+        local metrics=Nexus.LayoutMetrics
+        local w=math.floor((metrics and tonumber(metrics.PANEL_BASE_WIDTH) or 284)*scale+0.5)
+        fit.w,fit.button,fit.titleH=w,Scaled(24),Scaled(18)
+        MINI_TEXT_W=w-2*MINI_PAD
+        local char,row=7*scale,math.max(MINI_LINE,math.ceil(MINI_LINE*scale))
+        if metrics and type(metrics.ConservativeText)=="function" then
+            local ok,c,r=pcall(metrics.ConservativeText,scale)
+            if ok and tonumber(c) and tonumber(r) then char,row=tonumber(c),math.max(MINI_LINE,tonumber(r)) end
+        end
+        fit.row,fit.per=row,math.max(1,math.floor(MINI_TEXT_W/char))
+        -- A value is shown whole up to two rows; a longer one (a long reason)
+        -- is cut there and is complete in its hover.
+        MINI_CHARS=math.max(4,2*fit.per)
+        local closeW=Scaled(58)
+        local closeX=w-MINI_PAD-closeW
+        Place(f.close,closeX,-7);f.close:SetSize(closeW,Scaled(20))
+        Place(f.title,MINI_PAD,-9);f.title:SetSize(math.max(1,closeX-6-MINI_PAD),fit.titleH)
+        Place(f.drag,6,-4);f.drag:SetSize(math.max(1,closeX-8),math.max(24,fit.titleH+6))
+        f.pause:SetSize(Scaled(66),fit.button);f.resume:SetSize(Scaled(74),fit.button)
+        f.stop:SetSize(Scaled(60),fit.button);f.open:SetSize(Scaled(96),fit.button)
+        fit.dirty=true
+    end
+    f._nexusStack=function()
+        local changed=fit.dirty
+        for _,key in ipairs(KEYS) do
+            local text=f[key]:GetText() or ""
+            if fit.text[key]~=text then fit.text[key]=text;changed=true end
+        end
+        if not changed then return end
+        fit.dirty=nil
+        local y=9+(fit.titleH or 18)+3
+        for _,key in ipairs(LINES) do
+            y=y+GAPS[key]
+            Place(f[key],MINI_PAD,-y)
+            y=y+Fit(f[key])
+        end
+        y=y+3
+        -- The notice keeps its place under the status lines, and is shown
+        -- (and takes its rows) only while it holds an outcome.
+        Place(f.notice,MINI_PAD,-y)
+        if fit.text.notice~="" then
+            local height=Fit(f.notice)
+            f.notice:Show();f.noticeHit:Show();y=y+height+1
+        else
+            f.notice:SetSize(MINI_TEXT_W,fit.row or MINI_LINE)
+            f.notice:Hide();f.noticeHit:Hide()
+        end
+        Place(f.note,MINI_PAD,-y)
+        y=y+Fit(f.note)+5
+        local row=fit.button or 24
+        local pw,rw,sw,ow=f.pause:GetWidth(),f.resume:GetWidth(),f.stop:GetWidth(),f.open:GetWidth()
+        local w=fit.w or MINI_W
+        Place(f.pause,MINI_PAD,-y);Place(f.resume,MINI_PAD+pw+6,-y);Place(f.stop,MINI_PAD+pw+6+rw+6,-y)
+        if pw+rw+sw+ow+18>MINI_TEXT_W then y=y+row+4 end
+        Place(f.open,w-MINI_PAD-ow,-y)
+        local h=y+row+8
+        if f:GetWidth()~=w or f:GetHeight()~=h then
+            f:SetSize(w,h)
+            -- A new size is clamped to the screen again (clampMini).
+            miniSeen.sw=nil
+        end
+    end
     f.pause:Disable();f.resume:Disable();f.stop:Disable()
     local elapsed=0
     f:SetScript("OnShow",function()elapsed=0;miniRefresh()end)

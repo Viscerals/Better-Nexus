@@ -177,7 +177,34 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  -- the full window's rows are measured, at most their former boxes.
  C.guard(f:GetWidth()==620 and f:GetHeight()<=445 and f.status:GetWidth()==580
   and f.status:GetHeight()>=12 and f.status:GetHeight()<=74
-  and mini:GetWidth()==356 and mini:GetHeight()==196,'L1b: the existing full and mini geometry is retained')
+  ,'L1b: the existing full window geometry is retained')
+ -- v22: the owner requested a narrower mini that fits its content. The old
+ -- 356 x 196 pin is obsolete; the full-window checks above are unchanged.
+ -- Measure the actual recovery mini here, not a layout function's answer:
+ -- normal-font width 284, all visible content inside, all status boxes apart,
+ -- and the closing note clear of every footer control. Action, recovery,
+ -- receipt, text and hover guards in this scenario remain unchanged.
+ C.guard(mini:GetWidth()==284,'L1b: the recovery mini uses the requested normal-font width',mini:GetWidth())
+ local miniBox={0,0,mini:GetWidth(),mini:GetHeight()}
+ local placed={}
+ for _,key in ipairs({'title','state','reason','usage','pending','missing','notice','note','close','pause','resume','stop','open'})do
+  local region=mini[key]
+  if region:IsShown() and not(key=='notice' and (region:GetText() or '')=='')then
+   local ok,rect=pcall(G.Rect,region,mini)
+   C.setup(ok and rect~=nil,'L1b: recovery mini '..key..' has measurable geometry')
+   if ok and rect then placed[key]=rect;C.guard(G.Inside(rect,miniBox),'L1b: recovery mini '..key..' stays inside')end
+  end
+ end
+ local previous
+ for _,key in ipairs({'state','reason','usage','pending','missing','notice','note'})do
+  if placed[key]then
+   if previous then C.guard(G.Apart(placed[previous],placed[key]),'L1b: recovery mini '..previous..' and '..key..' do not overlap')end
+   previous=key
+  end
+ end
+ for _,key in ipairs({'pause','resume','stop','open'})do
+  if placed.note and placed[key]then C.guard(G.Apart(placed.note,placed[key]),'L1b: recovery note clears '..key)end
+ end
  -- Supply font measurement only: the actual fixed-box tooltip owns the
  -- overflow decision and must expose the exact rendered text when needed.
  local measured=G.Rows(f.status:GetText(),f.status:GetWidth(),G.MODELS.px16.char)*G.MODELS.px16.line

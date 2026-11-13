@@ -226,6 +226,24 @@ local function Install()
   end
   m[setter]=RECORDER[setter]
  end
+ -- G1 (v22): a texture placed with SetAllPoints covers what it was given
+ -- (its parent when given nothing). The harness has no SetAllPoints; it is
+ -- recorded here on the region (_allPointsTo) and nothing else: it adds no
+ -- anchor, so every rectangle the checks above resolve stays as it was.
+ -- ClearAllPoints forgets the record, as it forgets every anchor.
+ local clearAll=m.ClearAllPoints
+ m.ClearAllPoints=function(self,...)
+  if type(self)=='table' then rawset(self,'_allPointsTo',nil) end
+  return clearAll(self,...)
+ end
+ local hadAll=rawget(m,'SetAllPoints')
+ m.SetAllPoints=function(self,rel,...)
+  if type(self)=='table' then
+   if type(rel)=='string' then rel=_G[rel] end
+   rawset(self,'_allPointsTo',type(rel)=='table' and rel or self:GetParent() or false)
+  end
+  if hadAll then return hadAll(self,rel,...) end
+ end
  CreateFont=function(name) return CreateFrame('Font',name) end
  for name in pairs(RATIOS) do
   local font=_G[name] or CreateFrame('Font',name)
@@ -2861,6 +2879,85 @@ C.scenario('N8 display-only cards, collapsed Details and the passive grip are un
  C.guard(grip and grip._nexusPassiveDrag==true and grip:GetScript('OnClick')==nil,
   'N8: the grip stays a passive drag surface')
  C.guard(Effects()==baselineEffects,'N8: no render, hover or font change took a game action, sent anything or changed Auto',Effects())
+end)
+
+----------------------------------------------------------------------------
+-- G1 (v22, owner brief): the drag grip's drawn box. The Shift-drag target is
+-- the grip button itself, the slot the header gives it: at least 24 x 24
+-- units (the maintainer's 2026-11-08 choice; N8 and the header checks above
+-- pin it, unchanged). What the grip draws (its border, its fill and its
+-- hover highlight) is a separate thing: the draft's grip is 24 design pixels,
+-- which at native 10 is 16 units, while the target floor is 24. EXPECT
+-- (failing on f727 by design, where the border and the highlight cover the
+-- whole target): the drawn box is max(15, the draft's 24 pixels) units
+-- square, never over 20 units, centred in the target: 16 at native 10, 19 at
+-- 12, 20 at 14 and 20 at 16 (targets 24, 24, 24 and 26). 15 is the least box
+-- that holds the fixed 9 x 13 dot cluster with a one-unit edge round it.
+-- The 20-unit cap (Root's choice within the owner's request for a smaller
+-- grip, 2026-11-13): at native 16 the draft's 24 pixels are 26 units, the
+-- whole 26-unit target, so without a cap the player who reported a large
+-- grip would see no smaller box. The cap is on the drawn box only; the
+-- target, the header slots, the dots' centring and the passive Shift drag
+-- and release are unchanged. GUARD: the
+-- target, the passive Shift drag (no click of its own; drag start and stop
+-- kept), the fill inside the border box and the six 3 x 3 dots, a 9 x 13
+-- cluster, inside the drawn box; no game action. Measured on the created
+-- button and its own textures: the button's and the dots' anchors resolve
+-- as everywhere here; a texture placed with SetAllPoints covers the frame it
+-- was given (Install records it, as the client places it). Native pixels:
+-- units x the effective scale are nominal pixels only; NOT RUN. Native 10 is
+-- this model's smallest scale (Scale never goes under 1), so the 15-unit
+-- floor itself is not reached here.
+----------------------------------------------------------------------------
+C.scenario('G1 the grip keeps its at-least-24-unit Shift-drag target and draws a compact box centred in it, the six dots inside',function()
+ -- The rectangle a texture covers: its own anchors, or what SetAllPoints gave it.
+ local function ArtRect(texture)
+  if type(texture)~='table' then return nil end
+  if type(texture.GetNumPoints)=='function' and texture:GetNumPoints()>0 then return Rect(texture) end
+  local to=rawget(texture,'_allPointsTo')
+  if type(to)=='table' then return Rect(to) end
+  return nil
+ end
+ local before=Effects()
+ for _,height in ipairs({10,12,14,16}) do
+  local tag='G1 native '..height
+  SetNative(height)
+  C.setup(Render(Play())==true,tag..': fixture: the Play panel renders')
+  local grip=P.EnsureHeaderGrip()
+  local hit=grip and Rect(grip) or nil
+  if C.setup(hit~=nil and grip.edge~=nil and grip.fill~=nil and grip.hover~=nil and type(grip.dots)=='table' and #grip.dots==6,
+   tag..': fixture: the created grip with its border, fill and hover textures and its six dots') then
+   local target=Grip()
+   C.guard(hit[3]-hit[1]==target and hit[4]-hit[2]==target and target>=24,
+    tag..': the Shift-drag target is unchanged: the grip slot, at least 24 x 24 units',G.Text(hit))
+   C.guard(grip._nexusPassiveDrag==true and grip:GetScript('OnClick')==nil
+    and grip:GetScript('OnDragStart')~=nil and grip:GetScript('OnDragStop')~=nil,
+    tag..': the grip stays a passive Shift-drag surface with no click of its own')
+   local want=math.min(20,math.max(15,Design(24)))
+   local cx,cy=(hit[1]+hit[3])/2,(hit[2]+hit[4])/2
+   local function Box(r)
+    return r~=nil and Near(r[3]-r[1],want) and Near(r[4]-r[2],want)
+     and math.abs((r[1]+r[3])/2-cx)<=0.5 and math.abs((r[2]+r[4])/2-cy)<=0.5 and G.Inside(r,hit)
+   end
+   local edge,glow,fill=ArtRect(grip.edge),ArtRect(grip.hover),ArtRect(grip.fill)
+   C.expect(Box(edge),tag..': the drawn border box is max(15, the draft\'s 24 pixels), at most 20, = '..want
+    ..' units square, centred in the '..target..'-unit target',edge and (G.Text(edge)..' in '..G.Text(hit)) or 'unresolved')
+   C.expect(Box(glow),tag..': the hover highlight is that same drawn box, not the whole target',
+    glow and (G.Text(glow)..' in '..G.Text(hit)) or 'unresolved')
+   C.guard(fill~=nil and edge~=nil and G.Inside(fill,edge) and fill[3]>fill[1] and fill[4]>fill[2],
+    tag..': the fill lies inside the border box',(fill and G.Text(fill) or 'unresolved')..' / '..(edge and G.Text(edge) or 'unresolved'))
+   local inside,l,t,r,b=edge~=nil,nil,nil,nil,nil
+   for _,dot in ipairs(grip.dots) do
+    local d=Rect(dot)
+    if not (d and edge and G.Inside(d,edge)) then inside=false end
+    if d then l,t=math.min(l or d[1],d[1]),math.min(t or d[2],d[2]);r,b=math.max(r or d[3],d[3]),math.max(b or d[4],d[4]) end
+   end
+   C.guard(inside and l~=nil and r-l==9 and b-t==13,
+    tag..': the six 3 x 3 dots, a 9 x 13 cluster, lie inside the drawn box',
+    (l and string.format('[%.0f,%.0f %.0fx%.0f]',l,t,r-l,b-t) or 'unresolved')..' / '..(edge and G.Text(edge) or 'unresolved'))
+  end
+ end
+ C.guard(Effects()==before,'G1: no render took a game action, sent anything or changed Auto',Effects())
 end)
 
 Nexus.DisableOrdinaryAutomation()
