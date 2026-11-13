@@ -18,11 +18,13 @@ end
 -- progress), so the former model no longer outgrows the 600 px viewport at
 -- 2x font. The fixture needs a layout taller than the viewport: it carries
 -- three offers with long names, which wrap in full at 2x font.
--- Main-panel visual correction: the panel is 776 units wide here (its
--- width follows the text scale inside what the 800 px viewport leaves), each
--- offer row is its name over its quality, and the progress is a caption row
--- over a full-width bar. The first and third names still wrap at that width,
--- and the layout is still taller than the 600 px viewport.
+-- Main-panel visual correction: the panel's width follows the text scale
+-- inside what the viewport leaves. The approved compact panel: its reference
+-- width is 284 units (it was 420), so at 2x font it is 568 units wide here
+-- (it was 776: the 840 the former width asked for, bounded by the 800 px
+-- viewport); each offer row is the compact row and the progress is one row.
+-- The names still wrap at that width, and the layout is still taller than
+-- the 600 px viewport.
 local model = {
     status='ready', level=40, auto=false,
     cards={{text='Resonance of the Unbroken Covenant of the Northern Reach (Uncommon) wanted'},
@@ -57,14 +59,19 @@ Fits('initial render')
 -- still update on an otherwise settled render.
 -- Main-panel visual correction: the panel's width follows its text scale
 -- inside what the viewport's width leaves at the chosen size
--- (LayoutMetrics.PanelWidth: at 2x font 840 units, or the viewport's width
--- less the 24-unit margin when that is less), so a change of the viewport's
--- WIDTH takes a layout pass now, by design. The settled-render guard is
--- therefore kept on a change of the viewport's height alone, which leaves
--- the width, and so the layout, as they were; the two width changes that
--- stood here stay, each with the width it must give.
-assert(panel:GetWidth() == 776 and panel._responsiveLayout.width == 776,
-    'at 2x font the panel is as wide as the 800px viewport leaves: 776 units (800 - 24), not the reference 420 (width '
+-- (LayoutMetrics.PanelWidth: at 2x font 568 units, or the viewport's width
+-- less the 24-unit margin when that is less). A change of the viewport's
+-- width that changes that width takes a layout pass, by design; with the
+-- approved reference width both viewports of this fixture (800 and 1200
+-- units wide) leave more than the 568 units the text scale asks for at the
+-- chosen 100%, so the panel has that width at both (the former width asked
+-- for 840 and the 800 px viewport bounded it at 776; a bounded width is
+-- asked for in panel_native_font_metrics W1, at a chosen 150%). The
+-- settled-render guard is kept on a change of the viewport's height alone;
+-- the two width changes that stood here stay, each with the width it must
+-- give.
+assert(panel:GetWidth() == 568 and panel._responsiveLayout.width == 568 and 568 <= 800 - 24,
+    'at 2x font the panel is the 568 units its text scale asks for (284 x 2), which the 800px viewport holds; it was 776 (width '
     .. tostring(panel:GetWidth()) .. ')')
 -- The guard's baseline is a settled panel, so the panel is settled first, at
 -- the unchanged 800x600 viewport. The render above is the first after the
@@ -97,8 +104,8 @@ assert(settledAfter, 'fixture: at the unchanged 800x600 viewport the same model 
     .. ' (a render that computes no layout)')
 print('OBSERVED', 'panel_screen_fit: at the unchanged viewport render ' .. settledAfter
     .. ' after the first computed no layout; panel ' .. tostring(panel:GetWidth()) .. 'x' .. tostring(panel:GetHeight()))
-assert(panel:GetWidth() == 776 and panel._responsiveLayout.width == 776,
-    'settling at the unchanged viewport keeps the 776-unit width (width ' .. tostring(panel:GetWidth()) .. ')')
+assert(panel:GetWidth() == 568 and panel._responsiveLayout.width == 568,
+    'settling at the unchanged viewport keeps the 568-unit width (width ' .. tostring(panel:GetWidth()) .. ')')
 local computed = stats().computations
 UIParent:SetSize(800, 900)
 Render()
@@ -109,17 +116,17 @@ assert(stats().computations == computed, 'the taller viewport computes no layout
 UIParent:SetSize(800, 600)
 Render()
 Fits('settled render after the viewport height shrinks')
-assert(panel:GetWidth() == 776 and stats().computations == computed,
+assert(panel:GetWidth() == 568 and stats().computations == computed,
     'a change of the viewport height alone keeps the width and computes no layout (width '
     .. tostring(panel:GetWidth()) .. ', ' .. (stats().computations - computed) .. ' computed)')
 UIParent:SetSize(1200, 900)
 Render()
 assert(panel:GetScale() == 1, 'a larger viewport restores the native panel scale')
-assert(panel:GetWidth() == 840, 'and gives the panel its 840 units at 2x font (width ' .. tostring(panel:GetWidth()) .. ')')
+assert(panel:GetWidth() == 568, 'and leaves the panel at its 568 units at 2x font (width ' .. tostring(panel:GetWidth()) .. ')')
 UIParent:SetSize(800, 600)
 Render()
 Fits('render after viewport shrinks')
-assert(panel:GetWidth() == 776, 'the 800px viewport bounds the width at 776 units again (width ' .. tostring(panel:GetWidth()) .. ')')
+assert(panel:GetWidth() == 568, 'the 800px viewport still holds the 568 units (width ' .. tostring(panel:GetWidth()) .. ')')
 
 -- Fixture-local counters on the real widget methods: the harness's shared
 -- region methods (reached as layout_geometry_support does, no harness or

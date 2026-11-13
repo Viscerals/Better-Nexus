@@ -30,6 +30,29 @@
 -- Count disclosure: the compact banish, reroll and freeze charges are counts
 -- and are on the panel only while Details is open (S32; S25 checks them
 -- whole with Details open).
+-- The approved compact panel (design draft "Nexus compact panel": 420
+-- reference pixels wide, where the reference panel is 284 units; difficulty
+-- band B with its bar and ticks; one-line footer hubs). EXPECT, failing at
+-- eef1608f by design: the difficulty card is the band (S3, S10, S16); the
+-- plan progress is one row, its bar between the caption and Details (S21);
+-- the body's inset is the draft's and the three footer hubs are one line,
+-- "Wishlist", "Builds" and "Orbs", each saying what it opens on its hover
+-- (S22); with Auto OFF the offer heading is "Your offers" with the
+-- destination in a cell of its own, and a selected row's tag stands after a
+-- star (S14, S28, S32); an offer whose model card carries a "different
+-- quality" annotation code shows the short "Wrong quality" on its row, with
+-- the complete annotation whole on the row's hover, while a card that
+-- carries only its line keeps its complete annotation (S30); the widths
+-- are the approved reference width's (S13); the setup view's footer follows
+-- by the draft's gaps (S27). Each assertion of the former look that these
+-- replace is marked where it stood; it is replaced by the draft's own
+-- assertion, not relaxed.
+-- The approved compact Callboard (the draft's Callboard addendum, choice C1;
+-- S19b): a short objective is one line with its progress at the right end, a
+-- real 0 stays, a long progress line stands whole under the title, Details
+-- does not move the block, and no objective leaves no block or gap. No rule
+-- stands between the offer block and the progress row (S21b: the draft draws
+-- none).
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 local G=dofile('tests/prototype/layout_geometry_support.lua')
@@ -69,6 +92,44 @@ end
 local function Plain(fs) return fs and V.Plain(fs:GetText() or '') or '' end
 local function StatusCard()
  for _,f in ipairs(H.frames) do if f._nexusThemeExempt and f:GetParent()==NexusPanel and f.intensityBar then return f end end
+end
+-- The approved draft's lengths. It is drawn in reference pixels, 420 across
+-- the panel that is 284 units wide at the reference text size, so one of
+-- its pixels is 284 / 420 unit x the font scale. Design: such a length in
+-- whole units (1 at least). DesignY: a place the draft gives from the
+-- panel's top. Drawn: whether `units` is such a length where it stands (a
+-- block's own place decides whether it rounds down or up).
+local function Unit(scale) return 284/420*(scale or 1) end
+local function Design(px,scale) return math.max(1,math.floor(px*Unit(scale)+0.5)) end
+local function DesignY(px,scale) return math.floor(px*Unit(scale)+0.5) end
+local function Drawn(px,units,scale) return units==math.floor(px*Unit(scale)) or units==math.ceil(px*Unit(scale)) end
+-- What the compact offer heading row keeps at its right end for the
+-- destination cell: the cell's words in the font model in use (after a dot
+-- while the charges stand before it) and the draft's 10 pixels before them.
+-- Without a Saved Build slot the destination is the preview tag.
+local function SlotRoom(open,words)
+ words=(open and '\194\183 ' or '')..(words or (Nexus.Localization.Text('panel.label.preview_tag')))
+ return math.ceil(G.Length(words)*(G.model or G.MODELS.default).char)+Design(10)
+end
+-- What the panel says about the Auto selection over an offer whose first
+-- row is the marked one: the chip; the heading, which with Auto ON says
+-- "Auto ON" itself and with Auto OFF is the player's "Your offers", with
+-- the destination in the cell beside it; and the marked row's tag, whose
+-- words the row shows after its star while the whole tag (the code-owned
+-- mark and the words) stays the row's own for its hover.
+local function AutoSays(on)
+ local chip,head,cell=NexusPanel._autoBtn,NexusPanel._rollStatus,NexusPanel._offerSlot
+ local card=NexusPanel._offerCards and NexusPanel._offerCards[1]
+ if not (chip and head and card) then return false end
+ local heading=V.Plain(head:GetText() or '')
+ local starred=card.star~=nil and card.star:IsShown()
+ local tag=V.Plain(card.tag:GetText() or '')
+ if on then
+  return V.Plain(chip:GetText())=='Auto ON' and heading:find('Auto ON',1,true)~=nil and not heading:find('Auto OFF',1,true)
+   and not (cell and cell:IsShown()) and tag=='Recommended' and starred and card._nexusTag=='> Recommended'
+ end
+ return V.Plain(chip:GetText())=='Auto OFF' and heading==(Nexus.Localization.Text('panel.heading.your_offers'))
+  and cell~=nil and cell:IsShown() and tag=='Wishlist pick' and starred and card._nexusTag=='> Wishlist pick'
 end
 
 C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready')
@@ -164,12 +225,22 @@ C.scenario('S3 the original difficulty card in Play, not a flattened row; the ca
  local p,card=NexusPanel._play,StatusCard()
  if not C.setup(type(p)=='table' and card~=nil,'S3: fixture: the summary and the protected card exist') then return end
  local box=NexusPanel._responsiveLayout.boxes.status
- -- Approved panel cleanup: the card is the Compact A card (S16: 48 units
- -- with its Intensity bar, where the original was 56). This status carries
- -- no validated Intensity thresholds, so there is no bar: its two text lines
- -- and insets are 39 units (5 + 15 + 14 + 5).
- C.expect(card:IsShown() and box~=nil and card:GetHeight()==box.h and box.h==39,
-  'S3: the card is shown in the Play panel in its Compact A box',tostring(card:GetHeight()))
+ -- The approved compact panel: the card is the difficulty band (S16). This
+ -- status carries no validated Intensity thresholds, so there is no bar and
+ -- no room is kept for one: the band is its text between its 3-pixel insets,
+ -- or the draft's 26 pixels when the text needs no more. Its text is one
+ -- line, or the tier with Soul Ash under it where they do not fit one (this
+ -- plain harness measures the colour codes too, so here they do not). The
+ -- check that stood here asked for the Compact A card's 39 units.
+ local tier,ash=card.regions[1],card.regions[2]
+ local tierRect,ashRect=G.Rect(tier,NexusPanel),G.Rect(ash,NexusPanel)
+ local lines=ashRect[2]>=tierRect[4]-0.01 and (tier:GetStringHeight()+ash:GetStringHeight())
+  or math.max(tier:GetStringHeight(),ash:GetStringHeight())
+ local need=2*Design(3)+lines
+ C.expect(card:IsShown() and box~=nil and card:GetHeight()==box.h and not card.intensityBar:IsShown()
+  and (box.h==need or (box.h>need and Drawn(26,box.h))),
+  'S3: the card is shown in the Play panel as the difficulty band: no bar, as tall as its text needs or the draft\'s 26 pixels',
+  tostring(card:GetHeight())..' for '..tostring(need))
  C.expect(NexusPanel._responsiveLayout.boxes.serverLine==nil and not p.server:IsShown() and not p.serverHit:IsShown(),
   'S3: no flattened Difficulty / Soul Ash row')
  P.Render(Model({serverStatus=ss,owned=6}))
@@ -594,18 +665,23 @@ C.scenario('S9 the drag grip: visible, apart from the title and controls; only a
 end)
 
 -- The Play geometry at every supported font scale (LayoutMetrics clamps
--- 0.75-2; 1.25 is the 125% text of the design's L1): the 420 px panel's boxes
--- are disjoint and inside it, the card keeps at least its 56 px, Details adds
+-- 0.75-2; 1.25 is the 125% text of the design's L1): the panel's boxes are
+-- disjoint and inside it, the difficulty band is the draft's, Details adds
 -- the named lists below the counts without moving the counts, and level 80
 -- with no offer collapses the roll box under the 104 px minimum. Pure layout
 -- model; native font measurement is NOT RUN.
+-- The approved compact panel: the panel is laid out at the width its text
+-- scale gives it (LayoutMetrics.PanelWidth: 284 units x the scale, 1 to 2;
+-- it was laid out 420 units wide at every scale here), and the band stands
+-- where the draft draws it, from 82 to 116 of its pixels under the panel's
+-- top.
 C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, Details and the level-80 collapse',function()
  local LM=Nexus.LayoutMetrics
  for _,scale in ipairs({0.75,1,1.25,1.5,2}) do
   local function Laid(extra)
    -- Both DPS records exist here (spec.recordYours / recordBest): their rows
    -- are laid out only for records that exist (approved cleanup, S4b).
-   local spec={width=420,fontScale=scale,activeRoll=true,statusVisible=true,cardRows=true,toLockCount=1,orbLine=true,
+   local spec={width=LM.PanelWidth(scale),fontScale=scale,activeRoll=true,statusVisible=true,cardRows=true,toLockCount=1,orbLine=true,
     recordYours=true,recordBest=true}
    for k,v in pairs(extra or {}) do spec[k]=v end
    return LM.Panel(spec)
@@ -618,17 +694,20 @@ C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, De
    table.sort(names)
    for i=1,#names do
     local a=l.boxes[names[i]]
-    if a.x<0 or a.y<0 or a.x+a.w>420 or a.y+a.h>l.height then inside=false end
+    if a.x<0 or a.y<0 or a.x+a.w>l.width or a.y+a.h>l.height then inside=false end
     for j=i+1,#names do if LM.Overlap(a,l.boxes[names[j]]) then apart=false end end
    end
    C.expect(apart and inside,tag..': every box is inside the panel and apart from the others',table.concat(names,','))
-   -- Approved panel cleanup: the Compact A card, 48 units at font scale 1
-   -- (5 + a 15-unit tier line + a 14-unit Soul Ash line + 3 + the 6-unit
-   -- bar + 5), its two text lines following the font scale: 42, 48, 56, 63
-   -- and 77 units at 0.75, 1, 1.25, 1.5 and 2. The original card was 56.
-   local cardH=({[0.75]=42,[1]=48,[1.25]=56,[1.5]=63,[2]=77})[scale]
-   C.expect(l.boxes.status~=nil and l.boxes.status.h==cardH and l.boxes.serverLine==nil,
-    tag..': the Compact A card is '..cardH..' units; no flattened row',l.boxes.status and l.boxes.status.h)
+   -- The difficulty band with its bar: the draft's 34 pixels, from 82 to
+   -- 116 under the panel's top, which are 17, 23, 29, 35 and 46 units at
+   -- 0.75, 1, 1.25, 1.5 and 2. (The check that stood here asked for the
+   -- Compact A card's 42, 48, 56, 63 and 77.) The panel is the width the
+   -- rule gives this scale.
+   local cardH=({[0.75]=17,[1]=23,[1.25]=29,[1.5]=35,[2]=46})[scale]
+   C.expect(l.width==math.floor(284*math.max(1,scale)+0.5) and l.boxes.status~=nil and l.boxes.status.h==cardH
+    and cardH==DesignY(116,scale)-DesignY(82,scale) and l.boxes.status.x==Design(7,scale)
+    and l.boxes.status.w==l.width-2*Design(7,scale) and l.boxes.serverLine==nil,
+    tag..': the difficulty band is the draft\'s 34 pixels, '..cardH..' units, between the body\'s insets; no flattened row',l.boxes.status and l.boxes.status.h)
    if o.noOffer then
     C.expect(l.noOffer==true and l.boxes.roll.h<104 and l.boxes.planBar~=nil,tag..': the roll box collapses below 104 px',l.boxes.roll.h)
     -- Finish pass item E: no blank band where the offers were; the gaps
@@ -656,6 +735,88 @@ C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, De
   C.expect(open.boxes.bestDps.y-closed.boxes.bestDps.y==open.height-closed.height,
    'S10 @'..scale..': the rows below move by exactly the section\'s height',
    (open.boxes.bestDps.y-closed.boxes.bestDps.y)..' / '..(open.height-closed.height))
+  -- The approved draft's panel heights (difficulty B, with its bar): 319
+  -- pixels with Details closed and no Callboard (the header to 76, the band
+  -- 82 to 116, the offer heading and its three rows, the first with its
+  -- reason's line, 121 to 248, the progress row 253 to 275, the footer hubs
+  -- 287 to 313); 25 more with the one-line Callboard (its 20 and one gap of
+  -- 5); 140 more with Details open (the run count 20, the four counts in
+  -- two rows of 18, the lists' heading 18 and their three lines of 18, with
+  -- the gaps 3, 3, 1 and 5). A layout whose texts all fit their design rows
+  -- (no measured need is given here) is exactly those heights in units, and
+  -- a part that comes and goes adds whole units of its own. The one
+  -- exception is stated with it: header line 1 is never under the 24-unit
+  -- grip less the pixel it stands out above and below, which at a text
+  -- scale under about 1.5 is more than the draft's 22 pixels.
+  -- EXPECT, failing at eef1608f by design (there: 420 units wide at scale
+  -- 1, the Compact A card, two-line rows, a bar row and two-line hubs).
+  local function Draft(extra)
+   local spec={width=LM.PanelWidth(scale),fontScale=scale,activeRoll=true,statusVisible=true,cardRows=true,measured=true,
+    offerRowsH={0,0,0},offerReason={row=1,top=0,h=0}}
+   for k,v in pairs(extra or {}) do spec[k]=v end
+   return LM.Panel(spec)
+  end
+  local grip=math.max(0,math.max(24,Design(24,scale))-2*Design(1,scale)-(DesignY(27,scale)-DesignY(5,scale)))
+  local plain,board=Draft(),Draft({callboard=true,callboardInline=true})
+  local details=Draft({callboard=true,callboardInline=true,planDetails=true})
+  C.expect(plain.height==DesignY(319,scale)+grip and board.height-plain.height==DesignY(25,scale)
+   and details.height-board.height==DesignY(140,scale) and plain.boxes.callboard==nil and board.boxes.callboard~=nil
+   and board.boxes.callboard.h==Design(20,scale),
+   'S10 @'..scale..': the panel is the draft\'s 319 pixels high, 25 more with the one-line Callboard and 140 more with Details open',
+   plain.height..' / '..board.height..' / '..details.height..' (grip '..grip..')')
+  -- The open Details' name columns (the draft: name columns of two names and
+  -- a "more" line). Without a To lock list there are two, with one three:
+  -- side by side between the body's insets, apart, and of one height. A
+  -- column is then a half or a third of the block, so a row wider than it
+  -- wraps and needs more than the draft's three lines; the caller measures
+  -- that (detailNamesH for Still needed and Extra copies, toLockH for To
+  -- lock). Every column is then as tall as the tallest one needs and the
+  -- panel is taller by exactly that: no row is cut to keep a height. A To
+  -- lock height counts for nothing without a To lock column.
+  -- EXPECT, failing at eef1608f by design (there: To lock a row of its own
+  -- across the block under two columns).
+  local two,three=Draft({planDetails=true}),Draft({planDetails=true,toLockCount=1})
+  local function Side(l)
+   local b=l.boxes
+   return b.toLock~=nil and b.needed.x==l.inset and b.needed.x+b.needed.w<=b.shed.x and b.shed.x+b.shed.w<=b.toLock.x
+    and b.toLock.x+b.toLock.w==l.width-l.inset and b.shed.y==b.needed.y and b.toLock.y==b.needed.y
+    and b.shed.h==b.needed.h and b.toLock.h==b.needed.h
+  end
+  local names=three.boxes.needed.h-(tonumber(three.detailHeadingH) or 0)
+  local grownNames=Draft({planDetails=true,toLockCount=1,detailNamesH=names+30})
+  local grownLock=Draft({planDetails=true,toLockCount=1,detailNamesH=names+10,toLockH=names+40})
+  local noLock=Draft({planDetails=true,toLockH=names+40})
+  C.expect(two.boxes.toLock==nil and two.boxes.needed.x==two.inset and two.boxes.shed.x>=two.boxes.needed.x+two.boxes.needed.w
+   and two.boxes.shed.y==two.boxes.needed.y and two.boxes.shed.h==two.boxes.needed.h
+   and Side(three) and three.boxes.needed.w<two.boxes.needed.w and three.height==two.height,
+   'S10 @'..scale..': the Details name columns are two side by side, and three with To lock, between the insets, apart and of one height',
+   two.boxes.needed.w..' / '..three.boxes.needed.w..(three.boxes.toLock and (' / '..three.boxes.toLock.x..'+'..three.boxes.toLock.w) or ' / no To lock column'))
+  C.expect(Side(grownNames) and grownNames.boxes.needed.h==three.boxes.needed.h+30 and grownNames.height==three.height+30
+   and Side(grownLock) and grownLock.boxes.needed.h==three.boxes.needed.h+40 and grownLock.height==three.height+40,
+   'S10 @'..scale..': rows that need more than the draft\'s three lines make every column as tall as the tallest one needs, and the panel taller by exactly that',
+   three.height..' -> '..grownNames.height..' / '..grownLock.height)
+  C.expect(noLock.boxes.toLock==nil and noLock.height==two.height and noLock.boxes.needed.h==two.boxes.needed.h,
+   'S10 @'..scale..': without a To lock column a To lock height adds nothing',two.height..' / '..noLock.height)
+  -- The headings over the columns share one row: one line while every
+  -- heading fits its column on one line, and the tallest heading's measured
+  -- height when a heading wraps there (listHeadingH, which the caller
+  -- measures in the column's own width). The names start under the whole
+  -- row, in the same place across the block, and the panel is taller by
+  -- exactly what the row gained: no heading is cut to keep a height. A
+  -- heading that measures one line changes nothing.
+  -- EXPECT, failing at eef1608f and while the heading row was held to one
+  -- line (the one-line heading rule of issue #143, which the approved
+  -- no-cut rule now comes before in these columns).
+  local headRow=tonumber(three.detailHeadingH) or 0
+  local tallHead=Draft({planDetails=true,toLockCount=1,listHeadingH=headRow+17})
+  local oneLineHead=Draft({planDetails=true,toLockCount=1,listHeadingH=three.lineSmall})
+  C.expect(headRow>0 and three.detailHeadingTall==false
+   and Side(tallHead) and tallHead.detailHeadingH==headRow+17 and tallHead.detailHeadingTall==true
+   and tallHead.boxes.needed.y==three.boxes.needed.y and tallHead.boxes.needed.h==three.boxes.needed.h+17
+   and tallHead.height==three.height+17
+   and oneLineHead.detailHeadingH==headRow and oneLineHead.detailHeadingTall==false and oneLineHead.height==three.height,
+   'S10 @'..scale..': a heading that needs more than one line makes the heading row as tall as it needs, with the names under it and the panel taller by exactly that; a one-line heading changes nothing',
+   headRow..' -> '..tostring(tallHead.detailHeadingH)..', panel '..three.height..' -> '..tallHead.height..' / '..oneLineHead.height)
  end
 end)
 
@@ -893,16 +1054,39 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
   G.UseFont(G.MODELS.default)
   C.setup(P.Render(both)==true,'S13: fixture: both records at default text')
   local b=NexusPanel._responsiveLayout.boxes
-  C.expect(b.bestDps~=nil and b.bestKnown~=nil and b.bestDps.y==b.bestKnown.y and not Nexus.LayoutMetrics.Overlap(b.bestDps,b.bestKnown),
-   'S13: at default text both entries share one line',b.bestDps and b.bestKnown and (b.bestDps.y..' / '..b.bestKnown.y))
+  -- The rule is unchanged: the two entries share a line while both, two
+  -- gaps apart, fit the block (GUARD; stated from the layout's measured
+  -- entries as below). In the approved 284-unit reference panel these two
+  -- need more than its 274-unit block in this font model, so each takes its
+  -- own line (EXPECT: they shared one line of the former 404-unit block,
+  -- which the check here asked for). Two entries that do fit the block
+  -- still share one line: asked of the layout itself with short entries.
+  local l0=NexusPanel._responsiveLayout
+  local yours0,best0=l0.recordYours,l0.recordBest
+  if C.setup(type(yours0)=='table' and type(best0)=='table' and b.bestDps~=nil and b.bestKnown~=nil,
+   'S13: fixture: both entries are measured and laid out at default text') then
+   local need0=math.ceil(yours0[1]+l0.gap+yours0[2])+l0.gap*2+math.ceil(best0[1]+l0.gap+best0[2])
+   local shared0=b.bestDps.y==b.bestKnown.y and not Nexus.LayoutMetrics.Overlap(b.bestDps,b.bestKnown)
+   C.guard(shared0==(need0<=l0.full),'S13: at default text the entries share one line exactly when their measured widths fit the block',
+    need0..' of '..tostring(l0.full))
+   C.expect(l0.width==284 and l0.full==284-2*Design(7) and need0>l0.full and b.bestKnown.y>=b.bestDps.y+b.bestDps.h,
+    'S13: at default text in the 284-unit reference panel each entry takes its own line',
+    need0..' of '..tostring(l0.full)..'; '..b.bestDps.y..' / '..b.bestKnown.y)
+  end
+  local short=Nexus.LayoutMetrics.Panel({width=284,fontScale=1,activeRoll=true,recordYours={60,30},recordBest={70,30}})
+  C.guard(short.boxes.bestDps~=nil and short.boxes.bestKnown~=nil and short.boxes.bestDps.y==short.boxes.bestKnown.y
+   and not Nexus.LayoutMetrics.Overlap(short.boxes.bestDps,short.boxes.bestKnown),
+   'S13: two entries that fit the block share one line',short.boxes.bestDps and short.boxes.bestKnown and (short.boxes.bestDps.y..' / '..short.boxes.bestKnown.y))
   C.expect(b.recordNote==nil and not ShownText():find('server-wide',1,true),'S13: the scope note takes no row',ShownText())
   Whole('S13 default text')
   local oneLine=NexusPanel:GetHeight()
   G.UseFont(G.MODELS.double)
-  -- The 420-unit panel at 2.0 text: a 640-unit screen at the chosen 150%.
+  -- The panel a 640-unit screen leaves at the chosen 150% at 2.0 text: 410
+  -- units of the 568 its text scale asks for (it was the 420-unit floor of
+  -- the former reference width).
   UIParent:SetSize(640,4000)
   P.SetPanelScale(1.5)
-  C.setup(P.Render(both)==true and NexusPanel:GetWidth()==420,'S13: fixture: both records at 2.0 text, in the 420-unit panel',NexusPanel:GetWidth())
+  C.setup(P.Render(both)==true and NexusPanel:GetWidth()==410,'S13: fixture: both records at 2.0 text, in the 410-unit panel',NexusPanel:GetWidth())
   b=NexusPanel._responsiveLayout.boxes
   C.expect(b.bestDps~=nil and b.bestKnown~=nil and b.bestKnown.y>=b.bestDps.y+b.bestDps.h,
    'S13: at 2.0 text each entry takes its own line',b.bestDps and b.bestKnown and (b.bestDps.y..'+'..b.bestDps.h..' / '..b.bestKnown.y))
@@ -912,15 +1096,16 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
    performance={dummy={global={dps=5130,player='Synthetic'}},lk={global={dps=3400,player='Synthetic'}}}})
   C.setup(P.Render(wide)==true,'S13: fixture: Training Dummy and Lich King records at 2.0 text')
   Whole('S13 2.0 text, both targets')
-  -- With the room for it (a 1920-unit screen at 100%) the panel is 840 units
-  -- wide at 2.0 text: 420 x the text scale.
+  -- With the room for it (a 1920-unit screen at 100%) the panel is 568 units
+  -- wide at 2.0 text: the approved 284-unit reference width x the text scale
+  -- (it was 840: the former 420 x 2).
   P.ResetPanelScale()
   UIParent:SetSize(1920,4000)
   C.setup(P.Render(both)==true,'S13: fixture: both records at 2.0 text on a 1920-unit screen')
   local l=NexusPanel._responsiveLayout
   b=l.boxes
-  C.expect(NexusPanel:GetWidth()==840 and l.width==840,
-   'S13: at 2.0 text on a screen with the room the panel is 840 units wide (420 x the text scale)',NexusPanel:GetWidth())
+  C.expect(NexusPanel:GetWidth()==568 and l.width==568,
+   'S13: at 2.0 text on a screen with the room the panel is 568 units wide (284 x the text scale)',NexusPanel:GetWidth())
   local yours,best=l.recordYours,l.recordBest
   if C.setup(type(yours)=='table' and type(best)=='table' and b.bestDps~=nil and b.bestKnown~=nil,
    'S13: fixture: both entries are measured and laid out there') then
@@ -931,16 +1116,16 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
    print('OBSERVED','S13 2.0 text at '..tostring(l.width)..' units: the entries need '..need..' of '..tostring(l.full)..' units; shared='..tostring(shared))
    C.guard(shared==(need<=l.full),'S13: the entries share one line exactly when their measured widths fit the block',need..' of '..tostring(l.full))
    -- Where they fit, that they share the line follows from the rule above
-   -- (GUARD: the rule held at 420 units too). The red-ready check of this
-   -- part is the 840-unit width.
+   -- (GUARD: the rule held at the former widths too). The red-ready check
+   -- of this part is the 568-unit width.
    if need<=l.full then
-    C.guard(shared,'S13: with the room 840 units give, the two entries share one line again at 2.0 text',need..' of '..tostring(l.full))
+    C.guard(shared,'S13: with the room 568 units give, the two entries share one line again at 2.0 text',need..' of '..tostring(l.full))
    end
   end
-  Whole('S13 2.0 text, 840 units')
+  Whole('S13 2.0 text, 568 units')
   UIParent:SetSize(w0,h0)
   G.UseFont(G.MODELS.default)
-  C.setup(P.Render(both)==true and NexusPanel:GetHeight()==oneLine,'S13: fixture: default text gives the one-line panel back',NexusPanel:GetHeight())
+  C.setup(P.Render(both)==true and NexusPanel:GetHeight()==oneLine,'S13: fixture: default text gives the same panel back',NexusPanel:GetHeight())
  end)
  -- The chosen size (taken back while the screen is readable), the screen,
  -- the font model, the applied size and the default anchor return.
@@ -971,17 +1156,23 @@ C.scenario('S14 an Auto change updates the chip, the offer heading and the tag t
  C.setup(P.Render(m)==true,'S14: fixture: an offer with Auto OFF renders')
  local chip,head=NexusPanel._autoBtn,NexusPanel._rollStatus
  local tag=NexusPanel._offerCards and NexusPanel._offerCards[1] and NexusPanel._offerCards[1].tag
- if not C.setup(chip:IsShown() and V.Plain(chip:GetText())=='Auto OFF' and Plain(head):find('Auto OFF',1,true)~=nil and tag~=nil
-  and Plain(tag)=='> Wishlist pick','S14: fixture: chip, heading and tag say Auto OFF',Plain(head)) then return end
+ -- The approved compact panel (AutoSays above): with Auto OFF the heading
+ -- is the player's "Your offers" (the Auto state is the chip's own word)
+ -- and the marked row's tag stands after its star. The checks that stood
+ -- here asked for "Auto OFF" in the heading's own text and for the tag with
+ -- its code-owned mark as the row's text.
+ if not C.setup(chip:IsShown() and tag~=nil and AutoSays(false),'S14: fixture: chip, heading and tag say Auto OFF',Plain(head)) then return end
  local before=Effects()
  P.SetAuto(true)
  C.expect(V.Plain(chip:GetText())=='Auto ON' and Plain(head):find('Auto ON',1,true)~=nil and not Plain(head):find('Auto OFF',1,true)
-  and not Plain(head):find('you choose',1,true),'S14: Auto ON shows on the chip and in the offer heading together',
+  and not Plain(head):find('you choose',1,true) and Plain(head)~=(Nexus.Localization.Text('panel.heading.your_offers')),
+  'S14: Auto ON shows on the chip and in the offer heading together',
   V.Plain(chip:GetText())..' / '..Plain(head))
- C.expect(Plain(tag)=='> Recommended','S14: the marked offer\'s tag follows the same selection',Plain(tag))
+ C.expect(AutoSays(true),'S14: the marked offer\'s tag follows the same selection',Plain(tag))
  P.SetAuto(false)
- C.expect(V.Plain(chip:GetText())=='Auto OFF' and Plain(head):find('Auto OFF',1,true)~=nil and Plain(tag)=='> Wishlist pick',
-  'S14: Auto OFF shows on the chip, in the heading and on the tag together',V.Plain(chip:GetText())..' / '..Plain(head)..' / '..Plain(tag))
+ C.expect(AutoSays(false),
+  'S14: Auto OFF shows on the chip, the heading is the player\'s "Your offers" again and the tag follows',
+  V.Plain(chip:GetText())..' / '..Plain(head)..' / '..Plain(tag))
  C.guard(Effects()==before,'S14: presenting the selection makes no game action, send, saved-data or Auto change',Effects())
  -- Random Roll: with no Wishlist, the option on and the runtime's own
  -- "running" fact. The settings read is a boundary double for this check.
@@ -1059,7 +1250,7 @@ end)
 -- its hover and Hardcore click are S8's. A stated font model, not native
 -- measurement. EXPECT fails before the change by design (56 units, fixed
 -- one-line boxes).
-C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a wrapped tier, no room for an absent bar',function()
+C.scenario('S16 the difficulty band: the draft\'s 34 pixels with short text and its bar, grows for a wrapped tier, no room for an absent bar',function()
  local function Status(tier,bar)
   return {tier=tier,mode=tier,ash='1,240',gain='+45%',intensity=bar and 250 or nil,intensityMax=bar and 500 or nil,
    intensityThresholds=bar and {100,200,300,400} or nil,intensityLevel=bar and 2 or nil}
@@ -1070,27 +1261,53 @@ C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a
   for _,region in ipairs(card.regions or {}) do if region.kind=='FontString' then strings[#strings+1]=region end end
   return strings[1],strings[2],strings[3]
  end
+ -- The band (the approved compact panel, presentation B): between its
+ -- 8-pixel side insets the tier, a dot and Soul Ash stand on one line, left
+ -- of the multiplier's own cell and the draft's 10 pixels from it, while the
+ -- tier, the dot (5 pixels either side), Soul Ash and 10 pixels of room for
+ -- a value that gains a digit fit there; otherwise the tier wraps in that
+ -- room and Soul Ash stands on a line of its own under it. Which of the two
+ -- a status needs is worked out here from its words in this font model.
+ -- Returns the band's own need: its text block, the 3-pixel insets, and
+ -- with a bar the 1 pixel above it, its 4 pixels and the 3 under it.
  local function Check(tag,card,bar)
   local tier,ash,gain=Parts(card)
   local c,t,a,g=G.Rect(card,NexusPanel),G.Rect(tier,NexusPanel),G.Rect(ash,NexusPanel),G.Rect(gain,NexusPanel)
   local detail='card '..G.Text(c)..' tier '..G.Text(t)..' ash '..G.Text(a)..' gain '..G.Text(g)
-  C.expect(G.Inside(t,c) and G.Inside(a,c) and G.Inside(g,c) and G.Apart(t,g) and a[2]>=t[4]-0.01,
-   tag..': tier and multiplier share the first line, Soul Ash is under the tier, all inside the card',detail)
+  local char=G.model.char
+  local room=(c[3]-c[1])-2*Design(8)-(g[3]-g[1])-Design(10)
+  local tierW,ashW=math.ceil(G.Length(Plain(tier))*char),math.ceil(G.Length(Plain(ash))*char)
+  local oneLine=tierW+2*Design(5)+math.ceil(char)+ashW+Design(10)<=room
+  -- EXPECT: at eef1608f Soul Ash stood under the tier whatever their widths.
+  C.expect(G.Inside(t,c) and G.Inside(a,c) and G.Inside(g,c) and G.Apart(t,g) and t[1]==c[1]+Design(8) and g[3]==c[3]-Design(8)
+   and a[3]<=g[1]-Design(10)+0.01
+   and ((oneLine and a[1]>=t[3]-0.01 and math.abs(a[2]-t[2])<=0.01 and math.abs(g[2]-t[2])<=0.01)
+    or (not oneLine and a[2]>=t[4]-0.01 and a[1]==t[1])),
+   tag..': the tier and Soul Ash share the band\'s line beside the multiplier while they fit it, else Soul Ash is under the tier; all inside the band',
+   detail..' one line '..tostring(oneLine))
   C.expect(tier:GetWidth()>0 and tier:GetHeight()+0.5>=tier:GetStringHeight() and gain:GetWidth()+0.5>=gain:GetStringWidth()
    and ash:GetWidth()+0.5>=ash:GetStringWidth(),tag..': the tier, Soul Ash and multiplier are whole in their boxes',
    tier:GetWidth()..'x'..tier:GetHeight()..' needs '..tier:GetStringHeight())
   if bar then
    local b=G.Rect(card.intensityBar,NexusPanel)
-   C.expect(card.intensityBar:IsShown() and b[4]-b[2]==6 and b[2]>=a[4]-0.01 and G.Inside(b,c),
-    tag..': the 6-unit Intensity bar is under the texts, inside the card',detail..' bar '..G.Text(b))
+   -- (EXPECT: the bar was 6 units; it is the draft's 4 pixels, across the
+   -- band between its side insets, 3 pixels above its inner edge.)
+   C.expect(card.intensityBar:IsShown() and b[4]-b[2]==Design(4) and b[2]>=math.max(t[4],a[4])-0.01 and G.Inside(b,c)
+    and b[1]==c[1]+Design(8) and b[3]==c[3]-Design(8) and c[4]-b[4]==2*Design(3),
+    tag..': the Intensity bar, the draft\'s 4 pixels, is under the texts across the band, inside it',detail..' bar '..G.Text(b))
   end
+  local text=oneLine and math.max(tier:GetStringHeight(),ash:GetStringHeight()) or (tier:GetStringHeight()+ash:GetStringHeight())
+  return 2*Design(3)+text+(bar and (Design(1)+Design(4)+Design(3)) or 0),oneLine
  end
- -- Main-panel visual correction: the tier and the multiplier both start at
- -- the top of their cells, so they stand on one line (the multiplier was
- -- centred in its cell beside a tier at the top of its own). The harness
- -- keeps no vertical justification, so the requests are recorded for this
- -- scenario (as native_details_measurement records them) and the method is
- -- put back below.
+ -- Main-panel visual correction: the tier and the multiplier stand on one
+ -- line (the multiplier was centred in its cell beside a tier at the top of
+ -- its own). In the approved band that line also holds Soul Ash in its
+ -- smaller role, so on a one-line band each text takes the line's whole
+ -- height and stands in its middle, and they share one centre; where the
+ -- tier wraps, the tier and the multiplier start at the top again. The
+ -- harness keeps no vertical justification, so the requests are recorded
+ -- for this scenario (as native_details_measurement records them) and the
+ -- method is put back below.
  local regions=G.RegionMethods()
  local hadJustify=rawget(regions,'SetJustifyV')
  regions.SetJustifyV=function(self,v)
@@ -1103,29 +1320,41 @@ C.scenario('S16 Compact A difficulty card: 48 units with short text, grows for a
   local card=StatusCard()
   if not C.setup(card~=nil and card:IsShown() and card.intensityBar:IsShown(),'S16: fixture: the card and its bar are shown') then return end
   local box=NexusPanel._responsiveLayout.boxes.status
-  C.expect(box~=nil and box.h==48 and card:GetHeight()==48,'S16: with short text and its bar the active card is 48 units',box and box.h)
-  Check('S16 short',card,true)
-  local tierText,_,gainText=Parts(card)
+  local need,oneLine=Check('S16 short',card,true)
+  -- EXPECT: the Compact A card was 48 units here. The band is the draft's 34
+  -- pixels (23 units at this size) while its line needs no more.
+  C.expect(box~=nil and card:GetHeight()==box.h and oneLine and need<=box.h and Drawn(34,box.h) and box.h==23
+   and box.x==Design(7) and box.w==NexusPanel:GetWidth()-2*Design(7),
+   'S16: with short text and its bar the active band is the draft\'s 34 pixels, 23 units, between the body\'s insets',box and box.h)
+  local activeH=card:GetHeight()
+  local tierText,ashText,gainText=Parts(card)
   local tierRect,gainRect=G.Rect(tierText,NexusPanel),G.Rect(gainText,NexusPanel)
-  -- EXPECT: fails at aca67cf4, where only the tier asked for the top.
-  C.expect(rawget(tierText,'_justifyV')=='TOP' and rawget(gainText,'_justifyV')=='TOP' and tierRect[2]==gainRect[2],
-   'S16: the tier and the multiplier start at the top of their cells, on one line',
+  -- EXPECT: at eef1608f the tier and the multiplier asked for the top of
+  -- two cells over a Soul Ash line.
+  C.expect(rawget(tierText,'_justifyV')=='MIDDLE' and rawget(ashText,'_justifyV')=='MIDDLE' and rawget(gainText,'_justifyV')=='MIDDLE'
+   and tierRect[2]==gainRect[2] and tierText:GetHeight()==gainText:GetHeight() and tierText:GetHeight()==ashText:GetHeight(),
+   'S16: on the one-line band the tier, Soul Ash and the multiplier share the line\'s height and its middle',
    tostring(rawget(tierText,'_justifyV'))..' / '..tostring(rawget(gainText,'_justifyV'))..' at '..tostring(tierRect[2])..' / '..tostring(gainRect[2]))
   C.guard(card._nexusThemeExempt==true,'S16: the card stays exempt from the theme')
   C.setup(P.Render(Model({serverStatus=Status('HC3',true),owned=6}))==true,'S16: fixture: the completed build')
-  C.expect(card:IsShown() and card:GetHeight()==48,'S16: the completed card is 48 units too',card:GetHeight())
+  C.expect(card:IsShown() and card:GetHeight()==activeH,'S16: the completed band is as tall as the active one',card:GetHeight())
   local long='Stufe IV: Heroische Frostgrab-Herausforderung der zersplitterten Frostwacht-Konklave des Nordens'
   C.setup(P.Render(Model({serverStatus=Status(long,true)}))==true,'S16: fixture: a long localized tier')
   local tier=Parts(card)
-  -- The 48-unit card holds a 15-unit tier line: it grows by what the
-  -- wrapped tier needs beyond that line.
-  C.expect(tier:GetStringHeight()>15 and card:GetHeight()==48-15+tier:GetStringHeight()
-   and card:GetHeight()==NexusPanel._responsiveLayout.boxes.status.h,
-   'S16: a long tier wraps and the card grows by its extra lines',card:GetHeight()..' tier needs '..tier:GetStringHeight())
-  Check('S16 long tier',card,true)
+  -- A tier that does not fit the line wraps beside the multiplier, with
+  -- Soul Ash under it, and the band is exactly its insets, those lines and
+  -- its bar. (It was the 48-unit card grown by what the tier needed beyond
+  -- a 15-unit line.)
+  local longNeed,longOneLine=Check('S16 long tier',card,true)
+  C.expect(tier:GetStringHeight()>15 and not longOneLine and card:GetHeight()==longNeed and card:GetHeight()>activeH
+   and card:GetHeight()==NexusPanel._responsiveLayout.boxes.status.h
+   and rawget(tier,'_justifyV')=='TOP' and rawget(select(3,Parts(card)),'_justifyV')=='TOP',
+   'S16: a long tier wraps and the band grows to exactly its lines',card:GetHeight()..' needs '..tostring(longNeed)..', tier '..tier:GetStringHeight())
   C.setup(P.Render(Model({serverStatus=Status('HC3',false)}))==true,'S16: fixture: no validated Intensity scale')
-  C.expect(not card.intensityBar:IsShown() and card:GetHeight()<48,'S16: without a validated Intensity scale there is no bar and no room kept for it',card:GetHeight())
-  Check('S16 no bar',card,false)
+  local plainNeed=Check('S16 no bar',card,false)
+  C.expect(not card.intensityBar:IsShown() and card:GetHeight()<activeH
+   and (card:GetHeight()==plainNeed or (card:GetHeight()>plainNeed and Drawn(26,card:GetHeight()))),
+   'S16: without a validated Intensity scale there is no bar and no room kept for it: the draft\'s 26 pixels',card:GetHeight())
  end)
  regions.SetJustifyV=hadJustify
  G.UseFont(G.MODELS.default)
@@ -1279,6 +1508,166 @@ C.scenario('S19 a long Callboard objective and all its lines are shown in full; 
  C.setup(ok,'S19: fixture: the Callboard scenario ran',err)
 end)
 
+-- The approved compact Callboard (the design draft's Callboard addendum,
+-- choice C1: the progress on the title's line when it fits). A short
+-- objective is one line: its icon (the draft's 16 pixels), 6 after it the
+-- label, 8 after the label the title and, at the right end of that line, its
+-- one progress line, while the label, the title, the draft's gaps and that
+-- line fit the row beside the icon. The block is then the draft's 20 pixels,
+-- 5 under the difficulty band and 5 above the offer block, with no rule, and
+-- the panel is taller by exactly the block and its one gap. The words are
+-- the objective's own: a real 0 ("0/40") is shown as it is. A progress line
+-- too long for the title's line stands whole under the title, from the
+-- label's left edge, wrapped, and the block and the panel grow for it.
+-- Details does not move or change the block. Without an objective there is
+-- no block, text, rule or gap: the panel is exactly as tall as it was.
+-- The summary read is a boundary double, as in S19; what fits is worked out
+-- here from the words in the stated font model, not read from the panel.
+-- EXPECT, failing at eef1608f by design: there the progress line always
+-- stood under the title, in the former insets. GUARD: what already held (the
+-- objective's own words with their 0, the panel's exact growth, no rule, the
+-- hover area and its complete line, Details, no objective).
+C.scenario('S19b a short Callboard objective is one line with its progress at the right end and a real 0 stays; a long progress line stands under the title; Details does not move the block; no objective leaves no block or gap',function()
+ local TITLE,ZERO='Trade Goods: Felweed','Felweed: 0/40'
+ local LONG='Raureifgebundener Waechter und echogebundene Schildwachen in der Frostgrabhoehle besiegt: 0/3'
+ local board=Nexus.CallboardStatus
+ local real=board.GetSummary
+ local summary
+ board.GetSummary=function() return summary end
+ local function Play()
+  return Model({serverStatus={tier='HC3',mode='HC3',ash='1,240',gain='+45%',intensity=250,intensityMax=500,
+    intensityThresholds={100,200,300,400},intensityLevel=2},
+   cards={{text='Frostwake Sigil (Rare)',highlight=true},{text='Hollow Bell (Rare)'},{text='Ashen Tithe (Uncommon)'}},
+   recommendation='Take Frostwake Sigil.'})
+ end
+ -- The end of what stands above the block and the start of what stands
+ -- under it, from the layout's other boxes.
+ local function Around(boxes,box)
+  local above,below
+  for name,other in pairs(boxes) do
+   if name~='callboard' then
+    if other.y+other.h<=box.y and (not above or other.y+other.h>above) then above=other.y+other.h end
+    if other.y>=box.y+box.h and (not below or other.y<below) then below=other.y end
+   end
+  end
+  return above,below
+ end
+ -- The shown textures of the panel that are a rule (at most one unit high,
+ -- at least half the body wide) between two heights.
+ local function Rules(from,to,full)
+  local found={}
+  for _,r in ipairs(G.Shown(NexusPanel)) do
+   if r.kind=='Texture' then
+    local okRect,rect=pcall(G.Rect,r,NexusPanel)
+    if okRect and rect[4]-rect[2]<=1.01 and rect[3]-rect[1]>=full/2 and rect[2]>=from-0.01 and rect[4]<=to+0.01 then
+     found[#found+1]=G.Text(rect)
+    end
+   end
+  end
+  return found
+ end
+ local ok,err=pcall(function()
+  for _,model in ipairs({G.MODELS.default,G.MODELS.double}) do
+   local tag='S19b '..model.name
+   local scale,char=model.size/12,model.char
+   G.UseFont(model)
+   P._playDetails=false
+   summary=nil
+   C.setup(P.Render(Play())==true and NexusPanel._responsiveLayout.boxes.callboard==nil,
+    tag..': fixture: a build in progress without a Callboard objective')
+   local bare=NexusPanel:GetHeight()
+   local bareRoll=NexusPanel._responsiveLayout.boxes.roll and NexusPanel._responsiveLayout.boxes.roll.y
+   summary={observed=true,title=TITLE,lines={ZERO}}
+   C.setup(P.Render(Play())==true,tag..': fixture: the same panel with a short objective whose progress is 0 of 40')
+   local l=NexusPanel._responsiveLayout
+   local box=l.boxes.callboard
+   local icon,label,t,line=NexusPanel._callboardIcon,NexusPanel._callboardLabel,NexusPanel._callboardTitle,NexusPanel._callboardLine
+   local hit=NexusPanel._callboardLineHit
+   if not C.setup(box~=nil and icon~=nil and label~=nil and t~=nil and line~=nil and hit~=nil and label:IsShown() and t:IsShown()
+     and line:IsShown() and l.boxes.status~=nil and l.boxes.roll~=nil and bareRoll~=nil,
+    tag..': fixture: the Callboard block is laid out between the difficulty band and the offer block') then return end
+   local labelW,titleW,lineW=G.Length(Plain(label))*char,G.Length(TITLE)*char,G.Length(ZERO)*char
+   -- The row beside the icon (the draft's 16 pixels and 6): the label, 8,
+   -- the title, 10 and the progress line fit it, with room to spare.
+   local room=box.w-Design(16,scale)-Design(6,scale)
+   C.setup(labelW+Design(8,scale)+titleW+Design(10,scale)+lineW+Design(8,scale)<=room and model.line<=math.floor(20*Unit(scale)),
+    tag..': fixture: the label, the title, the draft\'s gaps and the progress line fit one row, and a line of text fits the draft\'s 20 pixels',
+    tostring(labelW+titleW+lineW)..' in '..room)
+   local ir,lr,tr,pr=G.Rect(icon,NexusPanel),G.Rect(label,NexusPanel),G.Rect(t,NexusPanel),G.Rect(line,NexusPanel)
+   local detail='box '..box.x..','..box.y..' '..box.w..'x'..box.h..' label '..G.Text(lr)..' title '..G.Text(tr)..' progress '..G.Text(pr)
+   C.guard(Plain(t)==TITLE and Plain(line)==ZERO,
+    tag..': the title and the progress are the objective\'s own words, whole, the real 0 included',Plain(t)..' | '..Plain(line))
+   C.expect(pr[2]==tr[2] and pr[4]==tr[4] and tr[2]==box.y and tr[4]==box.y+box.h and pr[3]==box.x+box.w
+     and pr[1]>=tr[1]+titleW+Design(10,scale)-0.01 and tr[3]<=pr[1]+0.01 and pr[3]-pr[1]+0.5>=lineW
+     and t:GetHeight()+0.5>=t:GetStringHeight() and line:GetHeight()+0.5>=line:GetStringHeight(),
+    tag..': the progress stands on the title\'s line, at the row\'s right end, the draft\'s 10 pixels or more after the title\'s words; both are whole',
+    detail)
+   C.expect(ir[1]==box.x and ir[3]-ir[1]==Design(16,scale) and ir[4]-ir[2]==Design(16,scale) and ir[2]>=box.y and ir[4]<=box.y+box.h
+     and lr[1]==box.x+Design(16,scale)+Design(6,scale) and lr[3]-lr[1]+0.01>=labelW and lr[3]-lr[1]<=labelW+2
+     and lr[2]>=box.y and lr[4]<=box.y+box.h and tr[1]==lr[3]+Design(8,scale),
+    tag..': the icon is the draft\'s 16 pixels at the block\'s left, the label 6 after it and the title 8 after the label, all on that line',
+    'icon '..G.Text(ir)..' '..detail)
+   local above,below=Around(l.boxes,box)
+   C.expect(Drawn(20,box.h,scale) and above==l.boxes.status.y+l.boxes.status.h and below==l.boxes.roll.y
+     and Drawn(5,box.y-above,scale) and Drawn(5,below-(box.y+box.h),scale),
+    tag..': the block is the draft\'s 20 pixels, 5 under the difficulty band and 5 above the offer block',
+    detail..' above '..tostring(above)..' below '..tostring(below))
+   local grown=NexusPanel:GetHeight()-bare
+   C.guard(grown==box.h+(below-(box.y+box.h)) and l.boxes.roll.y-bareRoll==grown,
+    tag..': the panel is taller by exactly the block and its one gap, and what is under the block moved by that',
+    bare..' -> '..NexusPanel:GetHeight()..' block '..box.h)
+   C.guard(#Rules(above,below,l.full)==0,tag..': no rule stands above, in or under the block',table.concat(Rules(above,below,l.full),' '))
+   C.guard(hit:IsShown() and type(hit._nexusFullLines)=='table' and #hit._nexusFullLines==1 and hit._nexusFullLines[1]==ZERO,
+    tag..': the progress keeps its hover area and its complete line')
+   -- Details: the block is the same with Details open, and closing gives
+   -- the height back.
+   local closed=NexusPanel:GetHeight()
+   NexusPanel._play.details:Click()
+   C.setup(P.Render(Play())==true and P._playDetails==true,tag..': fixture: Details opened')
+   local openBox=NexusPanel._responsiveLayout.boxes.callboard
+   local tr2,pr2=G.Rect(t,NexusPanel),G.Rect(line,NexusPanel)
+   C.guard(openBox~=nil and openBox.x==box.x and openBox.y==box.y and openBox.w==box.w and openBox.h==box.h
+     and tr2[1]==tr[1] and tr2[2]==tr[2] and pr2[1]==pr[1] and pr2[2]==pr[2] and pr2[3]==pr[3] and Plain(t)==TITLE and Plain(line)==ZERO
+     and NexusPanel:GetHeight()>closed,
+    tag..': with Details open the block and its words stand where they stood',G.Text(tr2)..' '..G.Text(pr2))
+   NexusPanel._play.details:Click()
+   C.setup(P.Render(Play())==true and P._playDetails==false,tag..': fixture: Details closed again')
+   C.guard(NexusPanel:GetHeight()==closed,tag..': closing Details gives the height back',NexusPanel:GetHeight()..' / '..closed)
+   -- A progress line too long for the title's line.
+   summary={observed=true,title=TITLE,lines={LONG}}
+   C.setup(P.Render(Play())==true,tag..': fixture: the same objective with a long progress line')
+   l=NexusPanel._responsiveLayout
+   box=l.boxes.callboard
+   if not C.setup(box~=nil and l.boxes.roll~=nil,tag..': fixture: the block is laid out again') then return end
+   local longW=G.Length(LONG)*char
+   C.setup(labelW+Design(8,scale)+titleW+Design(10,scale)+longW>room+2 and longW>box.w,
+    tag..': fixture: that line does not fit beside the title, nor on one line under it',longW..' in '..room)
+   lr,tr,pr=G.Rect(label,NexusPanel),G.Rect(t,NexusPanel),G.Rect(line,NexusPanel)
+   above,below=Around(l.boxes,box)
+   C.expect(Plain(t)==TITLE and Plain(line)==LONG and tr[2]==box.y and pr[2]>=tr[4]-0.01 and pr[1]==lr[1]
+     and lr[1]==box.x+Design(16,scale)+Design(6,scale) and pr[3]<=box.x+box.w+0.01
+     and line:GetStringHeight()>model.line and line:GetHeight()+0.5>=line:GetStringHeight()
+     and box.h==(tr[4]-tr[2])+(pr[4]-pr[2]) and pr[4]<=box.y+box.h+0.01,
+    tag..': a long progress line stands whole under the title, from the label\'s left edge, wrapped, in a block as tall as both',
+    'box '..box.y..'+'..box.h..' title '..G.Text(tr)..' progress '..G.Text(pr))
+   C.expect(below==l.boxes.roll.y and NexusPanel:GetHeight()-bare==box.h+(below-(box.y+box.h)) and Drawn(5,below-(box.y+box.h),scale),
+    tag..': the panel grows by exactly that block and its gap',bare..' -> '..NexusPanel:GetHeight()..' block '..box.h)
+   -- No objective again.
+   summary=nil
+   C.setup(P.Render(Play())==true,tag..': fixture: the objective ends')
+   C.guard(NexusPanel._responsiveLayout.boxes.callboard==nil and not label:IsShown() and not t:IsShown() and not line:IsShown()
+     and not icon:IsShown() and not hit:IsShown() and NexusPanel:GetHeight()==bare
+     and NexusPanel._responsiveLayout.boxes.roll.y==bareRoll,
+    tag..': without an objective there is no block, text or gap: the panel is exactly as tall as before',NexusPanel:GetHeight()..' / '..bare)
+  end
+ end)
+ board.GetSummary=real
+ G.UseFont(G.MODELS.default)
+ P._playDetails=false
+ P.Render(Model())
+ C.setup(ok,'S19b: fixture: the compact Callboard scenario ran',err)
+end)
+
 -- Shared by S20-S25: every shown FontString of the panel itself whose text
 -- holds one of `words` is whole in its box (wide enough for one line, or tall
 -- enough for its wrapped text), inside the panel and apart from the others.
@@ -1354,7 +1743,10 @@ C.scenario('S20 the opt-in DPS RECORDS section shows only records that exist; no
   text=Shown({dummy={personal={dps=12000}},lk={}})
   C.expect(not text:find('Target build',1,true),'S20: closing Details takes the total off the heading again',text)
   text,box=Shown({dummy={personal={dps=0}},lk={}})
-  C.expect(box~=nil and text:find('Your Dummy',1,true)~=nil and text:find('| 0 |',1,true)~=nil and not text:find('—',1,true),
+  -- (A shown text that is exactly "0". It was followed by the footer hubs'
+  -- second lines, which the approved one-line hubs no longer have, so it can
+  -- be the last shown text now.)
+  C.expect(box~=nil and text:find('Your Dummy',1,true)~=nil and (text..' |'):find('| 0 |',1,true)~=nil and not text:find('—',1,true),
    'S20: a record measured as 0 is shown as 0, not as missing',text)
   text,box=Shown({dummy={},lk={global={dps=31000,player='Synthetic'}}})
   C.expect(box~=nil and text:find('LICH KING',1,true)~=nil and text:find('31k',1,true)~=nil and not text:find('Your Lich King',1,true)
@@ -1389,7 +1781,7 @@ end)
 -- had them too: the caption at the row's left with Details at its right end,
 -- the drawn bar and button standing in their boxes, a Details button of at
 -- most half the row, and its unmoved place and the bar's when Details opens.
-C.scenario('S21 collapsed progress is a caption with Details at its right and a full-width bar below; the run count shows only with Details',function()
+C.scenario('S21 collapsed progress is one row: its caption, the bar and Details at its right; the run count shows only with Details',function()
  local ok,err=pcall(function()
   G.UseFont(G.MODELS.default)
   P._playDetails=false
@@ -1404,9 +1796,19 @@ C.scenario('S21 collapsed progress is a caption with Details at its right and a 
    and b.planDetails.x+b.planDetails.w==l.inset+l.full,
    'S21: the caption is at the left of its row and the Details button at the row\'s right end',
    b.progressHeader and b.planDetails and (b.progressHeader.x..'+'..b.progressHeader.w..' / '..b.planDetails.x..'+'..b.planDetails.w))
-  C.expect(b.planBar~=nil and b.progressHeader~=nil and b.planDetails~=nil and b.planBar.x==l.inset and b.planBar.w==l.full
-   and b.planBar.y>=math.max(b.progressHeader.y+b.progressHeader.h,b.planDetails.y+b.planDetails.h),
-   'S21: the bar is a full-width row of its own under the caption and the button',
+  -- The approved inline progress row: the bar stands on the caption's own
+  -- row, between the caption and the Details button and the draft's 8
+  -- pixels from each, 6 pixels high in the row's middle, and never under 40
+  -- pixels long (a caption or label that left it less would put it on a row
+  -- of its own under them). EXPECT: at eef1608f the bar was a full-width
+  -- row of its own under the caption and the button, which the check here
+  -- asked for.
+  C.expect(b.planBar~=nil and b.progressHeader~=nil and b.planDetails~=nil and l.inset==Design(7)
+   and b.planBar.x==b.progressHeader.x+b.progressHeader.w+Design(8) and b.planBar.x+b.planBar.w==b.planDetails.x-Design(8)
+   and b.planBar.h==Design(6) and b.planBar.w>=Design(40)
+   and b.planBar.y>=b.progressHeader.y and b.planBar.y+b.planBar.h<=b.progressHeader.y+b.progressHeader.h
+   and math.abs((b.planBar.y-b.progressHeader.y)-(b.progressHeader.y+b.progressHeader.h-b.planBar.y-b.planBar.h))<=1,
+   'S21: the bar stands on the caption\'s row, between the caption and the Details button, 8 pixels from each, in the row\'s middle',
    b.planBar and (b.planBar.x..','..b.planBar.y..' '..b.planBar.w..'x'..b.planBar.h))
   local track,button=G.Rect(p.track,NexusPanel),G.Rect(p.details,NexusPanel)
   C.guard(b.planBar~=nil and track[1]==b.planBar.x and track[2]==b.planBar.y and track[3]-track[1]==b.planBar.w
@@ -1437,6 +1839,49 @@ C.scenario('S21 collapsed progress is a caption with Details at its right and a 
  C.setup(ok,'S21: fixture: the progress scenario ran',err)
 end)
 
+-- The approved compact panel draws no rule between its blocks (the draft's
+-- decision D6: the one-unit line under the offer block, above the progress
+-- row, is gone; the block gap separates them). With three offers, the first
+-- of them the selected one (so the last row has no outline of its own): no
+-- shown texture of the panel is a rule (at most one unit high, at least half
+-- the body wide) from the last offer row's end to the progress row, and the
+-- progress row follows the offer block by the draft's 5 pixels. EXPECT,
+-- failing at eef1608f by design (the rule stood on the block's last unit).
+C.scenario('S21b no rule is drawn between the offer block and the progress row',function()
+ local ok,err=pcall(function()
+  for _,model in ipairs({G.MODELS.default,G.MODELS.double}) do
+   local tag='S21b '..model.name
+   local scale=model.size/12
+   G.UseFont(model)
+   P._playDetails=false
+   C.setup(P.Render(Model({cards={{text='Frostwake Sigil (Rare)',highlight=true},{text='Hollow Bell (Rare)'},{text='Ashen Tithe (Uncommon)'}},
+    recommendation='Take Frostwake Sigil.'}))==true,tag..': fixture: three offers, the first selected, Details closed')
+   local l=NexusPanel._responsiveLayout
+   local b=l.boxes
+   local cards=NexusPanel._offerCards
+   if not C.setup(b.roll~=nil and b.progressHeader~=nil and cards~=nil and cards[3]~=nil and cards[3]:IsShown(),
+    tag..': fixture: the offer block, its third row and the progress row are laid out') then return end
+   local last=G.Rect(cards[3],NexusPanel)
+   local rules={}
+   for _,r in ipairs(G.Shown(NexusPanel)) do
+    if r.kind=='Texture' then
+     local okRect,rect=pcall(G.Rect,r,NexusPanel)
+     if okRect and rect[4]-rect[2]<=1.01 and rect[3]-rect[1]>=l.full/2 and rect[2]>=last[4]-2 and rect[4]<=b.progressHeader.y+0.01 then
+      rules[#rules+1]=G.Text(rect)
+     end
+    end
+   end
+   C.expect(#rules==0,tag..': no rule stands from the last offer row\'s end to the progress row',table.concat(rules,' '))
+   C.expect(last[4]<=b.roll.y+b.roll.h+0.01 and Drawn(5,b.progressHeader.y-(b.roll.y+b.roll.h),scale),
+    tag..': the progress row follows the offer block by the draft\'s 5 pixels',(b.roll.y+b.roll.h)..' -> '..b.progressHeader.y)
+  end
+ end)
+ G.UseFont(G.MODELS.default)
+ P._playDetails=false
+ P.Render(Model())
+ C.setup(ok,'S21b: fixture: the rule scenario ran',err)
+end)
+
 -- Approved panel cleanup, structure: compact 8-unit side insets for every
 -- body block, and two-line footer hubs: each hub's name with, under it, what
 -- it opens, in existing words (Wishlist Editor; Build Library and
@@ -1449,40 +1894,51 @@ end)
 -- 120-unit hubs with a 24-unit "?" after them, which left the row uneven).
 -- No help button stands in the footer; Help is reached from Options
 -- (owner14_panel_usability F1). EXPECT fails at aca67cf4 by design.
-C.scenario('S22 body blocks keep one compact inset; the footer hubs are two-line with what each opens',function()
+C.scenario('S22 body blocks keep one compact inset; the footer hubs are one line, of one width, each saying what it opens on its hover',function()
  G.UseFont(G.MODELS.default)
  local ss={tier='HC3',mode='HC3',ash='1,240',gain='+45%'}
  local cards,rec=LongOffer('Take Cinder Lattice.')
  C.setup(P.Render(Model({serverStatus=ss,cards=cards,recommendation=rec,bestDps={dummy={dps=4812}}}))==true,'S22: fixture: a Play panel with card, offer and a record')
  local l=NexusPanel._responsiveLayout
+ -- The approved compact body: every block stands between the draft's
+ -- 7-pixel insets (5 units at this size; they were 8 units).
+ local inset=Design(7)
  local off={}
  for name,box in pairs(l.boxes) do
-  if box.x<8 or box.x+box.w>l.width-8 then off[#off+1]=name end
+  if box.x<inset or box.x+box.w>l.width-inset then off[#off+1]=name end
  end
  for _,name in ipairs({'status','roll','progressHeader','bestDps','footer','header'}) do
-  if not (l.boxes[name] and l.boxes[name].x==8) then off[#off+1]=name..' x='..tostring(l.boxes[name] and l.boxes[name].x) end
+  if not (l.boxes[name] and l.boxes[name].x==inset) then off[#off+1]=name..' x='..tostring(l.boxes[name] and l.boxes[name].x) end
  end
- C.expect(#off==0,'S22: every block starts at the 8-unit inset and ends inside it',table.concat(off,', '))
+ C.expect(#off==0 and inset==5 and l.inset==inset,'S22: every block starts at the body\'s inset, the draft\'s 7 pixels, and ends inside it',table.concat(off,', '))
+ -- The approved one-line footer: each hub shows its own short title and
+ -- nothing under it (the draft's 26-pixel hubs: "Wishlist", "Builds",
+ -- "Orbs"), and what it opens, which was its second line, is on its hover
+ -- in the same words. EXPECT: at eef1608f each hub had that second line on
+ -- its face, which the checks here asked for.
  local hubs=NexusPanel._footerButtons or {}
- local want={plan='Wishlist Editor',explore='Build Library · Leaderboard',orbs='Orbs / Lost Memories'}
+ local want={plan={'panel.button.hub_wishlist','Wishlist Editor'},explore={'panel.button.hub_builds','Build Library','Leaderboard'},
+  orbs={'panel.button.orbs','Lost Memories'}}
  local heights={}
- for key,words in pairs(want) do
+ for key,spec in pairs(want) do
   local hub=hubs[key]
-  local sub
+  local under,tip,says={},'',true
   for _,r in ipairs(hub and hub.regions or {}) do
-   if r.kind=='FontString' and r:IsShown() and Plain(r)==words then sub=r end
+   if r.kind=='FontString' and r:IsShown() and Plain(r)~='' then under[#under+1]=Plain(r) end
   end
-  C.expect(hub~=nil and hub:IsShown() and sub~=nil,'S22: the '..key..' hub says what it opens: '..words)
-  if hub and sub then
-   local hr,sr=G.Rect(hub,NexusPanel),G.Rect(sub,NexusPanel)
-   C.expect(G.Inside(sr,hr,0.01) and (sr[3]-sr[1]+0.5>=sub:GetStringWidth() or sr[4]-sr[2]+0.5>=sub:GetStringHeight())
-    and sr[2]-hr[2]>=12,'S22: the '..key..' hub\'s second line is whole inside the hub, under its name',G.Text(sr)..' in '..G.Text(hr))
+  if hub then tip=table.concat(V.TooltipLines(hub:GetScript('OnEnter'),hub),' | ') end
+  for i=2,#spec do if not tip:find(spec[i],1,true) then says=false end end
+  C.expect(hub~=nil and hub:IsShown() and V.Plain(hub:GetText() or '')==(Nexus.Localization.Text(spec[1])) and #under==0,
+   'S22: the '..key..' hub is one line: its own title and no second line',tostring(hub and hub:GetText())..' / '..table.concat(under,', '))
+  C.expect(says,'S22: the '..key..' hub says what it opens on its hover: '..table.concat(spec,', ',2),tip)
+  if hub then
    C.guard(type(hub:GetScript('OnClick'))=='function','S22: the '..key..' hub keeps its click route')
    heights[#heights+1]=hub:GetHeight()
   end
  end
- C.expect(#heights==3 and heights[1]==heights[2] and heights[2]==heights[3] and heights[1]==l.boxes.footer.h,
-  'S22: the three hubs share the footer row\'s height',table.concat(heights,'/'))
+ C.expect(#heights==3 and heights[1]==heights[2] and heights[2]==heights[3] and heights[1]==l.boxes.footer.h
+  and Drawn(26,heights[1]),
+  'S22: the three hubs share the footer row\'s height, the draft\'s 26 pixels',table.concat(heights,'/'))
  local footer=l.boxes.footer
  local rects,spans={}, {}
  for i,key in ipairs({'plan','explore','orbs'}) do
@@ -1724,8 +2180,12 @@ C.scenario('S27 no Wishlist with an Echo board: the footer follows the last setu
  end
  local BOARD={{text='Frostwake Sigil (Rare)',highlight=true},{text='Hollow Bell (Rare)'},{text='Ashen Tithe (Uncommon)'}}
  local SERVER={tier='HC3',ash='12,345',gain='+12.5%',intensity=40,intensityMax=100,intensityThresholds={20,40,60,80}}
- -- The footer against the last setup box: one layout gap (the gap between
- -- the two setup buttons) under it, and the panel ends 6 units under the footer.
+ -- The footer against the last setup box, as the approved draft spaces the
+ -- body: the two setup buttons one 5-pixel block gap apart, the footer its
+ -- own 12 pixels under the last of them, and the panel ending 6 pixels
+ -- under the footer. (It was one layout gap, the gap between the two setup
+ -- buttons, under the last button, and 6 units under the footer.) No least
+ -- height is kept: the footer follows the last button whatever stands above.
  local function Tail(tag)
   local layout=NexusPanel._responsiveLayout
   local boxes=type(layout)=='table' and layout.boxes or {}
@@ -1735,20 +2195,22 @@ C.scenario('S27 no Wishlist with an Echo board: the footer follows the last setu
   local band=footer.y-(create.y+create.h)
   print('OBSERVED',tag,'create ends '..tostring(create.y+create.h),'footer '..tostring(footer.y),'band '..tostring(band),
    'gap '..tostring(gap),'height '..tostring(NexusPanel:GetHeight()))
-  return band,gap,NexusPanel:GetHeight()==footer.y+footer.h+6 and NexusPanel:GetHeight()==layout.height
+  return band,gap,Drawn(6,NexusPanel:GetHeight()-(footer.y+footer.h)) and NexusPanel:GetHeight()==layout.height
  end
  C.setup(P.Render(Setup())==true,'S27: fixture: the setup view with no board renders')
  local band,gap,closed=Tail('S27 no board')
  if band==nil then return end
- C.guard(band==gap and closed,'S27: without a board the footer follows Create Wishlist by one gap',tostring(band)..' / '..tostring(gap))
+ -- (EXPECT: the distances are the draft's; the guard that stood here asked
+ -- for the layout's own gap.)
+ C.expect(Drawn(12,band) and Drawn(5,gap) and closed,'S27: without a board the footer follows Create Wishlist by its 12-pixel gap',tostring(band)..' / '..tostring(gap))
  for _,case in ipairs({{'with the difficulty card',SERVER},{'without the difficulty card',nil}}) do
   local tag='S27 board '..case[1]
   C.setup(P.Render(Setup(BOARD,case[2]))==true and NexusPanel._offerCards[1]:IsShown() and NexusPanel._offerCards[3]:IsShown(),
    tag..': fixture: the setup view shows the three offers')
   band,gap,closed=Tail(tag)
   if band==nil then return end
-  C.expect(band==gap,tag..': the footer follows Create Wishlist by one gap (no empty band)',tostring(band)..' / '..tostring(gap))
-  C.expect(closed,tag..': the panel ends 6 units under the footer, at the layout height',NexusPanel:GetHeight())
+  C.expect(Drawn(12,band) and Drawn(5,gap),tag..': the footer follows Create Wishlist by its 12-pixel gap (no empty band)',tostring(band)..' / '..tostring(gap))
+  C.expect(closed,tag..': the panel ends 6 pixels under the footer, at the layout height',NexusPanel:GetHeight())
  end
  -- Independent review of the first candidate of the main-panel visual
  -- corrections (A1): the setup hint had two modelled lines whatever it said,
@@ -1768,7 +2230,7 @@ C.scenario('S27 no Wishlist with an Echo board: the footer follows the last setu
  C.setup(hintBox~=nil and noteLines>2,'S27: fixture: the note needs more than the two modelled lines of the hint',noteLines)
  C.expect(hintBox~=nil and hintBox.h==noteLines*G.MODELS.default.line,
   'S27: the hint row holds every line of a long note',tostring(hintBox and hintBox.h)..' for '..tostring(noteLines)..' lines')
- C.guard(band==gap and closed,'S27: under a long note the footer still follows Create Wishlist by one gap and the panel ends 6 units under it',
+ C.expect(Drawn(12,band) and Drawn(5,gap) and closed,'S27: under a long note the footer still follows Create Wishlist by its 12-pixel gap and the panel ends 6 pixels under it',
   tostring(band)..' / '..tostring(gap))
  P.Render(Model())
 end)
@@ -1895,10 +2357,52 @@ C.scenario('S30 a real offer annotation is words only: no ownership number on an
   C.setup(P.Render(Model({cards={{text='Hollow Bell (Rare) '..tostring(note)},{text='Cinder Lattice (Epic)'},{text='Ashen Tithe'}}}))==true,
    'S30: fixture: an offer with the "'..code..'" annotation renders')
   local card=NexusPanel._offerCards[1]
+  -- These model cards carry only their line: a card whose producer gave it
+  -- no annotation code. The row shows such a card's annotation exactly as
+  -- it is, the "different quality" one included: the panel reads no meaning
+  -- out of a shown text. The annotation is also the row's own tag, on its
+  -- hover. (The runtime's render carries the code beside the line:
+  -- tests/prototype/automation.lua, OFFER_ANNOTATION.)
+  local tip=table.concat(V.TooltipLines(card:GetScript('OnEnter'),card),' | ')
   C.guard(Plain(card.name)=='Hollow Bell' and Plain(card.quality):find('Rare',1,true)~=nil and Plain(card.tag)==note
+   and card._nexusTag==note and tip:find(note,1,true)~=nil
    and not Plain(card.tag):find('%d'),'S30: the "'..code..'" row names its offer and quality and shows the annotation, with no number',
-   Plain(card.name)..' | '..Plain(card.quality)..' | '..Plain(card.tag))
+   Plain(card.name)..' | '..Plain(card.quality)..' | '..Plain(card.tag)..' | hover '..tip)
  end
+ -- The approved short status (decision D3, "Wrong quality") is worded from a
+ -- fact, not from the row's text: it stands only on a model card that itself
+ -- carries a "different quality" annotation code (`annotation`: the Policy's
+ -- own 'wrong quality' or 'low quality', the word its line was written
+ -- from). The complete annotation stays the row's own tag and is whole on
+ -- its hover. EXPECT (at eef1608f the row shows the complete annotation).
+ local short=(Nexus.Localization.Text('panel.label.offer_wrong_quality'))
+ C.setup(type(short)=='string' and short~='' and short~=words('wrong quality'),'S30: fixture: the short status is worded and is not the complete annotation',tostring(short))
+ for _,code in ipairs({'wrong quality','low quality'}) do
+  local note=words(code)
+  C.setup(P.Render(Model({cards={{text='Hollow Bell (Rare) '..tostring(note),annotation=code},{text='Cinder Lattice (Epic)'},{text='Ashen Tithe'}}}))==true,
+   'S30: fixture: an offer whose card carries the "'..code..'" code renders')
+  local card=NexusPanel._offerCards[1]
+  local tip=table.concat(V.TooltipLines(card:GetScript('OnEnter'),card),' | ')
+  C.expect(Plain(card.name)=='Hollow Bell' and Plain(card.quality):find('Rare',1,true)~=nil and Plain(card.tag)==short
+   and card._nexusTag==note and tip:find(note,1,true)~=nil and not (card.star and card.star:IsShown())
+   and not Plain(card.tag):find('%d'),'S30: a card that carries the "'..code..'" code shows the short status, with its complete annotation on the hover',
+   Plain(card.name)..' | '..Plain(card.quality)..' | '..Plain(card.tag)..' | hover '..tip)
+ end
+ -- GUARD (each holds before and after): the code alone decides, and only
+ -- for an unselected, ordinary offer. Another code keeps its annotation; a
+ -- guaranteed offer keeps its guaranteed tag before the annotation; the
+ -- selected offer keeps its own status and is never the short one.
+ local wrong=words('wrong quality')
+ C.setup(P.Render(Model({cards={{text='Hollow Bell (Rare) '..tostring(words('wanted')),annotation='wanted'},
+  {text='[Guaranteed offer] Cinder Lattice (Epic) '..tostring(wrong),annotation='wrong quality'},
+  {text='Ashen Tithe (Uncommon) '..tostring(wrong),annotation='wrong quality',highlight=true}}}))==true,
+  'S30: fixture: three offers whose cards carry codes render')
+ local rows=NexusPanel._offerCards
+ C.guard(Plain(rows[1].tag)==words('wanted'),'S30: a card that carries another code keeps its own annotation',Plain(rows[1].tag))
+ C.guard(Plain(rows[2].tag)~=short and Plain(rows[2].tag):find(wrong,1,true)~=nil and Plain(rows[2].tag):find('Guaranteed offer',1,true)~=nil,
+  'S30: a guaranteed offer keeps its guaranteed tag and its complete annotation',Plain(rows[2].tag))
+ C.guard(rows[3]._nexusMarked==true and Plain(rows[3].tag)~=short and not Plain(rows[3].tag):find(wrong,1,true),
+  'S30: the selected offer keeps its own status, never the short one',Plain(rows[3].tag))
  P.Render(Model())
 end)
 
@@ -2131,7 +2635,10 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
   local bare=Shape()
   local line=R.ChargesLine(KNOWN)
   local words=type(line)=='string' and V.Plain(line) or ''
-  if not C.setup(words~='' and bare.headW==bare.rollW-4 and not charges:IsShown(),
+  -- (The heading's whole row: the offer block's width less the destination
+  -- cell at its right end, SlotRoom; the block has no inner insets now, so
+  -- the 4 units that were taken off here are gone.)
+  if not C.setup(words~='' and bare.headW==bare.rollW-SlotRoom(false) and not charges:IsShown(),
    'S32: fixture: the Readout words the charge facts; without charge facts the heading has the whole row',words..'; '..Say(bare)) then return end
 
   -- Details closed.
@@ -2139,7 +2646,7 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
   local closed=Shape()
   C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0,
    'S32: with Details closed the charge counts are not on the panel: no row and no hover',ShownText())
-  C.expect(closed.headW==closed.rollW-4 and closed.headH==bare.headH and closed.rollH==bare.rollH and closed.rollY==bare.rollY
+  C.expect(closed.headW==closed.rollW-SlotRoom(false) and closed.headH==bare.headH and closed.rollH==bare.rollH and closed.rollY==bare.rollY
    and closed.panel==bare.panel,
    'S32: and no room is kept for them: the heading has its whole row and the panel is the panel without charge facts',
    Say(closed)..' / '..Say(bare))
@@ -2173,10 +2680,21 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
   C.guard(charges:IsShown() and Plain(charges)==words and Count(words)==1,
    'S32: with Details open the charge counts are shown as the Readout words them, once on the whole panel',
    Plain(charges)..' / '..words..' x'..Count(words))
-  C.guard(charges:GetWidth()==72 and open.headW==open.rollW-4-76 and cr[3]==area[3]-2 and cr[2]==hr[2] and hr[3]<=cr[1]-4+0.01
+  C.guard(charges:GetWidth()==72 and cr[2]==hr[2] and hr[3]<=cr[1]-4+0.01
    and G.Inside(cr,area,0.01) and Whole(charges) and Whole(head),
-   'S32: in their 72-unit cell at the right end of the heading row, 4 units after the heading, both whole',
+   'S32: in their 72-unit cell on the heading row, 4 units after the heading, both whole',
    G.Text(hr)..' '..G.Text(cr)..' in '..G.Text(area))
+  -- (EXPECT: the cell ended 2 units from the block's right and the heading
+  -- kept the row less 4 and 76. In the compact row the destination cell
+  -- follows the charges after a dot at the row's right end, so the charges
+  -- cell ends where that cell's room starts and the heading keeps the rest
+  -- less the 76.)
+  local slot=NexusPanel._offerSlot
+  local sr=slot and slot:IsShown() and G.Rect(slot,NexusPanel) or nil
+  C.expect(open.headW==open.rollW-SlotRoom(true)-76 and cr[3]==area[3]-SlotRoom(true) and sr~=nil and sr[3]==area[3]
+   and sr[1]>=cr[3]-0.01 and Plain(slot)=='\194\183 '..(Nexus.Localization.Text('panel.label.preview_tag')),
+   'S32: the charges cell stands before the destination cell, which ends the row after a dot; the heading keeps the rest of the row',
+   G.Text(hr)..' '..G.Text(cr)..' '..(sr and G.Text(sr) or 'no cell')..' in '..G.Text(area))
   local apart=true
   for i=1,3 do if not (c[i]:IsShown() and G.Apart(cr,G.Rect(c[i],NexusPanel)) and G.Apart(hr,G.Rect(c[i],NexusPanel))) then apart=false end end
   C.guard(apart and open.rollH-bare.rollH==open.headH-bare.headH and open.rollY==bare.rollY,
@@ -2184,6 +2702,43 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
   local tipLines=V.TooltipLines(hover:GetScript('OnEnter'),hover)
   C.guard(hover:IsShown() and tipLines[2]==charges:GetText() and #tipLines==2+#R.ChargesLegend(),
    'S32: their hover gives its heading, the complete row and the legend',table.concat(tipLines,' | '))
+
+  -- v9 (Root's ruling SPEC-A2: "allocate enough measured right-cell width
+  -- for whole charges/slot on one line when physically available; left text
+  -- can wrap"). Larger counts make the same row wider than the 72 units a
+  -- cell had. The row is worded by the Readout from these facts; its width
+  -- is stated here from its words and the default font model, and the cell
+  -- from the rule: that width in whole units, never under 72, in the row
+  -- less the destination cell, the 4-unit gap and the 72 units the heading
+  -- keeps. Nothing is read from the layout engine. EXPECT: at eef1608f the
+  -- cell was 72 units at the reference text size whatever the row said, so
+  -- this row was wider than its cell.
+  local WIDE={banish=12,reroll=10,freeze=100,trustworthy=true,arrived=true}
+  local wideLine=R.ChargesLine(WIDE)
+  local wideWords=type(wideLine)=='string' and V.Plain(wideLine) or ''
+  local wideNatural=G.Length(wideWords)*G.MODELS.default.char
+  local wideRow=open.rollW-SlotRoom(true)
+  if C.setup(wideWords~='' and wideNatural>72 and math.ceil(wideNatural)<=wideRow-76,
+   'S32: fixture: charge facts whose row is wider than 72 units and fits its heading row beside the heading\'s 72',
+   wideWords..' '..tostring(wideNatural)..' in a row of '..tostring(wideRow)) then
+   local oneLine=charges:GetStringHeight()
+   C.setup(P.Render(Offer(WIDE))==true and P._playDetails==true,'S32: fixture: the same offer with the wider charge row, Details open')
+   local wide=Shape()
+   local whr,wcr=G.Rect(head,NexusPanel),G.Rect(charges,NexusPanel)
+   local wideCell=math.max(72,math.ceil(wideNatural))
+   C.expect(charges:IsShown() and Plain(charges)==wideWords and Count(wideWords)==1 and charges:GetWidth()==wideCell
+    and charges:GetStringWidth()<=charges:GetWidth()+0.01 and charges:GetStringHeight()==oneLine,
+    'S32: a charge row wider than 72 units has a cell of its own one-line width and is whole there on one line',
+    Plain(charges)..' '..tostring(charges:GetWidth())..' of '..wideCell..', '..tostring(charges:GetStringHeight())..' / '..tostring(oneLine))
+   C.expect(wide.headW==wideRow-wideCell-4 and wide.headW>=72 and Whole(head) and wcr[2]==whr[2] and whr[3]<=wcr[1]-4+0.01
+    and wcr[3]==area[3]-SlotRoom(true) and G.Inside(wcr,area,0.01),
+    'S32: beside it the heading keeps the rest of the row, whole, 4 units before the cell, which still ends where the destination cell\'s room starts',
+    G.Text(whr)..' '..G.Text(wcr)..' in '..G.Text(area))
+   C.expect(wide.headH==open.headH and wide.rollH==open.rollH and wide.panel==open.panel,
+    'S32: and the wider row adds no line: the heading row, the offer block and the panel are as tall as with the short row',
+    Say(wide)..' / '..Say(open))
+   C.setup(P.Render(Offer(KNOWN))==true and P._playDetails==true,'S32: fixture: the offer with the short charge row again, Details open')
+  end
 
   -- Unknown counts stay unknown. The facts tried are the ways a count can be
   -- missing; the first the Readout words with "?" is used.
@@ -2222,7 +2777,7 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
   if C.setup(P.Render(setup)==true and NexusPanel._offerCards[1]:IsShown() and NexusPanel._responsiveLayout.boxes.planDetails==nil,
    'S32: fixture: the setup view with an Echo board and charge facts has no Details control') then
    C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0
-    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-4,
+    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-SlotRoom(false),
     'S32: the setup view, which has no Details, shows no charge counts and keeps no cell for them',ShownText())
   end
   -- The completed view (every target owned, none left to lock) has no
@@ -2233,7 +2788,7 @@ C.scenario('S32 the banish, reroll and freeze charges are counts: no row, hover 
    and NexusPanel._responsiveLayout.boxes.planDetails==nil,
    'S32: fixture: the completed view with an Echo board and charge facts has no Details control') then
    C.expect(not charges:IsShown() and not hover:IsShown() and Count(words)==0
-    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-4,
+    and head:GetWidth()==NexusPanel._responsiveLayout.boxes.roll.w-SlotRoom(false),
     'S32: the completed view, which has no Details, shows no charge counts and keeps no cell for them',ShownText())
   end
  end)
@@ -2279,16 +2834,11 @@ C.scenario('S28 a display refresh from before an Auto change keeps the actual se
   local tag=NexusPanel._offerCards[1].tag
   return V.Plain(chip:GetText())..' / '..Plain(head)..' / '..Plain(tag)
  end
- local function Says(on)
-  local tag=Plain(NexusPanel._offerCards[1].tag)
-  local heading=Plain(head)
-  if on then
-   return V.Plain(chip:GetText())=='Auto ON' and heading:find('Auto ON',1,true)~=nil and not heading:find('Auto OFF',1,true)
-    and tag=='> Recommended'
-  end
-  return V.Plain(chip:GetText())=='Auto OFF' and heading:find('Auto OFF',1,true)~=nil and not heading:find('Auto ON',1,true)
-   and tag=='> Wishlist pick'
- end
+ -- (The approved compact panel: AutoSays above. With Auto OFF the heading
+ -- is "Your offers" and says no Auto state itself; the tag's words stand
+ -- after the row's star. The helper that stood here asked for "Auto OFF"
+ -- in the heading and for the tag with its code-owned mark.)
+ local function Says(on) return AutoSays(on) end
  local ok,err=pcall(function()
   -- Auto was ON; the player turns it OFF; the host still holds the ON input.
   actual=true

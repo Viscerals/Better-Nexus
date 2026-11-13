@@ -10,6 +10,10 @@
 --     with no Resume; a Resume that fails is reported and still paused; no
 --     API is no banner; the pause is not saved and a module reload starts
 --     unpaused; hiding and reopening the panel works while paused.
+-- P3  item 1 (v9, Root's ruling SPEC-R1; the last scenario of this file):
+--     at the compact panel's width both banner texts are whole, wrapped in
+--     their room, the strip is as tall as they need, Resume keeps its size
+--     and place, and the strip's side of the panel follows its height.
 -- O1  items 2+9: Options is shorter and grouped; the duplicate coach entry is
 --     gone while every distinct route stays reachable (top level or one list
 --     down) and opens its owner once; opening reads only.
@@ -631,15 +635,20 @@ C.scenario('F1 the FAQ from Options, no footer shortcut, and number explanations
  C.expect(faq==nil or not faq:IsShown(),'F1: no "?" stands in the footer')
  -- Footer row: the left inset, three hubs of one width and the two gaps
  -- between them reach the right inset exactly (read from the hubs' own
- -- anchors, as before: 8 + 3 x 130 + 7 + 7 = 412 in the 420-unit panel).
+ -- anchors, as before). The approved compact panel: the insets are the
+ -- draft's 7 pixels, 5 units in the 284-unit reference panel, and the hubs
+ -- its 6 pixels apart, so the row is 5 + 3 x 88 + 5 + 5 = 279 (it was 8 + 3
+ -- x 130 + 7 + 7 = 412 in the 420-unit panel, between 8-unit insets).
  local hubs=NexusPanel._footerButtons
  local hub=hubs.plan:GetWidth()
  local _,_,_,left=hubs.plan:GetPoint(1)
  local _,_,_,first=hubs.explore:GetPoint(1)
  local _,_,_,second=hubs.orbs:GetPoint(1)
- C.expect(hubs.explore:GetWidth()==hub and hubs.orbs:GetWidth()==hub and left==8 and first>0 and second>0
-  and left+3*hub+first+second==NexusPanel:GetWidth()-8,
-  'F1: the three hubs are one width and span the footer between its 8-unit insets',
+ local inset=math.floor(7*284/420+0.5)
+ C.expect(hubs.explore:GetWidth()==hub and hubs.orbs:GetWidth()==hub and NexusPanel:GetWidth()==284 and inset==5
+  and left==inset and first>0 and second>0 and math.abs(first-second)<=1
+  and left+3*hub+first+second==NexusPanel:GetWidth()-inset,
+  'F1: the three hubs are one width and span the footer between its insets, the draft\'s 7 pixels',
   tostring(left)..' + 3 x '..tostring(hub)..' + '..tostring(first)..' + '..tostring(second)..' in '..tostring(NexusPanel:GetWidth()))
  -- The route that remains: Options > Questions (FAQ), a direct choice (O1).
  local row=Find(P.MoreMenuItems(NexusPanel._menuBtn),'Questions (FAQ)')
@@ -682,6 +691,125 @@ C.scenario('A1 Auto OFF stays exactly Auto OFF (displayed item 10 excluded)',fun
  Scan(P.MoreMenuItems(NexusPanel._menuBtn))
  for _,line in ipairs(P.AutoSummaryLines()) do if line:find('Auto: Off',1,true) then bad[#bad+1]=line end end
  C.guard(#bad==0,'A1: no menu row or Auto hover renames it to Auto: Off',table.concat(bad,' | '))
+end)
+
+-- v9, Root's ruling SPEC-R1 on item 1's paused banner: "wrap whole text at
+-- existing owned fonts, measure required height, preserve Resume
+-- action/position/clamp and existing pause semantics. No fixed36 clipping,
+-- shortening or hover-only substitute." The strip is as wide as the panel,
+-- which the approved compact panel made 284 units at normal text (it was
+-- 420), so its second text no longer fits one line beside Resume there.
+-- Stated here from the strip's own design and the font model, not read from
+-- the panel's code: each text has the strip's width less its two 8-unit
+-- sides and, while Resume is offered, the button's 82 units (its 76 and its
+-- 6-unit inset); it wraps there (layout_geometry_support's word wrap, G.Rows)
+-- in a box as tall as its lines, never under the 16-unit line it had; while
+-- both are one such line the strip is the 36 units it was, and otherwise it
+-- is both boxes with 4 units above them, 2 between them and its 2-unit edge
+-- line under them. Resume keeps its 76 x 22 size at the strip's right, 6
+-- units in, in its middle, and the strip's side of the panel (above while
+-- the screen holds it there, else below) follows the height it now has.
+-- EXPECT fails at eef1608f: there each text was one 16-unit no-wrap line in
+-- a fixed 36-unit strip, shortened by the client where it did not fit.
+-- GUARD: the two reviewed texts, the strip's width, Resume's size and place,
+-- and that showing the banner takes no action. Offline font models only;
+-- the native wrap and glyph widths are NOT RUN. Runs last, so every
+-- scenario above runs exactly as before.
+C.scenario('P3 the paused banner shows both its texts whole at the compact panel\'s width, in a strip as tall as they need',function()
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
+ local methods=G.RegionMethods()
+ local saved={GetStringHeight=methods.GetStringHeight,GetStringWidth=methods.GetStringWidth,
+  GetTextWidth=methods.GetTextWidth,GetFont=methods.GetFont}
+ local TEXTS={paused={'Nexus is paused for this session.','Auto, Orb actions, sharing and DPS recording wait.'},
+  unknown={'Pause state cannot be read right now.','Nexus may or may not be paused.'}}
+ local unreadable={IsPaused=function() return true end,Status=function() error('x') end,Pause=function() end,Resume=function() end}
+ local before=Acts()
+ local grown,wrapped=0,false
+ local ok,err=pcall(function()
+  P.Show()
+  for _,name in ipairs({'default','px16','double'}) do
+   local model=G.MODELS[name]
+   G.UseFont(model)
+   for _,state in ipairs({'paused','unknown'}) do
+    local why='P3 '..model.name..', '..state
+    if state=='paused' then
+     Nexus.SessionPause=REAL_PAUSE
+     if not REAL_PAUSE.IsPaused() then P.PauseNexus() end
+    else
+     Nexus.SessionPause=unreadable
+    end
+    if not C.setup(P.Render(Model(Extras(41)))==true and BannerShown() and Banner()._nexusState==state,
+     why..': fixture: the banner is shown in this state') then return end
+    local b=Banner()
+    local width=NexusPanel:GetWidth()
+    local room=width-16-(state=='paused' and 82 or 0)
+    C.guard(b:GetWidth()==width and Plain(b.title:GetText())==TEXTS[state][1] and Plain(b.note:GetText())==TEXTS[state][2],
+     why..': the strip spans the panel and holds its two reviewed texts',b:GetWidth()..' of '..width)
+    -- Each text: its room's width, and a box as tall as the font model
+    -- itself measures its wrapped lines there (never under 16 units), which
+    -- holds every line this file's own word wrap gives it.
+    local boxes,lines={},{}
+    for i,label in ipairs({b.title,b.note}) do
+     lines[i]=G.Rows(TEXTS[state][i],room,model.char)
+     boxes[i]=math.max(16,math.ceil(label:GetStringHeight() or 0))
+     C.expect(label:GetWidth()==room and label:GetHeight()==boxes[i] and label:GetHeight()>=lines[i]*model.line-0.5,
+      why..': '..(i==1 and 'the first' or 'the second')..' text has its room\'s width and a box as tall as its wrapped lines',
+      tostring(label:GetWidth())..'x'..tostring(label:GetHeight())..' for '..lines[i]..' line(s) of '..model.line..' in '..room)
+    end
+    if lines[1]>1 or lines[2]>1 then wrapped=true end
+    local want=(boxes[1]+boxes[2]>32) and math.max(36,boxes[1]+boxes[2]+8) or 36
+    if want>36 then grown=grown+1 end
+    C.expect(b:GetHeight()==want and (want==36 or 4+boxes[1]+2+boxes[2]==b:GetHeight()-2),
+     why..': the strip is 36 units while each text is one 16-unit line, else as tall as both texts with 4 above, 2 between and its 2-unit edge under them',
+     tostring(b:GetHeight())..' of '..want..' for '..boxes[1]..' + '..boxes[2])
+    if state=='paused' then
+     local point,rel,relPoint,x,y=b.resume:GetPoint(1)
+     C.guard(b.resume:IsShown() and b.resume:IsEnabled() and Plain(b.resume:GetText())=='Resume'
+      and b.resume:GetWidth()==76 and b.resume:GetHeight()==22 and point=='RIGHT' and rel==b and relPoint=='RIGHT' and x==-6 and y==0,
+      why..': Resume keeps its size and its place at the strip\'s right, 6 units in, in its middle',
+      tostring(point)..'/'..tostring(relPoint)..' '..tostring(x)..','..tostring(y))
+     C.expect(b.resume:GetHeight()<=b:GetHeight() and 8+b.title:GetWidth()<=width-6-b.resume:GetWidth()
+      and 8+b.note:GetWidth()<=width-6-b.resume:GetWidth(),
+      why..': both texts end before Resume, which stays inside the strip',room..' of '..width)
+    else
+     C.guard(not b.resume:IsShown() and not b.resume:IsEnabled(),why..': an unreadable pause offers no Resume')
+    end
+    -- The strip's side of the panel follows the height it has now: a panel
+    -- whose top leaves a 36-unit strip exactly its room above, and one that
+    -- leaves this strip exactly its room. (The harness gives every region
+    -- one top and one scale; the two tops are set here and removed again.)
+    local uiTop=600
+    rawset(UIParent,'GetTop',function() return uiTop end)
+    for _,top in ipairs({uiTop-36-2,uiTop-b:GetHeight()-2}) do
+     rawset(NexusPanel,'GetTop',function() return top end)
+     local side=P.PlacePauseBanner()
+     local point,rel,relPoint,x,y=b:GetPoint(1)
+     local above=top+want+2<=uiTop
+     C.expect(side==(above and 'above' or 'below') and rel==NexusPanel and x==0 and b:GetHeight()==want
+      and ((above and point=='BOTTOMLEFT' and relPoint=='TOPLEFT' and y==2)
+       or (not above and point=='TOPLEFT' and relPoint=='BOTTOMLEFT' and y==-2)),
+      why..': the strip stands '..(above and 'above' or 'below')..' a panel whose top is '..top..' under a screen top of '..uiTop..', by its own '..want..' units',
+      tostring(side)..' '..tostring(point)..'/'..tostring(relPoint)..' '..tostring(y))
+    end
+    rawset(NexusPanel,'GetTop',nil);rawset(UIParent,'GetTop',nil)
+    P.PlacePauseBanner()
+    if name=='default' and state=='paused' then
+     C.setup(width==284 and lines[2]>=2 and want>36,
+      why..': fixture: at normal text the 284-unit panel leaves the second text less than its one line needs, so it wraps and the strip grows',
+      width..' wide, '..lines[2]..' line(s), strip '..want)
+    end
+   end
+  end
+ end)
+ Nexus.SessionPause=REAL_PAUSE
+ if REAL_PAUSE.IsPaused() then REAL_PAUSE.Resume() end
+ for key,fn in pairs(saved) do methods[key]=fn end
+ rawset(NexusPanel,'GetTop',nil);rawset(UIParent,'GetTop',nil)
+ P.Render(Model(Extras(41)))
+ C.setup(ok,'P3: fixture: the scenario ran',err)
+ C.setup(wrapped and grown>0,'P3: fixture: a text needed more than one line and the strip grew for it in at least one case',grown)
+ C.expect(not REAL_PAUSE.IsPaused() and not BannerShown(),'P3: after Resume there is no banner')
+ C.guard(Acts()==before,'P3: showing, measuring and placing the banner takes no action, sends nothing and leaves Auto as it was',Acts())
 end)
 
 Nexus.SessionPause=REAL_PAUSE

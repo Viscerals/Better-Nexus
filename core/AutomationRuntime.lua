@@ -3441,6 +3441,12 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             -- The whole name and own quality the line was written from, so
             -- the offer cards never read a quality from the text.
             facts = Readout.CardFacts and Readout.CardFacts(card) or nil,
+            -- Display only: the Policy's own annotation code for this card,
+            -- the same value the line above was written from, so the panel
+            -- words a card's status from the code and never from the
+            -- line's text. A card without a code carries none. It is read
+            -- by no gate, intent or action; it grants and changes nothing.
+            annotation = action.annotations and action.annotations[i] or nil,
         }
     end
     local okAuto, autoWhy = MeasurePhase("preauthorize", AutoAllowed)

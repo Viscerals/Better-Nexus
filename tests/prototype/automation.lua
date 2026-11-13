@@ -313,6 +313,49 @@ do
  check(not Nexus.RecomputeStats().autoEnabled and #L.actions==0,'offer icons: Auto stayed OFF and nothing was taken or sent')
  GetSpellInfo=real
 end
+-- OFFER_ANNOTATION: the Policy's own annotation code of each real board card
+-- reaches the panel's model card as `annotation`, beside its line and facts,
+-- through the real adapter, runtime, Main and view model (the runtime's
+-- render gives it as display metadata: the same value it hands to
+-- Readout.CardLine). The witness is the decision record of the same fresh
+-- board (NexusDB.decisionLog, this harness's in-memory table), which the
+-- unchanged decision log writes from the same decision as `ann`. A card
+-- without a code carries none. The panel words a card's status from this
+-- field (play_panel_summary S30), never from the line's text; here only the
+-- field is asked, code against code: no formatted text is compared. An
+-- assigned Wishlist, Auto OFF: showing the offer takes, sends and toggles
+-- nothing. Which codes the Policy gives this board is the Policy's; the
+-- fixture names none and requires only that the board has one.
+do
+ local L=LBoot(10)
+ check(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Annotated plan',{{spellId=200001,quality=1,stacks=2}}),'offer annotation: fixture: a Wishlist is assigned')
+ L.Notify();L.Advance(1)
+ local acted=#L.actions
+ local before=type(NexusDB.decisionLog)=='table' and #NexusDB.decisionLog or 0
+ L.Board({{spellId=200001,quality=1},{spellId=200004,quality=4},{spellId=200002,quality=2}});L.Notify();L.Advance(.5)
+ local model,log=Nexus.Panel._lastModel,NexusDB.decisionLog
+ local d=type(log)=='table' and log[#log] or nil
+ check(type(model)=='table' and type(model.cards)=='table' and #model.cards==3 and type(d)=='table' and type(d.cards)=='table'
+  and #d.cards==3 and #log==before+1,'offer annotation: fixture: the panel holds three offer rows and the fresh board has one decision record of three cards')
+ local coded,seen=0,{}
+ for i=1,3 do
+  local card,rec=model.cards[i],d.cards[i]
+  local code=rec.ann
+  seen[i]=tostring(code)
+  check(type(card)=='table' and type(card.text)=='string' and type(card.facts)=='table' and card.facts.spellId==rec.id,
+   'offer annotation: fixture: model card '..i..' and decision card '..i..' are the same offer, with its line and facts: '..tostring(rec.id))
+  check(card.annotation==code or (card.annotation==nil and (code==nil or code==false)),
+   'offer annotation: model card '..i..' carries the decision\'s own annotation code for that offer, or none when it has none: '
+   ..tostring(card.annotation)..' / '..tostring(code))
+  if type(code)=='string' and code~='' then
+   coded=coded+1
+   check(type(card.annotation)=='string','offer annotation: the code of card '..i..' is carried as the string it is: '..type(card.annotation))
+  end
+ end
+ print('OBSERVED','offer annotation codes: '..table.concat(seen,' | '))
+ check(coded>=1,'offer annotation: fixture: at least one card of this board has an annotation code: '..table.concat(seen,' | '))
+ check(not Nexus.RecomputeStats().autoEnabled and #L.actions==acted,'offer annotation: Auto stayed OFF and showing the offer took and sent nothing')
+end
 -- LEVELING_RARITY3 (R2-SPEC-01/02): the FINAL adapter Take-read phase, after
 -- ordinary preauthorization. Callbacks fire only while Adapter.Take runs:
 -- onAssigned after its verifier's AssignedWishlist read (same key returned),

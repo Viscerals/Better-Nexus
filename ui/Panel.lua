@@ -758,6 +758,9 @@ end
 -- in the LayoutMetrics conservative model (9 x 8.75 px = 78.75 px; "Options"
 -- 61.25 px). Only a larger face or a longer label is shortened; its hover
 -- then names it in full first, and the leading "!" is never the part cut.
+-- (That is the former fixed slot. In the approved compact header a label
+-- wider than its control's room is not shortened: it wraps in the control,
+-- whole, M.FitControlLabel; its hover names it in full all the same.)
 -- The label is the localized "panel.button.options" (M.OptionsLabel); the
 -- "! " is code-owned and added only for the trusted notice the model carries.
 -- Every slot is an offset from the panel's right edge, so a wider panel keeps
@@ -805,27 +808,147 @@ do
         return notice and ("! " .. label) or label
     end
 
-    -- The line-1 slots (read only; the same table every call).
-    function M.HeaderSlots() return SLOTS end
-
-    -- Places the Options button in its slot with a one-line label bounded
-    -- to the button less its end caps (LayoutMetrics.OneLineLabel, as for
-    -- My Builds). Returns the slots.
-    function M.PlaceOptionsButton()
+    -- The approved compact header's line 1 (LayoutMetrics.Compact, in units
+    -- at this client's text scale): the same slots, sized by the design and
+    -- by the controls' own words. The grip stands at the body's left inset
+    -- and is at least 24 x 24 units; Close is the design's 24 pixels wide;
+    -- Options is as wide as the label it shows and the Auto control as wide
+    -- as the widest of its three labels (M.AutoControlWidth), each with the
+    -- design's room around the words and each held to three tenths of the
+    -- panel so the title keeps a slot; the three are the design's 6 apart,
+    -- in the middle of the row. `line` and `lineTop` give the row itself.
+    -- A label wider than the room such a held control leaves it is not
+    -- shortened: `optionsWraps` and `autoWraps` say that its own line is
+    -- wider than that room (`autoRoom` for the Auto labels), and the control
+    -- then shows it wrapped, whole, and is as tall as it needs
+    -- (M.FitControlLabel).
+    -- One table, filled again on each call: a label or a text scale that
+    -- changed is followed, and nothing is measured again for words and a
+    -- face already measured (M.PrimaryWidth).
+    local COMPACT = {}
+    local function CompactSlots(c)
+        local s = COMPACT
+        local panelW = tonumber(M._panelWidth)
+        local limit = panelW and math.floor(panelW * 0.3) or math.huge
         local menu = frame and frame._menuBtn
-        if not menu then return SLOTS end
-        menu:ClearAllPoints()
-        menu:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -SLOTS.options, -TOP)
-        menu:SetSize(OPTIONS_W, HEIGHT)
-        menu:Show()
-        local label = menu:GetFontString()
-        local metrics = Nexus.LayoutMetrics
-        if label and metrics and type(metrics.OneLineLabel) == "function" then
-            label:SetWidth(OPTIONS_W - CAPS)
-            metrics.OneLineLabel(label, nil, HEIGHT)
-        end
+        local optionsText = menu and M.PrimaryWidth(menu, menu:GetText()) or nil
+        s.compact = c
+        s.line, s.lineTop = c.line1H, c.headerTop
+        s.top, s.height = c.headerTop + math.floor((c.line1H - c.controlH) / 2), c.controlH
+        s.gap, s.edge, s.closeWidth = c.controlGap, c.inset, c.closeW
+        s.caps = CAPS
+        s.gripX, s.gripWidth, s.gripHeight = c.inset, c.grip, c.grip
+        s.gripTop = c.headerTop - math.floor((c.grip - c.line1H) / 2)
+        s.titleLeft = c.inset + c.grip + c.controlGap
+        s.options = s.edge + s.closeWidth + s.gap
+        s.optionsWidth = math.min(limit, (optionsText or c.controlH * 2) + c.optionsPad)
+        s.optionsWraps = optionsText ~= nil and optionsText > s.optionsWidth - s.caps
+        s.auto = s.options + s.optionsWidth + s.gap
+        local autoNeed, autoWords, autoClear = M.AutoControlWidth(c)
+        s.autoWidth = math.min(limit, autoNeed or (c.controlH * 2 + c.autoPad))
+        s.autoRoom = math.max(1, s.autoWidth - (autoClear or 0))
+        s.autoWraps = autoWords ~= nil and autoWords > s.autoRoom
+        s.reserved = s.auto + s.autoWidth + s.gap
+        return s
+    end
+
+    -- The line-1 slots (read only): the compact header's while the layout
+    -- engine gives its metrics (M.Compact), else the former fixed ones.
+    function M.HeaderSlots()
+        local c = M.Compact()
+        if c then return CompactSlots(c) end
         return SLOTS
     end
+
+    -- Places the Options button in its slot with its label bounded to the
+    -- button less its end caps: one line there while the label fits
+    -- (LayoutMetrics.OneLineLabel, as for My Builds). In the compact header
+    -- a label wider than that room wraps in it, whole, and the button is as
+    -- tall as the wrapped label needs (M.FitControlLabel); header line 1
+    -- grows for it (M.HeaderControlsNeed). Without the compact metrics the
+    -- label keeps its one line. Returns the slots.
+    function M.PlaceOptionsButton()
+        local slots = M.HeaderSlots()
+        local menu = frame and frame._menuBtn
+        if not menu then return slots end
+        local height = M.FitControlLabel(menu, slots.optionsWidth - slots.caps, slots.height, slots.compact,
+            slots.optionsWraps, true, menu:GetText())
+        menu:ClearAllPoints()
+        menu:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.options, -slots.top)
+        menu:SetSize(slots.optionsWidth, height)
+        menu:Show()
+        return slots
+    end
+end
+
+-- The approved compact panel's own lengths at this client's text scale
+-- (LayoutMetrics.Compact), or nil while the layout engine cannot give them:
+-- every former placement then stands as it was. Read where a block is placed
+-- or measured; the table is LayoutMetrics' own, kept per scale.
+function M.Compact()
+    local metrics = Nexus.LayoutMetrics
+    if not (metrics and type(metrics.Compact) == "function" and type(metrics.RuntimeMetrics) == "function") then
+        return nil
+    end
+    local okScale, scale = pcall(metrics.RuntimeMetrics)
+    local okCompact, compact = pcall(metrics.Compact, okScale and scale or nil)
+    if okCompact and type(compact) == "table" and tonumber(compact.inset) then return compact end
+    return nil
+end
+
+-- The body blocks' side inset: the compact panel's, else the former 8 units.
+function M.BodyInset()
+    local c = M.Compact()
+    return c and c.inset or 8
+end
+
+-- The widest of the given words on one line in the panel's primary font
+-- (LayoutMetrics "normal", the header controls' and buttons' own), in whole
+-- units: measured on a hidden text of `owner`, made once, and measured again
+-- only for other words or another face (its nominal font and size, or a new
+-- GetFont reader, as the header rows are keyed). nil while it cannot be
+-- measured: no words, no owned font, an owner that makes no text.
+function M.PrimaryWidth(owner, ...)
+    local metrics = Nexus.LayoutMetrics
+    if not (owner and metrics and type(metrics.FontObject) == "function"
+        and type(owner.CreateFontString) == "function") then return nil end
+    local words = {}
+    for index = 1, select("#", ...) do
+        local text = select(index, ...)
+        if text ~= nil and tostring(text) ~= "" then words[#words + 1] = tostring(text) end
+    end
+    if #words == 0 then return nil end
+    local probe = owner._nexusWidthProbe
+    if not probe then
+        local text = owner:CreateFontString(nil, "OVERLAY", metrics.FontObject("normal"))
+        if not text then return nil end
+        text:Hide()
+        probe = {text = text}
+        owner._nexusWidthProbe = probe
+    end
+    local reader = probe.text.GetFont
+    local ok, path, size = pcall(reader, probe.text)
+    local key = table.concat(words, "\031") .. "\031" .. (ok and (tostring(path) .. "\031" .. tostring(size)) or "?")
+    if probe.key ~= key or not rawequal(probe.reader, reader) then
+        local widest = 0
+        for _, text in ipairs(words) do widest = math.max(widest, M.LineWidth(probe.text, text)) end
+        probe.width = widest > 0 and math.ceil(widest) or nil
+        probe.key, probe.reader = key, reader
+    end
+    return probe.width
+end
+
+-- The Build and Wishlist rows' buttons (My Builds, Change) in the compact
+-- header: one column as wide as the wider of their two labels with the
+-- design's room around it, held to two fifths of the panel. nil while the
+-- labels cannot be measured (the caller keeps a modelled width).
+function M.LineButtonWidth(c, panelWidth)
+    local owner = frame and frame._switchBtn
+    local words = owner and M.PrimaryWidth(owner, LT("panel.button.my_builds"), LT("panel.button.change_wishlist"))
+    if not words then return nil end
+    -- (Also the wider label's own width: a label wider than its room in the
+    -- held column wraps in its button, M.UpdateContextHeader.)
+    return math.max(1, math.min(words + c.buttonPad, math.floor((tonumber(panelWidth) or math.huge) * 0.4))), words
 end
 
 -- The compact four-cell destination row remains an internal formatter and
@@ -904,6 +1027,135 @@ function M.WrapTitle(label)
     if type(label.SetNonSpaceWrap) == "function" then pcall(label.SetNonSpaceWrap, label, true) end
 end
 
+------------------------------------------------------------------------
+-- Whole labels in the compact panel's controls. Options, Auto, My Builds,
+-- Change and Details are each as wide as their own words need, up to a share
+-- of the panel that keeps the row usable. A label wider than the room such a
+-- held control leaves it (a long translation, a large text size) is not
+-- shortened and is not fitted in a smaller font: it wraps in that room, by
+-- words and inside a word longer than the room (M.WrapTitle), in the
+-- control's own font, and the control and its row grow for it. A label that
+-- fits is exactly what it was. Without the compact metrics nothing here
+-- applies and every label is the one line it was.
+------------------------------------------------------------------------
+-- The height the tallest of the given words needs wrapped at `room` units in
+-- `label` (the control's own text), or nil while each of them fits one line
+-- there. Measured on the label itself, which shows `shown` again afterwards;
+-- kept on `owner` until the words, the room or the label's face change (its
+-- nominal font and size, or a new GetFont reader, as the header rows are
+-- keyed).
+function M.WrappedLabelHeight(owner, label, room, shown, ...)
+    local metrics = Nexus.LayoutMetrics
+    if not (owner and label and metrics and type(metrics.WrapHeight) == "function") then return nil end
+    room = math.max(1, math.floor(tonumber(room) or 1))
+    local words = {}
+    for index = 1, select("#", ...) do
+        local text = select(index, ...)
+        if text ~= nil and tostring(text) ~= "" then words[#words + 1] = tostring(text) end
+    end
+    local reader = label.GetFont
+    local ok, path, size = pcall(reader, label)
+    local key = table.concat(words, "\031") .. "\031" .. room .. "\031"
+        .. (ok and (tostring(path) .. "\031" .. tostring(size)) or "?")
+    if owner._nexusWrapKey ~= key or not rawequal(owner._nexusWrapFace, reader) then
+        local wraps, tallest = false, 0
+        for _, text in ipairs(words) do
+            if M.LineWidth(label, text) > room then wraps = true end
+        end
+        if wraps then
+            M.WrapTitle(label)
+            for _, text in ipairs(words) do
+                label:SetText(text)
+                tallest = math.max(tallest, tonumber((metrics.WrapHeight(label, room, 1))) or 0)
+            end
+        end
+        label:SetText(shown or "")
+        owner._nexusWrapKey, owner._nexusWrapFace = key, reader
+        -- (No measured height: the label keeps its one line.)
+        owner._nexusWrapNeed = wraps and tallest > 0 and tallest or nil
+    end
+    return owner._nexusWrapNeed
+end
+
+-- One control's label in the control. `room` is the label's room there,
+-- `height` the control's design height, `c` the compact metrics (nil: the
+-- former layout, where nothing wraps), `wraps` the caller's own reading that
+-- the words' line is wider than the room (a control whose words fit is not
+-- measured), and the words are the labels the control can show (the tallest
+-- decides, so the control keeps one height whichever of them it shows).
+-- `kept`: a label that fits is held to one line in the control, as Options
+-- and My Builds always were (LayoutMetrics.OneLineLabel); the other
+-- controls' labels stay as their template has them while they fit.
+-- Returns the control's height: `height`, or the wrapped label's own height
+-- with a footer hub's room above and below it (c.hubPad) when that is more.
+function M.FitControlLabel(button, room, height, c, wraps, kept, ...)
+    local label = button and type(button.GetFontString) == "function" and button:GetFontString() or nil
+    local metrics = Nexus.LayoutMetrics
+    if not (label and metrics and type(metrics.OneLineLabel) == "function") then return height end
+    local need = wraps and c and M.WrappedLabelHeight(button, label, room, button:GetText(), ...) or nil
+    if need then
+        M.WrapTitle(label)
+        label:SetWidth(room)
+        label:SetHeight(need)
+        button._nexusWrapped = true
+        return math.max(height, need + 2 * c.hubPad)
+    end
+    if kept then
+        label:SetWidth(room)
+        metrics.OneLineLabel(label, nil, height)
+    elseif button._nexusWrapped then
+        -- Back to the template's own free one-line label.
+        label:SetWidth(0)
+        metrics.OneLineLabel(label, nil, 0)
+    end
+    button._nexusWrapped = nil
+    return height
+end
+
+-- The Auto state words that stand in the Auto control's slot while that
+-- control is hidden ("Auto ON", "Auto OFF", "Auto unknown").
+function M.AutoStateWords(model)
+    local auto
+    if type(model) == "table" then auto = model.auto end
+    return auto == nil and LT("panel.label.auto_state_unknown")
+        or (auto and LT("panel.label.auto_state_on") or LT("panel.label.auto_state_off"))
+end
+
+-- Those words in the slot (`width`): when their own line is wider than the
+-- slot, which the Auto control's labels size, they wrap in it, whole, in
+-- their own font, and their wrapped height is returned; nil while they fit
+-- one line (they then stand in the slot as before).
+function M.AutoStateHeight(state, words, width)
+    local metrics = Nexus.LayoutMetrics
+    if not (state and words and metrics and type(metrics.WrapHeight) == "function") then return nil end
+    if M.LineWidth(state, words) <= width then return nil end
+    M.WrapTitle(state)
+    return tonumber((metrics.WrapHeight(state, width, 1)))
+end
+
+-- What header line 1 must be tall for its controls, or nil while each has
+-- the design's height: Options, and the Auto control (`showAuto`) or the
+-- Auto state words in its slot, the tallest of them where its label wraps,
+-- with the room the design leaves above and below a control in the line.
+-- For the layout (LayoutMetrics.Panel: spec.headerControlsH); the controls
+-- are fitted here exactly as they are then placed.
+function M.HeaderControlsNeed(showAuto, model)
+    local c = M.Compact()
+    local menu = frame and frame._menuBtn
+    if not (c and menu) then return nil end
+    local slots = M.HeaderSlots()
+    local tallest = M.FitControlLabel(menu, slots.optionsWidth - slots.caps, slots.height, c,
+        slots.optionsWraps, true, menu:GetText())
+    if showAuto then
+        tallest = math.max(tallest, M.AutoControlHeight(slots))
+    else
+        tallest = math.max(tallest, M.AutoStateHeight(frame._contextAutoState, M.AutoStateWords(model),
+            slots.autoWidth) or 0)
+    end
+    if tallest <= slots.height then return nil end
+    return tallest + 2 * (slots.top - slots.lineTop)
+end
+
 -- `renderWidth` (optional) is given only by the measurement that precedes a
 -- layout pass which will resize the panel (M.MeasureContextHeader).
 function M.UpdateContextHeader(model, settled, renderWidth)
@@ -917,11 +1169,26 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     -- get (`renderWidth`): the frame still has its earlier width then, and
     -- the lines must be measured at the width they will be laid out at.
     local width = math.max(240, tonumber(renderWidth) or tonumber(frame:GetWidth()) or 420)
-    local labelWidth = math.max(100, width - 134)
-    -- The title runs from after the grip to the Auto slot (M.HeaderSlots):
-    -- 150 px at 420 px, more on a wider panel.
+    -- The approved compact header (M.Compact): the rows start at the body's
+    -- left inset and each row's button is as wide as the wider of the two
+    -- labels needs (M.LineButtonWidth), so the names keep the rest of the
+    -- row less the design's gap before the button. Without the compact
+    -- metrics the former fixed columns stand (134 units for the button and
+    -- the two insets).
+    local c = M.Compact()
+    local side, edge = c and c.inset or 12, c and c.inset or 10
+    local lineW, lineWords
+    if c then lineW, lineWords = M.LineButtonWidth(c, width) end
+    local buttonW = c and (lineW or math.min(106, math.floor(width * 0.4))) or 106
+    -- (Whether the wider of the two row buttons' labels is wider than its
+    -- room in that column: such a label wraps in its button, below.)
+    local buttonWraps = lineWords ~= nil and lineWords > buttonW - 12
+    local labelWidth = c and math.max(1, width - side - edge - buttonW - c.captionGap)
+        or math.max(100, width - 134)
+    -- The title runs from after the grip to the Auto slot (M.HeaderSlots).
     local slots = M.HeaderSlots()
-    local titleWidth = math.max(100, width - slots.reserved - slots.titleLeft)
+    local titleWidth = c and math.max(1, width - slots.reserved - slots.titleLeft)
+        or math.max(100, width - slots.reserved - slots.titleLeft)
     -- Put high-priority state before names: truncation at 420px must not
     -- silently turn a Community preview into an apparent assignment or hide
     -- an empty Saved Build's refusal. The complete facts remain on hover.
@@ -941,6 +1208,15 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     local build = facts.preview and facts.kind == "none" and LT("panel.value.build_none_captured")
         or (facts.slot and fields[2].compact) or fields[2].value
     local wishlist = facts.empty and fields[3].compact or fields[3].value
+    -- The approved compact Wishlist line: while the Wishlist is this
+    -- destination's stated, named assignment the line shows its name alone
+    -- (UserText's own compact form of the same fact). That it is assigned
+    -- stays on the line's hover, whole (tooltip[3]); every other state keeps
+    -- its words on the line.
+    if c and not facts.empty and facts.wishlistState == "assigned" and facts.wishlist ~= nil
+        and type(fields[3].compact) == "string" and fields[3].compact ~= "" then
+        wishlist = fields[3].compact
+    end
     -- With no Wishlist, while Auto-pick by rarity is what this destination
     -- uses (M.RarityModeFacts: running, or selected and positively
     -- unassigned): the mode and its state take the place of the whole
@@ -980,8 +1256,7 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     -- applied, nothing is re-anchored, refitted or set again. A layout pass
     -- always applies the header: it places the My Builds button itself.
     local autoShown = frame._autoBtn:IsShown() and true or false
-    local autoState = not autoShown and (model.auto == nil and LT("panel.label.auto_state_unknown")
-        or (model.auto and LT("panel.label.auto_state_on") or LT("panel.label.auto_state_off"))) or nil
+    local autoState = not autoShown and M.AutoStateWords(model) or nil
     -- The captions and their face are part of the key: their measured width
     -- places the names. A face with other metrics under the same nominal
     -- font and size comes with a new GetFont reader, compared by identity
@@ -995,7 +1270,14 @@ function M.UpdateContextHeader(model, settled, renderWidth)
         lines[1][3], lines[2][3], lines[3][3], tostring(tooltip[1]), tostring(tooltip[2]),
         tostring(tooltip[3]), tostring(tooltip[4]), tostring(autoState),
         tostring(lines[2][6]), tostring(lines[3][6]),
-        okFace and (tostring(facePath) .. ":" .. tostring(faceSize)) or "?"}, "\031")
+        okFace and (tostring(facePath) .. ":" .. tostring(faceSize)) or "?",
+        -- The compact header's own geometry: the button column, the slots
+        -- the controls' words give line 1 and the text scale's lengths.
+        c and (tostring(buttonW) .. ":" .. tostring(slots.reserved) .. ":" .. tostring(slots.titleLeft)
+            .. ":" .. tostring(c.scale)) or "-",
+        -- A wrapped Options label's own words: its control is held to one
+        -- width whatever they are, and its height follows them.
+        c and slots.optionsWraps and tostring(frame._menuBtn and frame._menuBtn:GetText()) or "-"}, "\031")
     -- The title has line 1's 20-unit row beside the controls while its text
     -- needs no more, and its measured height when it needs more (a state cue
     -- that wraps in the title's slot): the rows under it then start lower by
@@ -1016,21 +1298,34 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     local buildH = math.max(lineH, type(held) == "table" and tonumber(held.headerBuildH) or 0)
     local wishlistH = math.max(lineH, type(held) == "table" and tonumber(held.headerWishlistH) or 0)
     local titleH = math.max(20, type(held) == "table" and tonumber(held.headerTitleH) or 0)
-    local rows = lineH .. ":" .. buildH .. ":" .. wishlistH .. ":" .. titleH
+    local buildTop = type(held) == "table" and tonumber(held.headerBuildY) or 32
+    local wishlistTop = buildTop + buildH + 2
+    if c then
+        -- The compact rows are the layout's own (LayoutMetrics.Panel gives
+        -- each row its top and its height: the design's, or the measured
+        -- height of a name that wraps); before a layout holds them, the
+        -- design's rows at this text scale.
+        local laid = type(held) == "table" and held.compact ~= nil and held or nil
+        lineH = c.headerRowH
+        titleH = laid and tonumber(laid.headerTitleH) or c.line1H
+        buildH = laid and tonumber(laid.headerBuildH) or lineH
+        wishlistH = laid and tonumber(laid.headerWishlistH) or lineH
+        buildTop = laid and tonumber(laid.headerBuildY) or (c.headerTop + titleH + c.headerRowGap)
+        wishlistTop = laid and tonumber(laid.headerWishlistY) or (buildTop + buildH + c.headerRowGap)
+    end
+    local rows = lineH .. ":" .. buildH .. ":" .. wishlistH .. ":" .. titleH .. ":" .. buildTop .. ":" .. wishlistTop
     if settled and frame._nexusHeaderKey == key and frame._nexusHeaderLine == rows
         and rawequal(frame._nexusHeaderFace, faceReader) then return true end
     frame._nexusHeaderKey = nil
-    local buildTop = type(held) == "table" and tonumber(held.headerBuildY) or 32
-    local wishlistTop = buildTop + buildH + 2
     frame._contextTitle:ClearAllPoints()
-    frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -8)
+    frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -(c and slots.lineTop or 8))
     M.EnsureHeaderGrip()
     -- The caption column: as wide as the wider shown caption, measured in the
     -- captions' own font, then a fixed 6-unit gap; the names start after it.
     -- A line without a caption keeps the whole row from x 12, and so do both
     -- when the column would leave a name under 100 units (the whole line is
     -- then shown as before, never a name without its label).
-    local captionGap, column = 6, 0
+    local captionGap, column = c and c.captionGap or 6, 0
     for index = 2, 3 do
         local line = lines[index]
         if line[5] and line[6] then
@@ -1046,11 +1341,12 @@ function M.UpdateContextHeader(model, settled, renderWidth)
         if index > 1 then
             local top = index == 2 and buildTop or wishlistTop
             label:ClearAllPoints()
-            label:SetPoint("TOPLEFT", frame, "TOPLEFT", 12 + offset, -top)
+            label:SetPoint("TOPLEFT", frame, "TOPLEFT", side + offset, -top)
             if caption and split then
                 caption:ClearAllPoints()
-                caption:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -top)
-                caption:SetSize(column - captionGap, lineH)
+                caption:SetPoint("TOPLEFT", frame, "TOPLEFT", side, -top)
+                -- (One line of the row: the row itself while it is one line.)
+                caption:SetSize(column - captionGap, math.min(lineH, index == 2 and buildH or wishlistH))
                 -- Beside a one-line name the caption shares the row's middle;
                 -- beside a wrapped name it starts with the name's first line.
                 caption:SetJustifyV((index == 2 and buildH or wishlistH) > lineH and "TOP" or "MIDDLE")
@@ -1072,23 +1368,61 @@ function M.UpdateContextHeader(model, settled, renderWidth)
             -- than the line (the same two switches as the title).
             M.WrapTitle(label)
             label:SetHeight(index == 2 and buildH or wishlistH)
+            -- (In a row taller than one line the name starts at the row's
+            -- top, as its caption does: a wrapped name fills its row, and a
+            -- one-line name beside a button whose label wraps stands level
+            -- with its caption.)
+            if c and type(label.SetJustifyV) == "function" then
+                label:SetJustifyV((index == 2 and buildH or wishlistH) > lineH and "TOP" or "MIDDLE")
+            end
         end
     end
-    frame._switchBtn:ClearAllPoints()
-    frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -buildTop)
-    frame._switchBtn:SetSize(106, 20)
-    frame._contextChange:ClearAllPoints()
-    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -wishlistTop)
-    frame._contextChange:SetSize(106, 20)
-    local switchLabel = frame._switchBtn:GetFontString()
-    if switchLabel and Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
-        switchLabel:SetWidth(94)
-        -- The label's one-line box is the button's own height (20 units in
-        -- the compact header), never taller than the button it sits in.
-        Nexus.LayoutMetrics.OneLineLabel(switchLabel, nil, 20)
+    -- Each row's button at the top of its row, at the panel's right inset:
+    -- the design's 20-pixel line buttons, one column wide (buttonW), and
+    -- never taller than a row a unit under that. My Builds keeps its label
+    -- on one line inside the button (its one-line box is the button's own
+    -- height, never taller than the button it sits in). In the compact
+    -- header a label wider than its room in the column wraps in its button
+    -- instead, whole, and that button is as tall as its label needs
+    -- (M.FitControlLabel); its row grows for it (M.MeasureContextHeader).
+    local buttonH = c and lineH or 20
+    local switchH = M.FitControlLabel(frame._switchBtn, c and math.max(1, buttonW - 12) or 94,
+        c and math.min(buttonH, buildH) or 20, c, buttonWraps, true, LT("panel.button.my_builds"))
+    local changeH = c and math.min(buttonH, wishlistH) or 20
+    if c then
+        changeH = M.FitControlLabel(frame._contextChange, math.max(1, buttonW - 12), changeH, c, buttonWraps, false,
+            LT("panel.button.change_wishlist"))
     end
+    frame._switchBtn:ClearAllPoints()
+    frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -edge, -buildTop)
+    frame._switchBtn:SetSize(buttonW, switchH)
+    frame._contextChange:ClearAllPoints()
+    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -edge, -wishlistTop)
+    frame._contextChange:SetSize(buttonW, changeH)
     M.EnsureHeaderClose()
     local state = frame._contextAutoState
+    if c then
+        -- Options and the Auto control stand in the slots this apply read:
+        -- a label that changed without a layout pass (the "!" of a trusted
+        -- update notice) moves them with the title's room. The same slots
+        -- as the footer pass gives them (LayoutFooter).
+        M.PlaceOptionsButton()
+        if autoShown then
+            frame._autoBtn:ClearAllPoints()
+            frame._autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
+            -- (As tall as a label that wraps in it needs: M.AutoControlHeight.)
+            frame._autoBtn:SetSize(slots.autoWidth, M.AutoControlHeight(slots))
+        end
+        -- The Auto state words stand in the Auto control's own compact slot
+        -- while that control is hidden. The slot is as wide as the control's
+        -- labels make it; words wider than it ("Auto unknown", a longer
+        -- translation) wrap in it, whole, at their measured height
+        -- (M.AutoStateHeight), and line 1 grows for them.
+        state:ClearAllPoints()
+        state:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
+        state:SetSize(slots.autoWidth, math.max(slots.height,
+            autoState and M.AutoStateHeight(state, autoState, slots.autoWidth) or 0))
+    end
     if autoShown then
         state:Hide()
     else
@@ -1107,6 +1441,10 @@ end
 -- does), and the lines are measured only then or when a font changed: an
 -- unchanged header sets and measures nothing. The heights are kept on the
 -- panel (frame._nexusHeaderRows) for this render's layout spec.
+-- In the compact header a row's height is also its button's while that
+-- button's label wraps in it, and what line 1 needs for a control whose
+-- label wraps is measured with them and named after the three heights
+-- ("build:wishlist:title:controls"), only while there is such a control.
 function M.MeasureContextHeader(model)
     if not (frame and frame._contextBuild and Nexus.LayoutMetrics) then return "0:0:0" end
     -- The width this render gives the panel (M.Render: M._panelWidth) is named
@@ -1120,8 +1458,22 @@ function M.MeasureContextHeader(model)
     local held = frame._responsiveLayout
     local target = tonumber(M._panelWidth)
     local ahead = target and (type(held) ~= "table" or tonumber(held.width) ~= target) and target or nil
+    -- The compact header gives Options the width of the label it shows, and
+    -- the title the rest of line 1: the label this render will show (with
+    -- its "!" for a trusted update notice) is set before the line is
+    -- measured, and only when it differs.
+    local menu = frame._menuBtn
+    if menu and M.Compact() and type(model) == "table" then
+        local label = M.OptionsText(model.updateNotice)
+        if menu:GetText() ~= label then menu:SetText(label) end
+    end
     M.UpdateContextHeader(model, true, ahead)
     local lineH = math.max(20, type(held) == "table" and tonumber(held.normal) or 0)
+    -- In the compact header the layout holds each row at the design's own
+    -- height and grows it by what the text measures (LayoutMetrics.Panel), so
+    -- only the text's own height is measured here: no row minimum.
+    local compact = M.Compact() ~= nil
+    if compact then lineH = 1 end
     -- The heights belong to the fonts the lines hold (Build and Wishlist
     -- share one owned font object, the title has its own): each face and
     -- size is part of the key, since the row minimum above is the same 20
@@ -1140,16 +1492,46 @@ function M.MeasureContextHeader(model)
         rows = {key = key, face = label.GetFont}
         -- Each name at its own width: beside its caption's column, or the
         -- whole row for a line that has none (M.UpdateContextHeader).
+        -- (In the compact header a line's box is its row, which is the
+        -- layout's and taller than a one-line text: the measurement leaves
+        -- each line the height it was applied at, so a line measured again
+        -- without a layout pass, after a changed word or slot, does not move
+        -- in its row. A changed measurement is a changed layout key, and
+        -- that pass applies the new rows. Kept: Held.)
+        local function Held(text)
+            local height = compact and tonumber(text:GetHeight()) or nil
+            return height and height > 0 and height or nil
+        end
         for name, label in pairs({build = frame._contextBuild, wishlist = frame._contextWishlist}) do
             M.WrapTitle(label)
+            local held = Held(label)
             rows[name] = metrics.WrapHeight(label, math.max(1, tonumber(label:GetWidth()) or 1), lineH)
+            if held then label:SetHeight(held) end
         end
-        -- The title: whole in its slot, at least line 1's 20-unit row.
+        -- The title: whole in its slot, at least line 1's 20-unit row (the
+        -- compact header's row is the layout's: the text's own height here).
         M.WrapTitle(title)
-        rows.title = metrics.WrapHeight(title, math.max(1, tonumber(title:GetWidth()) or 1), 20)
+        local heldTitle = Held(title)
+        rows.title = metrics.WrapHeight(title, math.max(1, tonumber(title:GetWidth()) or 1), compact and 1 or 20)
+        if heldTitle then title:SetHeight(heldTitle) end
+        if compact then
+            -- A row is also as tall as its button while that button's label
+            -- wraps in it (My Builds, Change: M.UpdateContextHeader applied
+            -- them above), and line 1 as tall as its controls need
+            -- (M.HeaderControlsNeed, for the Auto control or the state words
+            -- as the header shows them now).
+            local function Tall(button)
+                return button and button._nexusWrapped and tonumber(button:GetHeight()) or 0
+            end
+            rows.build = math.max(rows.build, Tall(frame._switchBtn))
+            rows.wishlist = math.max(rows.wishlist, Tall(frame._contextChange))
+            rows.controls = M.HeaderControlsNeed(frame._autoBtn:IsShown() and true or false, model)
+        end
         frame._nexusHeaderRows = rows
     end
+    -- (The controls' need is named only while a control's label wraps.)
     return rows.build .. ":" .. rows.wishlist .. ":" .. rows.title
+        .. (rows.controls and (":" .. rows.controls) or "")
 end
 
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
@@ -1671,7 +2053,9 @@ end
 -- per-side margin kept clear of the button's end caps (not a template value).
 -- AUTO_LABEL.Fit (below) measures the widest label with the button's own font
 -- object and reduces only that object's size when it does not fit, never
--- below minSize. The tooltip names the full control.
+-- below minSize; in the approved compact header it reduces nothing, and a
+-- label wider than the control's room wraps there whole
+-- (M.AutoControlHeight). The tooltip names the full control.
 -- on/off/unknown are the labels' English base (the reviewed English of
 -- AUTO_LABEL.keys in data/LocalizationEnglish.lua); what is shown and
 -- measured is each key's text in the active language (AutoLabel, Fit).
@@ -1810,13 +2194,16 @@ local function CreateToLockWidgets(f)
     end)
     f.toLockHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.toLockHit:SetScript("OnMouseUp", function() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
-    -- Issue #143: the heading keeps one line in its fixed layout box
+    -- Issue #143: the heading is made as one line in its fixed layout box
     -- (LayoutMetrics.OneLineLabel, with no owner); ApplyPanelLayout still owns
-    -- its box. While the client shortens it, this row's own OnEnter above adds
-    -- the complete heading first, right after its single SetOwner, and its own
-    -- lines follow unchanged. The OneLineLabel owner hook is not attached: it
-    -- would run after that OnEnter and take the tooltip again with its own
-    -- SetOwner.
+    -- its box. While its one-line width is more than that box, this row's own
+    -- OnEnter above adds the complete heading first, right after its single
+    -- SetOwner, and its own lines follow unchanged. The OneLineLabel owner
+    -- hook is not attached: it would run after that OnEnter and take the
+    -- tooltip again with its own SetOwner.
+    -- In the approved compact panel the heading wraps inside its column and
+    -- is whole there (M.MeasureDetailHeadings); the one line stands without
+    -- the compact layout.
     if layout and type(layout.OneLineLabel) == "function" then
         layout.OneLineLabel(f.toLockLabel, nil, 11)
     end
@@ -1895,6 +2282,11 @@ function AUTO_LABEL.Fit(force)
     end
     local budget = width - 2 * AUTO_LABEL.inset
     local fitSize, widest = size, 0
+    -- The approved compact header never makes a label smaller: a label wider
+    -- than the control's room wraps in the control, whole, at the font's own
+    -- size, and the control grows for it (M.AutoControlHeight). The size is
+    -- reduced only without the compact metrics, as before.
+    local whole = M.Compact() ~= nil
     for _ = 1, 8 do
         if font and path and fitSize and type(font.SetFont) == "function" then
             pcall(font.SetFont, font, path, fitSize, flags or "")
@@ -1907,7 +2299,7 @@ function AUTO_LABEL.Fit(force)
             probe:SetText(text)
             widest = math.max(widest, tonumber(probe:GetStringWidth()) or 0)
         end
-        if widest <= budget or not (font and path and fitSize)
+        if whole or widest <= budget or not (font and path and fitSize)
             or fitSize <= AUTO_LABEL.minSize then break end
         fitSize = math.max(AUTO_LABEL.minSize,
             math.floor(fitSize * budget / widest))
@@ -1917,6 +2309,33 @@ function AUTO_LABEL.Fit(force)
     autoBtn._nexusFit = { width = widest, budget = budget, fits = widest <= budget,
         size = fitSize, baseSize = size, adjustable = font ~= nil }
     return autoBtn._nexusFit
+end
+
+-- The Auto control's width in the compact header: its widest label on one
+-- line in the panel's primary font (M.PrimaryWidth) with the design's room
+-- around it, and never less room than the fit above keeps clear at both
+-- ends, so every label fits its own control. nil while the labels cannot be
+-- measured. Also returns that widest label's own width and the room kept
+-- clear at the control's two ends together (M.HeaderSlots: the labels' room
+-- in a control the panel holds narrower than that).
+function M.AutoControlWidth(c)
+    local words = autoBtn and M.PrimaryWidth(autoBtn, LT(AUTO_LABEL.keys.on), LT(AUTO_LABEL.keys.off),
+        LT(AUTO_LABEL.keys.unknown)) or nil
+    if not words then return nil end
+    return words + math.max(c.autoPad, 2 * AUTO_LABEL.inset), words, 2 * AUTO_LABEL.inset
+end
+
+-- The Auto control's height in its compact slot (`slots`: M.HeaderSlots),
+-- with its label fitted there: the design's height while the widest of its
+-- three labels fits the control's room on one line, and, where the panel
+-- holds the control narrower than that (a long translation), the labels'
+-- tallest wrapped height with its room, the shown label wrapped whole in
+-- the control (M.FitControlLabel). One height whichever label shows, so a
+-- changed selection moves nothing. The font is never made smaller.
+function M.AutoControlHeight(slots)
+    if not (autoBtn and slots.compact) then return slots.height end
+    return M.FitControlLabel(autoBtn, slots.autoRoom, slots.height, slots.compact, slots.autoWraps, false,
+        LT(AUTO_LABEL.keys.on), LT(AUTO_LABEL.keys.off), LT(AUTO_LABEL.keys.unknown))
 end
 
 -- Only the new compact navigation label needs to share the existing Orb row.
@@ -2121,18 +2540,23 @@ function M.OneLineHeight(kind)
     return probe.height
 end
 
--- The panel's width for this render (LayoutMetrics.PanelWidth): the 420-unit
--- reference width times the text scale the owned fonts follow, bounded by
--- the screen's width at the panel's chosen size, so text at a larger native
--- size has the room it had at the reference size instead of wrapping in a
--- fixed 420 units. Read once per render (M.Render) and used for the header,
--- the layout and every block's measurement. The chosen size is the saved
--- choice (M.PanelScale), never the size a fit applied, so nothing is fed
--- back and the same inputs give the same width. 420 while it cannot be read.
+-- The panel's width for this render (LayoutMetrics.PanelWidth): the layout
+-- engine's reference width (the approved compact panel's:
+-- LayoutMetrics.PANEL_BASE_WIDTH) times the text scale the owned fonts
+-- follow, bounded by the screen's width at the panel's chosen size, so text
+-- at a larger native size has the room it has at the reference size instead
+-- of wrapping in a fixed width. Read once per render (M.Render) and used for
+-- the header, the layout and every block's measurement. The chosen size is
+-- the saved choice (M.PanelScale), never the size a fit applied, so nothing
+-- is fed back and the same inputs give the same width. The former 420 units
+-- while it cannot be read (no layout engine, or one without that rule).
 function M.TargetPanelWidth()
     local metrics = Nexus.LayoutMetrics
     if not (metrics and type(metrics.PanelWidth) == "function"
         and type(metrics.RuntimeMetrics) == "function") then return 420 end
+    -- Never narrower than the engine's own reference width.
+    local base = tonumber(metrics.PANEL_BASE_WIDTH)
+    if not (base and base == base and base > 0 and base < math.huge) then return 420 end
     local okScale, fontScale = pcall(metrics.RuntimeMetrics)
     local screenWidth
     if UIParent and type(UIParent.GetWidth) == "function" then
@@ -2141,7 +2565,7 @@ function M.TargetPanelWidth()
     end
     local okWidth, width = pcall(metrics.PanelWidth, okScale and fontScale or 1, screenWidth, M.PanelScale())
     width = okWidth and tonumber(width) or nil
-    return width and width == width and width >= 420 and width < math.huge and width or 420
+    return width and width == width and width >= base and width < math.huge and width or 420
 end
 
 -- A header line's own label and its name, apart: "Build: <name>" as
@@ -2766,10 +3190,14 @@ function M.FitPassiveHovers(settled)
         {frame._callboardTitleHit, frame._callboardTitle}, {frame._callboardLineHit, frame._callboardLine},
     }
     for i = 1, #pairs_ do Fit(pairs_[i][1], pairs_[i][2]) end
+    -- A Details heading in a heading row of more than one line stands at the
+    -- row's top (M.JustifyDetailHeading): its hover is then fitted as a
+    -- wrapped, top-aligned text, to the lines it has, not to the whole row.
     local shownOnly = {
         {frame._chargesHover, frame._chargesText}, {frame._recommendationHover, recText, true},
-        {frame._progressLabelHit, progressLabel}, {frame._needLabelHit, needLabel},
-        {frame._shedLabelHit, shedLabel}, {shedHit, shedText, true},
+        {frame._progressLabelHit, progressLabel},
+        {frame._needLabelHit, needLabel, needLabel and needLabel._nexusHeadTop == true},
+        {frame._shedLabelHit, shedLabel, shedLabel and shedLabel._nexusHeadTop == true}, {shedHit, shedText, true},
     }
     for i = 1, #shownOnly do
         local hit = shownOnly[i][1]
@@ -2818,7 +3246,8 @@ local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusPanel", UIParent)
-    frame:SetSize(420, 210)
+    -- (Its width is the render's own from the start: M.TargetPanelWidth.)
+    frame:SetSize(M.TargetPanelWidth(), 210)
     frame:SetClampedToScreen(true)
     M.RestorePanelPosition()
     frame:SetMovable(true)
@@ -3110,11 +3539,15 @@ local function EnsureFrame()
 
     progressLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     progressLabel:SetText((Nexus.Localization.Text("panel.heading.progress")))
-    -- Issue #143: each mapped heading stays one line in its fixed layout box.
-    -- While the client shortens a longer heading, a hover over it shows the
-    -- complete heading (LayoutMetrics.OneLineLabel). Created once here, shown
-    -- and hidden with the heading (ShowCoreProgress). Frame fields, not new
-    -- locals: EnsureFrame is at the Lua 5.1 upvalue limit.
+    -- Issue #143: each mapped heading is made as one line in its fixed layout
+    -- box. While a heading's one-line width is more than its box, a hover
+    -- over it shows the complete heading (LayoutMetrics.OneLineLabel). Created
+    -- once here, shown and hidden with the heading (ShowCoreProgress). Frame
+    -- fields, not new locals: EnsureFrame is at the Lua 5.1 upvalue limit.
+    -- (The headings over the Details name columns wrap inside their columns
+    -- in the approved compact panel: M.MeasureDetailHeadings. The progress
+    -- heading keeps its one line while it fits its room there, and wraps in
+    -- that room when it is wider: M.MeasureProgressRow.)
     frame._progressLabelHit = HitFrame(frame, progressLabel)
     frame._progressLabelHit:Hide()
     Nexus.LayoutMetrics.OneLineLabel(progressLabel, frame._progressLabelHit, 11)
@@ -3173,8 +3606,10 @@ local function EnsureFrame()
     needText:SetSize(136, 52)
     needText:SetJustifyH("LEFT")
     needText:SetJustifyV("TOP")
-    -- One line per name, so a long name never pushes "+N more" out of the
-    -- box; the hover list carries every complete name.
+    -- One row per name, so a long name never pushes "+N more" out of the
+    -- box; the hover list carries every complete name. Made as one line: in
+    -- the approved compact panel each row wraps inside its column and is
+    -- measured there (M.WrapDetailRows), so a long name stays whole.
     needText:SetWordWrap(false)
     needText:SetTextColor(1, 0.5, 0.2)
     needHit = HitFrame(frame, needText)
@@ -3377,7 +3812,7 @@ local function EnsureFrame()
     -- scripts reach this file through M, not new upvalues (see menuBtn).
     planBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     planBtn:SetSize(54, 22)
-    planBtn:SetText((Nexus.Localization.Text("panel.button.plan")))
+    planBtn:SetText(M.HubLabel("plan"))
     planBtn:SetScript("OnClick", function(self) M.ShowHub("plan", self) end)
     planBtn:SetScript("OnEnter", function(self) M.ShowHubTooltip("plan", self) end)
     planBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3388,15 +3823,15 @@ local function EnsureFrame()
     -- loading explanation itself (M.ExploreLoadingLines, C-04).
     exploreBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exploreBtn:SetSize(62, 22)
-    exploreBtn:SetText((Nexus.Localization.Text("panel.button.explore")))
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(exploreBtn,(Nexus.Localization.Text("panel.button.explore"))) end
+    exploreBtn:SetText(M.HubLabel("explore"))
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(exploreBtn,M.HubLabel("explore")) end
     exploreBtn:SetScript("OnClick", function(self) M.ShowHub("explore", self) end)
     exploreBtn:SetScript("OnEnter", function(self) M.ShowHubTooltip("explore", self) end)
     exploreBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local orbsHub = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbsHub:SetSize(52, 22)
-    orbsHub:SetText((Nexus.Localization.Text("panel.button.orbs")))
+    orbsHub:SetText(M.HubLabel("orbs"))
     orbsHub:SetScript("OnClick", function(self) M.ShowHub("orbs", self) end)
     orbsHub:SetScript("OnEnter", function(self) M.ShowHubTooltip("orbs", self) end)
     orbsHub:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3426,7 +3861,8 @@ local function EnsureFrame()
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         -- M4 (UX-15, M3 NB9): one name for this button everywhere: the
         -- hover is headed by its own label, without the notice mark. Issue
-        -- #146: while a larger face or a longer label shortens the button,
+        -- #146: while the label's own line is wider than its room in the
+        -- button (shortened there, or wrapped whole in the compact header),
         -- the complete label is shown once: the heading itself (wrapped)
         -- when the button shows that label, with or without the trusted
         -- "! "; any other button text first, then the heading. Through the
@@ -3438,7 +3874,8 @@ local function EnsureFrame()
             GameTooltip:AddLine(shown, 1, 1, 1, true)
         end
         GameTooltip:AddLine(label, 1, 1, 1, short or nil)
-        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.options_contents"), 0.8, 0.8, 0.8, true)
+        -- What the menu holds (M.OptionsHelpLines), each line whole.
+        for _, line in ipairs(M.OptionsHelpLines()) do GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
         -- model.status (Main.lua's statusLine, including "error (see /nexus
         -- err)") was set on every render but never read anywhere in this file --
         -- surfaced here so a real error is visible without knowing the slash
@@ -3749,7 +4186,7 @@ function M.ExploreLoadingLines()
     if not ok or type(status) ~= "table" or status.state == "ready" then return {} end
     return {
         {LF(status.state == "failed" and "loading.tooltip.view_unavailable" or "loading.tooltip.view_loading",
-            {view = LT("panel.button.explore")}), .65, .65, .68},
+            {view = M.HubLabel("explore")}), .65, .65, .68},
         {loading.PhaseText(status), .9, .9, .9, true},
         {LT(status.coreReady and "loading.tooltip.local_tools_available"
             or "loading.tooltip.local_tools_unlock"), .8, .8, .8, true},
@@ -3946,14 +4383,49 @@ function M.EnsureHeaderGrip()
         end)
         grip:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         M.PassiveDragSurface(grip)
+        grip._nexusDotsAt = slots.gripWidth .. ":" .. slots.gripHeight
         frame._dragGrip = grip
     end
     local slots = M.HeaderSlots()
     grip:ClearAllPoints()
     grip:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.gripX, -slots.gripTop)
     grip:SetSize(slots.gripWidth, slots.gripHeight)
+    -- The dot cluster stays centred when a text scale gives the grip
+    -- another size (the compact header's grip follows the design above its
+    -- 24-unit floor).
+    local size = slots.gripWidth .. ":" .. slots.gripHeight
+    if grip._nexusDotsAt ~= size then
+        local dotLeft = math.floor((slots.gripWidth - 9) / 2)
+        local dotTop = math.floor((slots.gripHeight - 13) / 2)
+        for index, dot in ipairs(grip.dots) do
+            dot:ClearAllPoints()
+            dot:SetPoint("TOPLEFT", grip, "TOPLEFT", dotLeft + ((index - 1) % 2) * 6,
+                -(dotTop + math.floor((index - 1) / 2) * 5))
+        end
+        grip._nexusDotsAt = size
+    end
     grip:Show()
     return grip
+end
+
+-- The help under the Options control's name on its hover (EnsureFrame): what
+-- the menu holds. In the approved compact panel it is the menu's own five
+-- group titles (M.MoreMenuItems, below), in the menu's order, each a whole
+-- reviewed label on a line of its own, so the hover lists the groups the
+-- menu then shows. The reviewed sentence that stood there
+-- ("panel.tooltip.options_contents") also names the footer's hubs Plan and
+-- Explore, which the compact footer shows as "Wishlist" and "Builds"
+-- (M.HubLabel). It is one formatted sentence, so it is not cut, reworded or
+-- patched here, and the compact panel does not show it. No existing reviewed
+-- text says that named controls are on the footer with their names as its
+-- parameters, so this hover does not point at the footer: the hubs are on
+-- the panel itself, each with its own hover (M.HubTooltipLines). The
+-- sentence's definition is untouched, and it is what the hover shows without
+-- the compact layout, where the footer keeps those names.
+function M.OptionsHelpLines()
+    if M.Compact() == nil then return {LT("panel.tooltip.options_contents")} end
+    return {LT("panel.menu.section_help"), LT("panel.menu.section_settings"), LT("panel.menu.section_notices"),
+        LT("panel.menu.section_session"), LT("panel.menu.section_panel")}
 end
 
 -- The Options menu (owner-approved items 2 and 9, issue #165): a short top
@@ -4150,8 +4622,15 @@ function M.MoreWindowsItems()
     Add({ text = LT("panel.menu.orbs"), notCheckable = true,
         tooltipTitle = LT("panel.tooltip.orbs_heading"), tooltipText = LT("panel.tooltip.orbs_also_footer"),
         func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) })
+    -- The Wishlist Editor row's hint ("Also under Plan on the panel footer.")
+    -- is optional, and it names a footer control the approved compact panel
+    -- does not show: that hub reads "Wishlist" there (M.HubLabel). The compact
+    -- panel leaves the hint out; the row keeps its label, its title and its
+    -- route. Without the compact layout, where the footer shows Plan, the
+    -- hint stays. The reviewed text and its key are untouched.
     Add({ text = LT("panel.menu.wishlist_editor"), notCheckable = true,
-        tooltipTitle = LT("panel.tooltip.wishlist_editor_title"), tooltipText = LT("panel.tooltip.wishlist_editor_also_plan"),
+        tooltipTitle = LT("panel.tooltip.wishlist_editor_title"),
+        tooltipText = M.Compact() == nil and LT("panel.tooltip.wishlist_editor_also_plan") or nil,
         func = MenuAction(OpenEditor) })
     return rows
 end
@@ -4240,20 +4719,37 @@ function M.HubMenuItems(kind)
 end
 
 -- The lines of a hub's hover, title first. Reads only.
+-- In the approved compact panel the Plan and Explore hubs read "Wishlist"
+-- and "Builds" on their faces (M.HubLabel), so each of the two hovers is
+-- headed by its own hub's face label, the name the player points at. The
+-- name of what the hub opens (the title of its menu, M.HubMenuItems, which
+-- the workspaces and the other hovers use too) stays, as the next line, and
+-- the contents follow unchanged. Every line is one whole reviewed text of an
+-- existing key: nothing is joined, cut or reworded, and the name is not
+-- said twice where a language gives both the same word. The Orbs hover
+-- already begins with its hub's name. Without the compact layout each hover
+-- is headed by the name of what it opens, as it was.
 function M.HubTooltipLines(kind)
+    local lines
     if kind == "plan" then
-        return {LT("panel.tooltip.plan_title"), LT("panel.tooltip.plan_contents"),
+        lines = {LT("panel.tooltip.plan_title"), LT("panel.tooltip.plan_contents"),
             LT("panel.tooltip.plan_opens_only")}
     elseif kind == "explore" then
-        return {LT("panel.tooltip.explore_title"), LT("panel.tooltip.explore_build_library"),
+        lines = {LT("panel.tooltip.explore_title"), LT("panel.tooltip.explore_build_library"),
             LT("panel.tooltip.explore_leaderboard"), M.SharedDataLine(),
             LT("panel.note.best_known_scope")}
     elseif kind == "orbs" then
         return {LT("panel.tooltip.orbs_heading"), LT("panel.tooltip.orbs_open_inspect"),
             M.OrbHubLine(),
             LT("panel.tooltip.orbs_closing_continues")}
+    else
+        return {}
     end
-    return {}
+    if M.Compact() ~= nil then
+        local face = M.HubLabel(kind)
+        if face ~= lines[1] then table.insert(lines, 1, face) end
+    end
+    return lines
 end
 
 -- A hub's hover stands beside the panel, never over its own content: right of
@@ -4617,10 +5113,18 @@ end
 -- words, counts, colours and the two-names-then-"+N more" rule are as
 -- before. Built lazily, through M and frame fields: EnsureFrame is at the
 -- Lua 5.1 upvalue ceiling.
+-- The approved compact panel stands these columns two across, and three
+-- with To lock, so a column is a half or a third of the block. There a row
+-- wider than its column (a long name, "+N more - Show all") wraps inside it
+-- and is measured at its wrapped height, and the rows under it start lower
+-- by exactly that (M.WrapDetailRows, M.PlaceDetailRows): no name and no
+-- "+N more" row is cut, shortened or held to one line, and the layout
+-- reserves the taller stack. Without the compact layout the rows are one
+-- line each, as they were.
 ------------------------------------------------------------------------
--- The face's lines: the first two names, then "+N more" for the rest. A
--- name stays one line (a line break inside it is a space); `stripDetail`
--- drops a " (Quality:xN ...)" breakdown, which the hover shows.
+-- The face's rows: the first two names, then "+N more" for the rest. A
+-- name is one row (a line break inside it is a space); `stripDetail` drops
+-- a " (Quality:xN ...)" breakdown, which the hover shows.
 function M.DetailNameLines(names, stripDetail)
     names = type(names) == "table" and names or {}
     local lines = {}
@@ -4634,7 +5138,8 @@ function M.DetailNameLines(names, stripDetail)
     return lines
 end
 
--- The column's three one-line rows: the column itself, then two made once.
+-- The column's three rows: the column itself, then two made once (each one
+-- line as made; M.WrapDetailRows sets whether they wrap).
 function M.DetailRows(column, r, g, b)
     local rows = column._nexusRows
     if rows then return rows end
@@ -4654,11 +5159,34 @@ function M.DetailRows(column, r, g, b)
     return rows
 end
 
+-- Whether a column's rows wrap inside it (`wrap`: the approved compact
+-- panel's narrow columns; M.PanelLayout). A wrapping row breaks by words and,
+-- where the client offers that switch, inside a word longer than the column
+-- (as the title and the offer names do: M.WrapTitle), so its whole text is
+-- drawn on as many lines as it needs. Set only when the mode changes: a
+-- column that never wrapped is not touched, so without the compact layout
+-- the rows are exactly the one-line rows they were made as.
+function M.WrapDetailRows(column, wrap)
+    local rows = column and column._nexusRows
+    if not rows then return end
+    wrap = wrap and true or false
+    if (column._nexusWrap or false) == wrap then return end
+    column._nexusWrap = wrap
+    for index = 1, #rows do
+        local row = rows[index]
+        if type(row.SetWordWrap) == "function" then pcall(row.SetWordWrap, row, wrap) end
+        if type(row.SetNonSpaceWrap) == "function" then pcall(row.SetNonSpaceWrap, row, wrap) end
+    end
+end
+
 -- The client's height of one row's text at its width, by the measurement
 -- LayoutMetrics.WrapHeight and Overflows already use (height 0, then
--- GetStringHeight; the box height is restored). Without a measurement, the
--- conservative model's line.
-function M.DetailLineHeight(row)
+-- GetStringHeight; the box height is restored): one line for a one-line row,
+-- every wrapped line for a row that wraps (`wrap`). Without a measurement,
+-- the conservative model's line, and for a row that wraps that model's rows
+-- at the row's width (as LayoutMetrics.WrapHeight), so a wrapped name is
+-- never given one line's room.
+function M.DetailLineHeight(row, wrap)
     local height = row:GetHeight()
     row:SetHeight(0)
     local ok, measured = pcall(row.GetStringHeight, row)
@@ -4667,24 +5195,30 @@ function M.DetailLineHeight(row)
     if measured and measured > 0 and measured < math.huge then return math.ceil(measured) end
     local metrics = Nexus.LayoutMetrics
     if metrics and metrics.ConservativeText and metrics.RuntimeMetrics then
-        local _, line = metrics.ConservativeText((metrics.RuntimeMetrics()))
+        local scale = metrics.RuntimeMetrics()
+        local _, line = metrics.ConservativeText(scale)
+        if wrap and type(metrics.TextRows) == "function" then
+            return math.max(1, metrics.TextRows(row:GetText() or "", math.max(1, tonumber(row:GetWidth()) or 1), scale)) * line
+        end
         return line
     end
     return 17
 end
 
 -- Rows two and three, each under the one above at its measured height, at
--- the column's width. Returns the height of the column's lines.
+-- the column's width. Returns the height of the column's rows: with rows
+-- that wrap (M.WrapDetailRows), the sum of their wrapped heights.
 function M.PlaceDetailRows(column)
     local rows = column and column._nexusRows
     if not rows then return 0 end
     local width = math.max(1, tonumber(column:GetWidth()) or 1)
+    local wrap = column._nexusWrap == true
     local top = 0
     for index = 1, #rows do
         local row = rows[index]
         if (row:GetText() or "") ~= "" then
             if index > 1 then row:SetWidth(width) end
-            local height = M.DetailLineHeight(row)
+            local height = M.DetailLineHeight(row, wrap)
             if index > 1 then
                 row:ClearAllPoints()
                 row:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -top)
@@ -4708,9 +5242,11 @@ function M.ShowDetailRows(column)
     if column == shedText then M.SyncExtraListLink() end
 end
 
-function M.SetDetailNames(column, lines, empty, r, g, b)
+-- `wrap`: the rows wrap inside the column (M.WrapDetailRows).
+function M.SetDetailNames(column, lines, empty, r, g, b, wrap)
     if not column then return 0 end
     local rows = M.DetailRows(column, r, g, b)
+    M.WrapDetailRows(column, wrap)
     for index = 1, #rows do
         rows[index]:SetText(lines[index] or (index == 1 and empty) or "")
     end
@@ -4718,16 +5254,18 @@ function M.SetDetailNames(column, lines, empty, r, g, b)
     return M.PlaceDetailRows(column)
 end
 
--- Both columns' lines from the run's lists; returns the taller column's
--- measured lines.
-function M.RenderDetailNames(missing, shed)
+-- Both columns' rows from the run's lists; returns the taller column's
+-- measured rows. `wrap`: the compact panel's columns, whose rows wrap inside
+-- them at the column's width (set before this call) and are measured wrapped.
+function M.RenderDetailNames(missing, shed, wrap)
     local need = M.SetDetailNames(needText, M.DetailNameLines(missing, true),
-        "|cff888888" .. LT("panel.label.no_remaining_demand") .. "|r", 1, 0.5, 0.2)
+        "|cff888888" .. LT("panel.label.no_remaining_demand") .. "|r", 1, 0.5, 0.2, wrap)
     local lines = M.DetailNameLines(shed, false)
     -- A longer list than the face shows names its complete-list route on
-    -- the "+N more" row itself (M.SyncExtraListLink): one whole row.
+    -- the "+N more" row itself (M.SyncExtraListLink): one whole row, which
+    -- that button covers at whatever height the row has.
     if lines[3] then lines[3] = LF("panel.label.more_count_show_all", {count = LC(#shed - 2)}) end
-    local extra = M.SetDetailNames(shedText, lines, "|cff888888" .. LT("panel.label.no_extra_copies") .. "|r", 0.72, 0.52, 1)
+    local extra = M.SetDetailNames(shedText, lines, "|cff888888" .. LT("panel.label.no_extra_copies") .. "|r", 0.72, 0.52, 1, wrap)
     M.SyncExtraListLink()
     return math.max(need, extra)
 end
@@ -4997,9 +5535,98 @@ function M.RefreshExtraList()
     return true
 end
 
+-- The To lock names as their column shows them: the first two, then "+N
+-- more" for the rest, on one wrapping text. The whole list is on its hover.
+function M.ToLockText(names)
+    names = type(names) == "table" and names or {}
+    local lines = {}
+    local shown = math.min(#names, 2)
+    for index = 1, shown do lines[#lines + 1] = tostring(names[index]) end
+    if #names > shown then lines[#lines + 1] = LF("panel.label.more_count", {count = LC(#names - shown)}) end
+    return table.concat(lines, ", ")
+end
+
+-- The progress caption's own width (LayoutMetrics.Panel: spec.progressLabelW):
+-- its words on one line in its own font, so the bar beside it starts right
+-- after them. nil while there is no caption.
+function M.ProgressLabelWidth()
+    if not progressLabel then return nil end
+    local words = progressLabel:GetText() or ""
+    if words == "" then return nil end
+    return math.ceil(M.LineWidth(progressLabel, words))
+end
+
+------------------------------------------------------------------------
+-- The headings over the Details name columns (STILL NEEDED, EXTRA COPIES
+-- and LOCKED TARGETS, in the session's language) in the approved compact
+-- panel. A column there is a half or a third of the block, and the approved
+-- design's rule that nothing is cut comes before the one-line heading rule
+-- of issue #143: a heading wider than its column wraps inside it, by words
+-- and, where the client offers that switch, inside a word longer than the
+-- column, and is whole there. M.MeasureDetailHeadings gives the layout the
+-- tallest heading's wrapped height (LayoutMetrics.Panel: spec.listHeadingH),
+-- so the heading row holds every heading and the names, and all that
+-- follows, start under it. While every heading fits one line the row is the
+-- one-line row it was. Fonts and keys are unchanged.
+-- Without the compact layout these headings are the one-line labels they
+-- were made as (LayoutMetrics.OneLineLabel), and so is the progress heading.
+-- In the compact layout the progress heading is one line while it fits the
+-- room the layout gives it, and wraps there, whole, when it is wider
+-- (M.MeasureProgressRow). A heading's own hover still gives the complete heading
+-- while its one-line width is more than its box, as before; in the compact
+-- layout that is a second way to read it, no longer the only one.
+------------------------------------------------------------------------
+-- Whether one heading wraps (`wrap`: the compact layout). Set only when the
+-- mode changes: a heading that never wrapped is not touched.
+function M.WrapDetailHeading(label, wrap)
+    if not label then return end
+    wrap = wrap and true or false
+    if (label._nexusHeadWrap or false) == wrap then return end
+    label._nexusHeadWrap = wrap
+    if type(label.SetWordWrap) == "function" then pcall(label.SetWordWrap, label, wrap) end
+    if type(label.SetNonSpaceWrap) == "function" then pcall(label.SetNonSpaceWrap, label, wrap) end
+    if not wrap then M.JustifyDetailHeading(label, false) end
+end
+
+-- Where a heading stands in the heading row: at its top while the row holds
+-- more than one line (`top`: layout.detailHeadingTall), so a one-line heading
+-- beside a wrapped one starts where that one starts; in the row's middle
+-- otherwise, as it was. Set only when it changes.
+function M.JustifyDetailHeading(label, top)
+    if not label then return end
+    top = top and true or false
+    if (label._nexusHeadTop or false) == top then return end
+    label._nexusHeadTop = top
+    if type(label.SetJustifyV) == "function" then pcall(label.SetJustifyV, label, top and "TOP" or "MIDDLE") end
+end
+
+-- One heading's height in its column's width (`box`): its wrapped height
+-- there, one line while it fits one. 0 for a heading that is not laid out,
+-- has no words, or does not wrap (no compact layout).
+function M.MeasureDetailHeading(label, box, wrap)
+    M.WrapDetailHeading(label, wrap)
+    if not (wrap and label and box and (label:GetText() or "") ~= "") then return 0 end
+    return M.WrappedHeight(label, box.w, 1)
+end
+
+-- The tallest of the laid-out headings (the To lock heading only with its
+-- column), or nil when none is measured.
+function M.MeasureDetailHeadings(boxes, wrap)
+    local tallest = math.max(M.MeasureDetailHeading(needLabel, boxes.needed, wrap),
+        M.MeasureDetailHeading(shedLabel, boxes.shed, wrap),
+        M.MeasureDetailHeading(frame and frame.toLockLabel or nil, boxes.toLock, wrap))
+    return tallest > 0 and tallest or nil
+end
+
 -- LayoutMetrics.Panel, with the open Details name columns reserved at the
--- client's measured height of their real lines when that is taller than the
--- modelled rows. Collapsed Details measures nothing and keeps the model.
+-- client's measured height of their real rows when that is taller than the
+-- design's three lines. In the compact layout the columns are a half or a
+-- third of the block, so each row is measured wrapped in its column's own
+-- width (M.RenderDetailNames with `wrap`), and so are the To lock column's
+-- names: the layout then reserves the tallest column and no row is cut.
+-- The columns' headings are measured the same way (M.MeasureDetailHeadings)
+-- and the heading row is the tallest of them.
+-- Collapsed Details measures nothing and keeps the model.
 function M.PanelLayout(spec, progress)
     local metrics = Nexus.LayoutMetrics
     -- Kept for this pass's measured second computation (M.MeasuredLayout).
@@ -5013,9 +5640,22 @@ function M.PanelLayout(spec, progress)
     needText:SetWidth(boxes.needed.w)
     shedText:SetWidth(boxes.shed.w)
     local height = M.RenderDetailNames(type(pr.missing) == "table" and pr.missing or {},
-        type(pr.shed) == "table" and pr.shed or {})
-    if height > layout.small * 3 then
-        spec.detailNamesH = height
+        type(pr.shed) == "table" and pr.shed or {}, layout.compact ~= nil)
+    -- The To lock column's names (M.ToLockText, the words ApplyModel then
+    -- shows): their wrapped height in the column's width, a word longer than
+    -- the column included (the client's non-space wrap, where it has one).
+    local lockH
+    if boxes.toLock and frame and frame.toLockText and type(pr.toLock) == "table" and #pr.toLock > 0 then
+        local names = frame.toLockText
+        names:SetText(M.ToLockText(pr.toLock))
+        if type(names.SetNonSpaceWrap) == "function" then pcall(names.SetNonSpaceWrap, names, true) end
+        lockH = M.WrappedHeight(names, boxes.toLock.w, 1)
+    end
+    -- The headings over the columns, each in its own column's width: the
+    -- row they share is the tallest of them (one line while each fits one).
+    local headH = M.MeasureDetailHeadings(boxes, layout.compact ~= nil)
+    if height ~= spec.detailNamesH or lockH ~= spec.toLockH or headH ~= spec.listHeadingH then
+        spec.detailNamesH, spec.toLockH, spec.listHeadingH = height, lockH, headH
         layout = metrics.Panel(spec)
     end
     return layout
@@ -5063,7 +5703,20 @@ end
 -- the appearance's accent around a dark fill, with its tag in the accent. It
 -- was a lighter band with a 2-unit bar at its left. An unselected row has no
 -- ground and no outline, and no icon has one.
-local OFFER = {mark = {1, 0.82, 0}, crop = 0.07, fill = {0, 0, 0, 0.5}, edge = 1}
+-- star: what the compact row shows before a selected row's status words,
+-- where the one-line rows and the hover have Readout's code-owned mark: the
+-- client's own star (FrameXML ChatFrame.lua ICON_LIST[1]), a plain texture.
+-- words: the keys that already own a selected row's status words (the words
+-- of Readout's pick, recommendation and Freeze tags), by what the card is.
+-- short: the approved short status of an unselected row, by the annotation
+-- code its model card carries: both codes whose complete annotation is
+-- UserText's "different quality" one (M.OfferStatusWords).
+local OFFER = {mark = {1, 0.82, 0}, crop = 0.07, fill = {0, 0, 0, 0.5}, edge = 1,
+    star = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
+    words = {pick = "readout.label.offer_pick", recommended = "readout.label.offer_recommended",
+        freeze = "readout.label.offer_freeze"},
+    short = {["wrong quality"] = "panel.label.offer_wrong_quality",
+        ["low quality"] = "panel.label.offer_wrong_quality"}}
 
 -- The verified icon of an offer (MI-F01): the client's own texture for the
 -- card's exact spell id, the third return of GetSpellInfo, as
@@ -5194,6 +5847,37 @@ function M.EnsureOfferCards()
             card[key] = text
         end
         M.Role(card.quality, "muted")
+        -- The approved compact row puts the quality and the status on the
+        -- name's line, at its right end: "<quality> . <status>". The dot
+        -- between them is a code-owned mark of its own, muted like the
+        -- quality, so the quality and the tag stay each its own words. The
+        -- selected row's tag has the star before it (OFFER.star) in place of
+        -- the code-owned "> ": a plain texture with no mouse and no action,
+        -- in the appearance's accent where the client can desaturate it
+        -- (Texture:SetDesaturated answers whether it can), else in the
+        -- star's own gold.
+        -- The dot and the star stand on the row as regions of the offer
+        -- block's marks layer (M.OfferMarks), so the row's own regions stay
+        -- its icon, its outline and its three texts, and the roll area's
+        -- own texts stay its heading, charges, rows and body. Each is
+        -- hidden with its row (M.RenderOfferCards).
+        local marks = M.OfferMarks() or area
+        card.dot = marks:CreateFontString(nil, "OVERLAY", small)
+        card.dot:SetJustifyH("CENTER")
+        card.dot:SetText("\194\183")
+        card.dot:Hide()
+        M.Role(card.dot, "muted")
+        card.star = marks:CreateTexture(nil, "OVERLAY")
+        card.star:SetTexture(OFFER.star)
+        card.star:Hide()
+        local okGrey, grey = false, nil
+        if type(card.star.SetDesaturated) == "function" then okGrey, grey = pcall(card.star.SetDesaturated, card.star, true) end
+        if okGrey and grey and type(card.star.SetVertexColor) == "function" then
+            local paint = {star = card.star}
+            function paint.SetTextColor(self, r, g, b) self.star:SetVertexColor(r, g, b) end
+            paint:SetTextColor(OFFER.mark[1], OFFER.mark[2], OFFER.mark[3])
+            card.starPaint = M.Role(paint, "accent")
+        end
         card:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -5222,10 +5906,11 @@ end
 -- name and quality are its own and an unknown quality is never read from the
 -- text. `frozen` (optional) Readout.FreezeCard's index, which the caller
 -- passes only with Auto OFF: that card is tagged as a Freeze
--- (Readout.OfferCard). Returns whether the cards show; while they do, the
--- one-line rows are hidden and keep their text. No old card survives a new
--- board.
-function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
+-- (Readout.OfferCard). `codes` (optional): each model card's own annotation
+-- code by index, where its producer carries one (M.OfferStatusWords).
+-- Returns whether the cards show; while they do, the one-line rows are
+-- hidden and keep their text. No old card survives a new board.
+function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen, codes)
     local readout = Nexus.Readout
     local any = false
     for index = 1, 3 do
@@ -5233,6 +5918,8 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
     end
     local show = any and responsive == true and readout and type(readout.OfferCard) == "function"
     local cards = (show or (frame and frame._offerCards)) and M.EnsureOfferCards() or nil
+    -- The approved compact row's status words (below).
+    local compact = show and M.Compact() ~= nil
     for index = 1, 3 do
         local card = cards and cards[index]
         local line = type(lines) == "table" and SafeText(lines[index]) or ""
@@ -5256,7 +5943,6 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             M.OfferSlot(card, nil, true, M.OfferIcon(own))
             card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
-            card.tag:SetText(shown.shown or shown.tag)
             -- The selected row (the marked offer, or with Auto OFF the one
             -- to freeze) is told by its tag's words in the appearance's
             -- accent, its dark fill and its thin accent outline; every other
@@ -5264,6 +5950,23 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             -- render, so a reused card keeps no earlier selection. The fixed
             -- colours stand while the appearance module is absent.
             local selected = (shown.marked or shown.freeze) and true or false
+            -- The status as the compact row shows it, worded from what the
+            -- card is (M.OfferStatusWords: Readout's own `marked` and
+            -- `freeze` facts, the Auto selection and the card's annotation
+            -- code), through the keys that own those meanings. A selected
+            -- row shows its status words after the star; an unselected row
+            -- whose code is a "different quality" one shows the approved
+            -- short status. No shown tag is read, cut or compared for it.
+            -- Every other row, and every row when its words cannot be
+            -- given, shows Readout's tag exactly as it is. The row's
+            -- complete line and Readout's complete tag stay on its hover
+            -- (below).
+            local tagShown, starred = shown.shown or shown.tag, false
+            local words = compact and M.OfferStatusWords(shown, auto, type(codes) == "table" and codes[index] or nil) or nil
+            if words then tagShown, starred = words, selected end
+            card.tag:SetText(tagShown)
+            -- (Worded anew: the row's earlier arrangement no longer holds.)
+            card._nexusStar, card._nexusPlan = starred, nil
             if selected then
                 card.tag:SetTextColor(OFFER.mark[1], OFFER.mark[2], OFFER.mark[3])
             else
@@ -5276,6 +5979,9 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
             card:Show()
         elseif card then
             card._nexusFull, card._nexusTag, card._nexusMarked = nil, nil, nil
+            card._nexusStar, card._nexusPlan = nil, nil
+            SetVisible(card.star, false)
+            SetVisible(card.dot, false)
             SetVisible(card.fill, false)
             for _, edge in ipairs(card.outline) do SetVisible(edge, false) end
             -- A hidden card keeps no offer's icon: its slot, once made, is cleared.
@@ -5311,12 +6017,13 @@ end
 -- The offer heading (Readout.OfferHeadingForms: whose choice the offer is),
 -- with the established state words and the destination, in the first of its
 -- forms that fits the heading row on one line (its width less the charges
--- cell's 72 px minimum and its gap, LayoutMetrics.Panel): "Current offer -
--- you choose", then "Offer - you choose", then "You choose". Every form
--- keeps who chooses, the Auto state and the destination in the row itself;
--- nothing moves to a hover. The chosen form and the width it was measured
--- at stay on the text for the charges cell (M.ChargesCell), which takes
--- only the room that form leaves: a wider cell never costs a longer form.
+-- cell this render's row of counts has, M.ChargesCell, and its gap):
+-- "Current offer - you choose", then "Offer - you choose", then "You
+-- choose". Every form keeps who chooses, the Auto state and the destination
+-- in the row itself; nothing moves to a hover. The counts' cell comes first:
+-- it has its own one-line width, and a form that still does not fit beside
+-- it wraps in the heading's room (M.MeasuredLayout). The chosen form and the
+-- width it was measured at stay on the text.
 -- Without a layout the full form stays. Text only.
 -- Colours (main-panel visual correction: a quiet heading): with Auto OFF
 -- the form is ordinary text (the heading's own "text" role) and the state
@@ -5326,13 +6033,32 @@ end
 -- grey preview, and the gold of a hold or a wait (ApplyModel).
 function M.SetOfferHeading(text, model, activeSlot, layout)
     local readout = Nexus.Readout
+    -- The approved compact heading while the player chooses (Auto OFF, with
+    -- a compact layout): "Your offers" at the left, in ordinary text, and
+    -- the destination at the right end of the row in a cell of its own,
+    -- muted (M.OfferSlotCell): "Slot N" or the preview tag, after the
+    -- charges while Details shows them. The Auto state is the Auto control's
+    -- own word in the header. A heading longer than its room wraps there;
+    -- the right cell keeps one line.
+    if model.auto == false and type(layout) == "table" and layout.compact then
+        local chosen = LT("panel.heading.your_offers")
+        M.OfferSlotCell((SafeText(model._nexusChargeLine) ~= "" and "\194\183 " or "")
+            .. (activeSlot > 0 and LF("panel.label.slot_number", {slot = tostring(activeSlot)})
+                or LT("panel.label.preview_tag")), layout)
+        text:SetText(chosen)
+        text._nexusFitted, text._nexusFittedW = chosen, M.LineWidth(text, chosen)
+        return chosen
+    end
+    -- Every other heading says its destination itself: no cell beside it.
+    M.OfferSlotCell(nil)
     local forms = readout.OfferHeadingForms and readout.OfferHeadingForms(model.auto)
         or {readout.OfferHeading(model.auto)}
     local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.roll or nil
     -- (Less what the Auto scope control keeps at the row's right while it
     -- shares this row: layout.headingReserve.)
-    local width = box and (box.w - 4 - (tonumber(layout.headingReserve) or 0) - (SafeText(model._nexusChargeLine) ~= ""
-        and (tonumber(layout.chargesMinW) or 72) + (tonumber(layout.chargesGap) or 4) or 0)) or nil
+    local counts = SafeText(model._nexusChargeLine)
+    local width = box and (box.w - M.RollInset(layout) * 2 - (tonumber(layout.headingReserve) or 0) - (counts ~= ""
+        and M.ChargesCell(layout, nil, counts) + (tonumber(layout.chargesGap) or 4) or 0)) or nil
     local chosen, measured = "", nil
     for _, form in ipairs(forms) do
         -- The " · " separators and colours are code-owned; each word group is
@@ -5354,6 +6080,116 @@ function M.SetOfferHeading(text, model, activeSlot, layout)
     text:SetText(chosen)
     text._nexusFitted, text._nexusFittedW = chosen, measured
     return chosen
+end
+
+-- The offer block's inner side inset: none in the compact layout (the
+-- heading and the rows start at the body's own inset), else the former 2.
+function M.RollInset(layout)
+    return type(layout) == "table" and layout.compact and 0 or 2
+end
+
+-- The offer block's marks layer: a plain frame over the roll area that
+-- holds what the approved compact block shows beside a row's own three
+-- texts and beside the heading: the "." between a row's quality and status,
+-- the star before a selected row's status (M.EnsureOfferCards) and the
+-- heading's destination cell (M.OfferSlotCell). They are regions of this
+-- layer, so the roll area's own texts and textures and each row's own
+-- regions are what they were. The layer covers the area one frame level
+-- above the rows, takes no mouse and has no script; it is made once and
+-- stays shown, and each mark is shown and hidden on its own.
+function M.OfferMarks()
+    local area = frame and frame._rollArea
+    if not area then return nil end
+    local layer = frame._offerMarks
+    if not layer then
+        layer = CreateFrame("Frame", nil, area)
+        layer:SetAllPoints(area)
+        if type(layer.SetFrameLevel) == "function" and type(area.GetFrameLevel) == "function" then
+            layer:SetFrameLevel((tonumber(area:GetFrameLevel()) or 0) + 2)
+        end
+        if type(layer.EnableMouse) == "function" then layer:EnableMouse(false) end
+        frame._offerMarks = layer
+    end
+    return layer
+end
+
+-- The destination cell at the right end of the compact offer heading row
+-- (M.SetOfferHeading): one muted line of secondary text, made once. `words`
+-- shows it with those words; nil hides it and gives its room back. What the
+-- heading row keeps free for it (its measured width and the design's gap
+-- before it) is kept on the panel for the row's measurement and placement
+-- (M.HeadingReserve).
+function M.OfferSlotCell(words, layout)
+    if not frame then return nil end
+    local cell = frame._offerSlot
+    if words == nil or words == "" then
+        frame._offerSlotW = nil
+        if cell then cell:Hide() end
+        return nil
+    end
+    if not cell then
+        local metrics = Nexus.LayoutMetrics
+        cell = (M.OfferMarks() or frame._rollArea):CreateFontString(nil, "OVERLAY", metrics and metrics.FontObject
+            and metrics.FontObject("secondary") or "GameFontHighlightSmall")
+        cell:SetJustifyH("RIGHT")
+        cell:SetJustifyV("MIDDLE")
+        cell:SetWordWrap(false)
+        cell:SetTextColor(0.53, 0.53, 0.53)
+        M.Role(cell, "muted")
+        frame._offerSlot = cell
+    end
+    frame._offerSlotW = math.ceil(M.LineWidth(cell, words))
+    -- (Its box is its words' own width at once, so its one line is
+    -- measured as one line before the row is placed.)
+    cell:SetWidth(frame._offerSlotW)
+    cell:Show()
+    return cell
+end
+
+-- What the offer heading row keeps free at its right end: the Auto scope
+-- control while it shares the row (layout.headingReserve) and the compact
+-- destination cell with the design's gap before it.
+function M.HeadingReserve(layout)
+    local reserve = type(layout) == "table" and tonumber(layout.headingReserve) or 0
+    local slotW = frame and tonumber(frame._offerSlotW) or nil
+    if slotW and type(layout) == "table" and layout.compact then
+        reserve = reserve + slotW + layout.compact.metaGap
+    end
+    return reserve
+end
+
+-- The compact row's status words for one offer, from what the card is and
+-- never from its shown tag:
+--   the marked offer (`card.marked`, Readout.OfferCard's own fact): the
+--   words of Readout's pick tag with Auto OFF and of its recommendation tag
+--   otherwise, exactly as Readout chooses between those two tags;
+--   the offer to freeze (`card.freeze`): the words of its Freeze tag;
+--   an unselected offer, not a guaranteed one, whose model card carries a
+--   "different quality" annotation code (`code`: the Policy's own word, the
+--   one Readout.CardLine is given for the card): the approved short status.
+-- Each is the reviewed text of the key that owns that meaning (OFFER.words,
+-- OFFER.short). nil for every other offer, for a card that carries no such
+-- code, and when the seam cannot give the words: the row then shows
+-- Readout's tag exactly as it is. Nothing is cut off a tag, no mark is read
+-- and no shown text is compared with another.
+-- The runtime's render gives each card that code beside its line
+-- (core/AutomationRuntime.lua: the card's `annotation`, the value its line
+-- was written from). A model card that carries no code (only its line)
+-- keeps its complete annotation on the row, whole, as before.
+function M.OfferStatusWords(card, auto, code)
+    if type(card) ~= "table" then return nil end
+    local key
+    if card.marked then
+        key = auto == false and OFFER.words.pick or OFFER.words.recommended
+    elseif card.freeze then
+        key = OFFER.words.freeze
+    elseif type(code) == "string" and not card.guaranteed then
+        key = OFFER.short[code]
+    end
+    if not key then return nil end
+    local text, source = Nexus.Localization.Text(key)
+    if type(text) == "string" and text ~= "" and source ~= "unavailable" then return text end
+    return nil
 end
 
 -- The compact charges row a render shows (Readout.ChargesLine: banish,
@@ -5387,109 +6223,202 @@ function M.ChargesLineShown(model)
     return line
 end
 
--- The width of the charges cell beside `heading` in the roll area's heading
--- row: the cell the layout sizes for the font scale (LayoutMetrics.Panel:
--- 72 px at scale 1, in step with the scale above it), bounded by the room
--- the shown heading leaves after the gap, and never under 72 px. A fitted
--- offer heading needs the width its form was chosen at (M.SetOfferHeading);
--- any other heading also keeps its line under the conservative text model,
--- as its row did before. At font scale 1 and below nothing is measured and
--- the cell is 72 px, as before. The charges text keeps its font: a row
--- wider than its cell is shortened there and complete on its hover.
-function M.ChargesCell(layout, heading)
+-- The width of the charges cell at the right of the roll area's heading row
+-- (shown only while Details is open: M.ChargesLineShown). The cell is as
+-- wide as its own row of counts measures on one line in its own font
+-- (`counts`: that row's words when the caller has them before the text is
+-- set, else the text's own), so every count and unknown mark stays whole on
+-- one line whenever the row can hold it: the heading beside it keeps, after
+-- the gap, at least the 72 units a cell always had (layout.chargesMinW) and
+-- wraps in what it has. Only a row of counts wider than that room (a long
+-- translation at a large text size) gets that room and wraps in it, and the
+-- heading row grows for it (M.MeasuredLayout). Never under 72 units, never
+-- shortened and never in a smaller font. The values and the unknown marks
+-- are the row's own (Readout.ChargesLine); nothing about them is changed.
+-- `heading` is no longer read (the cell does not depend on what the heading
+-- says); the parameter stays for its callers.
+function M.ChargesCell(layout, heading, counts)
     local minimum = tonumber(layout.chargesMinW) or 72
-    local wanted = tonumber(layout.chargesW) or minimum
+    local charges = frame and frame._chargesText
     local box = type(layout.boxes) == "table" and layout.boxes.roll or nil
-    if wanted <= minimum or not (box and heading) then return minimum end
-    local line = heading:GetText() or ""
-    local need = heading._nexusFitted == line and tonumber(heading._nexusFittedW) or nil
-    if not need then
-        local metrics = Nexus.LayoutMetrics
-        local char = metrics and metrics.ConservativeText and metrics.ConservativeText(layout.scale) or 7
-        local visible = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-        need = math.max(M.LineWidth(heading, line), #(visible:gsub("[\128-\191]", "")) * char)
-    end
-    local room = box.w - 4 - (tonumber(layout.headingReserve) or 0) - (tonumber(layout.chargesGap) or 4) - math.ceil(need)
-    return math.max(minimum, math.min(wanted, room))
+    if not (charges and box) then return minimum end
+    local shown = charges:GetText() or ""
+    if type(counts) ~= "string" then counts = shown end
+    if counts == "" then return minimum end
+    local room = box.w - M.RollInset(layout) * 2 - M.HeadingReserve(layout) - (tonumber(layout.chargesGap) or 4) - minimum
+    local need = math.ceil(M.LineWidth(charges, counts))
+    -- (Words given ahead of the text are only measured: the text shows what
+    -- it showed.)
+    if shown ~= counts then charges:SetText(shown) end
+    return math.max(minimum, math.min(need, room))
 end
 
--- Geometry of the cards inside the roll box: the band LayoutMetrics.OfferRows
--- gives them below the heading, one full-width row per offer, every row the
--- same fixed grid (LayoutMetrics.OfferRowGrid; main-panel visual
--- correction): the row's content is inset one layout gap from both ends; the
--- icon is a square as tall as the two text lines (M.OfferSlot; kept free
--- without an icon); one gap after it the text column holds the name and,
--- on the line under it, the quality; the status column holds the tag,
--- right-aligned, ending at the row's right inset, in the middle of the two
--- lines. No border is drawn around an icon or an unselected row.
--- M.OfferRowColumns gives the two columns' widths, the same in all three
--- rows, so the names and the tags stand in the same columns in each.
--- Nothing is shortened: a name or quality longer than the text column wraps
--- there, a tag longer than the status column wraps there, and the row is as
--- tall as its lines (the heights M.MeasuredLayout measured:
--- layout.offerRowsH); the rows follow each other, a row gap apart. Without
--- measured heights (a layout computed without them) every row keeps the
--- grid's two lines. The complete line stays on the card's hover.
--- Returns "rows".
---
--- The columns: the status column is as wide as the widest shown tag on one
--- line, held to half of the room the two columns share (a longer tag wraps
--- in it); the text column is the rest, less one layout gap. Returns the
--- grid and the text and status columns' widths.
-function M.OfferRowColumns(cards, width, layout)
-    local grid = Nexus.LayoutMetrics.OfferRowGrid(layout.small, layout.gap, layout.normal, width)
-    local statusW = 0
-    for index = 1, 3 do
-        local card = cards[index]
-        local tag = card and card:IsShown() and card.tag:GetText() or ""
-        if tag ~= "" then
-            statusW = math.max(statusW, math.min(math.ceil(M.LineWidth(card.tag, tag)), math.floor(grid.content / 2)))
-        end
+-- Geometry of the cards inside the roll box (the approved compact rows): one
+-- full-width row per offer under the heading, at the top and the height the
+-- layout gives each (LayoutMetrics.Panel: the design's 28 pixels, 2 apart;
+-- more for a row whose content needs it). A row's content is inset the
+-- design's 6 pixels from both ends: the icon (24, a square in the middle of
+-- the row's first line; kept free without an icon), 8 after it the name,
+-- and at the row's right end the quality, a dot and the status: "<quality>
+-- . <status>", the selected row's status after its star. No border is drawn
+-- around an icon or an unselected row.
+-- Nothing is shortened. A row has one of three arrangements, by what its
+-- words need in the text column:
+--   the name and that phrase share the row's first line while they fit it
+--   with the design's 10 pixels between them;
+--   otherwise the name has the whole text column and wraps there, and the
+--   phrase stands on a line of its own under it, at the right;
+--   a phrase wider than the text column stands as its two parts under the
+--   name, the quality and under it the status after its star, without the
+--   dot: each at the right on one line while it fits the column (the status
+--   less its star), else wrapping across it from the left.
+-- The selected offer's reason stands under those lines, in the text column
+-- (ApplyPanelLayout). The complete line stays on the card's hover.
+-- M.OfferRowPlan measures one row's arrangement, for the layout
+-- (M.MeasuredLayout) and for its placement here; it is kept on the card
+-- until the card is worded again (M.RenderOfferCards). Returns "rows".
+function M.OfferRowPlan(card, width, c)
+    local name, quality, tag = card.name, card.quality, card.tag
+    local function OneLine(text) return M.WrappedHeight(text, 100000, 1) end
+    local textX = c.rowPadX + c.icon + c.iconGap
+    local content = math.max(1, width - textX - c.rowPadX)
+    local qualityWords, tagWords = quality:GetText() or "", tag:GetText() or ""
+    local qualityW = qualityWords ~= "" and math.ceil(M.LineWidth(quality, qualityWords)) or 0
+    local tagW = tagWords ~= "" and math.ceil(M.LineWidth(tag, tagWords)) or 0
+    local dotW = (qualityW > 0 and tagW > 0) and (c.wordGap * 2 + math.ceil(M.LineWidth(card.dot, card.dot:GetText() or ""))) or 0
+    local starW = (tagW > 0 and card._nexusStar) and (c.mark + c.markGap) or 0
+    local metaW = qualityW + dotW + starW + tagW
+    local plan = {width = width, textX = textX, content = content, starW = starW}
+    plan.inline = metaW == 0 or math.ceil(M.LineWidth(name, name:GetText() or "")) + c.metaGap + metaW <= content
+    plan.split = metaW > content
+    if plan.inline then
+        plan.nameW = metaW > 0 and (content - c.metaGap - metaW) or content
+        plan.nameH = OneLine(name)
+    else
+        plan.nameW = content
+        plan.nameH = M.WrappedHeight(name, content, 1)
     end
-    local nameW = math.max(1, grid.content - (statusW > 0 and (statusW + grid.gap) or 0))
-    return grid, nameW, statusW
+    -- The phrase's parts. On one line each is as wide as its own words. A
+    -- split phrase gives each part the text column (the status less its
+    -- star), and a part wider than that wraps there.
+    local qualityRoom = plan.split and content or qualityW
+    local tagRoom = plan.split and math.max(1, content - starW) or tagW
+    plan.dotW = plan.split and 0 or dotW
+    plan.qualityW, plan.tagW = math.min(qualityW, qualityRoom), math.min(tagW, tagRoom)
+    plan.qualityWraps, plan.tagWraps = qualityW > qualityRoom, tagW > tagRoom
+    plan.tagLine = tagW > 0 and OneLine(tag) or 0
+    plan.qualityH = qualityW == 0 and 0
+        or (plan.qualityWraps and M.WrappedHeight(quality, qualityRoom, 1) or OneLine(quality))
+    plan.tagH = plan.tagWraps and M.WrappedHeight(tag, tagRoom, 1) or plan.tagLine
+    -- What stands under the name's line: nothing, the phrase's one line, or
+    -- its two parts; each line at least the design's row line.
+    local under, lines = 0, 0
+    if plan.split then
+        if qualityW > 0 then under, lines = under + math.max(c.rowLine, plan.qualityH), lines + 1 end
+        if tagW > 0 then under, lines = under + math.max(c.rowLine, plan.tagH), lines + 1 end
+    elseif not plan.inline then
+        under, lines = math.max(c.rowLine, plan.qualityH, plan.tagH), 1
+    end
+    plan.under = under
+    -- What the row's content needs, and the design's own height for this
+    -- arrangement in its reference pixels: 28, and 24 more for each line
+    -- the phrase takes under the name.
+    plan.need = c.rowPadY * 2 + (plan.inline and math.max(plan.nameH, plan.qualityH, plan.tagH)
+        or (plan.nameH + under))
+    plan.pixels = 28 + 24 * lines
+    card._nexusPlan = plan
+    return plan
 end
 
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
-    if not (cards and layout and box) then return nil end
-    local top, rowH, rowGap = Nexus.LayoutMetrics.OfferRows(layout.small, layout.gap, layout.normal)
+    local c = type(layout) == "table" and layout.compact or nil
+    if not (cards and c and box) then return nil end
     local width = box.w - inset * 2
-    local measured = type(layout.offerRowsH) == "table" and layout.offerRowsH or nil
-    local grid, nameW, statusW = M.OfferRowColumns(cards, width, layout)
-    local y = top + (tonumber(layout.headingExtra) or 0)
+    local tops, heights = layout.offerRowTops, layout.offerRowHeights
+    local reason = type(layout.offerReason) == "table" and layout.offerReason or nil
+    local headH = tonumber(layout.headingH) or c.headingH
+    local function At(region, x, y, w, h, card)
+        region:ClearAllPoints()
+        region:SetPoint("TOPLEFT", card, "TOPLEFT", x, -y)
+        region:SetSize(math.max(1, w), math.max(1, h))
+    end
     for index = 1, 3 do
         local card = cards[index]
-        local height = math.max(rowH, math.ceil(measured and tonumber(measured[index]) or 0))
+        local height = heights and tonumber(heights[index]) or c.rowH
         card:ClearAllPoints()
-        card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -y)
+        card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset,
+            -(tops and tonumber(tops[index]) or (headH + c.headingGap + (index - 1) * (c.rowH + c.rowGap))))
         card:SetSize(width, height)
-        M.OfferSlot(card, grid.icon, nil, nil, grid.inset, grid.pad)
-        -- With measured rows each text takes the height its own words need
-        -- at its column's width; else the grid's lines.
-        local wrap = measured ~= nil and card:IsShown()
-        local name, quality, tag = card.name, card.quality, card.tag
-        name:ClearAllPoints()
-        name:SetPoint("TOPLEFT", card, "TOPLEFT", grid.textX, -grid.pad)
-        name:SetSize(nameW, grid.nameH)
-        local nameH = wrap and M.WrappedHeight(name, nameW, grid.nameH) or grid.nameH
-        quality:ClearAllPoints()
-        quality:SetPoint("TOPLEFT", card, "TOPLEFT", grid.textX, -(grid.pad + nameH))
-        quality:SetSize(nameW, grid.metaH)
-        local metaH = grid.metaH
-        if wrap and (quality:GetText() or "") ~= "" then
-            metaH = M.WrappedHeight(quality, nameW, grid.metaH)
+        if card:IsShown() then
+            local plan = card._nexusPlan
+            if not (plan and plan.width == width) then plan = M.OfferRowPlan(card, width, c) end
+            -- The row's lines from its top: the first line takes what the
+            -- lines under it (the phrase, the reason) leave of the row.
+            local reasonH = (reason and reason.row == index) and math.max(c.reasonLine, tonumber(reason.h) or 0) or 0
+            local firstH = math.max(plan.nameH, height - c.rowPadY * 2 - plan.under - reasonH)
+            local icon = math.min(c.icon, firstH)
+            M.OfferSlot(card, icon, nil, nil, c.rowPadX, c.rowPadY + math.floor((math.min(firstH, c.rowLine) - icon) / 2))
+            local name, quality, tag, dot, star = card.name, card.quality, card.tag, card.dot, card.star
+            At(name, plan.textX, c.rowPadY, plan.nameW, firstH, card)
+            name:SetJustifyV(plan.nameH > c.rowLine and "TOP" or "MIDDLE")
+            local left, right = plan.textX, plan.textX + plan.content
+            local top = plan.inline and c.rowPadY or (c.rowPadY + firstH)
+            SetVisible(star, plan.starW > 0)
+            SetVisible(dot, plan.dotW > 0)
+            if plan.split then
+                -- The phrase's two parts, each on a line of its own: at the
+                -- row's right end on one line, or (wider than the column)
+                -- wrapping across it from the left. The star stands before
+                -- the status's first line.
+                if plan.qualityW > 0 then
+                    local lineH = math.max(c.rowLine, plan.qualityH)
+                    At(quality, plan.qualityWraps and left or (right - plan.qualityW), top, plan.qualityW, lineH, card)
+                    quality:SetJustifyV(plan.qualityWraps and "TOP" or "MIDDLE")
+                    top = top + lineH
+                end
+                if plan.tagW > 0 then
+                    local lineH = math.max(c.rowLine, plan.tagH)
+                    local x = plan.tagWraps and (left + plan.starW) or (right - plan.tagW)
+                    At(tag, x, top, plan.tagW, lineH, card)
+                    tag:SetJustifyH(plan.tagWraps and "LEFT" or "RIGHT")
+                    tag:SetJustifyV(plan.tagWraps and "TOP" or "MIDDLE")
+                    if plan.starW > 0 then
+                        local first = plan.tagWraps and math.min(lineH, plan.tagLine) or lineH
+                        local side = math.min(c.mark, first)
+                        At(star, x - plan.starW, top + math.floor((first - side) / 2), side, side, card)
+                    end
+                end
+            else
+                -- The phrase on one line, from the row's right end: the
+                -- status, the star before it, the dot and the quality, all
+                -- in that line's middle.
+                local lineH = plan.inline and firstH or plan.under
+                if plan.tagW > 0 then
+                    right = right - plan.tagW
+                    At(tag, right, top, plan.tagW, lineH, card)
+                    tag:SetJustifyH("RIGHT")
+                    tag:SetJustifyV("MIDDLE")
+                end
+                if plan.starW > 0 then
+                    right = right - plan.starW
+                    local side = math.min(c.mark, lineH)
+                    At(star, right, top + math.floor((lineH - side) / 2), side, side, card)
+                end
+                if plan.dotW > 0 then
+                    right = right - plan.dotW
+                    At(dot, right, top, plan.dotW, lineH, card)
+                    dot:SetJustifyV("MIDDLE")
+                end
+                if plan.qualityW > 0 then
+                    At(quality, right - plan.qualityW, top, plan.qualityW, lineH, card)
+                    quality:SetJustifyV("MIDDLE")
+                end
+            end
+            -- Where the selected offer's reason starts inside this row.
+            card._nexusReasonTop = reasonH > 0 and (height - c.rowPadY - reasonH) or nil
         end
-        local statusH = grid.metaH
-        tag:ClearAllPoints()
-        tag:SetSize(math.max(1, statusW), grid.metaH)
-        if wrap and statusW > 0 and (tag:GetText() or "") ~= "" then
-            statusH = M.WrappedHeight(tag, statusW, grid.metaH)
-        end
-        tag:SetPoint("TOPRIGHT", card, "TOPRIGHT", -grid.inset,
-            -(grid.pad + math.max(0, math.floor((nameH + metaH - statusH) / 2))))
         card._nexusLayout = "rows"
-        y = y + height + rowGap
     end
     return "rows"
 end
@@ -5539,30 +6468,33 @@ function M.MeasuredLayout(layout)
         return math.max(least, M.ClientLineHeight(text) or 0)
     end
     local box = boxes.roll
-    if box and not layout.noOffer then
-        local width = box.w - 4
-        local _, rowH = metrics.OfferRows(small, gap, layout.normal)
-        -- The heading row: one line of the heading and the charges while
-        -- each fits one line, at that line's own measured height (never
-        -- under the small row: a face whose line is taller than its nominal
-        -- size is not cut), and the wrapped height of whichever of them
-        -- needs more than one line (Needed).
-        local headW = width - (tonumber(layout.headingReserve) or 0)
-        local headH = small
+    local c = layout.compact
+    if box and c and not layout.noOffer then
+        local width = box.w - M.RollInset(layout) * 2
+        -- The heading row: the heading, the charges and the destination
+        -- cell at their own measured heights (one line each while they fit
+        -- one; the wrapped height of a heading or charges text that needs
+        -- more: Needed). The layout holds the row at the design's height and
+        -- grows it only for these.
+        local headW = width - M.HeadingReserve(layout)
+        local headH = 1
         local charges = frame._chargesText
         if charges and charges:IsShown() then
-            local cell = M.ChargesCell(layout, statusText)
-            headH = math.max(headH, Needed(charges, cell))
+            local cell = M.ChargesCell(layout)
+            headH = math.max(headH, Needed(charges, cell, 1))
             headW = headW - cell - (tonumber(layout.chargesGap) or 4)
         end
         if (statusText:GetText() or "") ~= "" then
-            headH = math.max(headH, Needed(statusText, headW))
+            headH = math.max(headH, Needed(statusText, headW, 1))
+        end
+        if frame._offerSlot and frame._offerSlot:IsShown() then
+            headH = math.max(headH, M.ClientLineHeight(frame._offerSlot) or 1)
         end
         spec.headingH = headH
         -- The offer rows.
         local cards = frame._offerCards
         local body = recText:GetText() or ""
-        local rows, reason
+        local rows, pixels, reason
         -- Only rows that are shown are content: between boards the text
         -- stands right under the heading, and the block keeps its height
         -- through spec.reservedRollH, not through empty rows.
@@ -5572,41 +6504,28 @@ function M.MeasuredLayout(layout)
         end
         spec.cardRows = anyShown
         if anyShown then
-            rows = {}
-            local grid, nameW, statusW = M.OfferRowColumns(cards, width, layout)
+            rows, pixels = {}, {}
             for index = 1, 3 do
                 local card = cards[index]
-                rows[index] = rowH
+                rows[index], pixels[index] = 0, 28
                 if card:IsShown() then
-                    -- The row's lines at their measured heights: the name
-                    -- and, under it, its quality; beside them the tag in the
-                    -- status column. The row is as tall as the taller of the
-                    -- two, inside the grid's pad, and never under the grid's
-                    -- own row (one rhythm for the three rows).
-                    local nameH = M.WrappedHeight(card.name, nameW, grid.nameH)
-                    local metaH = grid.metaH
-                    if (card.quality:GetText() or "") ~= "" then
-                        metaH = M.WrappedHeight(card.quality, nameW, grid.metaH)
-                    end
-                    local statusH = 0
-                    if statusW > 0 and (card.tag:GetText() or "") ~= "" then
-                        statusH = M.WrappedHeight(card.tag, statusW, grid.metaH)
-                    end
-                    local content = math.max(nameH + metaH, statusH)
-                    local height = grid.pad + content + grid.pad
+                    -- The row's own content (M.OfferRowPlan): what it needs
+                    -- in units and the design's height for its arrangement.
+                    local plan = M.OfferRowPlan(card, width, c)
+                    rows[index], pixels[index] = plan.need, plan.pixels
                     if frame._offerReasonRow == index and body ~= "" then
                         -- The selected offer's reason: inside its row, once,
-                        -- under its lines and across both columns.
-                        local reasonH = M.WrappedHeight(recText, grid.content, small)
-                        reason = {row = index, top = grid.pad + content + rowGap, h = reasonH}
-                        height = grid.pad + content + rowGap + reasonH + grid.pad
+                        -- under its lines, across the text column, whole.
+                        local reasonH = M.WrappedHeight(recText, plan.content, 1)
+                        reason = {row = index, top = plan.need - c.rowPadY, h = reasonH}
+                        rows[index] = plan.need + math.max(c.reasonLine, reasonH)
+                        pixels[index] = plan.pixels + 18
                     end
-                    rows[index] = math.max(rowH, height)
                 end
             end
         end
-        spec.offerRowsH, spec.offerReason = rows, reason
-        local bodyH = (not reason and body ~= "") and M.WrappedHeight(recText, width, small) or nil
+        spec.offerRowsH, spec.offerRowsPx, spec.offerReason = rows, pixels, reason
+        local bodyH = (not reason and body ~= "") and M.WrappedHeight(recText, width, 1) or nil
         -- The Orb guidance, an Orb pause reason and the inline Auto line are
         -- the rows that must stay readable in a face wider than the one
         -- measured (LayoutMetrics.ConservativeText; spec.guidanceRows marks
@@ -5627,7 +6546,9 @@ function M.MeasuredLayout(layout)
             math.max(M.WrappedHeight(p.needed, boxes.planNeeded.w, small), M.WrappedHeight(p.tomes, boxes.planTomes.w, small)),
             math.max(M.WrappedHeight(p.extra, boxes.planExtra.w, small), M.WrappedHeight(p.locked, boxes.planLocked.w, small)),
         }
-        spec.progressValueH = M.WrappedHeight(progressValue, boxes.progressValue.w, layout.normal)
+        -- (Its own measured height: the layout holds its row at the
+        -- design's line.)
+        spec.progressValueH = M.WrappedHeight(progressValue, boxes.progressValue.w, 1)
     else
         spec.countRowsH, spec.progressValueH = nil, nil
     end
@@ -5660,8 +6581,40 @@ function M.MeasuredLayout(layout)
     else
         spec.completeTitleH, spec.completeTextH = nil, nil
     end
+    -- The progress row's caption and its Details control, each whole in the
+    -- room this layout gives it (M.MeasureProgressRow).
+    spec.progressLabelH, spec.planDetailsH = M.MeasureProgressRow(layout, spec)
     local ok, measured = pcall(metrics.Panel, spec)
     return ok and type(measured) == "table" and measured or layout
+end
+
+-- The progress row's caption and its Details control, whole (the approved
+-- compact panel), for the layout (LayoutMetrics.Panel: spec.progressLabelH,
+-- spec.planDetailsH):
+--   the caption has its own one-line width beside the bar. Where the layout
+--   gives it less (a long caption: the bar then has a row of its own and
+--   the caption the room left of Details), it wraps in that room, by words
+--   and inside a word longer than it, and its wrapped height is returned;
+--   the Details control is as wide as the wider of its two labels needs, up
+--   to half the row. Labels wider than their room in such a held control
+--   wrap in it, and the control's height for them is returned
+--   (M.FitControlLabel: one height whichever label it shows).
+-- nil for each that fits one line: the row and the control are then the
+-- design's. Neither is shortened or fitted smaller. The widths are the first
+-- layout's and do not depend on these heights.
+function M.MeasureProgressRow(layout, spec)
+    local boxes, c = layout.boxes, layout.compact
+    local header, details = boxes.progressHeader, boxes.planDetails
+    local p = frame and frame._play
+    if not (c and header and details and progressLabel and p and p.details) then return nil, nil end
+    local captionH
+    local wraps = (tonumber(spec.progressLabelW) or 0) > header.w
+    M.WrapDetailHeading(progressLabel, wraps)
+    if wraps then captionH = M.WrappedHeight(progressLabel, header.w, 1) end
+    local controlH = M.FitControlLabel(p.details, math.max(1, details.w - c.detailsPad), 0, c,
+        (tonumber(spec.planDetailsW) or 0) > details.w, false,
+        LT("panel.button.details_show"), LT("panel.button.details_hide"))
+    return captionH, controlH > 0 and controlH or nil
 end
 
 ------------------------------------------------------------------------
@@ -5902,6 +6855,10 @@ function M.DetailsWidth()
         p.detailsWidth = width > 0 and width or nil
         p.detailsWidthKey, p.detailsWidthFace = key, reader
     end
+    -- The compact control: its label with the design's room around it, in
+    -- place of the template's 24 units of end caps the fit above allows.
+    local c = M.Compact()
+    if c and p.detailsWidth then return math.max(1, p.detailsWidth - 24 + c.detailsPad) end
     return p.detailsWidth
 end
 
@@ -6201,7 +7158,7 @@ function M.MeasureOrbLine(line)
     local panelW = tonumber(M._panelWidth) or 420
     local moved = panelW - (type(laid) == "table" and tonumber(laid.width) or panelW)
     local width = math.max(1, boxes.orbLine and (boxes.orbLine.w + moved) or (panelW - 90))
-    local detailWidth = math.max(1, boxes.planOrb and (boxes.planOrb.w + moved) or (panelW - 16))
+    local detailWidth = math.max(1, boxes.planOrb and (boxes.planOrb.w + moved) or (panelW - M.BodyInset() * 2))
     local details = M._playDetails == true
     local probe = frame._orbLineProbe
     if not probe then
@@ -6334,10 +7291,21 @@ function M.NoOfferState(model, guide, guideText, cardCount, recommendation, auto
     return true
 end
 
+-- The width the offer block's guidance text is placed at (ApplyPanelLayout),
+-- for counting its rows before the block is laid out. In the compact panel
+-- the text has no side inset of its own: the whole block (`blockW`), under
+-- the heading and in the collapsed block alike. Without the compact metrics
+-- the former widths stand: the block less 8 units for the collapsed block,
+-- 248 units under the heading.
+function M.GuidanceWidth(blockW, collapsed)
+    if M.Compact() then return blockW end
+    return collapsed and (blockW - 8) or 248
+end
+
 -- Rows of the collapsed guidance in the conservative text model, at the
--- content width (`content`: the block's width less 8 units; 396 units in the
--- 420-unit panel, and that without one) less the inline Open Orbs... button
--- and its gap (the LayoutMetrics noOffer geometry). At least one.
+-- width its text is placed at: the content width (`content`:
+-- M.GuidanceWidth; 396 units without one) less the inline Open Orbs...
+-- button and its gap (the LayoutMetrics noOffer geometry). At least one.
 function M.NoOfferRows(text, fontScale, button, content)
     local metrics = Nexus.LayoutMetrics
     if not (metrics and metrics.TextRows and metrics.ConservativeText) then return 1 end
@@ -6420,6 +7388,21 @@ function M.AutoInfoWidth()
     local toggle = M.EnsureAutoInfoToggle()
     if not toggle then return nil end
     return Nexus.LayoutMetrics.FitButtonWidth(toggle, 1)
+end
+
+-- Whether the control shares the offer heading's row (`width` its own
+-- width, `blockW` the block's). In the compact panel: while it, with the
+-- room a charges row keeps on that row (the 72-unit minimum cell and its
+-- gap, only while this render shows that row), takes no more than half the
+-- block. The heading then keeps at least the other half, Auto ON adds no
+-- row at normal text, and with the charges beside the heading the control
+-- has a row of its own instead of crowding them. Without the compact
+-- metrics the former rule stands: no more than two fifths of the block.
+function M.AutoInfoShares(width, blockW, model)
+    if not width then return false end
+    if not M.Compact() then return width <= math.floor(blockW * 0.4) end
+    local charges = type(model) == "table" and SafeText(model._nexusChargeLine) ~= "" and 76 or 0
+    return width + charges <= math.floor(blockW * 0.5)
 end
 
 -- Places the control: at the right end of the offer heading's row while the
@@ -6646,25 +7629,45 @@ end
 -- The Callboard's words (FillCallboard) and the measured heights of its
 -- title and of its objective lines at the width they will have, for the
 -- layout; nil without an observed objective. `width` is the Callboard box's.
--- The approved inline Callboard: the icon and the "CALLBOARD" label stand on
--- the objective title's first line, the title beside them, and the objective
--- lines under the title from the label's left. M.CallboardColumns gives the
--- title's and the lines' left offsets and widths in a box `width` wide for a
--- label `labelW` wide.
+-- The approved compact Callboard: the icon and the "CALLBOARD" label stand
+-- on the objective title's line, the title beside them, and the objective's
+-- own lines either at the right end of that line (one line of them, while
+-- the label, the title, the design's gaps and that line fit the row) or
+-- under the title from the label's left, whole and wrapped. The words are
+-- the Callboard owner's own, as they are: nothing is added to them and no
+-- progress is made up. M.CallboardColumns gives the title's and the lines'
+-- left offsets and widths in a box `width` wide for a label `labelW` wide.
 M.CALLBOARD = {icon = 16, gap = 4}
 function M.CallboardColumns(width, labelW)
-    local C = M.CALLBOARD
-    local labelX = C.icon + C.gap
-    local titleX = labelX + labelW + C.gap * 2
+    local C, c = M.CALLBOARD, M.Compact()
+    local labelX = c and (c.callboardIcon + c.callboardIconGap) or (C.icon + C.gap)
+    local titleX = labelX + labelW + (c and c.callboardLabelGap or C.gap * 2)
     return labelX, titleX, math.max(1, width - titleX), math.max(1, width - labelX)
 end
 
--- Returns the title's and the lines' measured heights and the label's width.
+-- Returns the title's and the lines' measured heights, the label's width
+-- and whether the lines stand on the title's line (then their own height is
+-- 0: they take no row). The arrangement is kept on the panel for the
+-- placement (PlaceCallboardBox).
 function M.MeasureCallboard(summary, width)
     if not FillCallboard(summary) then return nil end
     local labelW = math.ceil(M.LineWidth(frame._callboardLabel, frame._callboardLabel:GetText() or "")) + 1
     local _, _, titleW, detailW = M.CallboardColumns(width, labelW)
-    return M.WrappedHeight(frame._callboardTitle, titleW, 1), M.WrappedHeight(frame._callboardLine, detailW, 1), labelW
+    local c = M.Compact()
+    local title, line = frame._callboardTitle, frame._callboardLine
+    local plan = {width = width, labelW = labelW}
+    local words = line:GetText() or ""
+    if c and words ~= "" and not words:find("\n", 1, true) then
+        local titleNeed = math.ceil(M.LineWidth(title, title:GetText() or ""))
+        local lineNeed = math.ceil(M.LineWidth(line, words))
+        if titleNeed + c.callboardLineGap + lineNeed <= titleW then
+            plan.inline, plan.lineW = true, lineNeed
+            titleW = titleW - c.callboardLineGap - lineNeed
+        end
+    end
+    frame._callboardPlan = plan
+    return M.WrappedHeight(title, titleW, 1), plan.inline and 0 or M.WrappedHeight(line, detailW, 1), labelW,
+        plan.inline and true or false
 end
 
 -- Manual fallback when LayoutMetrics is unavailable (negative Y from TOPLEFT).
@@ -6703,29 +7706,50 @@ end
 
 local function PlaceCallboardBox(box, layout)
     if not box or not frame or not frame._callboardLabel then return end
-    local small = layout and layout.small or 11
+    local c = type(layout) == "table" and layout.compact or M.Compact()
+    if not c then return end
     local function place(widget, x, y, w, h)
         if not widget then return end
         widget:ClearAllPoints()
         widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -y)
-        widget:SetSize(w, h)
+        widget:SetSize(math.max(1, w), math.max(1, h))
     end
-    local lineH = CallboardLineHeight(layout)
-    -- The title and the objective lines in the heights the layout measured
-    -- for their wrapped text (one row each while they fit one). Inline: the
-    -- icon and the label on the title's first line (M.CallboardColumns).
-    local titleH = math.max(lineH, layout and tonumber(layout.callboardTitleH) or 0)
-    local detailH = math.max(lineH, layout and tonumber(layout.callboardDetailH) or 0)
-    local labelW = layout and tonumber(layout.callboardLabelW) or 60
+    -- The title's row and the lines' row at the heights the layout gives
+    -- them (the design's line while the text fits it, its measured height
+    -- when it wraps). The icon and the label stand on the title's first
+    -- line: the icon in its middle, the label across it.
+    local lineH = tonumber(layout and layout.callboardLine) or c.callboardH
+    local titleRow = math.max(1, tonumber(layout and layout.callboardTitleH) or lineH)
+    local detailH = math.max(0, tonumber(layout and layout.callboardDetailH) or 0)
+    local labelW = tonumber(layout and layout.callboardLabelW) or 60
     local labelX, titleX, titleW, detailW = M.CallboardColumns(box.w, labelW)
-    local icon = M.CALLBOARD.icon
-    place(frame._callboardIcon, box.x, box.y + math.max(0, math.floor((lineH - icon) / 2)), icon, icon)
-    place(frame._callboardLabel, box.x + labelX, box.y + math.max(0, math.floor((lineH - small) / 2)), labelW, small)
-    place(frame._callboardTitle, box.x + titleX, box.y, titleW, titleH)
-    place(frame._callboardTitleHit, box.x + titleX, box.y, titleW, titleH)
-    local lineY = box.y + titleH
-    place(frame._callboardLine, box.x + labelX, lineY, detailW, detailH)
-    place(frame._callboardLineHit, box.x + labelX, lineY, detailW, detailH)
+    local first = math.min(lineH, titleRow)
+    local icon = math.min(c.callboardIcon, first)
+    local title, line = frame._callboardTitle, frame._callboardLine
+    place(frame._callboardIcon, box.x, box.y + math.floor((first - icon) / 2), icon, icon)
+    place(frame._callboardLabel, box.x + labelX, box.y, labelW, first)
+    frame._callboardLabel:SetJustifyV("MIDDLE")
+    if layout and layout.callboardInline then
+        -- One line of the objective at the right end of the title's line.
+        local plan = frame._callboardPlan
+        local lineW = plan and plan.inline and plan.width == box.w and plan.lineW
+            or math.ceil(M.LineWidth(line, line:GetText() or ""))
+        lineW = math.max(1, math.min(lineW, titleW))
+        titleW = math.max(1, titleW - c.callboardLineGap - lineW)
+        place(line, box.x + box.w - lineW, box.y, lineW, titleRow)
+        place(frame._callboardLineHit, box.x + box.w - lineW, box.y, lineW, titleRow)
+        line:SetJustifyH("RIGHT")
+        line:SetJustifyV(titleRow > lineH and "TOP" or "MIDDLE")
+    else
+        -- The objective's lines under the title, from the label's left.
+        place(line, box.x + labelX, box.y + titleRow, detailW, detailH)
+        place(frame._callboardLineHit, box.x + labelX, box.y + titleRow, detailW, detailH)
+        line:SetJustifyH("LEFT")
+        line:SetJustifyV("TOP")
+    end
+    place(title, box.x + titleX, box.y, titleW, titleRow)
+    place(frame._callboardTitleHit, box.x + titleX, box.y, titleW, titleRow)
+    title:SetJustifyV(titleRow > lineH and "TOP" or "MIDDLE")
     -- No rule under the Callboard: the section gap separates it.
     if frame._callboardDivider then frame._callboardDivider:Hide() end
 end
@@ -6766,19 +7790,25 @@ function M.Toggle()
 end
 
 ------------------------------------------------------------------------
--- The Compact A difficulty card (approved panel cleanup). The card keeps
--- what made it the original: its tooltip backdrop and border, the validated
--- mode colours, Soul Ash, the multiplier, the red Intensity bar, its hover
--- and Hardcore-menu click and its theme exemption. Only its geometry is
--- compact and flowing: the tier and the multiplier on the first line (their
--- tops on one line), Soul Ash under the tier as secondary text, the bar
--- under them (LayoutMetrics.Panel: 48 units with short text at font scale
--- 1). A tier too long for its line wraps and the card grows by its measured
--- height; nothing is shortened. The card's texts state their own base
--- colour and shadow (M.StyleStatusCardText); the bar, its frame, its ticks
--- and its fill are not changed here: zero, unknown and a value keep what
--- they showed.
+-- The difficulty band (the approved compact panel, presentation B: the
+-- band with its bar and ticks). The card keeps what made it the original:
+-- its tooltip backdrop and border, the validated mode colours, Soul Ash, the
+-- multiplier, the red Intensity bar scaled to the game's validated maximum
+-- with its level ticks, its hover and Hardcore-menu click and its theme
+-- exemption. Only its geometry is the band's: one text line with the tier,
+-- a separating dot and Soul Ash from the left and the multiplier at the
+-- right, and the bar under that line across the band (LayoutMetrics.Panel:
+-- the design's 34 pixels, 26 without a validated Intensity scale, where no
+-- bar and no room for one are kept). A tier too long for the line beside
+-- the multiplier wraps there, Soul Ash then stands on a line of its own
+-- under it, and the band grows by their measured height; nothing is
+-- shortened and "Ash" and its number are never apart. The card's texts
+-- state their own base colour and shadow (M.StyleStatusCardText); the bar,
+-- its frame, its ticks and its fill are not changed here: zero, unknown and
+-- a value keep what they showed.
 ------------------------------------------------------------------------
+-- `side` and `gap` are the card's former insets, used only without the
+-- compact metrics; `gain` is the multiplier's cell at font scale 1.
 M.STATUS_CARD = {side = 8, gap = 6, gain = 70}
 
 -- Whether the card shows its Intensity bar: only with a reading and the
@@ -6788,7 +7818,7 @@ function M.StatusBarShown(ss)
         and type(ss.intensityThresholds) == "table"
 end
 
--- The multiplier's cell on the first line (0 without a multiplier): the
+-- The multiplier's cell at the band's right (0 without a multiplier): the
 -- original card's 70 units at the layout's font scale, whatever the value,
 -- so a changed multiplier moves nothing (C-02).
 function M.StatusGainWidth(scale)
@@ -6796,57 +7826,122 @@ function M.StatusGainWidth(scale)
     return math.floor(M.STATUS_CARD.gain * (tonumber(scale) or 1) + 0.5)
 end
 
--- The tier's width beside the multiplier in a card `cardWidth` wide.
+-- The room the tier and Soul Ash have beside the multiplier in a card
+-- `cardWidth` wide: the card less its side insets, the multiplier's cell
+-- and the gap before it.
 function M.StatusTierWidth(cardWidth, scale)
     local gainW = M.StatusGainWidth(scale)
-    return math.max(1, cardWidth - M.STATUS_CARD.side * 2 - (gainW > 0 and (gainW + M.STATUS_CARD.gap) or 0))
+    local c = M.Compact()
+    local side, gap = c and c.bandPadX or M.STATUS_CARD.side, c and c.bandGap or M.STATUS_CARD.gap
+    return math.max(1, cardWidth - side * 2 - (gainW > 0 and (gainW + gap) or 0))
+end
+
+-- The separating dot between the tier and Soul Ash on the band's line: a
+-- code-owned mark in the card's own grey, made once.
+function M.StatusDot()
+    local dot = worldStatusBox._nexusDot
+    if not dot then
+        local metrics = Nexus.LayoutMetrics
+        dot = worldStatusBox:CreateFontString(nil, "OVERLAY", metrics and metrics.FontObject
+            and metrics.FontObject("secondary") or "GameFontHighlightSmall")
+        dot:SetJustifyH("CENTER")
+        dot:SetText("\194\183")
+        dot:SetTextColor(0.72, 0.72, 0.72)
+        dot:Hide()
+        worldStatusBox._nexusDot = dot
+    end
+    return dot
 end
 
 -- The card's words (M.RenderServerStatusValues) and the measured height of
--- its tier at the width it will have, for the layout; nil without a card.
+-- its text block at the width it will have, for the layout; nil without a
+-- card. The tier, the dot and Soul Ash share one line while they fit beside
+-- the multiplier with room left for a value that gains a digit (the values
+-- change without a layout pass, C-02); otherwise the tier wraps in that
+-- room and Soul Ash has its own line under it. The arrangement is kept on
+-- the card for its placement (M.PlaceStatusCard).
 function M.MeasureStatusCard(ss, complete, cardWidth, scale)
     if not M.RenderServerStatusValues(ss, complete) then return nil end
     if type(worldStatusText.SetWordWrap) == "function" then pcall(worldStatusText.SetWordWrap, worldStatusText, true) end
-    return (Nexus.LayoutMetrics.WrapHeight(worldStatusText, M.StatusTierWidth(cardWidth, scale), 1))
+    local metrics = Nexus.LayoutMetrics
+    local room = M.StatusTierWidth(cardWidth, scale)
+    local c = M.Compact()
+    if not c then return (metrics.WrapHeight(worldStatusText, room, 1)) end
+    local dot = M.StatusDot()
+    local tierW = math.ceil(M.LineWidth(worldStatusText, worldStatusText:GetText() or ""))
+    local ashW = math.ceil(M.LineWidth(worldStatusAsh, worldStatusAsh:GetText() or ""))
+    local dotW = c.wordGap * 2 + math.ceil(M.LineWidth(dot, dot:GetText() or ""))
+    local band = {room = room, tierW = tierW, dotW = dotW}
+    band.inline = tierW + dotW + ashW + c.metaGap <= room
+    band.ashH = M.WrappedHeight(worldStatusAsh, band.inline and math.max(1, room - tierW - dotW) or room, 1)
+    band.tierH = metrics.WrapHeight(worldStatusText, room, 1)
+    worldStatusBox._nexusBand = band
+    return band.inline and math.max(band.tierH, band.ashH) or (band.tierH + band.ashH)
 end
 
 -- The card's texts and bar inside the layout's status box.
 function M.PlaceStatusCard(layout, box)
-    local side, inset = M.STATUS_CARD.side, tonumber(layout.statusInset) or 5
-    local tierH, ashH = layout.statusTierH, layout.statusAshH
+    local c = layout.compact or M.Compact()
+    if not c then return end
+    local side, inset = c.bandPadX, tonumber(layout.statusInset) or c.bandPadY
+    local textH = math.max(1, tonumber(layout.statusTierH) or 1)
     local gainW = M.StatusGainWidth(layout.scale)
+    local room = M.StatusTierWidth(box.w, layout.scale)
+    local band = worldStatusBox._nexusBand
+    if not (band and band.room == room) then band = nil end
+    local dot = M.StatusDot()
     worldStatusBox:ClearAllPoints()
     worldStatusBox:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -box.y)
     worldStatusBox:SetSize(box.w, box.h)
     worldStatusText:ClearAllPoints()
     worldStatusText:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side, -inset)
-    worldStatusText:SetSize(M.StatusTierWidth(box.w, layout.scale), tierH)
     worldStatusText:SetJustifyH("LEFT")
-    worldStatusText:SetJustifyV("TOP")
-    -- The multiplier stands on the tier's first line: both are the card's
-    -- primary text and both start at the top of their cells, so their tops
-    -- (and with one font their baselines) agree whatever the cell's height.
-    -- The multiplier was centred in its cell while the tier stood at the
-    -- top of its own.
+    worldStatusAsh:ClearAllPoints()
+    worldStatusAsh:SetJustifyH("LEFT")
     worldStatusGain:ClearAllPoints()
     worldStatusGain:SetPoint("TOPRIGHT", worldStatusBox, "TOPRIGHT", -side, -inset)
-    worldStatusGain:SetSize(math.max(1, gainW), math.ceil(15 * (tonumber(layout.scale) or 1)))
     worldStatusGain:SetJustifyH("RIGHT")
-    worldStatusGain:SetJustifyV("TOP")
-    worldStatusAsh:ClearAllPoints()
-    worldStatusAsh:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side, -(inset + tierH))
-    worldStatusAsh:SetSize(box.w - side * 2, ashH)
-    worldStatusAsh:SetJustifyH("LEFT")
+    if band and band.inline then
+        -- One line: every text takes the line's whole height and stands in
+        -- its middle, so the primary and the secondary size share a centre.
+        worldStatusText:SetSize(band.tierW, textH)
+        worldStatusText:SetJustifyV("MIDDLE")
+        dot:ClearAllPoints()
+        dot:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side + band.tierW, -inset)
+        dot:SetSize(band.dotW, textH)
+        dot:SetJustifyV("MIDDLE")
+        dot:Show()
+        worldStatusAsh:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side + band.tierW + band.dotW, -inset)
+        worldStatusAsh:SetSize(math.max(1, room - band.tierW - band.dotW), textH)
+        worldStatusAsh:SetJustifyV("MIDDLE")
+        worldStatusGain:SetSize(math.max(1, gainW), textH)
+        worldStatusGain:SetJustifyV("MIDDLE")
+    else
+        -- The tier wrapped in its room, Soul Ash on its own line under it;
+        -- the multiplier stays on the tier's first line.
+        local ashH = math.min(textH - 1, band and band.ashH or math.ceil(14 * (tonumber(layout.scale) or 1)))
+        local tierH = math.max(1, textH - math.max(0, ashH))
+        dot:Hide()
+        worldStatusText:SetSize(room, tierH)
+        worldStatusText:SetJustifyV("TOP")
+        worldStatusAsh:SetPoint("TOPLEFT", worldStatusBox, "TOPLEFT", side, -(inset + tierH))
+        worldStatusAsh:SetSize(room, math.max(1, ashH))
+        worldStatusAsh:SetJustifyV("TOP")
+        worldStatusGain:SetSize(math.max(1, gainW), math.min(tierH, math.ceil(15 * (tonumber(layout.scale) or 1))))
+        worldStatusGain:SetJustifyV("TOP")
+    end
+    -- The Intensity bar under the text line, across the band inside its
+    -- side insets, the design's 3 pixels above the band's inner edge.
     local bar = worldStatusBox.intensityBar
     bar:ClearAllPoints()
-    bar:SetPoint("BOTTOMLEFT", worldStatusBox, "BOTTOMLEFT", side, inset)
-    bar:SetPoint("BOTTOMRIGHT", worldStatusBox, "BOTTOMRIGHT", -side, inset)
-    bar:SetHeight(math.max(1, tonumber(layout.statusBarH) or 6))
+    bar:SetPoint("BOTTOMLEFT", worldStatusBox, "BOTTOMLEFT", side, inset + c.bandBarBottom)
+    bar:SetPoint("BOTTOMRIGHT", worldStatusBox, "BOTTOMRIGHT", -side, inset + c.bandBarBottom)
+    bar:SetHeight(math.max(1, tonumber(layout.statusBarH) or c.bandBarH))
     worldStatusBox.PositionIntensityTicks()
 end
 
 local function LayoutServerStatus(completed, layout)
-    -- With a responsive layout the card is the Compact A card.
+    -- With a responsive layout the card is the compact band.
     if type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.status and layout.statusTierH then
         return M.PlaceStatusCard(layout, layout.boxes.status)
     end
@@ -7001,74 +8096,87 @@ function M.RarityModeFacts(model)
 end
 
 ------------------------------------------------------------------------
--- The approved two-line footer hubs: each hub's name and, under it, what it
--- opens, in existing words with those meanings: Plan opens the Wishlist
--- Editor workspace, Explore the Build Library and Leaderboard workspaces,
--- Orbs the "Orbs / Lost Memories" window. Explore's line uses the two names
--- its own menu rows and the opened windows already carry (panel.menu.
--- build_library, panel.menu.leaderboard), not a shorter word from another
--- window's button: the caption is not shortened to stay on one line. The
--- second line is the panel's secondary
--- text in the appearance's muted role; a line too long for its hub wraps and
--- every hub takes the tallest hub's height (M.MeasureFooter,
--- LayoutMetrics.Panel: spec.footerH). The hubs keep their own click and hover
--- routes.
--- Main-panel visual correction: the three hubs are one width and together
--- span the footer's whole row, at every panel width (M.FooterColumns,
--- LayoutMetrics.FooterColumns: in the 420-unit panel three 130-unit hubs, 7
--- units apart, fill the 404-unit row). They were three 120-unit hubs with
--- the 24-unit FAQ shortcut after them; that shortcut is gone (M.ShowFaq).
+-- The approved compact footer: three hubs of one width on one line, each
+-- with its name alone on its face. Two hubs are named by what they hold:
+-- "Wishlist" (the Plan menu: the Wishlist Editor, Assign Wishlist and the
+-- game's My Builds page) and "Builds" (the Explore menu: the Build Library
+-- and the Leaderboard); Orbs keeps its name. What a hub opens is no longer
+-- a second line on its face: it stays where it was besides, whole, on the
+-- hub's own hover (M.HubTooltipLines: headed by the hub's face name, then
+-- the name of what it opens and its contents) and in its menu
+-- (M.HubMenuItems), which keeps its title, rows and routes. The hubs keep
+-- their own click and hover routes.
+-- The three hubs are one width and together span the footer's whole row at
+-- every panel width (M.FooterColumns, LayoutMetrics.FooterColumns), the
+-- design's 6 pixels apart.
 ------------------------------------------------------------------------
--- `hub` is a hub's width only without LayoutMetrics (the former row).
+-- `hub` is a hub's width and `gap` the gap between two only without
+-- LayoutMetrics (the former row); `pad` is a hub's own padding there.
 M.FOOTER = {hub = 120, gap = 6, pad = 4, side = 6}
 
+-- A hub's name on its face (above): the compact footer's while the layout
+-- engine gives the compact metrics, else the former names.
+function M.HubLabel(kind)
+    local compact = M.Compact() ~= nil
+    if kind == "plan" then return LT(compact and "panel.button.hub_wishlist" or "panel.button.plan") end
+    if kind == "explore" then return LT(compact and "panel.button.hub_builds" or "panel.button.explore") end
+    return LT("panel.button.orbs")
+end
+
 -- A hub's width and the two gaps between the three for this render's panel
--- width (M._panelWidth: the row is the panel less its 8-unit inset on each
+-- width (M._panelWidth: the row is the panel less its side inset on each
 -- side).
 function M.FooterColumns()
     local F = M.FOOTER
     local metrics = Nexus.LayoutMetrics
     if metrics and type(metrics.FooterColumns) == "function" then
-        local ok, hub, first, second = pcall(metrics.FooterColumns, (tonumber(M._panelWidth) or 420) - 16, F.gap)
+        local c = M.Compact()
+        local row = (tonumber(M._panelWidth) or 420) - M.BodyInset() * 2
+        local ok, hub, first, second = pcall(metrics.FooterColumns, row, c and c.hubGap or F.gap)
         if ok and tonumber(hub) and tonumber(first) and tonumber(second) then return hub, first, second end
     end
     return F.hub, F.gap, F.gap
 end
 
 function M.FooterHubs()
-    return {
-        {planBtn, LT("panel.menu.wishlist_editor")},
-        {exploreBtn, LT("panel.menu.build_library") .. " · " .. LT("panel.menu.leaderboard")},
-        {frame._orbsHubBtn, LT("panel.menu.orbs")},
-    }
+    return {planBtn, exploreBtn, frame._orbsHubBtn}
 end
 
--- The hubs' second lines worded and measured; returns the height a hub needs
--- (its name line and the tallest second line inside the hub's own padding).
-function M.MeasureFooter(scale)
-    local metrics, F = Nexus.LayoutMetrics, M.FOOTER
-    scale = tonumber(scale) or 1
-    local nameH, lineH, tallest = math.ceil(15 * scale), math.ceil(14 * scale), 0
-    local hubW = M.FooterColumns()
-    for _, hub in ipairs(M.FooterHubs()) do
-        local button, words = hub[1], hub[2]
-        local sub = button._nexusSub
-        if not sub then
-            sub = button:CreateFontString(nil, "OVERLAY", metrics.FontObject("secondary"))
-            sub:SetJustifyH("CENTER")
-            sub:SetJustifyV("TOP")
-            -- A muted second line under the hub's name (the fixed grey
-            -- stands without the appearance module).
-            sub:SetTextColor(0.66, 0.66, 0.69)
-            M.Role(sub, "muted")
-            button._nexusSub = sub
-        end
-        sub:SetText(words)
-        sub:Show()
-        tallest = math.max(tallest, M.WrappedHeight(sub, hubW - F.side * 2, lineH))
-    end
-    frame._footerLines = {name = nameH, sub = tallest}
-    return F.pad + nameH + tallest + F.pad
+-- The height a hub needs for its one line: one line of the hubs' own face
+-- (the owned normal font, as the client measures it: M.OneLineHeight, on a
+-- hidden text at a width nothing wraps at, so no hub's label is read at
+-- whatever width it happens to have) inside the hub's padding.
+-- LayoutMetrics.Panel holds the row at the design's height and grows it only
+-- for this (spec.footerH). 0 while the client reports no height for that
+-- line: the design's row then stands.
+function M.MeasureFooter()
+    local c = M.Compact()
+    local pad = c and c.hubPad or M.FOOTER.pad
+    local line = M.OneLineHeight("normal") or 0
+    return line > 0 and (line + pad * 2) or 0
+end
+
+-- The three hubs in the layout's footer row: one width, from the row's left
+-- inset to its right one, the row's own height, above the panel's lower
+-- inset. The pass that sizes the panel places them again from its final
+-- layout (ApplyPanelLayout): a block above that grew moves the row, and the
+-- row's height in whole units follows where it stands.
+function M.PlaceFooterHubs(layout)
+    local orbsHub = frame and frame._orbsHubBtn
+    if not (planBtn and exploreBtn and orbsHub) then return end
+    local c = type(layout) == "table" and layout.compact or nil
+    local footer = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.footer or nil
+    local hubH = footer and footer.h or 22
+    local hubW, firstGap, secondGap = M.FooterColumns()
+    planBtn:ClearAllPoints()
+    exploreBtn:ClearAllPoints()
+    orbsHub:ClearAllPoints()
+    planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", c and c.inset or 8, c and c.footerBottom or 6)
+    planBtn:SetSize(hubW, hubH)
+    exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", firstGap, 0)
+    exploreBtn:SetSize(hubW, hubH)
+    orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", secondGap, 0)
+    orbsHub:SetSize(hubW, hubH)
 end
 
 -- Auto keeps its existing consentful click handler, now in the header. The
@@ -7079,47 +8187,14 @@ local function LayoutFooter(showAuto, layout)
 
     local orbsHub = frame._orbsHubBtn
     autoBtn:ClearAllPoints()
-    planBtn:ClearAllPoints()
-    exploreBtn:ClearAllPoints()
-    orbsHub:ClearAllPoints()
 
     if showAuto then
         autoBtn:Show()
         autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
-        autoBtn:SetSize(slots.autoWidth, slots.height)
+        autoBtn:SetSize(slots.autoWidth, M.AutoControlHeight(slots))
         AUTO_LABEL.Fit()
     else autoBtn:Hide() end
-    local F = M.FOOTER
-    local footer = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.footer or nil
-    local lines = footer and frame._footerLines or nil
-    local hubH = footer and footer.h or 22
-    -- Three hubs of one width from the row's left inset to its right one.
-    local hubW, firstGap, secondGap = M.FooterColumns()
-    planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 6)
-    planBtn:SetSize(hubW, hubH)
-    exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", firstGap, 0)
-    exploreBtn:SetSize(hubW, hubH)
-    orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", secondGap, 0)
-    orbsHub:SetSize(hubW, hubH)
-    for _, button in ipairs({planBtn, exploreBtn, orbsHub}) do
-        local sub = button._nexusSub
-        if sub then
-            if lines then
-                -- The name on the hub's first line, what it opens under it.
-                local label = type(button.GetFontString) == "function" and button:GetFontString() or nil
-                if label then
-                    label:ClearAllPoints()
-                    label:SetPoint("TOP", button, "TOP", 0, -F.pad)
-                end
-                sub:ClearAllPoints()
-                sub:SetPoint("TOPLEFT", button, "TOPLEFT", F.side, -(F.pad + lines.name))
-                sub:SetSize(hubW - F.side * 2, lines.sub)
-                sub:Show()
-            else
-                sub:Hide()
-            end
-        end
-    end
+    M.PlaceFooterHubs(layout)
 
     planBtn:Show()
     exploreBtn:Show()
@@ -7150,30 +8225,39 @@ local function ApplyPanelLayout(layout, completed)
     if boxes.status then PlacePanelBox(worldStatusBox, boxes.status) end
     if boxes.roll then
         PlacePanelBox(rollArea, boxes.roll)
-        local inset = 2
-        local y = 1
-        -- The heading row is one small line, or as tall as a heading or
+        local compact = layout.compact
+        local inset = M.RollInset(layout)
+        -- The heading row is the design's line, or as tall as a heading or
         -- charges text that wraps needs (layout.headingH); what is under it
-        -- moves down by the difference. The Auto scope control, while it
-        -- shares this row (layout.headingReserve), stands at its right end.
+        -- moves down by the difference. At its right end stand, from the
+        -- right: the Auto scope control while it shares this row
+        -- (layout.headingReserve), the compact destination cell
+        -- (M.OfferSlotCell) and the charges cell; the heading has the rest.
+        -- Each takes the row's whole height and stands in its middle.
         local headH = tonumber(layout.headingH) or layout.small
-        local headExtra = tonumber(layout.headingExtra) or 0
-        local rowW = boxes.roll.w - inset * 2 - (tonumber(layout.headingReserve) or 0)
+        local rowW = boxes.roll.w - inset * 2 - M.HeadingReserve(layout)
         statusText:ClearAllPoints()
-        statusText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+        statusText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, 0)
         statusText:SetSize(rowW, headH)
-        statusText:SetJustifyV("TOP")
+        statusText:SetJustifyV("MIDDLE")
+        local slotCell = frame._offerSlot
+        if slotCell and slotCell:IsShown() then
+            slotCell:ClearAllPoints()
+            slotCell:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -(inset + (tonumber(layout.headingReserve) or 0)), 0)
+            slotCell:SetSize(math.max(1, tonumber(frame._offerSlotW) or 1), headH)
+        end
         local charges = frame._chargesText
         if charges then
-            -- The cell the layout sizes for the font scale, in the room the
-            -- shown heading leaves (M.ChargesCell); its 72 px minimum while
-            -- hidden and in the collapsed block, which has no heading row.
-            local cell = charges:IsShown() and not layout.noOffer and M.ChargesCell(layout, statusText)
+            -- The cell its own row of counts needs on one line, in the room
+            -- the heading row has for it (M.ChargesCell); its 72-unit minimum
+            -- while hidden and in the collapsed block, which has no heading
+            -- row.
+            local cell = charges:IsShown() and not layout.noOffer and M.ChargesCell(layout)
                 or tonumber(layout.chargesMinW) or 72
             charges:ClearAllPoints()
-            charges:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -(boxes.roll.w - inset - rowW), -y)
+            charges:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -(boxes.roll.w - inset - rowW), 0)
             charges:SetSize(cell, headH)
-            charges:SetJustifyV("TOP")
+            charges:SetJustifyV("MIDDLE")
             -- The heading keeps the rest of its row, less the cell and its
             -- gap, while charges are shown.
             if charges:IsShown() then
@@ -7181,37 +8265,29 @@ local function ApplyPanelLayout(layout, completed)
             end
         end
         -- The one-line rows and the offer cards that show in their place
-        -- share one band (LayoutMetrics.OfferRows); the text below starts
-        -- under it.
-        local rowTop, rowH, rowGap, bodyTop = Nexus.LayoutMetrics.OfferRows(layout.small, layout.gap, layout.normal)
+        -- share the rows' band (LayoutMetrics.Panel: layout.offerRowTops,
+        -- layout.offerRowHeights; the design's rows under the heading while
+        -- the layout holds none); the text below starts under it.
+        local rowTops, rowHeights = layout.offerRowTops, layout.offerRowHeights
         for index = 1, 3 do
             local text = cardTexts[index]
             text:ClearAllPoints()
-            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -(headExtra + rowTop + (index - 1) * (rowH + rowGap)))
-            text:SetSize(boxes.roll.w-inset*2, rowH)
+            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -(rowTops and rowTops[index]
+                or (headH + compact.headingGap + (index - 1) * (compact.rowH + compact.rowGap))))
+            text:SetSize(boxes.roll.w-inset*2, rowHeights and rowHeights[index] or compact.rowH)
         end
-        -- Rows made taller by wrapped text push the text under them down.
-        y = tonumber(layout.bodyTop) or (bodyTop + headExtra + (tonumber(layout.offerRowsExtra) or 0))
+        -- The text under the rows (or under the heading without rows).
+        local recY = tonumber(layout.bodyTop) or (headH + compact.headingGap)
         M.PlaceOfferCards(layout, boxes.roll, inset)
-        -- Guidance alone (no cards) starts right below the heading, so it
-        -- has the card rows' space; with cards it follows them as before.
-        local noCards = true
-        for index = 1, 3 do
-            if (cardTexts[index]:GetText() or "") ~= "" then noCards = false end
-        end
-        local recY = y
-        if noCards then
-            recY = 1 + headH + math.max(3,math.floor(layout.gap/2))
-        end
         local button = frame._orbsBtn
         local buttonRow = 0
         -- The ordinary bottom button row with the mini-panel access. The
         -- collapsed level-80 layout has no such row (no mini fields either);
         -- it places Open Orbs... inline below.
         if button and button:IsShown() and layout.orbButtonH and not layout.noOffer then
-            buttonRow = layout.orbButtonH + math.ceil(layout.gap/2)
+            buttonRow = layout.orbButtonH + compact.headingGap
             button:ClearAllPoints()
-            button:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -inset, math.ceil(layout.gap/2))
+            button:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -inset, 0)
             button:SetSize(layout.orbButtonW, layout.orbButtonH)
             local miniButton = frame._orbMiniBtn
             if miniButton then
@@ -7229,25 +8305,24 @@ local function ApplyPanelLayout(layout, completed)
         recText:ClearAllPoints()
         local reason = layout.offerReason
         local reasonCard = reason and frame._offerCards and frame._offerCards[reason.row] or nil
-        if reasonCard and reasonCard:IsShown() then
+        local reasonPlan = reasonCard and reasonCard:IsShown() and reasonCard._nexusPlan or nil
+        if reasonPlan and reasonCard._nexusReasonTop then
             -- The selected offer's reason: inside its own row, under its
-            -- name and quality, from the text column's left edge to the
-            -- status column's right edge (M.MeasuredLayout measured it
-            -- there, at that width). It is not repeated under the rows.
-            local grid = Nexus.LayoutMetrics.OfferRowGrid(layout.small, layout.gap, layout.normal,
-                boxes.roll.w - inset * 2)
-            recText:SetPoint("TOPLEFT", reasonCard, "TOPLEFT", grid.textX, -(tonumber(reason.top) or rowH))
-            recText:SetSize(grid.content, math.max(1, tonumber(reason.h) or layout.small))
+            -- lines, across the text column (M.MeasuredLayout measured it
+            -- there, at that width; M.PlaceOfferCards gave its top). It is
+            -- not repeated under the rows.
+            recText:SetPoint("TOPLEFT", reasonCard, "TOPLEFT", reasonPlan.textX, -reasonCard._nexusReasonTop)
+            recText:SetSize(reasonPlan.content, math.max(1, compact.reasonLine, tonumber(reason.h) or 0))
         else
             recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -recY)
             -- The measured height of the whole text, or (a layout computed
             -- without it) the room the box leaves.
             recText:SetSize(boxes.roll.w-inset*2, (tonumber(layout.bodyH) or 0) > 0 and layout.bodyH
-                or math.max(layout.small*2,boxes.roll.h-recY-layout.gap-buttonRow))
+                or math.max(layout.small*2,boxes.roll.h-recY-buttonRow))
         end
-        rollDivider:ClearAllPoints()
-        rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
-        rollDivider:SetSize(boxes.roll.w-2,1)
+        -- No rule under the offer block: the block gap separates it from
+        -- the progress row (the approved compact panel draws none).
+        rollDivider:Hide()
         -- The collapsed level-80 block (M.NoOfferState): no heading row, the
         -- guidance from the top, Open Orbs... inline at its right; the
         -- optional mini-panel access stays in the Orb window.
@@ -7281,9 +8356,10 @@ local function ApplyPanelLayout(layout, completed)
         EnsureCallboardWidgets()
         PlaceCallboardBox(boxes.callboard, layout)
     end
-    -- The heading keeps one line (issue #143) in the middle of the Play
-    -- heading row, which is as tall as its Details button and as that line
-    -- measures (layout.lineSmall). It takes the row's whole height: a slice
+    -- The heading stands in the middle of the Play heading row, which is as
+    -- tall as its Details button, as one line of the heading measures
+    -- (layout.lineSmall) and as a heading or a Details label that wraps
+    -- needs (M.MeasureProgressRow). It takes the row's whole height: a slice
     -- one modelled small line high cut a face whose line is taller.
     local header = boxes.progressHeader
     if header then
@@ -7301,13 +8377,19 @@ local function ApplyPanelLayout(layout, completed)
             boxes.tomes.y,24,boxes.tomes.h)
     end
 
-    local labelGap = math.max(3,math.floor(layout.gap/2))
-    -- A heading over a list keeps one line of secondary text at its measured
-    -- height (layout.lineSmall; the modelled small line without one).
-    local labelH = tonumber(layout.lineSmall) or layout.small
+    -- A heading over a list has the row the layout gives the headings
+    -- (layout.detailHeadingH): one line of secondary text (the design's
+    -- line, or that line's measured height) while every heading fits its
+    -- column on one line, and the tallest heading's wrapped height when one
+    -- wraps there (M.MeasureDetailHeadings), with its names right under it.
+    -- In a row of more than one line the headings stand at its top.
+    local labelGap = 0
+    local labelH = tonumber(layout.detailHeadingH) or tonumber(layout.lineSmall) or layout.small
+    local headTop = layout.detailHeadingTall == true
     if boxes.needed then
         PlacePanelRect(needLabel,boxes.needed.x,boxes.needed.y,
             boxes.needed.w,labelH)
+        M.JustifyDetailHeading(needLabel, headTop)
         PlacePanelRect(needText,boxes.needed.x,
             boxes.needed.y+labelH+labelGap,boxes.needed.w,
             boxes.needed.h-labelH-labelGap)
@@ -7316,14 +8398,19 @@ local function ApplyPanelLayout(layout, completed)
     if boxes.shed then
         PlacePanelRect(shedLabel,boxes.shed.x,boxes.shed.y,
             boxes.shed.w,labelH)
+        M.JustifyDetailHeading(shedLabel, headTop)
         PlacePanelRect(shedText,boxes.shed.x,
             boxes.shed.y+labelH+labelGap,boxes.shed.w,
             boxes.shed.h-labelH-labelGap)
         M.PlaceDetailRows(shedText)
     end
     if boxes.toLock and frame.toLockLabel then
+        -- To lock is the third name column, beside the other two: its
+        -- names wrap in the column's width (M.PanelLayout measured them
+        -- there).
         PlacePanelRect(frame.toLockLabel,boxes.toLock.x,boxes.toLock.y,
             boxes.toLock.w,labelH)
+        M.JustifyDetailHeading(frame.toLockLabel, headTop)
         PlacePanelRect(frame.toLockText,boxes.toLock.x,
             boxes.toLock.y+labelH+labelGap,boxes.toLock.w,
             boxes.toLock.h-labelH-labelGap)
@@ -7335,6 +8422,8 @@ local function ApplyPanelLayout(layout, completed)
     M.PlacePerformance(boxes.performance)
     PlacePanelBox(bestDpsText, boxes.bestDps)
     M.PlacePlaySummary(layout)
+    -- The footer hubs in this layout's footer row (M.PlaceFooterHubs).
+    M.PlaceFooterHubs(layout)
     -- Show / Hide details keeps the panel's top where it was: ApplyCandidate
     -- installs the held corner after the final fit (M.HoldPanelTop).
 end
@@ -7472,27 +8561,28 @@ local function ApplyModel(model, signatures, roll)
         local metricsOk, fontScale, uiScale, revision =
             pcall(Nexus.LayoutMetrics.RuntimeMetrics)
         if metricsOk then
-            -- This render's panel width (M.Render: M.TargetPanelWidth; 420
-            -- units at the reference text size) and its body blocks' width:
-            -- the panel less its 8-unit inset on each side (404 at 420).
+            -- This render's panel width (M.Render: M.TargetPanelWidth) and
+            -- its body blocks' width: the panel less its side inset on each
+            -- side (M.BodyInset).
             local panelW = tonumber(M._panelWidth) or 420
-            local blockW = panelW - 16
+            local blockW = panelW - M.BodyInset() * 2
             -- The difficulty card's words, set now so its tier is measured
             -- at the width it will have (a long tier wraps, the card grows).
             local statusTierH = statusVisible and M.MeasureStatusCard(ss, complete, blockW, fontScale) or nil
             -- The Callboard's words, set now so its title and objective
             -- lines are measured at the widths they will have.
-            local callboardTitleH, callboardDetailH, callboardLabelW
+            local callboardTitleH, callboardDetailH, callboardLabelW, callboardInline
             if callboardObserved then
-                callboardTitleH, callboardDetailH, callboardLabelW = M.MeasureCallboard(callboardSummary, blockW, fontScale)
+                callboardTitleH, callboardDetailH, callboardLabelW, callboardInline =
+                    M.MeasureCallboard(callboardSummary, blockW, fontScale)
             end
             -- The opt-in DPS RECORDS section: its rows worded and measured
             -- (0 without a record, so no block is laid out).
             local performanceH = M.MeasurePerformance(pr, complete, not noBuild and showPerformance, blockW)
-            -- The Auto scope control: on the offer heading's row while it
-            -- takes no more than two fifths of the block (161 of 404 units;
-            -- so Auto ON adds no row at normal and 125% text), else a row of
-            -- its own.
+            -- The Auto scope control: on the offer heading's row while
+            -- that leaves the heading its share of the row (M.AutoInfoShares:
+            -- so Auto ON adds no row at normal text), else a row of its
+            -- own.
             local autoInfo = M.AutoScopeShown(model, rollBlock and not noOffer, noBuild)
             local autoInfoW = autoInfo and M.AutoInfoWidth() or nil
             -- M.PanelLayout: LayoutMetrics.Panel, with open Details name
@@ -7507,16 +8597,21 @@ local function ApplyModel(model, signatures, roll)
                 headerWishlistH=frame._nexusHeaderRows and frame._nexusHeaderRows.wishlist or nil,
                 -- The title at its measured height (a state cue that wraps).
                 headerTitleH=frame._nexusHeaderRows and frame._nexusHeaderRows.title or nil,
+                -- What line 1 needs for a control whose label wraps in it,
+                -- with the Auto control as this render shows or hides it.
+                headerControlsH=M.HeaderControlsNeed(showAutoControl and true or false, model),
                 complete=complete,showPerformance=showPerformance,
                 performanceH=performanceH,
                 -- One line of secondary text at its measured height, for
                 -- every row that holds one (the progress caption, the DPS
                 -- entries, the headings over the Details lists).
                 lineSmallH=M.OneLineHeight("secondary"),
-                -- The Details control at its own labels' width (Play only).
+                -- The Details control at its own labels' width, and the
+                -- progress caption at its own words' (Play only).
                 planDetailsW=(not noBuild and not complete) and M.DetailsWidth() or nil,
+                progressLabelW=(not noBuild and not complete) and M.ProgressLabelWidth() or nil,
                 footerH=M.MeasureFooter(fontScale),
-                autoInfoW=autoInfoW,autoInfoInline=autoInfoW ~= nil and autoInfoW <= math.floor(blockW * 0.4),
+                autoInfoW=autoInfoW,autoInfoInline=M.AutoInfoShares(autoInfoW, blockW, model),
                 -- Between boards (Auto ON in the same context, no offer
                 -- shown: a reserved block, a wait or a hold) the block keeps
                 -- at least the height it had, so the panel does not jump.
@@ -7531,18 +8626,19 @@ local function ApplyModel(model, signatures, roll)
                 -- the cards, the recommendation with the inline Auto line
                 -- (without cards the body already has the card rows' space).
                 noOffer=noOffer,
-                guidanceRows=noOffer and M.NoOfferRows(guideText, fontScale, guide.openOrbs, blockW - 8)
+                guidanceRows=noOffer
+                    and M.NoOfferRows(guideText, fontScale, guide.openOrbs, M.GuidanceWidth(blockW, true))
                     or (autoNote ~= "" and #cards > 0)
                     and Nexus.LayoutMetrics.TextRows((bodyText ~= "" and (bodyText .. "\n") or "")
-                        .. autoNote, 248, fontScale)
+                        .. autoNote, M.GuidanceWidth(blockW), fontScale)
                     or (guideText ~= "" and (bodyText == guideText
                     or guide.openOrbs))
-                    and Nexus.LayoutMetrics.TextRows(bodyText, 248, fontScale)
+                    and Nexus.LayoutMetrics.TextRows(bodyText, M.GuidanceWidth(blockW), fontScale)
                     or 0,
                 cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
                 callboard=callboardObserved and true or false,
                 callboardTitleH=callboardTitleH,callboardDetailH=callboardDetailH,
-                callboardLabelW=callboardLabelW,
+                callboardLabelW=callboardLabelW,callboardInline=callboardInline,
                 planDetails=M._playDetails == true,
                 -- The DPS entries exist only for records that exist, at
                 -- their measured widths.
@@ -7597,6 +8693,9 @@ local function ApplyModel(model, signatures, roll)
         PlaceCallboardManual(callboardTop)
     end
 
+    -- The compact heading's destination cell is shown only by the heading
+    -- that words it in this pass (M.SetOfferHeading).
+    M.OfferSlotCell(nil)
     SetVisible(frame._rollArea, rollBlock)
     frame._rollArea:ClearAllPoints()
     frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, callboardTop - callboardExtra)
@@ -7683,13 +8782,18 @@ local function ApplyModel(model, signatures, roll)
         -- the card's tag says what that means in each. The Freeze card is
         -- tagged only with Auto OFF.
         do
-            local lines, facts = {}, {}
+            local lines, facts, codes = {}, {}, {}
             for i = 1, 3 do
                 lines[i] = type(cards[i]) == "table" and SafeText(cards[i].text) or ""
                 facts[i] = type(cards[i]) == "table" and type(cards[i].facts) == "table" and cards[i].facts or false
+                -- The card's own annotation code, which its producer carries
+                -- beside the line (the Policy word the line was written from:
+                -- core/AutomationRuntime.lua); false for a card that carries
+                -- only its line.
+                codes[i] = type(cards[i]) == "table" and type(cards[i].annotation) == "string" and cards[i].annotation or false
             end
             M.RenderOfferCards(lines, Nexus.Readout and Nexus.Readout.MarkedCard
-                and Nexus.Readout.MarkedCard(cards) or nil, model.auto, responsiveLayout ~= nil, facts, frozen)
+                and Nexus.Readout.MarkedCard(cards) or nil, model.auto, responsiveLayout ~= nil, facts, frozen, codes)
         end
         -- An unresolved Orb action's own reason is more specific than the
         -- general pause text; otherwise the recommendation stays first. A
@@ -7699,10 +8803,19 @@ local function ApplyModel(model, signatures, roll)
         local body = activeRoll and bodyText
             or ("|cff888888" .. Nexus.Localization.Text("panel.body.no_echo_choice") .. "|r")
         local named = marked or (recommendation ~= "" and frozen)
+        local whole
         if named and activeRoll and bodyText == recommendation
             and not (guide and guide.openOrbs) and type(cards[named]) == "table" then
-            body = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[named].text),
+            whole = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[named].text),
                 type(cards[named].facts) == "table" and cards[named].facts or nil)
+            -- The approved compact row: a reason that stands inside the
+            -- named offer's own row (frame._offerReasonRow) is shown as the
+            -- reason itself, since the row names the offer; the sentence
+            -- with its target stays whole on the reason's hover (below).
+            -- Anywhere else the sentence names its target as before.
+            if not (responsiveLayout and responsiveLayout.compact and frame._offerReasonRow == named) then
+                body = whole
+            end
         end
         -- The inline Auto line follows whatever the body shows, on its own line.
         if autoNote ~= "" then body = (body ~= "" and (body .. "\n") or "") .. autoNote end
@@ -7710,6 +8823,10 @@ local function ApplyModel(model, signatures, roll)
         -- line stays visible in the body (M.AutoScopeFallback).
         body = M.AutoScopeFallback(body, model, rollBlock and not noOffer, noBuild, responsiveLayout)
         recText:SetText(body)
+        -- The reason's hover (LayoutMetrics.FullTextTooltip) gives the
+        -- complete sentence while the row shows the reason without its
+        -- target; otherwise it shows a complete text only when that is cut.
+        recText._nexusFullText = (whole and whole ~= body and body == recommendation) and whole or nil
         -- Compact charges, only from charge facts the model itself carries
         -- (Readout.ChargesLine; unknown is "?", never 0), and only while
         -- Details is open: the row this render shows is empty otherwise
@@ -7747,9 +8864,6 @@ local function ApplyModel(model, signatures, roll)
             Nexus.Theme.SetPrimary(frame._orbsBtn, noOffer and frame._orbsBtn:IsShown())
             if frame._orbsHubBtn then
                 Nexus.Theme.SetPrimary(frame._orbsHubBtn, noOffer and frame._orbsBtn:IsShown())
-                -- On the filled hub its second line is ordinary text, so it
-                -- stays readable on the fill; otherwise it is muted.
-                M.Role(frame._orbsHubBtn._nexusSub, (noOffer and frame._orbsBtn:IsShown()) and "text" or "muted")
             end
         end
     end
@@ -7899,22 +9013,19 @@ local function ApplyModel(model, signatures, roll)
         SetPoint(shedLabel, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 42)
         SetPoint(shedText, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 58)
         shedText:SetWidth(108)
-        -- Two names, then "+N more", one line each (M.DetailNameLines). The
+        -- Two names, then "+N more", one row each (M.DetailNameLines). The
         -- STILL NEEDED face drops " (Poor:×N Common:×N ...)": the quality
-        -- breakdown is in the tooltip on mouseover instead.
-        M.RenderDetailNames(missingNamesCache, shedNamesCache)
+        -- breakdown is in the tooltip on mouseover instead. In the compact
+        -- layout the rows wrap inside their columns, as M.PanelLayout
+        -- measured them; ApplyPanelLayout places them at the columns' widths.
+        M.RenderDetailNames(missingNamesCache, shedNamesCache,
+            responsiveLayout ~= nil and responsiveLayout.compact ~= nil)
 
         if #toLockNamesCache > 0 then
             SetPoint(frame.toLockLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 90)
             SetPoint(frame.toLockText, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 106)
             frame.toLockText:SetWidth(238)
-            local toLockLines = {}
-            local toLockShown = math.min(#toLockNamesCache, 2)
-            for i = 1, toLockShown do toLockLines[#toLockLines + 1] = toLockNamesCache[i] end
-            if #toLockNamesCache > toLockShown then
-                toLockLines[#toLockLines + 1] = LF("panel.label.more_count", {count = LC(#toLockNamesCache - toLockShown)})
-            end
-            frame.toLockText:SetText(table.concat(toLockLines, ", "))
+            frame.toLockText:SetText(M.ToLockText(toLockNamesCache))
             frame.toLockLabel:Show()
             frame.toLockText:Show()
             frame.toLockHit:ClearAllPoints()
@@ -7994,7 +9105,9 @@ local function ApplyModel(model, signatures, roll)
                 button = setupGetStartedBtn
             end
             local label = button and button:GetFontString()
-            if label then
+            -- (Not a label that wraps in its button in the compact header:
+            -- M.FitControlLabel holds that one whole.)
+            if label and not button._nexusWrapped then
                 label:SetWidth(math.max(1, (tonumber(button:GetWidth()) or 0) - 12))
                 metrics.OneLineLabel(label, nil, tonumber(button:GetHeight()) or 1)
             end
@@ -8384,6 +9497,18 @@ function M.EnsurePauseBanner()
     frame._pauseBanner = banner
     return banner
 end
+-- The strip is as wide as the panel, and its two texts are whole in it: each
+-- has the strip's width less its 8-unit sides and, while Resume is offered,
+-- the button's room (82), and wraps there in its own font, by words and
+-- inside a word longer than the room (M.WrapTitle). Each text's box is its
+-- measured height, never under the 16-unit line it had, and while both are
+-- one such line the strip is the 36 units it always was. A text that needs
+-- more (the narrower compact panel, a larger text size, a longer
+-- translation) makes the strip as tall as both texts with its 4 units above
+-- them, 2 between them and its 2-unit edge line under them. Nothing is
+-- shortened or fitted smaller. Resume keeps its size and stays at the
+-- strip's right, in its middle. Without the layout engine's measurement the
+-- texts keep the one line they were made with.
 -- Above the panel when the screen holds the strip there, else below it.
 function M.PlacePauseBanner()
     local banner = frame and frame._pauseBanner
@@ -8392,10 +9517,29 @@ function M.PlacePauseBanner()
         local ok, value = pcall(region[method], region)
         return ok and tonumber(value) or nil
     end
-    banner:SetSize(math.max(240, Read(frame, "GetWidth") or 420), BANNER_H)
+    local width = math.max(240, Read(frame, "GetWidth") or 420)
+    local textWidth = math.max(100, width - 16 - (banner._nexusState == "paused" and 82 or 0))
+    local metrics = Nexus.LayoutMetrics
+    local height = BANNER_H
+    if metrics and type(metrics.WrapHeight) == "function" then
+        local texts = 0
+        for _, label in ipairs({banner.title, banner.note}) do
+            M.WrapTitle(label)
+            label:SetWidth(textWidth)
+            -- (A measurement that gives no number leaves the 16-unit line.)
+            texts = texts + math.max(16, tonumber((metrics.WrapHeight(label, textWidth, 16))) or 0)
+        end
+        if texts > 32 then height = math.max(BANNER_H, texts + 8) end
+    else
+        for _, label in ipairs({banner.title, banner.note}) do
+            label:SetWidth(textWidth)
+            if metrics and type(metrics.OneLineLabel) == "function" then metrics.OneLineLabel(label, nil, 16) end
+        end
+    end
+    banner:SetSize(width, height)
     local top, uiTop = Read(frame, "GetTop"), Read(UIParent, "GetTop")
     local fs, us = Read(frame, "GetEffectiveScale") or 1, Read(UIParent, "GetEffectiveScale") or 1
-    local above = not (top and uiTop) or (top + BANNER_H + 2) * fs <= uiTop * us
+    local above = not (top and uiTop) or (top + height + 2) * fs <= uiTop * us
     banner:ClearAllPoints()
     if above then banner:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, 2)
     else banner:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -2) end
@@ -8425,13 +9569,9 @@ function M.UpdatePauseBanner()
         banner.note:SetText(LT("panel.status.pause_unreadable_note"))
         banner.resume:Disable(); banner.resume:Hide()
     end
+    -- Its size, its texts' room and heights and its side of the panel, for
+    -- the words and the state just set (M.PlacePauseBanner).
     M.PlacePauseBanner()
-    local textWidth = math.max(100, (tonumber(banner:GetWidth()) or 420) - 16 - (state == "paused" and 82 or 0))
-    local metrics = Nexus.LayoutMetrics
-    for _, label in ipairs({banner.title, banner.note}) do
-        label:SetWidth(textWidth)
-        if metrics and type(metrics.OneLineLabel) == "function" then metrics.OneLineLabel(label, nil, 16) end
-    end
     banner:Show()
     return state
 end

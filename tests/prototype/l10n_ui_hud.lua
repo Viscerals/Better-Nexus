@@ -15,6 +15,15 @@
 -- with the seam absent), a translated Nexus badge keeps the duplicate check,
 -- and rendering, hovering and opening menus change no saved table and make
 -- no send or game action.
+-- The approved compact panel (design draft "Nexus compact panel"; its
+-- decisions on the offer block's words): with Auto OFF and offers the
+-- heading is the reviewed "Your offers" with the destination in a cell of
+-- its own beside it; a selected row shows its tag's words after a star, and
+-- the tag's code-owned "> " stays on the row's hover; the recommendation
+-- stands inside the selected row as the reason alone, and the whole sentence
+-- with its target is on the reason's own hover. Each assertion of the former
+-- words is marked where it stood and replaced by the draft's own assertion,
+-- not relaxed; every text still has to reach its receiver through the seam.
 -- Synthetic offline evidence only: no native font, glyph, fit or pixel claim.
 local S=dofile('tests/prototype/l10n_pseudo_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
@@ -132,12 +141,26 @@ local function HudSession()
    -- Hover: the complete line, then the tag line when the card has one
    -- (the closing sentence is the panel family's own copy).
    local tagged=(c._nexusTag or '')~=''
+   -- star: the offer block's star stands on this row before its tag (the
+   -- approved compact row's mark of the selected offer).
    out.cards[i]={name=c.name:GetText(),quality=c.quality:GetText(),tag=c.tag:GetText(),
-    full=hover[1],hoverTag=tagged and hover[2] or nil,shown=c:IsShown()}
+    full=hover[1],hoverTag=tagged and hover[2] or nil,shown=c:IsShown(),
+    star=c.star~=nil and c.star:IsShown() and true or false}
   end
  end
  out.headingOff=NexusPanel._rollStatus:GetText()
  out.bodyOff=NexusPanel._rollRec:GetText()
+ -- The compact heading's destination cell, and the recommendation whole as
+ -- the reason's own registered hover shows it (entered and left; passive).
+ do
+  local slot=NexusPanel._offerSlot
+  out.slotOff=slot and slot:IsShown() and slot:GetText() or nil
+  local reason=NexusPanel._recommendationHover
+  local enter=reason and reason:GetScript('OnEnter')
+  out.wholeOff=enter and S.CaptureTooltip(enter,reason) or {}
+  local leave=reason and reason:GetScript('OnLeave')
+  if leave then leave(reason) end
+ end
  -- Count disclosure (approved main-panel design: "Counts stay behind
  -- Details", the compact charges among them). The charges are counts: with
  -- Details closed, as the panel opens, the compact row and its hover are not
@@ -182,6 +205,7 @@ local function HudSession()
  Pn.Render(Model({auto=true,cards=CARDS}))
  out.headingOn=NexusPanel._rollStatus:GetText()
  out.tagOn=cards[1] and cards[1].tag:GetText()
+ out.starOn=cards[1] and cards[1].star~=nil and cards[1].star:IsShown() and true or false
  -- Approved panel cleanup (compact Auto ON): the Auto scope row is closed
  -- behind its own control until the player opens it. Open it (memory only)
  -- and render the same model again, then read the row as before.
@@ -303,14 +327,27 @@ for i=1,3 do
 end
 Strict('offer cards (quality, tag, hover)',cardTexts)
 check(hud.cards[1] and hud.cards[1].name=='Cinder Lattice','Echo names are data, inserted unchanged',hud.cards[1] and hud.cards[1].name)
-check(hud.cards[1] and hud.cards[1].quality==P('Epic') and hud.cards[1].tag=='> '..P('Wishlist pick'),
- 'marked card: shown quality and the code-owned "> " before the pick tag',hud.cards[1] and (hud.cards[1].quality..'|'..hud.cards[1].tag))
+-- The approved compact row. EXPECT: the check that stood here took the tag's
+-- text for the code-owned "> " and the pick words. The row now shows the
+-- words after the star, which stands where that mark stood, and the row's
+-- hover keeps the whole tag with its code-owned "> ".
+check(hud.cards[1] and hud.cards[1].quality==P('Epic') and hud.cards[1].tag==P('Wishlist pick') and hud.cards[1].star==true
+ and hud.cards[1].hoverTag=='> '..P('Wishlist pick'),
+ 'marked card: shown quality, the pick tag\'s words after the star, and the code-owned "> " before them on the row\'s hover',
+ hud.cards[1] and (hud.cards[1].quality..'|'..hud.cards[1].tag..'|'..tostring(hud.cards[1].star)..'|'..tostring(hud.cards[1].hoverTag)))
 check(hud.cards[3] and hud.cards[3].tag=='['..P('Guaranteed offer')..']'
  and hud.cards[3].full=='['..P('Guaranteed offer')..'] '..P('Ashen Tithe ('..P('Uncommon')..')'),
  'guaranteed card: code-owned brackets around the shown marker; hover line re-rendered from the parse',hud.cards[3] and hud.cards[3].full)
-check(HasForm(hud.headingOff,{'Current offer - you choose','Offer - you choose','You choose'},P),
- 'offer heading (Auto OFF, a fitting form) reaches the heading row',hud.headingOff)
-check(hud.bodyOff:find(P('Cinder Lattice ('..P('Epic')..')'),1,true)~=nil,'recommendation target reaches the body',hud.bodyOff)
+-- (EXPECT: the heading was one of the "you choose" forms. The approved Auto
+-- OFF heading is the reviewed "Your offers", and the destination reaches a
+-- cell of its own beside it: the preview tag here, where no slot is active.)
+check(HasForm(hud.headingOff,{'Your offers'},P) and hud.slotOff==P('Preview'),
+ 'offer heading (Auto OFF) reaches the heading row and its destination the cell beside it',tostring(hud.headingOff)..' | '..tostring(hud.slotOff))
+-- (EXPECT: the target was looked up in the text under the rows. The reason
+-- stands in the selected row, which names the offer itself; the sentence
+-- with its target reaches the reason's own hover.)
+check(#hud.wholeOff==1 and hud.wholeOff[1]:find(P('Cinder Lattice ('..P('Epic')..')'),1,true)~=nil and (hud.bodyOff or '')~='',
+ 'recommendation target reaches the reason\'s hover; the reason itself is in the row',tostring(hud.bodyOff)..' | '..tostring(hud.wholeOff[1]))
 -- Charges are counts, behind Details: closed, open, closed again (HudSession).
 local function Row(row) return type(row)=='table' and (tostring(row.shown)..'/'..tostring(row.hover)..'/['..tostring(row.text)..']') or 'not read' end
 check(hud.detailsAtStart==false and type(hud.chargesClosed)=='table' and hud.chargesClosed.shown==false
@@ -333,7 +370,8 @@ check(hud.legend[3]==P('B, R and F: the Banish, Reroll and Freeze charges left t
  and hud.legend[4]:sub(1,3)=='?: ' and hud.legend[5]:sub(1,3)=='~: ','legend keeps the code-owned ? and ~ marks',hud.legend[4])
 -- Auto ON, waiting and paused.
 check(HasForm(hud.headingOn,{'Current offer - Auto ON','Offer - Auto ON','Auto ON'},P),'offer heading (Auto ON)',hud.headingOn)
-check(hud.tagOn=='> '..P('Recommended'),'Auto ON tag',hud.tagOn)
+-- (EXPECT, as for the pick tag: the words after the star.)
+check(hud.tagOn==P('Recommended') and hud.starOn==true,'Auto ON tag: its words after the star',tostring(hud.tagOn)..'|'..tostring(hud.starOn))
 check(hud.scope==P('Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.'),
  'Auto scope row reaches its FontString',hud.scope)
 check(hud.headingWait:find('... '..P('Waiting for offer data'),1,true)~=nil,'waiting heading',hud.headingWait)
@@ -466,7 +504,9 @@ local REMOVED={'readout.label.offer_pick','readout.value.quality_epic','readout.
 for _,k in ipairs(REMOVED) do check(entries[k]~=nil,'fixture: pseudo entry exists for '..k);entries[k]=nil end
 S.InstallBootHook(nil,entries)
 local partial=HudSession()
-check(partial.cards[1] and partial.cards[1].tag=='> Wishlist pick' and partial.cards[1].quality=='Epic',
+-- (EXPECT, as above: the pick words after the star, the whole tag on the hover.)
+check(partial.cards[1] and partial.cards[1].tag=='Wishlist pick' and partial.cards[1].star==true
+ and partial.cards[1].hoverTag=='> Wishlist pick' and partial.cards[1].quality=='Epic',
  'missing entries: pick tag and quality show exact English',partial.cards[1] and partial.cards[1].tag)
 check(partial.legend[4]=='?: the game has not reported that count yet. It is unknown, not zero.','missing legend entry is English',partial.legend[4])
 check(partial.themeMenu[1]=='Appearance: style','missing menu title is English',partial.themeMenu[1])
@@ -487,7 +527,10 @@ local function NoSeam(fn,...)
  assert(r[1],r[2]);return unpack(r,2)
 end
 local R=Nexus.Readout
-check(en.cards[1].quality=='Epic' and en.cards[1].tag=='> Wishlist pick' and en.cards[3].tag=='[Guaranteed offer]'
+-- (EXPECT, as above: the English pick words after the star, the whole
+-- legacy tag "> Wishlist pick" on the row's hover.)
+check(en.cards[1].quality=='Epic' and en.cards[1].tag=='Wishlist pick' and en.cards[1].star==true
+ and en.cards[1].hoverTag=='> Wishlist pick' and en.cards[3].tag=='[Guaranteed offer]'
  and en.cards[3].full=='[Guaranteed offer] Ashen Tithe (Uncommon)','English cards are byte-identical',en.cards[3].full)
 check(en.charges=='B:0 R:? F:3 ~' and en.chargesUnknown=='B:? R:? F:?' and en.chargesZero=='B:0 R:0 F:0','English charge rows')
 check(en.detailsAtStart==false and en.chargesClosed.shown==false and en.chargesClosed.text=='' and en.chargesOpen.shown==true
@@ -495,8 +538,11 @@ check(en.detailsAtStart==false and en.chargesClosed.shown==false and en.chargesC
  'English count disclosure: no charge row with Details closed, the row with Details open, none again once closed')
 check(en.legend[3]=='B, R and F: the Banish, Reroll and Freeze charges left this run, as the game reported them when Nexus made its last decision.'
  and en.legend[6]=='Shown with Auto OFF, where you choose; with Auto ON Nexus uses these charges itself.','English legend')
-check(en.bodyOff:find('Cinder Lattice (Epic)',1,true)~=nil and en.scope=='Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.',
- 'English target and Auto scope row')
+-- (EXPECT, as above: the target on the reason's hover, the reason in the row.)
+check(#en.wholeOff==1 and en.wholeOff[1]:find('Cinder Lattice (Epic)',1,true)~=nil and en.bodyOff:find('Take a needed Echo',1,true)~=nil
+ and en.headingOff:find('Your offers',1,true)~=nil and en.slotOff=='Preview'
+ and en.scope=='Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.',
+ 'English heading, target and Auto scope row')
 check(en.themeMenu[1]=='Appearance: style' and en.appearance.text:find('Nexus Vista, Nexus Amethyst',1,true)~=nil,'English Appearance menu')
 check(en.rewards[1]=='Rewards by Difficulty' and en.serverChat[1]=="|cff7fd5ffNexus:|r The Hardcore menu is not available yet. Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu and open it from the server HUD.",
  'English Callboard hover and Hardcore notice',en.serverChat[1])

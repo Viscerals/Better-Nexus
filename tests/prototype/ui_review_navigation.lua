@@ -197,6 +197,36 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   and hide.tooltipText:find('/nexus panel',1,true)~=nil,'V2: moved and hiding entries say where else they are and how the panel returns')
  C.expect(hide and not hide.tooltipText:find('The Nexus panel is hidden',1,true),
   'V2: the pre-click Hide tooltip does not claim the still-visible panel is already hidden',hide and hide.tooltipText)
+ -- v10 (Root's navigation disposition: "For compact Main ONLY, omit the
+ -- optional panel.tooltip.wishlist_editor_also_plan tooltipText on the
+ -- Wishlist Editor row in Options > More help and windows. Preserve the row
+ -- label/title/callback and the legacy hint."). That hint said "Also under
+ -- Plan on the panel footer.", and the compact footer shows no Plan (V3: its
+ -- hubs read Wishlist, Builds and Orbs). In the menu as it opens here, the
+ -- row keeps its label, its title and its handler and carries no hint, and
+ -- no row of the menu or of More help and windows says that sentence in its
+ -- label, title or hint. The Orbs row beside it keeps its own hint (asked
+ -- above): its footer hub is still called Orbs. EXPECT: at eef1608f this row
+ -- said the sentence. GUARD: the reviewed English text keeps its definition
+ -- (it is shown only without the compact layout, which no scenario of this
+ -- file reaches). The row's route is opened in owner14_panel_usability O1.
+ local editorRow=Item(more,'Wishlist Editor')
+ local stale={}
+ for _,list in ipairs({items,more}) do
+  for _,item in ipairs(list) do
+   for _,field in ipairs({'text','tooltipTitle','tooltipText'}) do
+    if type(item[field])=='string' and item[field]:find('Plan on the panel footer',1,true) then
+     stale[#stale+1]=tostring(item.text)..' ('..field..')'
+    end
+   end
+  end
+ end
+ C.expect(editorRow~=nil and editorRow.tooltipTitle=='Wishlist Editor' and type(editorRow.func)=='function'
+  and editorRow.tooltipText==nil and #stale==0,
+  'V2: in the compact panel the Wishlist Editor row under More help and windows keeps its label, title and handler and no longer points at a Plan on the footer',
+  tostring(editorRow and editorRow.tooltipText)..' / '..table.concat(stale,', '))
+ C.guard((Nexus.Localization.Text('panel.tooltip.wishlist_editor_also_plan'))=='Also under Plan on the panel footer.',
+  'V2: the reviewed hint "Also under Plan on the panel footer." keeps its definition')
  local support,logs=Item(more,'Support report...'),Item(more,'Log viewer...')
  C.expect(support and type(support.func)=='function' and logs and type(logs.func)=='function',
   'V2: Support report and the log viewer are reachable from the menu, under More help and windows')
@@ -390,14 +420,20 @@ C.scenario('V2b each Options route with its owner unavailable opens nothing else
  C.guard(Effects()==before,'V2b: the refusal changes nothing',Effects())
 end)
 
-C.scenario('V3 header Auto and separate Plan, Explore and Orbs footer inside the 420 px Play panel',function()
+C.scenario('V3 header Auto and the separate Wishlist, Builds and Orbs footer hubs inside the Play panel',function()
  C.setup(P.Render(Model())==true,'V3: fixture: a build in progress with Auto shown')
  local f=NexusPanel
  local hubs=f._footerButtons or {}
  C.expect(hubs.plan and hubs.explore and hubs.orbs and hubs.auto==f._autoBtn,'V3: the footer holds Auto and the three hubs')
  if not (hubs.plan and hubs.explore and hubs.orbs) then return end
- C.expect(V.Plain(hubs.plan:GetText())=='Plan' and V.Plain(hubs.explore:GetText())=='Explore' and V.Plain(hubs.orbs:GetText())=='Orbs',
-  'V3: the hubs read Plan, Explore and Orbs')
+ -- The approved compact footer: the Plan hub's face reads "Wishlist" and
+ -- the Explore hub's "Builds" (the draft's one-line hubs); they are the
+ -- same two hubs, with their routes, menus and hovers (V4, V5 below).
+ -- EXPECT: the faces read Plan and Explore, which the check here asked for.
+ C.expect(V.Plain(hubs.plan:GetText())==(Nexus.Localization.Text('panel.button.hub_wishlist'))
+  and V.Plain(hubs.explore:GetText())==(Nexus.Localization.Text('panel.button.hub_builds'))
+  and V.Plain(hubs.plan:GetText())=='Wishlist' and V.Plain(hubs.explore:GetText())=='Builds' and V.Plain(hubs.orbs:GetText())=='Orbs',
+  'V3: the hubs read Wishlist, Builds and Orbs')
  local peers={}
  for _,c in ipairs(f.children or {}) do
   if c.kind=='Button' and c:IsShown() then
@@ -406,24 +442,39 @@ C.scenario('V3 header Auto and separate Plan, Explore and Orbs footer inside the
   end
  end
  C.expect(#peers==0,'V3: Build Library and Leaderboard are no longer footer peers (Explore holds them)',table.concat(peers,', '))
- C.guard(f:GetWidth()==420,'V3: the Play panel uses its 420 px context width',f:GetWidth())
+ -- (EXPECT: the approved reference width, the draft's 420 reference pixels
+ -- where the former 420-unit panel measured 621; the guard here asked for
+ -- those 420 units.)
+ local inset=math.floor(7*284/420+0.5)
+ C.expect(f:GetWidth()==284 and inset==5,'V3: the Play panel is the approved reference width, 284 units',f:GetWidth())
  local a,p,e,o=Rect(hubs.auto),Rect(hubs.plan),Rect(hubs.explore),Rect(hubs.orbs)
  C.setup(a and p and e and o,'V3: fixture: every footer control resolves its anchors')
  if not (a and p and e and o) then return end
  print('OBSERVED','V3 auto='..G.Text(a)..' plan='..G.Text(p)..' explore='..G.Text(e)..' orbs='..G.Text(o))
- C.guard(hubs.auto:IsShown() and a[2]<=10 and a[3]-a[1]==84,'V3: Auto is a separate header control',G.Text(a))
+ C.guard(hubs.auto:IsShown() and a[2]<=10,'V3: Auto is a separate header control',G.Text(a))
+ -- (EXPECT: the control was a fixed 84 units. The compact header gives it
+ -- the widest of its three labels and the draft's 16 pixels, never under
+ -- the 12 units its label fit keeps clear, held to three tenths of the
+ -- panel; this harness measures 6 units a byte.)
+ local widest=0
+ for _,key in ipairs({'panel.button.auto_on','panel.button.auto_off','panel.button.auto_unknown'}) do
+  widest=math.max(widest,6*#(Nexus.Localization.Text(key)))
+ end
+ C.expect(a[3]-a[1]==math.min(math.floor(f:GetWidth()*0.3),widest+math.max(math.floor(16*284/420+0.5),12)),
+  'V3: the Auto control is as wide as its widest label needs',G.Text(a)..' for '..widest)
  -- Approved compact footer (two-line hubs, compact gaps): the three hubs are
  -- 4 units apart in the approved design and 6 here, beside the FAQ shortcut
  -- in the same 404-unit row; the former 10-unit gap belonged to the one-line
  -- hubs. Auto stays a header control, apart from and above the footer.
  C.expect(a[4]<p[2] and e[1]-p[3]>=4 and o[1]-e[3]>=4,'V3: header Auto stands apart from footer navigation',
   G.Text(a)..' '..G.Text(p)..' '..G.Text(e)..' '..G.Text(o))
- C.expect(o[3]<=420-8 and G.Apart(a,p) and G.Apart(p,e) and G.Apart(e,o),'V3: all four stay inside the panel margin, apart',G.Text(o))
+ C.expect(p[1]==inset and o[3]==f:GetWidth()-inset and G.Apart(a,p) and G.Apart(p,e) and G.Apart(e,o),
+  'V3: all four stay inside the panel margin, apart; the hubs span the footer between its insets',G.Text(p)..' '..G.Text(o))
  C.setup(P.Render(Model({noBuild=true}))==true,'V3: fixture: the setup view (no build) renders')
  a,p,e,o=Rect(hubs.auto),Rect(hubs.plan),Rect(hubs.explore),Rect(hubs.orbs)
  C.guard(not hubs.auto:IsShown(),'V3: without a build the Auto control stays hidden, as before')
  C.expect(hubs.plan:IsShown() and hubs.explore:IsShown() and hubs.orbs:IsShown() and p and e and o
-  and p[1]>=8 and o[3]<=420-8 and G.Apart(p,e) and G.Apart(e,o),'V3: the three hubs share the row without Auto',
+  and p[1]==inset and o[3]==f:GetWidth()-inset and G.Apart(p,e) and G.Apart(e,o),'V3: the three hubs share the row without Auto',
   p and e and o and (G.Text(p)..' '..G.Text(e)..' '..G.Text(o)) or 'unplaced')
  C.setup(P.Render(Model())==true,'V3: fixture: back to the build in progress')
 end)
@@ -447,15 +498,18 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  -- through a bounded deterministic rule against actual screen width";
  -- "Readability has priority over fixed420 width"): at this scenario's 125%
  -- text (the font reports 15 for the 12-unit reference) the Play panel is
- -- 420 x 1.25 = 525 units wide, or what the screen leaves it at the chosen
+ -- the reference width x 1.25, or what the screen leaves it at the chosen
  -- 100% (its width less the 24-unit margin, on a screen of 640 units or
- -- more) where that is less, and never under 420. The width is stated here
- -- from the scenario's own font size and the screen; it is not read from the
- -- layout engine. The check that stood here held the header to 420 units.
+ -- more) where that is less, and never under the reference width. The
+ -- width is stated here from the scenario's own font size and the screen;
+ -- it is not read from the layout engine. The approved reference width is
+ -- 284 units (it was 420), so the panel is 284 x 1.25 = 355 units wide here
+ -- (it was 525). The check that first stood here held the header to 420
+ -- units.
  local screen=tonumber(UIParent:GetWidth())
- local wantWidth=math.floor(420*large.size/12+0.5)
+ local wantWidth=math.floor(284*large.size/12+0.5)
  if screen and screen>=640 then wantWidth=math.min(wantWidth,math.floor(screen-24)) end
- wantWidth=math.max(420,wantWidth)
+ wantWidth=math.max(284,wantWidth)
  C.setup(P.PanelScale()==1 and large.size/12==1.25,'V3a: fixture: 125% text at the chosen 100% panel size',P.PanelScale())
  C.expect(f:GetWidth()==wantWidth and title and build and wishlist and change,
   'V3a: at 125% text the Play header is as wide as the text scale gives it inside the screen ('..wantWidth
@@ -620,6 +674,25 @@ C.scenario('V4 the hubs open real workspaces; retained routes and hovers say wha
   local want=({plan='saves, assigns and loads nothing',explore='not a complete or server-wide ranking',
    orbs='an approved run continues'})[kind]
   C.expect(ok and tip:find(want,1,true)~=nil,'V4: the '..kind..' hover says '..want,tostring(err)..' '..tip)
+  -- v9 (Root's ruling ST8-2: "Fix the misleading ... hub hover titles
+  -- through semantic composition from EXISTING localized menu/control
+  -- labels, including current Wishlist/Builds/Orbs face labels. Keep
+  -- destination menu names/routes and contents as approved"). Each hover is
+  -- headed by the name its own hub shows on its face (V3: Wishlist, Builds,
+  -- Orbs), and the name of what the hub opens stays on it: as the next line
+  -- for the two hubs whose face is not that name (Plan, Explore), and as
+  -- the heading itself for Orbs, which begins with the hub's name. The
+  -- contents then follow (the sentence checked above among them). Literal
+  -- reviewed English, not read from the panel's own line builder. EXPECT:
+  -- the Wishlist hub's hover was headed "Plan" and the Builds hub's
+  -- "Explore", names no footer control shows.
+  local heads=({plan={'Wishlist','Plan','Wishlist Editor, Assign Wishlist and the game\'s My Builds page.'},
+   explore={'Builds','Explore','Build Library: shared builds, and under Mine your Saved Builds and shared listings.'},
+   orbs={'Orbs / Lost Memories','Opens the Orb window to inspect it. It starts or spends nothing.'}})[kind]
+  local headed=ok and V.Plain(tostring(lines[1])):sub(1,#V.Plain(button:GetText()))==V.Plain(button:GetText())
+  for i,line in ipairs(heads) do headed=headed and V.Plain(tostring(lines[i]))==line end
+  C.expect(headed,'V4: the '..kind..' hover is headed by the name on its hub\'s face, then names what it opens and lists its contents',
+   tostring(lines[1])..' | '..tostring(lines[2])..' | '..tostring(lines[3]))
  end
  C.guard(GameplayEffects()==beforeNav,'V4: hovering the hubs keeps actions, sends, assignments and Auto unchanged',GameplayEffects())
 end)

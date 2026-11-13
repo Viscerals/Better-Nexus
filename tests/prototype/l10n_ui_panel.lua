@@ -584,13 +584,21 @@ end
 ---------------------------------------------------------------- MISSING
 do
  local entries=S.PseudoEntries()
- local removed={['panel.button.plan']='Plan',['panel.menu.faq']='Questions (FAQ)',['panel.label.more_count']='+{count} more',
+ -- The approved compact panel (design draft "Nexus compact panel"; its
+ -- decision on the footer's words): the first footer hub reads "Wishlist"
+ -- (panel.button.hub_wishlist) and the second "Builds"
+ -- (panel.button.hub_builds); what each opens is unchanged and stays on its
+ -- hover. EXPECT: the entry removed here was panel.button.plan, the hub's
+ -- former name, and the hub was expected to read the English "Plan". The
+ -- entry of the name the hub shows now is removed instead, and the hub must
+ -- show that name's exact English.
+ local removed={['panel.button.hub_wishlist']='Wishlist',['panel.menu.faq']='Questions (FAQ)',['panel.label.more_count']='+{count} more',
   ['panel.tooltip.minimap_drag']='Drag to reposition'}
- for k in pairs(removed) do entries[k]=nil end
+ for k in pairs(removed) do check(entries[k]~=nil,'MISSING: fixture: a pseudo entry exists for '..k);entries[k]=nil end
  local H,P=Boot(nil,entries)
  P.Init({RefreshDisplay=function() return true end,ToggleAuto=function() return false end,RequestFirstDisplay=function() return true end})
  P.Show();P.Render(Model{})
- check(NexusPanel._footerButtons.plan:GetText()=='Plan','MISSING: Plan shows exact English')
+ check(NexusPanel._footerButtons.plan:GetText()=='Wishlist','MISSING: the Wishlist hub shows exact English')
  check(NexusPanel._footerButtons.explore:GetText():find(S.OPEN,1,true)~=nil,'MISSING: a present entry is still the pseudo text')
  local faq
  for _,item in ipairs(P.MoreMenuItems(NexusPanel._menuBtn)) do if item.text=='Questions (FAQ)' then faq=item end end
@@ -612,7 +620,12 @@ do
  local LS=Nexus.LoadingStatus
  check(LS~=nil and type(LS.BindSharedButton)=='function','PENDING: LoadingStatus is loaded')
  local explore=NexusPanel._footerButtons.explore
- local label=Nexus.Localization.Text('panel.button.explore')
+ -- The approved compact panel: this hub's name is "Builds"
+ -- (panel.button.hub_builds; it was panel.button.explore, "Explore"). The
+ -- name the hub shows is the one the loading explanation and the greying
+ -- registry are bound with, so the probe below is bound with it too.
+ local label=Nexus.Localization.Text('panel.button.hub_builds')
+ check(label=='Builds','PENDING: fixture: the hub\'s reviewed English name is Builds: '..tostring(label))
  local realStatus=Nexus.StartupStatus
  local saved,saved2,acts,sent=F.Serialize(NexusDB),F.Serialize(WishlistRealizerDB),#H.actions,#H.sent
  local probe=CreateFrame('Button',nil,UIParent)

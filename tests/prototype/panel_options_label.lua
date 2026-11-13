@@ -1,11 +1,26 @@
 -- Issue #165: the HUD menu button reads "Options" (and "! Options" while a
 -- trusted update notice is shown) instead of an ellipsis alone. The label is
 -- the localized "panel.button.options"; the "!" is code-owned. Header line 1
--- geometry at 420 px and a wider panel, 125% text in the LayoutMetrics
+-- geometry at the panel's own width and a wider panel, 125% text in the LayoutMetrics
 -- conservative model, long names and a long localized label, the hover named
 -- by the visible control, both Difficulty / Soul Ash HUD modes, the notice
 -- route and the menu route. Synthetic fixtures; no game client. Native glyph
 -- widths are not proven here.
+-- The approved compact panel (design draft "Nexus compact panel": 420
+-- reference pixels wide, where the reference panel is 284 units, so one
+-- reference pixel is 284/420 of the text scale in units). Its header line 1
+-- sizes each control by its own words: Options is as wide as the label it
+-- shows, as the client measures it, with the draft's 14 pixels of room
+-- (never under the 14 units that keep the label's two 6-unit end caps with 2
+-- to spare), held to three tenths of the panel; it is no longer a fixed
+-- 92-unit slot with an 80-unit label. The Auto control is sized the same way
+-- from its three labels, Close is the draft's 24 pixels, the gaps its 6, and
+-- the title keeps the rest. The Build and Wishlist names wrap in their
+-- column, and the Wishlist line shows the name alone, with its assignment
+-- on the line's hover. Each assertion of the former fixed slots is marked
+-- where it stood and replaced by the draft's own assertion, not relaxed:
+-- the label, the notice mark, the hover, the route and the passivity checks
+-- are unchanged.
 local T=dofile('tests/prototype/startup_support.lua')
 Nexus=nil;NexusDB=T.Profile(3,0);WishlistRealizerDB=nil;SlashCmdList=nil
 local H=dofile('tests/prototype/harness.lua')
@@ -79,6 +94,26 @@ print('PASS Options words and the trusted-notice route')
 
 -- 2. Label fit at 125%. The harness button has no font string; give it one
 -- measured in the conservative model, then place it as a layout pass does.
+-- The approved compact control is as wide as its label measures, so the
+-- label fits because the control is sized to it, and that needs the
+-- control's own measurement in the same model as the label. From here to
+-- the end of section 5 every text of this harness therefore measures in the
+-- one conservative model (layout_geometry_support UseFont: 8.75 units a
+-- character, 17-unit lines, the 15 px owned font; its new font reader is
+-- what makes the panel measure its words again), as one face does in the
+-- client. A label that changes is followed by the next layout pass
+-- (P.PlaceOptionsButton), as a render follows it.
+-- One reference pixel in units at this text scale, on whole units.
+local function Design(px) return math.max(1,math.floor(px*284/420*1.25+0.5)) end
+-- The room around Options' label: the draft's 14 pixels (12 units at 125%)
+-- and never under 14 units.
+local ROOM=math.max(Design(14),14)
+-- The width a render lays the panel out at with 125% text: 284 x 1.25.
+local RENDERED=355
+local G=dofile('tests/prototype/layout_geometry_support.lua')
+G.UseFont({name='125% conservative',char=char,line=17,size=15})
+assert(LM.RuntimeMetrics()==1.25 and ROOM==14,'fixture: the conservative model keeps the 125% runtime font scale')
+assert(P.Render(Model()) and f:GetWidth()==RENDERED,'fixture: a render in the conservative model, '..RENDERED..' units wide: '..tostring(f:GetWidth()))
 local menu=f._menuBtn
 local label=menu:CreateFontString()
 label.GetText=function()return menu:GetText()end
@@ -89,8 +124,18 @@ assert(slots==P.HeaderSlots(),'the same read-only slots')
 assert(menu:GetWidth()==slots.optionsWidth and menu:GetHeight()==slots.height,'Options keeps its slot size')
 assert(label:GetWidth()==slots.optionsWidth-slots.caps and label:GetHeight()==slots.height,
  'the label is bounded to the button less its end caps, one line high')
+-- EXPECT: the slot was the fixed 92 x 22 units with an 80-unit label, which
+-- both labels fitted. The compact control is the draft's 22 pixels high (19
+-- units here) and as wide as the label it shows and its room, with the same
+-- two 6-unit end caps.
+assert(slots.caps==12 and slots.height==Design(22) and slots.height==19,'Options is the draft\'s 22 pixels high, its label inside two 6-unit end caps: '
+ ..tostring(slots.height)..' / '..tostring(slots.caps))
 for _,notice in ipairs({false,true})do
  menu:SetText(P.OptionsText(notice))
+ slots=P.PlaceOptionsButton()
+ local want=math.ceil(#menu:GetText()*char)+ROOM
+ assert(menu:GetWidth()==want and slots.optionsWidth==want and label:GetWidth()==want-12,
+  'Options is as wide as "'..menu:GetText()..'" measures and its room: '..menu:GetWidth()..' of '..want)
  assert(not LM.Shortened(label),'"'..menu:GetText()..'" fits whole at 125%: '
   ..label:GetStringWidth()..' <= '..label:GetWidth())
 end
@@ -106,8 +151,35 @@ assert(P.Render(Model({notice=true})))
 local LONG_LABEL='! Einstellungen und Status'
 menu:SetText(LONG_LABEL)
 assert(LM.Shortened(label),'fixture: a long localized label does not fit the slot')
+-- The approved compact control follows its label only up to three tenths of
+-- the panel (106 of this render's 355 units) and is not grown wider than
+-- that.
+-- v9 (Root's ruling SPEC-A3-A7: "Preserve full long translated captions at
+-- current native fonts, including Options ... Let owned
+-- text/button/header/progress-row heights grow and wrap as needed. Remove
+-- compact-path shortening/font fitting"). After the layout pass that follows
+-- a changed label the long label is no longer shortened in that control: it
+-- wraps inside the same two end caps and is whole there. Its box is that
+-- room wide and as tall as its wrapped lines in this font model (stated here
+-- with G.Rows: 17 units a line, more than one line), and the control is as
+-- tall as those lines with the draft's 3 pixels above and below them (3
+-- units each at 125%), taller than its one-line height. EXPECT: the
+-- assertion that stood here asked for the label to stay shortened
+-- (LM.Shortened) in a control of the one-line height. Its own line is still
+-- wider than its room, which is why its hover names it in full first, as
+-- below.
+do
+ local held=P.PlaceOptionsButton()
+ local room=menu:GetWidth()-12
+ local lines=G.Rows(LONG_LABEL,room,char)*17
+ assert(menu:GetWidth()==math.floor(RENDERED*0.3) and held.optionsWidth==menu:GetWidth() and label:GetWidth()==room
+  and label:GetStringWidth()>room and lines>=2*17 and label:GetHeight()==lines
+  and menu:GetHeight()==lines+2*Design(3) and menu:GetHeight()>held.height,
+  'a long label holds Options at three tenths of the panel and wraps there, whole, in a control as tall as its lines: '
+   ..menu:GetWidth()..'x'..tostring(menu:GetHeight())..', label '..tostring(label:GetHeight())..' of '..lines)
+end
 menu:GetScript('OnEnter')(menu)
-assert(tip[1]==LONG_LABEL,'the complete label comes first while shortened: '..tostring(tip[1]))
+assert(tip[1]==LONG_LABEL,'the complete label comes first while its line is wider than its room: '..tostring(tip[1]))
 local function Has(text)for _,line in ipairs(tip)do if line:find(text,1,true)then return true end end end
 assert(tip[2]=='Options','the hover then names the control by its own label: '..tostring(tip[2]))
 assert(not Has('Menu and status'),'the hover no longer names a control the panel does not show')
@@ -123,7 +195,11 @@ print('PASS shortened label hover, notice hover')
 
 -- 4. Header geometry: title, Auto (or its state words), Options and Close on
 -- line 1; Build beside My Builds and Wishlist beside Change below. Every slot
--- is a right-edge offset, so 420 px and a wider panel keep the same order.
+-- is a right-edge offset, so the panel's own width and a wider panel keep the
+-- same order.
+-- The approved compact panel: the widths are the one this render laid the
+-- panel out at (355 units at 125% text) and a forced 640. The former pair was
+-- 420, the fixed-slot panel's least width, and 640.
 local function Rect(region,W)
  local point,relative,relativePoint,x,y=region:GetPoint(1)
  assert(relative==f and point==relativePoint and (point=='TOPLEFT' or point=='TOPRIGHT'),
@@ -151,7 +227,24 @@ local function CheckHeader(W,why)
  -- The title starts after the drag grip (slots.titleLeft).
  assert(r.title.w==W-slots.reserved-slots.titleLeft,why..': the title keeps the rest of line 1: '..r.title.w)
  assert(r.title.x==slots.titleLeft,why..': the title starts after the grip: '..r.title.x)
- assert(r.title.w>=150,why..': the title stays readable: '..r.title.w)
+ -- The compact slots, stated from the draft and the shown words (not read
+ -- from the panel): after the 7-pixel inset come Close (24 pixels), Options
+ -- (its shown label and its room) and the Auto control or its state words'
+ -- slot (the widest of the three Auto labels, "Auto OFF", and the draft's 16
+ -- pixels, never under the 12 units its label fit keeps clear), Options and
+ -- the Auto slot each held to three tenths of the panel this render laid
+ -- out, 6 pixels apart; the title starts 6 pixels after the 24-unit grip.
+ -- EXPECT: the assertion that stood here asked for the 150 units the title
+ -- had left of the fixed slots in the 420-unit panel. The title keeps what
+ -- the controls' own words leave, and its own word must fit there.
+ local limit=math.floor(RENDERED*0.3)
+ local optionsW=math.min(limit,math.ceil(#f._menuBtn:GetText()*char)+ROOM)
+ local autoW=math.min(limit,math.ceil(#'Auto OFF'*char)+math.max(Design(16),12))
+ local reserved=Design(7)+Design(24)+Design(6)+optionsW+Design(6)+autoW+Design(6)
+ assert(slots.reserved==reserved and slots.titleLeft==Design(7)+24+Design(6) and slots.gap==Design(6)
+  and r.close.w==Design(24) and r.options.w==optionsW and r.auto.w==autoW,
+  why..': line 1 keeps the draft\'s slots for these words: '..tostring(slots.reserved)..' of '..reserved)
+ assert(f._contextTitle:GetText()=='Nexus' and #'Nexus'*char<=r.title.w,why..': the title\'s own word fits its slot: '..r.title.w)
  assert(r.options.w==slots.optionsWidth and r.auto.w==slots.autoWidth,why..': slot widths')
  local order={'title','auto','options','close'}
  for i=1,#order-1 do
@@ -161,7 +254,24 @@ local function CheckHeader(W,why)
  assert(r.title.x>=0 and r.close.x+r.close.w<=W,why..': line 1 stays inside the panel')
  assert(r.build.x+r.build.w<=r.switch.x and r.wishlist.x+r.wishlist.w<=r.change.x,
   why..': Build and Wishlist end before My Builds and Change')
- assert(r.build.h==20 and r.wishlist.h==20 and r.title.h==20,why..': one-line header rows')
+ -- The approved compact header's rows. Line 1's row is the at-least-24-unit
+ -- grip less the design pixel it stands out above and below (22 units here,
+ -- where the draft's 22 pixels are 19), and the title's one line stands in
+ -- it. The Build and Wishlist rows are the draft's 20 pixels (16 or 17
+ -- units here, each laid on whole units) and as tall as their names' wrapped
+ -- lines where that is more: the long names of this fixture wrap in their
+ -- column and nothing is shortened (17 units a line in this model). The
+ -- rows keep the heights this render's own layout gave them, so at the
+ -- forced wider panel a name may need fewer lines than its row holds.
+ -- EXPECT: the assertion that stood here held the three to one 20-unit line
+ -- each, with the names cut at the column's end.
+ local function Lines(region,width) return G.Rows(region:GetText() or '',width,char)*17 end
+ local buildLines,wishlistLines=Lines(f._contextBuild,r.build.w),Lines(f._contextWishlist,r.wishlist.w)
+ assert(r.title.h==math.max(Design(22),24-2*Design(1)) and r.title.h==22 and Lines(f._contextTitle,r.title.w)==17,
+  why..': the title is one line in line 1\'s row: '..r.title.h)
+ assert(buildLines>=Design(20) and wishlistLines>=Design(20) and r.build.h>=buildLines and r.wishlist.h>=wishlistLines
+  and (W~=RENDERED or (r.build.h==buildLines and r.wishlist.h==wishlistLines)),
+  why..': the Build and Wishlist rows hold their names\' wrapped lines whole: '..r.build.h..' / '..buildLines..', '..r.wishlist.h..' / '..wishlistLines)
  -- Main-panel visual correction ("Split Build/Wishlist captions from
  -- values"): each line's label is a caption of its own before the names
  -- (f._contextBuildCaption, f._contextWishlistCaption) and the line's own
@@ -191,19 +301,28 @@ local function CheckHeader(W,why)
   assert(not LM.Overlap(r[names[i]],r[names[j]]),why..': '..names[i]..' overlaps '..names[j])
  end end
  assert(f._menuBtn:IsShown() and f._closeBtn:IsShown(),why..': Options and Close are shown')
+ -- A forced width is this check's own. The panel gets its render's width
+ -- back with its header applied there, so the next render starts from what
+ -- a render leaves: the names wrap now, and a render measures them at the
+ -- frame's own width, a width a caller gave it included.
+ if W~=RENDERED then
+  f:SetWidth(RENDERED)
+  P.UpdateContextHeader(P._lastModel)
+  P.PlaceOptionsButton()
+ end
  return autoShown,r
 end
-assert(P.Render(Model({notice=true})))
-for _,W in ipairs({420,640})do
+assert(P.Render(Model({notice=true})) and f:GetWidth()==RENDERED,'fixture: the render lays the panel out '..RENDERED..' units wide')
+for _,W in ipairs({RENDERED,640})do
  assert(CheckHeader(W,'Auto shown at '..W..' px')==true,'fixture: Auto is shown for an active build')
 end
-assert(P.Render(Model({complete=true})))
-for _,W in ipairs({420,640})do
+assert(P.Render(Model({complete=true})) and f:GetWidth()==RENDERED,'fixture: the render lays the panel out '..RENDERED..' units wide')
+for _,W in ipairs({RENDERED,640})do
  assert(CheckHeader(W,'Auto hidden at '..W..' px')==false,'fixture: Auto is hidden for a finished build at 80')
  assert(f._contextAutoState:GetText()=='Auto OFF','the Auto state words take its slot')
 end
-f:SetWidth(420)
-print('PASS header line 1 order and no overlap at 420 px and 640 px, Auto shown and hidden')
+f:SetWidth(RENDERED)
+print('PASS header line 1 order and no overlap at the panel\'s own 355 units and at 640, Auto shown and hidden')
 
 -- 4b. Both Difficulty / Soul Ash HUD preferences, through the setter the
 -- Options menu uses. With the Nexus HUD the panel mirrors the values (attached:
@@ -225,22 +344,24 @@ local headerBy={}
 -- Main-panel visual correction ("Let this panel width follow text scale
 -- through a bounded deterministic rule against actual screen width";
 -- "Readability has priority over fixed420 width"): at this fixture's 125%
--- text a render lays the panel out 420 x 1.25 = 525 units wide, and the
--- mirrored status is that render's block. The widths forced below (420 and
--- 640) move only the header's right-edge slots, as before; the status keeps
--- the place its render gave it, so "inside the panel" is held against the
--- render's own width at both forced widths (tighter than the forced 640 was,
--- and 525 where the forced 420 stood). The assertion that stood here held it
--- inside the forced width.
-local RENDERED=525
+-- text a render lays the panel out at its reference width x 1.25, and the
+-- mirrored status is that render's block. The forced 640 below moves only
+-- the header's right-edge slots, as before; the status keeps the place its
+-- render gave it, so "inside the panel" is held against the render's own
+-- width at both widths (tighter than the forced 640 was). The assertion that
+-- stood here held it inside the forced width.
+-- The approved compact panel: the reference width is 284 units, so the
+-- render's own width is RENDERED, 355 units (section 2); it was 420 x 1.25 =
+-- 525. The widths are that one and the forced 640 (they were the forced 420
+-- and 640).
 for _,mode in ipairs({'nexus','server'})do
  status.SetMode(mode)
  assert(status.IsUsingNexusHud()==(mode=='nexus'),'fixture: the '..mode..' HUD is the preference')
  for _,complete in ipairs({false,true})do
   assert(P.Render(Model({notice=true,complete=complete,status=mode=='nexus'})),'render in '..mode..' mode')
-  assert(f:GetWidth()==RENDERED,'at 125% text the render lays the panel out '..RENDERED..' units wide (420 x 1.25): '..tostring(f:GetWidth()))
+  assert(f:GetWidth()==RENDERED,'at 125% text the render lays the panel out '..RENDERED..' units wide (284 x 1.25): '..tostring(f:GetWidth()))
   local line=f._play and f._play.server
-  for _,W in ipairs({420,640})do
+  for _,W in ipairs({RENDERED,640})do
    local why=mode..' HUD, '..(complete and 'finished' or 'in progress')..' at '..W..' px'
    local autoShown,r=CheckHeader(W,why)
    assert(autoShown==not complete,'fixture: '..why..': Auto follows the build, not the HUD mode')
@@ -279,7 +400,7 @@ for _,mode in ipairs({'nexus','server'})do
 end
 status.SetMode(originalMode)
 assert(status.VisibilityFacts().mode==originalMode,'fixture: the original HUD preference is restored')
-f:SetWidth(420)
+f:SetWidth(RENDERED)
 print('PASS both Difficulty / Soul Ash HUD modes: header line 1 unchanged, the attached status below it')
 
 -- 5. Route: a click opens the Options menu at the button and changes
@@ -336,7 +457,7 @@ print('PASS panel options label')
 -- the label. Fresh real-TOC boots (format5_support F.Boot) of synthetic saved
 -- data: right after data\LocalizationPacks.lua loads, a scoped F.fileHooks
 -- entry deep-copies the in-memory packs and overwrites only the copied frFR
--- "panel.button.options" (the shipped complete frFR already holds its own
+-- "panel.button.options" (the shipped frFR already holds its own
 -- reviewed "Options", which stays unchanged); the real
 -- core/Localization.lua then checks and copies it, frFR is chosen only in the
 -- synthetic settings, and Panel.Render, OptionsLabel / OptionsText,
@@ -345,12 +466,28 @@ print('PASS panel options label')
 -- language ID, no shipped pack, key, cap or data change, no translation.
 -- Geometry is the stated uniform-character models of layout_geometry_support
 -- (default, 16 px face, 0.75, 2.0) and the 125% conservative model of section
--- 2, at UI scales 1 and 0.64, 420 / 640 px panels and a 640x480 screen: a
--- regression model, not native glyph, wide-script font or pixel proof. Native
--- focus, Escape, hit order and tooltip drawing are NOT RUN; a harness Click is
--- not a native click. The fixed 92x22 control is shortened, never grown; its
--- own hover recovers the complete label. Self-contained: it reads nothing the
--- sections above set up, and restores the globals it replaces.
+-- 2, at UI scales 1 and 0.64, the panel's own width and a forced 640, and a
+-- 640x480 screen: a regression model, not native glyph, wide-script font or
+-- pixel proof. Native focus, Escape, hit order and tooltip drawing are NOT
+-- RUN; a harness Click is not a native click. The approved compact control is
+-- as wide as its label up to three tenths of the panel and is not grown
+-- wider than that (it was a fixed 92x22 control). v9 (Root's ruling
+-- SPEC-A3-A7): a longer label is not shortened there any more. It wraps in
+-- the control, whole, the control and header line 1 grow for it, and its
+-- own hover still names the complete label first (EXPECT: "a longer label
+-- is shortened there, and its own hover recovers the complete label").
+-- v11 (Root's disposition on partial packs: "Full shipped frFR completeness
+-- is not a current panel UI-test prerequisite"): a pack may hold fewer
+-- entries than the English catalog, and a key it lacks falls back to
+-- English. This section asks nothing about how many entries the shipped
+-- frFR holds. The hook counts the entries of the copy it hands the loader,
+-- before the loader runs, and every accepted and rejected figure asked of
+-- the loader is stated from that count; part F hands over a copy without
+-- its Options entry and asks for the English word in the French panel.
+-- (EXPECT: the shipped frFR one entry per English key, and the loader's
+-- frFR row equal to the size of the English catalog.)
+-- Self-contained: it reads nothing the sections above set up, and restores
+-- the globals it replaces.
 do
  -- Every global as it is now; each boot's harness replaces many of them.
  local before={}
@@ -362,6 +499,10 @@ do
  local checks=0
  local function check(ok,why)assert(ok,why);checks=checks+1 end
  local KEY='panel.button.options'
+ -- v11: given to Boot in place of a candidate text, it has the hook leave
+ -- the copied frFR Options entry out (part F). A table of its own, so it
+ -- equals no text.
+ local OMIT={}
  -- Deterministic test-only text from bounded valid UTF-8 pieces: accented
  -- Latin, CJK (wide in the client, one model character here), fullwidth
  -- Latin and Cyrillic, then ASCII padding to an exact byte length.
@@ -393,10 +534,16 @@ do
  -- character, a 15 px owned font), as a geometry model beside the four above.
  local C125={name='125% conservative',char=8.75,line=17,size=15}
  local MODELS={G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double,C125}
- -- Literal fits of the short control in the 80 px label room: visible
- -- characters x model width ("Réglages" 8, "! Réglages" 10).
+ -- Literal fits of the short control: visible characters x model width
+ -- ("Réglages" 8, "! Réglages" 10).
+ -- The approved compact control is sized to the label it shows, so the short
+ -- label is whole in every model: with its room it stays under the three
+ -- tenths of the panel that hold the control (58 and 69 of 85 units in the
+ -- default face, 70 and 84 of 85 at 16 px, 48 and 56 of 85 at 0.75, 107 and
+ -- 129 of 170 at 2.0, 84 and 102 of 106 at 125%). EXPECT: in the fixed 80 px
+ -- label room it was cut at 2.0 (both) and, with the notice mark, at 125%.
  local SHORT_CUT={[G.MODELS.default]={false,false},[G.MODELS.px16]={false,false},
-  [G.MODELS.small]={false,false},[G.MODELS.double]={true,true},[C125]={false,true}}
+  [G.MODELS.small]={false,false},[G.MODELS.double]={false,false},[C125]={false,false}}
  -- Independent literal expectations of the surrounding presentation, per
 -- active language: the reviewed English base and the reviewed shipped frFR
 -- values (panel.tooltip.options_contents, panel.tooltip.update_available,
@@ -404,17 +551,41 @@ do
 -- panel.label.context_wishlist with usertext.value.wishlist_assigned_named).
 -- Only the Options label itself is the test candidate; the help, notice,
 -- Auto state and Wishlist words are the language's own and localize.
+-- The approved compact panel: the Wishlist line shows the name alone (the
+-- reviewed line with the destination's own compact form of the name) and
+-- the line's hover keeps the reviewed line with its state. `wishlist` is
+-- the line as shown; `assigned` is the reviewed line with its state, as it
+-- stood on the line itself (the literal that was `wishlist`).
+ -- v9 (Root's ruling ST8-2: "Fix the misleading Main Options help ...
+ -- through semantic composition from EXISTING localized menu/control labels
+ -- ... Leave the existing options_contents definition untouched; if not used
+ -- in Main, report this explicitly with the fixture consequence"). The
+ -- reviewed sentence (`help`, panel.tooltip.options_contents) ends "Plan,
+ -- Explore and Orbs are on the footer", and the compact footer's hubs read
+ -- Wishlist, Builds and Orbs. The compact panel's hover no longer shows that
+ -- sentence: under the control's name it lists the Options menu's own five
+ -- group titles (`sections`: panel.menu.section_help, _settings, _notices,
+ -- _session, _panel), each whole on a line of its own, in the menu's order.
+ -- `sections` are independent literals: the reviewed English, and for frFR
+ -- the same five reviewed titles FRENCH_MENU below already states as rows of
+ -- the opened menu. `help` stays as the literal of the sentence's untouched
+ -- definition, which Header asks for and asks not to be on the hover.
+ -- EXPECT: `help` was the hover's second line (Want), in both languages.
  local LOCALE={
   enUS={help='Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.',
+   sections={'Help and setup','Settings','Notices','Session','Panel'},
    notice='Update available: 1.20.0-beta.1 test.9029',
    releases='Open this menu for the manual Releases-page link.',
    autoOff='Auto OFF',
-   wishlist='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)'},
+   wishlist='Wishlist: Synthetic |||| Wishlist Caf\195\169',
+   assigned='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)'},
   frFR={help='Aide et configuration, param\195\168tres, avis, journaux et actions du panneau. Plan, Explorer et Orbs sont en bas du panneau.',
+   sections={'Aide et configuration','Param\195\168tres','Avis','Session','Panneau'},
    notice='Mise \195\160 jour disponible : 1.20.0-beta.1 test.9029',
    releases='Ouvrez ce menu pour le lien manuel vers la page Releases.',
    autoOff='Auto D\195\137SACTIV\195\137',
-   wishlist='Liste de souhaits : Synthetic |||| Wishlist Caf\195\169 (assign\195\169e)'},
+   wishlist='Liste de souhaits : Synthetic |||| Wishlist Caf\195\169',
+   assigned='Liste de souhaits : Synthetic |||| Wishlist Caf\195\169 (assign\195\169e)'},
  }
  local function Words()
   local words=LOCALE[(Nexus.Localization.ActiveLanguage())]
@@ -422,13 +593,14 @@ do
   return words
  end
  -- The control's own hover: its name heads it, complete and wrapped while
- -- the button shows that name shortened (with or without the trusted "! "),
- -- so the complete label is shown exactly once; then help and the notice,
- -- in the active language.
+ -- the name's own line is wider than its room in the button (with or without
+ -- the trusted "! "), so the complete label is shown exactly once; then the
+ -- menu's five group titles (v9: `sections`; EXPECT: the one `help`
+ -- sentence) and the notice, in the active language.
  local function Want(label,notice,shortened)
   local words,out=Words(),{}
   out[#out+1]={label,1,1,1,shortened or nil}
-  out[#out+1]={words.help,0.8,0.8,0.8,true}
+  for _,title in ipairs(words.sections)do out[#out+1]={title,0.8,0.8,0.8,true} end
   if notice then
    out[#out+1]={' '}
    out[#out+1]={words.notice,1,0.82,0,true}
@@ -481,6 +653,8 @@ do
   check(same(Effects(),baseline),why..': since start-up no saved root, setting, language, Auto, assignment, action (save, spend), send, chat, popup or consent change')
  end
  -- One fresh real-TOC boot; options nil boots the shipped data unchanged.
+ -- (v11: OMIT has the hook leave the copied frFR Options entry out; any
+ -- other value is put there, as before.)
  local function Boot(language,options)
   local db=F.Database({version=2});db.settings.uiLanguage=language
   local prior=F.fileHooks
@@ -495,7 +669,16 @@ do
    -- What the shipped frFR held before the copy was changed.
    local count=0;for _ in pairs(shipped.frFR.entries)do count=count+1 end
    shippedFacts={entries=shipped.frFR.entries,count=count,options=shipped.frFR.entries[KEY]}
-   packs.frFR.entries[KEY]=options
+   if options==OMIT then packs.frFR.entries[KEY]=nil else packs.frFR.entries[KEY]=options end
+   -- v11 (Root's disposition, required 2): the fixture's own INPUT, counted
+   -- here, before the real loader (core\Localization.lua, the next file of
+   -- the TOC) checks it: how many entries the copied frFR is handed over
+   -- with. Every accepted and rejected figure asked of the loader below is
+   -- stated from this count and from what the case did to the Options
+   -- entry, never from the loader's own diagnostics and never from the
+   -- size of the English catalog.
+   local supplied=0;for _ in pairs(packs.frFR.entries)do supplied=supplied+1 end
+   shippedFacts.supplied=supplied
    Nexus.LocalizationPacks=packs
   end} or nil
   -- A new harness measures with its defaults until G.UseFont; an earlier
@@ -577,35 +760,151 @@ do
   end
   return out
  end
- -- The literal header line 1 slots (Panel M.HeaderSlots: Close 24 px at the
- -- 10 px edge, Options 92 px with an 80 px label, Auto 84 px, 8 px gaps,
- -- the 24 x 24 grip at (8, 6), centred on the 22 px row, and the title from
- -- 36), as {left, top, right, bottom}.
- local function Slots(W)
-  return {options={W-134,7,W-42,29},label={W-128,7,W-48,29},close={W-34,7,W-10,29},
-   auto={W-226,7,W-142,29},state={W-226,9,W-142,27},grip={8,6,32,30},title={36,8,W-234,28}}
+ -- v9 (ST8-2): the opened menu's own group titles, in its order: what the
+ -- hover's help lines must be (LOCALE sections), read from the real menu.
+ local function TopTitles(opened)
+  local out={}
+  for _,item in ipairs(opened and opened.list or {})do
+   if item.isTitle==true then out[#out+1]=tostring(item.text) end
+  end
+  return out
  end
+ -- The approved compact header's line 1 (design draft "Nexus compact
+ -- panel"), stated from the draft, the active font model and the shown
+ -- words; not read from the panel. One reference pixel is 284/420 of the
+ -- text scale in units, laid on whole units (Design). From the right edge:
+ -- the 7-pixel inset; Close, 24 pixels; Options, as wide as the label it
+ -- shows measures in the model and its room (the draft's 14 pixels and
+ -- never under 14 units: its label's two 6-unit end caps and 2 to spare);
+ -- the Auto control, or the Auto state words in its slot, as wide as the
+ -- widest of the three Auto labels and the draft's 16 pixels (never under
+ -- the 12 units its label fit keeps clear). Options and the Auto slot are
+ -- each held to three tenths of the panel the render laid out (`own`). The
+ -- three are 6 pixels apart and 22 pixels high, in the middle of line 1's
+ -- row, which starts 5 pixels down and is 22 pixels or, where that is more,
+ -- the at-least-24-unit grip less the design pixel it stands out above and
+ -- below. The grip stands at the inset, centred on that row; the title
+ -- starts 6 pixels after it and ends 6 pixels before the Auto slot, in the
+ -- row's height or its own wrapped lines where they need more. As {left,
+ -- top, right, bottom}.
+ -- EXPECT: the slots that stood here were the former fixed literals (Close
+ -- 24 at the 10-unit edge, Options 92 with an 80-unit label, Auto 84, 8-unit
+ -- gaps, the grip at (8, 6), the title from 36).
+ local function Design(px)
+  local scale=math.max(0.75,math.min(2,(G.model and G.model.size or 12)/12))
+  return math.max(1,math.floor(px*284/420*scale+0.5))
+ end
+ local function Wide(text) return math.ceil(G.Length(G.Visible(text))*G.model.char) end
+ -- The width a render lays the panel out at: 284 units x the text scale
+ -- (from 1 to 2), or what the screen leaves it at its chosen size where that
+ -- is less, never under 284 (stated from the model, the screen and the
+ -- chosen size; it was 420 units x the text scale).
+ local function OwnWidth()
+  local width=math.floor(284*math.max(1,math.min(2,(G.model and G.model.size or 12)/12))+0.5)
+  local screen,chosen=tonumber(UIParent:GetWidth()),Nexus.Panel.PanelScale()
+  if screen and screen>=640 then width=math.min(width,math.floor((screen-24)/chosen)) end
+  return math.max(284,width)
+ end
+ -- v9 (Root's ruling SPEC-A3-A7: whole labels in the compact controls, no
+ -- shortening and no smaller font; the control and line 1 grow instead).
+ -- The widths above are unchanged. What a control held to three tenths of
+ -- the panel does with words wider than its room is new, and is stated here
+ -- from the same words, the font model and the draft, not read from the
+ -- panel:
+ --   Options: its label's room is the control less its two 6-unit end caps.
+ --   A label wider than that wraps there; its box is as tall as its wrapped
+ --   lines (G.Rows) and stands in the control's middle, and the control is
+ --   those lines with the draft's 3 pixels above and below them;
+ --   the Auto control: its labels' room is the control less the 12 units its
+ --   label fit keeps clear. When the widest of its three labels is wider
+ --   than that, the control is as tall as the tallest of the three wrapped
+ --   there with the same 3 pixels, whichever label it shows;
+ --   the Auto state words (the control hidden): words wider than the slot
+ --   wrap in it and their box is as tall as their wrapped lines.
+ -- A control whose words fit keeps the draft's 22 pixels, as before. `stated`
+ -- is the Auto state text the header shows (nil while the control is shown).
+ -- EXPECT: every control and the state words had the one 22-pixel height
+ -- whatever their words (slot = auto = state; the label box the control's).
+ local function Slots(W,own,shown,title,stated)
+  local L=Nexus.Localization
+  local edge,close,gap,high=Design(7),Design(24),Design(6),Design(22)
+  local grip=math.max(24,Design(24))
+  local row=math.max(Design(22),grip-2*Design(1))
+  local top=Design(5)+math.floor((row-high)/2)
+  local limit=math.floor(own*0.3)
+  local autoWords={(L.Text('panel.button.auto_on')),(L.Text('panel.button.auto_off')),(L.Text('panel.button.auto_unknown'))}
+  local widest=math.max(Wide(autoWords[1]),Wide(autoWords[2]),Wide(autoWords[3]))
+  local options=math.min(limit,Wide(shown)+math.max(Design(14),14))
+  local auto=math.min(limit,widest+math.max(Design(16),12))
+  local closeLeft=W-edge-close
+  local optionsLeft=closeLeft-gap-options
+  local autoLeft=optionsLeft-gap-auto
+  local titleLeft,titleRight=edge+grip+gap,autoLeft-gap
+  local titleHigh=math.max(row,G.Rows(title,titleRight-titleLeft,G.model.char)*G.model.line)
+  local gripTop=Design(5)-math.floor((grip-row)/2)
+  local pad=Design(3)
+  local function Lines(words,room) return G.Rows(words,room,G.model.char)*G.model.line end
+  local optionsWraps=Wide(shown)>options-12
+  local labelHigh=optionsWraps and Lines(shown,options-12) or high
+  local optionsHigh=optionsWraps and math.max(high,labelHigh+2*pad) or high
+  local labelTop=top+(optionsHigh-labelHigh)/2
+  local autoHigh=high
+  if widest>auto-12 then
+   autoHigh=math.max(high,math.max(Lines(autoWords[1],auto-12),Lines(autoWords[2],auto-12),Lines(autoWords[3],auto-12))+2*pad)
+  end
+  local stateHigh=high
+  if stated and G.Length(G.Visible(stated))*G.model.char>auto then stateHigh=math.max(high,Lines(stated,auto)) end
+  return {options={optionsLeft,top,optionsLeft+options,top+optionsHigh},
+   label={optionsLeft+6,labelTop,optionsLeft+options-6,labelTop+labelHigh},
+   close={closeLeft,top,W-edge,top+high},auto={autoLeft,top,autoLeft+auto,top+autoHigh},
+   state={autoLeft,top,autoLeft+auto,top+stateHigh},grip={edge,gripTop,edge+grip,gripTop+grip},
+   title={titleLeft,Design(5),titleRight,Design(5)+titleHigh},optionsWidth=options,high=high,gap=gap,
+   optionsWraps=optionsWraps,optionsHigh=optionsHigh,labelHigh=labelHigh,autoHigh=autoHigh,stateHigh=stateHigh}
+ end
+ -- W: a width forced on the panel for this check, or nil for the width its
+ -- render laid it out at.
  local function Header(W,why,want,expectShort,notice)
   local f,P=NexusPanel,Nexus.Panel
-  if W~=420 then f:SetWidth(W);P.UpdateContextHeader(P._lastModel);P.PlaceOptionsButton() end
+  local own=f:GetWidth()
+  check(own==OwnWidth(),'SETUP O1 '..why..': the render laid the panel out at its own width for this text scale and screen ('
+   ..tostring(own)..' of '..OwnWidth()..')')
+  if W then f:SetWidth(W);P.UpdateContextHeader(P._lastModel);P.PlaceOptionsButton() else W=own end
   check(f:GetWidth()==W,'SETUP O1 '..why..': the panel is '..W..' px wide')
   local menu=f._menuBtn
   local label=menu:GetFontString()
   local shown=(notice and '! ' or '')..want
   check(menu:GetText()==shown and label and label:GetText()==shown,
    why..': the actual Options control and its FontString show the admitted text exactly ('..tostring(menu:GetText())..')')
-  check(menu:GetWidth()==92 and menu:GetHeight()==22 and label:GetWidth()==80 and label:GetHeight()==22
-   and label.wordWrap==false,why..': Options keeps its fixed 92x22 slot and a one-line 80x22 label; it does not grow')
-  local slots=Slots(W)
   local autoShown=f._autoBtn:IsShown()
+  local slots=Slots(W,own,shown,f._contextTitle:GetText() or '',not autoShown and f._contextAutoState:GetText() or nil)
+  -- EXPECT: Options kept its fixed 92x22 slot and a one-line 80x22 label and
+  -- did not grow. It is as wide as its label and its room, up to three
+  -- tenths of the panel and never past that, in the draft's 22-pixel
+  -- height, with a one-line label inside its two 6-unit end caps.
+  -- v9: that is what a label that fits its room still is (the same sizes,
+  -- wordWrap==false). A label wider than its room wraps there instead of
+  -- being shortened: its box is the room wide and as tall as its wrapped
+  -- lines, the control as tall as those lines with the draft's 3 pixels
+  -- above and below, and wordWrap is on (Slots). EXPECT: the check that
+  -- stood here asked every label, the long one too, for the one-line box
+  -- (the control's 22 pixels, wordWrap==false).
+  check(menu:GetWidth()==slots.optionsWidth and menu:GetWidth()<=math.floor(own*0.3) and menu:GetHeight()==slots.optionsHigh
+   and label:GetWidth()==slots.optionsWidth-12 and label:GetHeight()==slots.labelHigh and label.wordWrap==slots.optionsWraps
+   and (not slots.optionsWraps or (slots.labelHigh>=2*G.model.line and slots.optionsHigh>slots.high)),
+   why..': Options is as wide as its label and its room, held to three tenths of the panel, with its label inside its end caps: '
+    ..(slots.optionsWraps and 'wrapped whole, the control as tall as its lines (' or 'one line (')
+    ..tostring(menu:GetWidth())..'x'..tostring(menu:GetHeight())..' of '..slots.optionsWidth..'x'..slots.optionsHigh
+    ..', label '..tostring(label:GetHeight())..' of '..slots.labelHigh..')')
   local r={options=G.Rect(menu,f),label=G.Rect(label,f),close=G.Rect(f._closeBtn,f),
    auto=G.Rect(autoShown and f._autoBtn or f._contextAutoState,f),grip=G.Rect(f._dragGrip,f),title=G.Rect(f._contextTitle,f)}
   check(same(r.options,slots.options) and same(r.label,slots.label) and same(r.close,slots.close)
    and same(r.auto,autoShown and slots.auto or slots.state) and same(r.grip,slots.grip) and same(r.title,slots.title),
-   why..': header line 1 keeps its literal slots: Options '..G.Text(r.options)..', label '..G.Text(r.label)..', Auto '..G.Text(r.auto))
+   why..': header line 1 keeps the draft\'s slots for these words: Options '..G.Text(r.options)..', label '..G.Text(r.label)..', Auto '..G.Text(r.auto)
+    ..', Close '..G.Text(r.close)..', grip '..G.Text(r.grip)..', title '..G.Text(r.title))
   check(G.Inside(r.label,{r.options[1]+6,r.options[2],r.options[3]-6,r.options[4]}),why..': the label stays inside Options less its end caps')
-  check(r.auto[3]+8<=r.options[1] and r.options[3]+8<=r.close[1] and r.grip[3]<=r.title[1] and r.title[3]<=r.auto[1],
-   why..': grip, title, Auto, Options and Close stay in order with the 8 px gaps')
+  -- (EXPECT: the gaps were 8 units; they are the draft's 6 pixels.)
+  check(r.auto[3]+slots.gap<=r.options[1] and r.options[3]+slots.gap<=r.close[1] and r.grip[3]<=r.title[1] and r.title[3]<=r.auto[1],
+   why..': grip, title, Auto, Options and Close stay in order with the draft\'s 6-pixel gaps')
   local names={'options','close','auto','grip','title'}
   for i=1,#names do for j=i+1,#names do
    check(G.Apart(r[names[i]],r[names[j]]),why..': '..names[i]..' and '..names[j]..' do not overlap')
@@ -613,8 +912,14 @@ do
   check(G.Inside(r.options,{0,0,W,f:GetHeight()}) and G.Inside(r.close,{0,0,W,f:GetHeight()}),why..': line 1 stays inside the panel')
   check(G.Visible(autoShown and f._autoBtn:GetText() or f._contextAutoState:GetText())==Words().autoOff,
    why..': Auto reads exactly the active language\'s reviewed Auto OFF words ('..Words().autoOff..')')
-  check(Nexus.LayoutMetrics.Shortened(label)==expectShort,
-   why..': the 80 px label is '..(expectShort and 'shortened' or 'whole')..' in this model ('..label:GetStringWidth()..' px)')
+  -- (v9: a label whose own line is wider than its room is the one that
+  -- wraps, and it is whole there, as checked above; it is not shortened.
+  -- EXPECT: this check said such a label was shortened. The literal
+  -- expectation per model is unchanged and is asked of the derived slots
+  -- too.)
+  check(Nexus.LayoutMetrics.Shortened(label)==expectShort and slots.optionsWraps==expectShort,
+   why..': the label\'s own line is '..(expectShort and 'wider than its room, so it wraps there' or 'whole in its room')
+    ..' in this model ('..label:GetStringWidth()..' in '..tostring(label:GetWidth())..')')
   local lines,owners,cycle=Hover(menu)
   -- Every visible tooltip line counts, whatever its colour or wrap flag.
   local full=0
@@ -624,8 +929,17 @@ do
    and owners[1][2]=='ANCHOR_TOPLEFT' and cycle,
    why..': the registered hover takes the tooltip once and gives the '..(expectShort and 'complete ' or '')
     ..'control name, its help'..(notice and ' and the complete trusted notice' or '')..' ('..#lines..' lines)')
+  -- v9 (ST8-2): the reviewed sentence that names the footer hubs Plan and
+  -- Explore keeps its definition, unchanged, in the active language, and
+  -- the compact panel's hover shows it on no line.
+  local sentence,onHover=(Nexus.Localization.Text('panel.tooltip.options_contents')),false
+  for _,line in ipairs(lines)do if tostring(line[1])==Words().help then onHover=true end end
+  check(sentence==Words().help and not onHover,
+   why..': the reviewed Options sentence that names Plan and Explore on the footer is still defined, unchanged, and is not on the compact panel\'s hover')
   Passive(why)
-  if W~=420 then f:SetWidth(420) end
+  -- A forced width is this check's own: the panel gets its render's width
+  -- back with its header applied there.
+  if W~=own then f:SetWidth(own);P.UpdateContextHeader(P._lastModel);P.PlaceOptionsButton() end
   return r
  end
  local function Sweep(language,want,cut,tag)
@@ -638,9 +952,11 @@ do
     for _,complete in ipairs({false,true})do
      for _,notice in ipairs({false,true})do
       check(Nexus.Panel.Render(Model({notice=notice,complete=complete})),'SETUP O1: render')
-      for _,W in ipairs({420,640})do
-       Header(W,tag..', '..model.name..', UI '..ui..', '..(complete and 'finished' or 'in progress')
-        ..(notice and ', notice' or '')..', '..W..' px',want,cut(model)[notice and 2 or 1],notice)
+      -- (The panel's own width, then a forced 640; they were the forced
+      -- 420 and 640.)
+      for _,W in ipairs({false,640})do
+       Header(W or nil,tag..', '..model.name..', UI '..ui..', '..(complete and 'finished' or 'in progress')
+        ..(notice and ', notice' or '')..', '..(W and (W..' px') or 'its own width'),want,cut(model)[notice and 2 or 1],notice)
       end
      end
     end
@@ -652,7 +968,7 @@ do
    local scale=NexusPanel:GetScale()
    check(scale>0 and scale<=1 and NexusPanel:GetWidth()*scale<=616+1e-6 and NexusPanel:GetHeight()*scale<=456+1e-6,
     tag..', '..model.name..': at a 640x480 screen the whole panel fits less the 24 px margin (scale '..scale..')')
-   Header(420,tag..', '..model.name..', 640x480 screen',want,cut(model)[2],true)
+   Header(nil,tag..', '..model.name..', 640x480 screen',want,cut(model)[2],true)
    UIParent:SetSize(1920,1080)
   end
   rawset(UIParent,'GetEffectiveScale',uiScale)
@@ -661,6 +977,19 @@ do
  -- The shipped frFR table is untouched: same table, same entry count, its own
 -- reviewed "Options" (equal to the English word in the reviewed frFR draft),
 -- while the deep copy differs from it only in the overwritten Options entry.
+ -- v11 (Root's disposition, required 4: "Retire ONLY the assertion that the
+ -- shipped frFR input has one entry per English key; prove no original entry
+ -- is lost/altered, and copies differ only in the explicitly changed Options
+ -- entry"). How many entries the shipped frFR holds is not compared with the
+ -- English catalog any more: a pack may be partial. EXPECT: the second check
+ -- carried "count==#Nexus.Localization.Keys()". It still asks that the
+ -- shipped table holds as many entries as the hook counted in it (none lost,
+ -- none added), and the loop before it that every other copied entry is the
+ -- shipped one (none altered). New in it: the copy holds exactly the entries
+ -- the hook counted in it for the loader (shippedFacts.supplied), which is as
+ -- many as the shipped table when its Options entry was overwritten (`want`
+ -- is the text put there) and one fewer when the hook left that entry out
+ -- (`want` is nil, part F).
  local function Shipped(tag,want)
   local copy=Nexus.LocalizationPacks
   check(shipped and shippedFacts and copy~=shipped and copy.frFR~=shipped.frFR and copy.frFR.entries~=shipped.frFR.entries
@@ -671,30 +1000,49 @@ do
    if key~=KEY then others=others and copy.frFR.entries[key]==text end
   end
   for _ in pairs(copy.frFR.entries)do copied=copied+1 end
-  check(count==shippedFacts.count and count==#Nexus.Localization.Keys() and copied==count,
-   tag..': the shipped frFR still holds '..count..' entries, one per English key; the copy as many ('..copied..')')
+  check(count==shippedFacts.count and copied==(want==nil and count-1 or count) and copied==shippedFacts.supplied,
+   tag..': the shipped frFR still holds its '..count..' entries; the copy '..(want==nil and 'one fewer' or 'as many')..' ('..copied
+    ..'), the number the hook counted for the loader ('..tostring(shippedFacts.supplied)..')')
   check(shipped.frFR.entries[KEY]=='Options' and shippedFacts.options=='Options' and shipped.frFR.entries[KEY]~=want,
-   tag..': the shipped frFR keeps its own reviewed Options entry, unchanged and different from the test text')
-  check(copy.frFR.entries[KEY]==want and others,tag..': only the copied Options entry holds the test text; every other copied entry is the shipped one')
+   tag..': the shipped frFR keeps its own reviewed Options entry, unchanged'
+    ..(want==nil and ', while the copy has none' or ' and different from the test text'))
+  check(copy.frFR.entries[KEY]==want and others,tag..': only the copied Options entry '
+   ..(want==nil and 'is left out' or 'holds the test text')..'; every other copied entry is the shipped one')
  end
- local function Admitted(L,want,tag)
-  local text,source,reason=L.Text(KEY)
-  check(text==want and source=='candidate' and reason==nil,tag..': the real loader admitted the test candidate ('..tostring(source)..')')
+ -- v11: what every boot through the hook is asked about the pack the loader
+ -- was handed, whatever the case did to its Options entry (`want` as for
+ -- Shipped). It is the body Admitted had after its first check, which
+ -- Admitted still runs first; part F runs it after its own first check.
+ local function Loaded(L,want,tag)
   local base,baseSource=L.Resolve(KEY)
   check(base=='Options' and baseSource=='base' and Nexus.LocalizationEnglish[KEY]=='Options',tag..': pure Resolve and the English base stay Options')
   local row
   for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
   local ids={}
   for _,language in ipairs(L.Languages())do ids[#ids+1]=language.id..'='..language.name end
-  -- The shipped frFR is a complete pack: one entry per English key. The copy
-  -- overwrites its existing Options entry, so the count does not grow.
+  -- The English catalog is asked strictly, as before: 4096 keys, every one
+  -- of them admitted English.
   local keys=#L.Keys()
-  check(keys==4078 and L.Diagnostics().base.accepted==keys,tag..': the English base holds the 4078-key catalog ('..keys..')')
+  check(keys==4096 and L.Diagnostics().base.accepted==keys,tag..': the English base holds the 4096-key catalog ('..keys..')')
+  -- v11 (Root's disposition, required 2 and 3): the loader's frFR row is
+  -- asked for the hook's own count of the entries it handed over
+  -- (shippedFacts.supplied, counted before the loader ran): every one of
+  -- them accepted and none rejected, the overwritten Options entry among
+  -- them where the case put one there. An entry the loader cannot admit,
+  -- under whichever key, is a rejection and fails here; none is excused.
+  -- EXPECT: "row.accepted==keys", the pack one entry per English key.
+  local supplied=shippedFacts and shippedFacts.supplied
   check(table.concat(ids,',')=='enUS=English,frFR=Fran\195\167ais,deDE=Deutsch,esES=Espa\195\177ol,plPL=Polski,ptBR=Portugu\195\170s (Brasil),ruRU=\208\160\209\131\209\129\209\129\208\186\208\184\208\185'
-   and L.Diagnostics().packs.adopted==6 and L.Diagnostics().packs.refused==0 and row and row.accepted==keys and row.rejected==0,
-   tag..': the same seven offered languages, no pseudo language; frFR copied all '..keys..' entries, the overwritten Options among them ('
+   and L.Diagnostics().packs.adopted==6 and L.Diagnostics().packs.refused==0 and row and row.accepted==supplied and row.rejected==0,
+   tag..': the same seven offered languages, no pseudo language; frFR admitted every one of the '..tostring(supplied)
+    ..' entries it was handed'..(want==nil and '' or ', the overwritten Options among them')..', and rejected none ('
     ..table.concat(ids,',')..'; '..tostring(row and row.accepted)..'/'..tostring(row and row.rejected)..')')
   Shipped(tag,want)
+ end
+ local function Admitted(L,want,tag)
+  local text,source,reason=L.Text(KEY)
+  check(text==want and source=='candidate' and reason==nil,tag..': the real loader admitted the test candidate ('..tostring(source)..')')
+  Loaded(L,want,tag)
  end
  -- A. English control: the shipped data, no hook.
  local L=Boot(nil,nil)
@@ -718,12 +1066,25 @@ do
  local englishMenu,englishShape=TopTexts(englishOpened),TopShape(englishOpened)
  check(englishWishlist==LOCALE.enUS.wishlist and #englishMenu>10 and #englishMenu==#FRENCH_MENU,
   'SETUP O1 English: the escaped Wishlist name and the Options menu ('..tostring(englishWishlist)..', '..#englishMenu..' rows)')
+ -- v9 (ST8-2): the five lines the hover lists (LOCALE sections, asked of
+ -- the real hover by Header) are the real menu's own group titles, in the
+ -- menu's order, so the hover names exactly the groups the menu then shows.
+ check(same(TopTitles(englishOpened),LOCALE.enUS.sections),
+  'O1 English: the opened Options menu has exactly the five group titles its hover lists, in the same order ('
+   ..table.concat(TopTitles(englishOpened),' / ')..')')
+ -- The approved compact Wishlist line. EXPECT: the value was the escaped
+ -- name with its state, "(assigned)". It is the escaped name alone, and the
+ -- line's own registered hover keeps the reviewed line with its state.
+ local englishHover={}
+ for _,line in ipairs((Hover(NexusPanel._contextWishlistHit)))do englishHover[#englishHover+1]=tostring(line[1]) end
+ englishHover=table.concat(englishHover,'\n')
  check(englishCaption~=nil and englishCaption:IsShown() and englishCaption:GetText()=='Wishlist:'
-  and englishValue=='Synthetic |||| Wishlist Caf\195\169 (assigned)',
-  'SETUP O1 English: the label Wishlist: is a caption of its own and its value is the escaped name with its state ('..tostring(englishValue)..')')
+  and englishValue=='Synthetic |||| Wishlist Caf\195\169' and englishHover:find(LOCALE.enUS.assigned,1,true)~=nil,
+  'SETUP O1 English: the label Wishlist: is a caption of its own, its value is the escaped name alone and its hover keeps the line with its state ('
+   ..tostring(englishValue)..' / '..englishHover..')')
  -- The English control keeps the English hover, notice and Auto OFF words.
  check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1 English: render with the notice')
- Header(420,'O1 English, trusted notice','Options',false,true)
+ Header(nil,'O1 English, trusted notice','Options',false,true)
  check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
  -- B. The exact 256-byte expanded candidate through the real loader.
  L=Boot('frFR',LONG)
@@ -740,17 +1101,20 @@ do
  -- warm control with its own handlers.
  local raw=Model({notice=true});local pristine=H.Clone(raw)
  check(P.Render(raw) and same(raw,pristine),'O1 expanded: Render leaves the raw model untouched')
- Header(420,'O1 expanded, notice on',LONG,true,true)
+ Header(nil,'O1 expanded, notice on',LONG,true,true)
  local stats=P.RenderStats()
  check(P.Render(Model()) and P.RenderStats().layouts==stats.layouts and P.RenderStats().noticePasses==stats.noticePasses+1,
   'SETUP O1 expanded: the notice change takes the notice-only update path')
- Header(420,'O1 expanded, notice gone',LONG,true,false)
+ Header(nil,'O1 expanded, notice gone',LONG,true,false)
  local frames=#H.frames
  local opened=Menu()
  check(opened and opened.anchor==menu and opened.frame==P._moreMenu and opened.list[1].isTitle,'O1 expanded: the click opens the Options menu at the control')
  local menuTexts=TopTexts(opened)
  check(same(TopShape(opened),englishShape),'O1 expanded: the Options menu offers the same rows as in English: titles, submenus and their sizes, clicks and states, row by row')
  check(same(menuTexts,FRENCH_MENU),'O1 expanded: every row shows the reviewed frFR words, the Language row naming Fran\195\167ais')
+ check(same(TopTitles(opened),LOCALE.frFR.sections),
+  'O1 expanded: the opened Options menu has exactly the five reviewed frFR group titles its hover lists, in the same order ('
+   ..table.concat(TopTitles(opened),' / ')..')')
  local localized=0
  for i,text in ipairs(menuTexts)do if text~=englishMenu[i] then localized=localized+1 end end
  check(localized==#menuTexts-2,'O1 expanded: all rows but the two whose reviewed frFR equals English (Questions (FAQ), Session) differ from English ('..localized..')')
@@ -771,7 +1135,7 @@ do
   opened=Menu()
   check(opened and opened.anchor==menu and opened.frame==P._moreMenu and same(TopTexts(opened),menuTexts),'O1 expanded: reopening the menu keeps its anchor, frame and rows')
  end
- Header(420,'O1 expanded, after refreshes, reopen and menus',LONG,true,false)
+ Header(nil,'O1 expanded, after refreshes, reopen and menus',LONG,true,false)
  check(#H.frames==frames and menu==f._menuBtn and menu:GetFontString()==warm.label and #menu.regions==warm.regions
   and #menu.children==warm.children and menu:GetScript('OnEnter')==warm.enter and menu:GetScript('OnLeave')==warm.leave
   and menu:GetScript('OnClick')==warm.click and rawget(menu,'_nexusOneLine')==nil,
@@ -797,9 +1161,16 @@ do
  local ESCAPED='Synthetic |||| Wishlist Caf\195\169'
  local shownWishlist=f._contextWishlist:GetText()
  local function Count(text)local n,i=0,1;while true do local s,e=text:find(ESCAPED,i,true);if not s then return n end;n=n+1;i=e+1 end end
+ -- (The approved compact Wishlist line: the reviewed frFR line with the
+ -- name alone, and the line with its state on the line's own hover. EXPECT:
+ -- the line itself ended with the state, "(assign\195\169e)".)
+ local frenchHover={}
+ for _,line in ipairs((Hover(f._contextWishlistHit)))do frenchHover[#frenchHover+1]=tostring(line[1]) end
+ frenchHover=table.concat(frenchHover,'\n')
  check(shownWishlist==LOCALE.frFR.wishlist and Count(shownWishlist)==1 and Count(englishWishlist)==1
-  and P._lastModel.progress.wishlistName==NAME,
-  'O1 expanded: the reviewed frFR Wishlist line shows the escaped name byte for byte, once, as in English, and keeps it raw ('..tostring(shownWishlist)..')')
+  and frenchHover:find(LOCALE.frFR.assigned,1,true)~=nil and P._lastModel.progress.wishlistName==NAME,
+  'O1 expanded: the reviewed frFR Wishlist line shows the escaped name byte for byte, once, as in English, keeps it raw, and its hover keeps the line with its state ('
+   ..tostring(shownWishlist)..' / '..frenchHover..')')
  -- C. The short control: the same route; whole where the model fits it.
  L=Boot('frFR',SHORT)
  Admitted(L,SHORT,'O1 short')
@@ -810,9 +1181,9 @@ do
  G.UseFont(G.MODELS.default)
  check(Nexus.Panel.OptionsLabel()=='Options' and Nexus.Panel.OptionsText(false)=='Options','O1 bang: OptionsLabel falls back to the English base')
  check(Nexus.Panel.Render(Model()),'SETUP O1 bang: render')
- Header(420,'O1 bang, no notice',"Options",false,false)
+ Header(nil,'O1 bang, no notice',"Options",false,false)
  check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1 bang: render with the notice')
- Header(420,'O1 bang, trusted notice',"Options",false,true)
+ Header(nil,'O1 bang, trusted notice',"Options",false,true)
  -- E. Refusals: each invalid candidate is left out by the real loader and
  -- the actual control shows the reviewed English, the rest of frFR intact.
  for _,bad in ipairs(BAD)do
@@ -822,8 +1193,20 @@ do
   local row
   for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
   local keys=#L.Keys()
-  check(keys==4078 and text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==keys-1 and row.rejected==1,
-   tag..': the loader refused the one overwritten entry, kept the other '..(keys-1)..' and Options falls back to English ('
+  -- v11 (Root's disposition, required 3: "exactly ONE rejection and all
+  -- other supplied entries accepted"): the figures are stated from the
+  -- hook's own counts, taken before the loader ran. The copied frFR was
+  -- handed over with as many entries as the shipped frFR holds, the bad
+  -- candidate in place of its Options entry (SETUP); the loader's row is
+  -- then that count less the one refused, and one rejected. EXPECT:
+  -- "row.accepted==keys-1", the pack one entry per English key. The strict
+  -- English count stays in the check.
+  local supplied=shippedFacts and shippedFacts.supplied
+  check(type(supplied)=='number' and supplied==shippedFacts.count,
+   'SETUP '..tag..': the hook handed the loader as many entries as the shipped frFR holds, the bad candidate in place of its Options entry ('
+    ..tostring(supplied)..' of '..tostring(shippedFacts and shippedFacts.count)..')')
+  check(keys==4096 and text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==supplied-1 and row.rejected==1,
+   tag..': the loader refused the one overwritten entry, kept the other '..(supplied-1)..' and Options falls back to English ('
     ..tostring(reason)..', accepted '..tostring(row and row.accepted)..', rejected '..tostring(row and row.rejected)..')')
   check(shipped.frFR.entries[KEY]=='Options' and shipped.frFR.entries[KEY]==shippedFacts.options,
    'SETUP '..tag..': the shipped frFR Options entry is unchanged')
@@ -836,7 +1219,62 @@ do
    'SETUP '..tag..': the rest of the frFR fixture pack is still active')
   G.UseFont(G.MODELS.default)
   check(Nexus.Panel.Render(Model({notice=true})),'SETUP '..tag..': render')
-  Header(420,tag,'Options',false,true)
+  Header(nil,tag,'Options',false,true)
+ end
+ -- F. v11 (Root's disposition, required 5: "Add one deliberately partial
+ -- copied-candidate case in this SAME fixture: omit the copied Options entry
+ -- through the existing scoped hook"). A partial pack, on purpose: the same
+ -- hook hands the real loader the copied frFR WITHOUT its Options entry and
+ -- with every other copied entry as shipped. Nothing in it is invalid, so
+ -- nothing is rejected: the loader's row is the hook's own count of what it
+ -- handed over, one entry fewer than it counted in the shipped table. The
+ -- key the pack lacks resolves to the English base as a missing candidate,
+ -- and the rest of the panel stays French: in the default font model the
+ -- actual Options control shows the whole English word on one line, without
+ -- and with the trusted notice; its registered hover names it above the
+ -- reviewed frFR group titles; its click opens the reviewed frFR menu; and
+ -- Auto keeps its reviewed frFR words (Header asks that of every header).
+ -- These are the header, hover and menu checks parts B and D make, with the
+ -- same literals, so the fallback itself is shown, not only a count. No
+ -- pseudo language: frFR is one of the seven offered languages (Loaded) and
+ -- the pack is the shipped one's copy.
+ L=Boot('frFR',OMIT)
+ do
+  local tag='O1 partial'
+  local text,source,reason=L.Text(KEY)
+  check(text=='Options' and source=='base' and reason=='missing_candidate',
+   tag..': with no Options entry in the copied frFR the real loader gives the English base as a missing candidate ('
+    ..tostring(text)..', '..tostring(source)..', '..tostring(reason)..')')
+  -- The omission is real and is the only difference in size: both numbers
+  -- are the hook's own, counted before the loader ran.
+  check(type(shippedFacts.supplied)=='number' and shippedFacts.supplied==shippedFacts.count-1,
+   'SETUP '..tag..': the hook handed the loader one entry fewer than the shipped frFR holds ('
+    ..tostring(shippedFacts.supplied)..' of '..tostring(shippedFacts.count)..')')
+  Loaded(L,nil,tag)
+  -- The reviewed frFR keeps the game page name My Builds; Auto OFF is translated.
+  check(select(2,L.Text('panel.button.my_builds'))=='candidate' and L.Text('panel.button.my_builds')=='My Builds'
+   and select(2,L.Text('panel.button.auto_off'))=='candidate' and L.Text('panel.button.auto_off')=='Auto D\195\137SACTIV\195\137',
+   tag..': the rest of the copied frFR is still active: My Builds and Auto OFF come from the pack')
+  G.UseFont(G.MODELS.default)
+  check(Nexus.Panel.OptionsLabel()=='Options' and Nexus.Panel.OptionsText(false)=='Options' and Nexus.Panel.OptionsText(true)=='! Options',
+   tag..': OptionsLabel and OptionsText give the English base; only the trusted notice adds "! "')
+  check(Nexus.Panel.Render(Model()),'SETUP '..tag..': render')
+  check(NexusPanel:IsShown() and NexusPanel._menuBtn:IsShown(),tag..': the Options control is shown on the shown panel')
+  Header(nil,tag..', no notice','Options',false,false)
+  check(Nexus.Panel.Render(Model({notice=true})),'SETUP '..tag..': render with the notice')
+  Header(nil,tag..', trusted notice','Options',false,true)
+  check(Nexus.Panel.Render(Model()),'SETUP '..tag..': render')
+  local opened=Menu()
+  check(opened and opened.anchor==NexusPanel._menuBtn and opened.frame==Nexus.Panel._moreMenu and opened.list[1].isTitle,
+   tag..': the click opens the Options menu at the control')
+  check(same(TopShape(opened),englishShape),
+   tag..': the Options menu offers the same rows as in English: titles, submenus and their sizes, clicks and states, row by row')
+  check(same(TopTexts(opened),FRENCH_MENU),
+   tag..': every row shows the reviewed frFR words, the Language row naming Fran\195\167ais')
+  check(same(TopTitles(opened),LOCALE.frFR.sections),
+   tag..': the opened Options menu has exactly the five reviewed frFR group titles its hover lists, in the same order ('
+    ..table.concat(TopTitles(opened),' / ')..')')
+  check(rawget(NexusDB.settings,'uiLanguage')=='frFR' and Nexus.RecomputeStats().autoEnabled~=true,tag..': the synthetic frFR choice and Auto OFF stay')
  end
  rawset(UIParent,'GetEffectiveScale',nil)
  F.fileHooks=nil

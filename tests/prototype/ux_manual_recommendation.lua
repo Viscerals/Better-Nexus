@@ -17,6 +17,18 @@
 -- view model -> Panel, with read/request/action counts held to a measured
 -- baseline. Its EXPECTs fail on the M2 partial cut, which has the consumer
 -- but no producer (no charges line from a real decision).
+-- The approved compact panel (design draft "Nexus compact panel"; its
+-- decisions on the offer block's words): with Auto OFF and offers on the
+-- board the heading is "Your offers", the destination stands in a cell of
+-- its own at the heading row's right end, and the Auto state is the header
+-- Auto control's own words; a selected row shows its tag's words after a
+-- star, which stands where the tag's own code-owned "> " stood; and a
+-- recommendation that names one offer stands inside that offer's own row as
+-- the reason alone, the whole sentence with its target on the reason's
+-- hover. View, Whole and InRow below read those; each assertion of the
+-- former words is marked where it stood and replaced by the draft's own
+-- assertion, not relaxed. Which card is marked, what is performed and every
+-- Auto ON, paused, waiting and Orb heading are unchanged.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('ux_manual_recommendation')
 local H,A,observer
@@ -51,6 +63,14 @@ local function Plain(t) return V.Plain(t) end
 -- the shown choice is visibly identified as a Freeze target (its shown row
 -- starts "[Freeze] " or its shown card's tag starts "> Freeze"), which is
 -- never the Take marker.
+-- The approved compact row shows a selected row's tag as its words after a
+-- star (the offer block's own mark standing on the row: card.star), which
+-- stands where the tag's code-owned "> " stood. The tag as the player reads
+-- it is that mark and the words, so a shown star is read as the "> " it
+-- replaces, and a tag's words without the star are not a marker. slot: the
+-- destination cell beside the compact heading ("" while there is none).
+-- auto: the header's Auto state as shown, the Auto control's own words or,
+-- while that control is hidden, the state words in its slot.
 local function View()
  local f=NexusPanel
  local cards,marks,facts,freezes={},{},{},{}
@@ -69,6 +89,7 @@ local function View()
   for _,card in ipairs(f._offerCards or {}) do
    if card:IsShown() then
     local name,quality,shown=Plain(card.name:GetText() or ''),Plain(card.quality:GetText() or ''),Plain(card.tag:GetText() or '')
+    if shown~='' and card.star and card.star:IsShown() then shown='> '..shown end
     local parts={}
     for _,text in ipairs({name,quality,shown}) do if text~='' then parts[#parts+1]=text end end
     cards[#cards+1]=table.concat(parts,' ')
@@ -79,8 +100,34 @@ local function View()
   end
  end
  local charges=f._chargesText
+ local slot=f._offerSlot
+ local auto=f._autoBtn and f._autoBtn:IsShown() and f._autoBtn or f._contextAutoState
  return {head=Plain(f._rollStatus:GetText() or ''),body=Plain(f._rollRec:GetText() or ''),cards=cards,marks=marks,
-  facts=facts,freezes=freezes,charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown()}
+  facts=facts,freezes=freezes,charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown(),
+  slot=slot and slot:IsVisible() and Plain(slot:GetText() or '') or '',
+  auto=auto and auto:IsVisible() and Plain(auto:GetText() or '') or ''}
+end
+-- The recommendation as the player can read it whole: what the reason's own
+-- hover shows (the panel's registered hover over the text, which gives the
+-- complete sentence with its target while the row shows the reason alone),
+-- else the text itself. The hover is entered and left; nothing else is done.
+local function Whole()
+ local f=NexusPanel
+ local hover=f._recommendationHover
+ local enter=hover and hover:GetScript('OnEnter')
+ local lines=enter and V.TooltipLines(enter,hover) or {}
+ local leave=hover and hover:GetScript('OnLeave')
+ if leave then leave(hover) end
+ local text=Plain(table.concat(lines,'\n'))
+ return text~='' and text or Plain(f._rollRec:GetText() or '')
+end
+-- The recommendation stands inside shown offer row i (anchored to that row,
+-- under its name), not under the rows.
+local function InRow(i)
+ local f=NexusPanel
+ local card=f._offerCards and f._offerCards[i]
+ local _,anchor=f._rollRec:GetPoint(1)
+ return card~=nil and card:IsShown() and f._rollRec:IsShown() and anchor==card
 end
 local function Marked(v)
  local n,at=0,nil
@@ -143,12 +190,25 @@ C.scenario('R1 Auto OFF, unstepped Take: you choose, one marked card, named targ
  print('OBSERVED','R1 head=['..v.head..'] body=['..v.body..'] cards=['..table.concat(v.cards,' | ')..']')
  C.setup(v.roll and #v.cards==3 and m and m.cards and m.cards[1] and m.cards[1].highlight==true
   and not m.cards[2].highlight and not m.cards[3].highlight,'R1: fixture: the runtime marks card 1 as its Take target')
- C.expect(v.head:find('Auto OFF',1,true)~=nil and v.head:find('you choose',1,true)~=nil and v.head:find('Slot 1',1,true)~=nil
-  and not v.head:find('active',1,true),'R1: the heading says Auto OFF, you choose, and claims no active rolling',v.head)
+ -- The approved compact heading. EXPECT: the check that stood here looked
+ -- for "Auto OFF", "you choose" and "Slot 1" in the one heading text. Each
+ -- fact is still on the panel where the draft shows it: the heading is the
+ -- player's own offers, the destination is the cell beside it and the Auto
+ -- state is the header Auto control's words; none of the three says active.
+ C.expect(v.head=='Your offers' and v.slot=='Slot 1' and v.auto=='Auto OFF'
+  and not (v.head..' '..v.slot..' '..v.auto):lower():find('active',1,true),
+  'R1: the heading is Your offers with the destination Slot 1 beside it, the Auto control says Auto OFF, and none claims active rolling',
+  v.head..' | '..v.slot..' | '..v.auto)
  local n,at=Marked(v)
  C.expect(n==1 and at==1 and Shows(v,1,'Echo 1','Uncommon'),'R1: exactly the chosen card is marked',table.concat(v.cards,' | '))
- C.expect(v.body:find('Take a needed Echo',1,true)~=nil and v.body:find('Echo 1 (Uncommon)',1,true)~=nil,
-  'R1: the unstepped recommendation names its target and keeps its reason',v.body)
+ -- EXPECT: the check that stood here looked for the target's name in the
+ -- text under the rows. The approved row holds the reason itself, inside
+ -- the marked offer's own row (which names the Echo and its quality), and
+ -- the reason's hover gives the whole sentence with its target.
+ local whole=Whole()
+ C.expect(v.body=='Take a needed Echo' and InRow(1) and whole:find('Take a needed Echo',1,true)~=nil
+  and whole:find('Echo 1 (Uncommon)',1,true)~=nil,
+  'R1: the unstepped recommendation keeps its reason inside the marked row, and its hover names its target',v.body..' | '..whole)
  C.guard(Acts()==acts and not Auto(),'R1: Auto OFF performs nothing; the recommendation only shows')
  -- A2 changing choice: the next board's target is card 3; no stale marker.
  Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200003,quality=3}})
@@ -156,21 +216,31 @@ C.scenario('R1 Auto OFF, unstepped Take: you choose, one marked card, named targ
  n,at=Marked(v)
  C.expect(n==1 and at==3 and not v.marks[1] and Shows(v,3,'Echo 3','Epic'),'R1: the marker follows the new board; none stays on the old position',
   table.concat(v.cards,' | '))
- C.expect(v.body:find('Echo 3 (Epic)',1,true)~=nil and not v.body:find('Echo 1',1,true),'R1: the body names the new target only',v.body)
+ -- (EXPECT, as above: the reason stands in the new marked row and its
+ -- hover names the new target only.)
+ whole=Whole()
+ C.expect(InRow(3) and not InRow(1) and whole:find('Echo 3 (Epic)',1,true)~=nil and not whole:find('Echo 1',1,true)
+  and not v.body:find('Echo 1',1,true),'R1: the reason stands in the new marked row and names the new target only',v.body..' | '..whole)
  -- The same Echo offered twice: both are the target; no card is guessed.
  Offer({{spellId=200002,quality=2},{spellId=200002,quality=2},{spellId=200062,quality=0}})
  v=View()
  m=Nexus.Panel._lastModel
  n=Marked(v)
  C.setup(m.cards[1].highlight==true and m.cards[2].highlight==true,'R1: fixture: two identical offers are both the Take target')
- C.expect(v.head:find('you choose',1,true)~=nil and n==0 and not v.body:find('(Rare)',1,true),
-  'R1: with two equal targets no card is marked and none is named',v.body)
+ -- (EXPECT: the heading was looked up for "you choose"; it is the approved
+ -- "Your offers" beside the Auto control's Auto OFF. No row holds the
+ -- reason, and neither the text nor its hover names a card.)
+ whole=Whole()
+ C.expect(v.head=='Your offers' and v.auto=='Auto OFF' and n==0 and not v.body:find('(Rare)',1,true)
+  and not whole:find('(Rare)',1,true) and not InRow(1) and not InRow(2) and not InRow(3),
+  'R1: with two equal targets no card is marked and none is named',v.body..' | '..whole)
  -- No needed offer: Reroll/Banish name no card; nothing is marked.
  Offer({{spellId=200070,quality=1},{spellId=200071,quality=2},{spellId=200072,quality=3}})
  v=View()
  n=Marked(v)
- C.expect(v.head:find('you choose',1,true)~=nil and n==0,'R1: a recommendation with no Take target marks no card',v.body)
- C.guard(v.body~='' and not v.body:find(': Echo',1,true),'R1: its reason is shown without a guessed target',v.body)
+ C.expect(v.head=='Your offers' and v.auto=='Auto OFF' and n==0,'R1: a recommendation with no Take target marks no card',v.body)
+ C.guard(v.body~='' and not v.body:find(': Echo',1,true) and not Whole():find(': Echo',1,true),
+  'R1: its reason is shown without a guessed target',v.body)
  C.guard(Acts()==acts and not Auto(),'R1: across every board, Auto OFF performed nothing')
 end)
 
@@ -181,7 +251,10 @@ C.scenario('R2 stepped recommendations keep their own names; no Take: no marker'
  local stepped='1. Freeze Echo 5\n2. Take Echo 1'
  local v=Render(function(m) m.recommendation=stepped end)
  C.guard(v.body==Plain(stepped),'R2: a stepped recommendation is shown exactly as the runtime names it',v.body)
- C.expect(v.head:find('you choose',1,true)~=nil,'R2: the Auto OFF heading applies to stepped recommendations too',v.head)
+ -- (EXPECT: the heading was looked up for "you choose"; the approved Auto
+ -- OFF heading and the Auto control's words stand for a stepped
+ -- recommendation too.)
+ C.expect(v.head=='Your offers' and v.auto=='Auto OFF','R2: the Auto OFF heading applies to stepped recommendations too',v.head..' | '..v.auto)
  v=Render(function(m) for _,c in ipairs(m.cards) do c.highlight=nil end end)
  C.guard(Marked(v)==0,'R2: without a runtime target no card is marked (no first-card default)')
  C.guard(Acts()==acts,'R2: rendering performs nothing')
@@ -576,10 +649,20 @@ C.scenario('R8 Auto OFF, two different Needed offers: the Freeze target is named
  C.expect(n==1 and at==1 and Shows(v,1,'Echo 1','Uncommon'),'R8: exactly the Freeze target is visibly identified as a Freeze',
   table.concat(v.cards,' | '))
  C.guard(Marked(v)==0,'R8: no card carries the Take marker: a Freeze is not a Wishlist pick',table.concat(v.cards,' | '))
- C.expect(v.body:find('Echo 1 (Uncommon)',1,true)~=nil and v.body:lower():find('freeze',1,true)~=nil
-  and not v.body:find('Echo 2',1,true) and not v.body:find('Take',1,true),
-  'R8: the recommendation names its Freeze target with Freeze wording, not Take',v.body)
- C.guard(v.head:find('you choose',1,true)~=nil and not v.head:find('Active',1,true),'R8: the heading says the player chooses',v.head)
+ -- (EXPECT: the target's name was looked up in the text under the rows.
+ -- The reason stands inside the Freeze target's own row, which names it;
+ -- the reason's hover gives the whole sentence with that target.)
+ local whole=Whole()
+ C.expect(InRow(1) and whole:find('Echo 1 (Uncommon)',1,true)~=nil and v.body:lower():find('freeze',1,true)~=nil
+  and whole:lower():find('freeze',1,true)~=nil and not whole:find('Echo 2',1,true) and not v.body:find('Echo 2',1,true)
+  and not whole:find('Take',1,true) and not v.body:find('Take',1,true),
+  'R8: the recommendation stands in its Freeze target\'s row and names it with Freeze wording, not Take',v.body..' | '..whole)
+ -- (The guard that stood here looked the heading up for "you choose": the
+ -- approved heading is "Your offers" beside the Auto control's Auto OFF.
+ -- That it never says Active is kept as the guard it was.)
+ C.guard(not v.head:find('Active',1,true),'R8: the heading never says Active',v.head)
+ C.expect(v.head=='Your offers' and v.auto=='Auto OFF','R8: the heading is the player\'s own offers and the Auto control says Auto OFF',
+  v.head..' | '..v.auto)
  C.expect(EngineFree(VisibleText()),'R8: no engine name in any visible recommendation or status text',v.body)
  C.guard(m.cards[1].highlight~=true and m.cards[2].highlight~=true,'R8: the Take highlight (automation target) is not set for a Freeze')
  -- The one-line rows (the fallback without a built layout) hold the same
@@ -609,14 +692,21 @@ C.scenario('R8 Auto OFF, two different Needed offers: the Freeze target is named
  n,at=Frozen(v)
  C.expect(n==1 and at==2 and Shows(v,2,'Echo 3','Epic') and not v.freezes[1],'R8: the Freeze mark follows the decision on a new board',
   table.concat(v.cards,' | '))
- C.expect(v.body:find('Echo 3 (Epic)',1,true)~=nil and not v.body:find('Echo 1',1,true),'R8: the body names the new target only',v.body)
+ whole=Whole()
+ C.expect(InRow(2) and whole:find('Echo 3 (Epic)',1,true)~=nil and not whole:find('Echo 1',1,true) and not v.body:find('Echo 1',1,true),
+  'R8: the reason stands in the new Freeze target\'s row and names the new target only',v.body..' | '..whole)
  -- Ordinary Take board: the Take marker, no Freeze mark survives.
  Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200005,quality=1}})
  v=View()
  C.setup(w.last and w.last.type=='take' and w.last.spellId==200005,'R8: fixture: one Needed offer, a Take',Line(w.last))
  n,at=Marked(v)
  C.guard(n==1 and at==3 and Frozen(v)==0,'R8: an ordinary Take keeps its Wishlist pick marker; no Freeze mark remains',table.concat(v.cards,' | '))
- C.guard(v.body:find('Take a needed Echo',1,true)~=nil and v.body:find('Echo 5 (Uncommon)',1,true)~=nil,'R8: and its named Take recommendation',v.body)
+ -- (The reason itself is a guard as it was; that its target is named is
+ -- the compact row's EXPECT: in the marked row, whole on the hover.)
+ C.guard(v.body:find('Take a needed Echo',1,true)~=nil,'R8: and its Take recommendation',v.body)
+ whole=Whole()
+ C.expect(InRow(3) and whole:find('Take a needed Echo',1,true)~=nil and whole:find('Echo 5 (Uncommon)',1,true)~=nil,
+  'R8: named in its marked row and whole on its hover',v.body..' | '..whole)
  -- No choice: nothing marked.
  H.Board({});H.Notify();H.Advance(.6)
  v=View()
@@ -639,7 +729,8 @@ C.scenario('R9 Freeze controls: duplicate same Echo, unknown charges and a long 
  C.setup(w.last and w.last.type=='freeze' and w.last.reasonCode=='PAIR_FREEZE_SECOND_NEEDED' and w.last.spellId==200003,
   'R9: fixture: two copies of an Echo needed twice: the decision Freezes one',Line(w.last))
  C.guard(Frozen(v)==0 and Marked(v)==0,'R9: with two equal targets no card is marked',table.concat(v.cards,' | '))
- C.guard(not v.body:find('(Epic)',1,true) and v.body~='','R9: and none is named; the reason is still shown',v.body)
+ C.guard(not v.body:find('(Epic)',1,true) and v.body~='' and not Whole():find('(Epic)',1,true),
+  'R9: and none is named; the reason is still shown',v.body)
  C.expect(EngineFree(VisibleText()),'R9: the unnamed Freeze reason has no engine name',v.body)
  C.guard(SameEffects(Effects(),e0),'R9: nothing performed')
  w.Stop()
@@ -675,7 +766,11 @@ C.scenario('R9 Freeze controls: duplicate same Echo, unknown charges and a long 
  C.setup(w.last and w.last.type=='freeze' and w.last.spellId==200001,'R9: fixture: the long-named Echo is the Freeze target',Line(w.last))
  n,at=Frozen(v)
  C.expect(n==1 and at==1 and Shows(v,1,long,'Uncommon'),'R9: the long-named Freeze target is identified',table.concat(v.cards,' | '))
- C.expect(v.body:find(long..' (Uncommon)',1,true)~=nil,'R9: and named whole in the recommendation',v.body)
+ -- (EXPECT: the name was looked up in the text under the rows. The row
+ -- itself shows the long name whole (Shows above), the reason stands in
+ -- that row, and the reason's hover names the target whole.)
+ local whole=Whole()
+ C.expect(InRow(1) and whole:find(long..' (Uncommon)',1,true)~=nil,'R9: and named whole in the recommendation\'s own sentence',v.body..' | '..whole)
  C.guard(SameEffects(Effects(),e0),'R9: nothing performed')
  w.Stop()
 end)
@@ -702,8 +797,14 @@ C.scenario('R10 Auto OFF, three different Needed offers: the Freeze is named wit
  local n,at=Frozen(v)
  C.guard(n==1 and d and at==d.index,'R10: exactly the decision\'s Freeze card is identified',table.concat(v.cards,' | '))
  C.guard(Marked(v)==0,'R10: no card carries the Take marker')
- C.guard(v.body:find(target,1,true)~=nil and v.body:lower():find('freeze',1,true)~=nil and not v.body:find('Take',1,true),
-  'R10: the body names the Freeze target with Freeze wording',v.body)
+ -- (The Freeze wording is a guard as it was; that the target is named is
+ -- the compact row's EXPECT: the reason in the target's own row, the whole
+ -- sentence on its hover.)
+ C.guard(v.body:lower():find('freeze',1,true)~=nil and not v.body:find('Take',1,true),
+  'R10: the body keeps its Freeze wording',v.body)
+ local whole=Whole()
+ C.expect(d and InRow(d.index) and whole:find(target,1,true)~=nil and not whole:find('Take',1,true),
+  'R10: the reason stands in the Freeze target\'s row and its hover names that target',v.body..' | '..whole)
  local shown=VisibleText()
  C.expect(not shown:lower():find('two needed',1,true) and not shown:lower():find('of two',1,true),
   'R10: no visible recommendation or status text claims exactly two Needed offers',v.body)

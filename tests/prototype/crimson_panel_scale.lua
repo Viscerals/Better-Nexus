@@ -11,13 +11,22 @@
 --    non-finite or non-number request writes nothing;
 -- Z4 a malformed or out-of-range saved value reads as 100% and is not
 --    rewritten by reading, rendering or opening Options;
--- Z5 a screen too narrow for the chosen size reduces the applied size, says
+-- Z5 a screen too small for the chosen size reduces the applied size, says
 --    so, keeps the choice, and returns to it when the screen fits again;
---    invalid screen dimensions keep a finite scale and write nothing;
+--    invalid screen dimensions keep a finite scale and write nothing.
+--    The original 640 x 1080 screen is kept: the former 420-unit panel did
+--    not fit it at 150% and was reduced there. The approved compact panel is
+--    284 units x the text scale, which that screen holds at 150%, so there
+--    the fit rule gives the chosen size whole, the list does not say
+--    reduced and the choice stays. The reduction is then reached beside it
+--    on a 640 x 480 screen with a tall panel (long names, Details open).
 -- Z6 the generic FitToScreen keeps its ceiling of 1 for every other caller
 --    and takes a ceiling for the main panel;
 -- Z7 a size change keeps the panel's physical top-left corner (then the
---    smallest clamp to the screen) and writes no panelX / panelY;
+--    smallest clamp to the screen) and writes no panelX / panelY. The
+--    original low corner 600,100 is kept: the compact panel is whole there,
+--    so it must stay exactly there. The clamp is then reached beside it at
+--    600,40;
 -- Z8 a drag at 150% saves its centre in UIParent units; a render during an
 --    active drag changes neither the scale nor the anchor;
 -- Z9 no other frame's scale changes (Wishlist overlay, independent windows,
@@ -143,24 +152,58 @@ C.scenario('Z4 a malformed or out-of-range saved value reads as 100% and is not 
  P.Render(Model())
 end)
 
-C.scenario('Z5 a narrow screen reduces the applied size and says so; the choice is kept',function()
+C.scenario('Z5 a screen too small for the chosen size reduces the applied size and says so; the choice is kept',function()
  P.SetPanelScale(1.5)
- C.setup(root:GetWidth()==420 and root:GetHeight()<700,'Z5: fixture: the panel is 420 wide and under 700 tall',root:GetHeight())
+ -- The original screen, 640 x 1080, with the original fixture fact restated
+ -- for the approved width (it was: 420 wide and under 700 tall).
+ C.setup(root:GetWidth()==284 and root:GetHeight()<700,'Z5: fixture: the panel is 284 wide and under 700 tall',root:GetHeight())
  UIParent:SetSize(640,1080)
  P.Render(Model())
- C.expect(Near(root:GetScale(),616/420),'Z5: on a 640-wide screen the applied size is (640-24)/420',root:GetScale())
+ -- The fixture that stood here asked for the former 420 units, which this
+ -- screen could not hold at 150%, and expected the reduction to
+ -- (640-24)/420. The approved panel is 284 units: 426 at 150%, inside the
+ -- 616 this screen leaves. The same fit rule (the header's: the chosen size,
+ -- bounded by what the screen holds of the panel's own width and height, and
+ -- never under 50%) therefore gives the chosen size whole here, the list
+ -- does not say reduced, and the choice stays saved and named.
+ local rule=math.max(0.5,math.min(1.5,(640-24)/root:GetWidth(),(1080-24)/root:GetHeight()))
+ C.expect(root:GetWidth()==284 and root:GetWidth()*1.5<=640-24 and Near(root:GetScale(),1.5) and Near(root:GetScale(),rule)
+  and Row(SizeMenu(),'Reduced to fit')==nil,
+  'Z5: on the 640 x 1080 screen the 284-unit panel needs no reduction: the fit rule gives the chosen 150% whole and the list does not say reduced',
+  tostring(root:GetWidth())..' x '..tostring(root:GetHeight())..' at '..tostring(root:GetScale())..', rule '..tostring(rule))
+ C.expect(Saved().panelScale==1.5 and SizeMenu().text=='Main panel size: 150%',
+  'Z5: on the 640 x 1080 screen the chosen 150% stays saved and the list names it',SizeMenu().text)
+ -- Beside it, the reduction: a panel taller than the screen leaves at the
+ -- chosen size: three offers with long names and open Details on a 480-high
+ -- screen. Details is the panel's own memory-only state and is put back
+ -- below.
+ local function Tall()
+  local m=Model()
+  m.cards={{text=string.rep('Cinderbound ',8)..'Lattice (Rare)'},
+   {text='Hollow Bell of the '..string.rep('Ashen ',8)..'Choir (Epic)'},
+   {text=string.rep('Gravecall ',6)..'Chorus (Uncommon)'}}
+  return m
+ end
+ local wasDetails=P._playDetails
+ P._playDetails=true
+ UIParent:SetSize(640,480)
+ P.Render(Tall())
+ C.setup(root:GetWidth()==284 and root:GetHeight()>(480-24)/1.5 and root:GetHeight()<700,
+  'Z5: fixture: the panel is 284 wide, taller than a 480-high screen leaves at 150%, and under 700 tall',root:GetHeight())
+ C.expect(Near(root:GetScale(),(480-24)/root:GetHeight()),'Z5: on a 480-high screen the applied size is (480-24) over the panel\'s height',root:GetScale())
  C.expect(Saved().panelScale==1.5,'Z5: the chosen 150% stays saved')
  local menu=SizeMenu()
  C.expect(menu.text=='Main panel size: 150%' and Row(menu,'Reduced to fit your screen')~=nil,
   'Z5: the list keeps 150% and says Reduced to fit your screen',menu.text)
  UIParent:SetSize(1920,1080)
- P.Render(Model())
+ P.Render(Tall())
  C.expect(Near(root:GetScale(),1.5) and Row(SizeMenu(),'Reduced to fit')==nil,'Z5: on a screen that fits it returns to 150%')
  UIParent:SetSize(0,0)
- P.Render(Model())
+ P.Render(Tall())
  local s=root:GetScale()
  C.expect(type(s)=='number' and s==s and s>=0.5 and s<=1.5 and Saved().panelScale==1.5,
   'Z5: unreadable screen dimensions keep a finite scale and the choice',s)
+ P._playDetails=wasDetails
  UIParent:SetSize(1920,1080)
  P.ResetPanelScale()
  P.Render(Model())
@@ -194,10 +237,29 @@ C.scenario('Z7 a size change keeps the physical top-left corner and writes no po
   'Z7: at 150% the corner 600,700 (physical) is anchored at 400,466.7 panel units',tostring(p)..' '..tostring(x)..','..tostring(y))
  C.guard(Saved().panelX==nil and Saved().panelY==nil,'Z7: a size change writes no panelX / panelY')
  -- Near the bottom edge the panel moves up just enough to stay whole.
+ -- The original corner, 600,100 in the panel's units at 150%: 900,150 on the
+ -- screen. The former panel was taller than those 150 units, so it left the
+ -- bottom there and was raised until its bottom met the edge. The approved
+ -- compact panel is lower than 150 here: at this corner it is whole, and the
+ -- size change must leave it exactly there (the clamp moves nothing it need
+ -- not move).
  corner.left,corner.top=600,100
+ C.setup(root:GetHeight()<corner.top*1.5,'Z7: fixture: the compact panel is lower than the 150 units the corner 600,100 stands above the screen\'s bottom',root:GetHeight())
  Click('Reset to 100%')
- local _,_,_,_,y2=root:GetPoint(1)
- C.expect(Near(y2,root:GetHeight()),'Z7: a corner that would leave the bottom is clamped to the panel height',y2)
+ local _,_,_,x2,y2=root:GetPoint(1)
+ C.expect(Near(x2,900) and Near(y2,150),'Z7: a corner that leaves the panel whole is kept exactly: 600,100 at 150% is 900,150 at 100%',
+  tostring(x2)..','..tostring(y2)..' for a panel '..tostring(root:GetHeight())..' tall')
+ -- Beside it, a corner low enough for the compact panel to leave the bottom:
+ -- 40 units up at 150%, 60 on the screen, which this panel's height exceeds.
+ -- The size is first put back to 150% from the first corner, as above.
+ corner.left,corner.top=600,700
+ Click('150%')
+ corner.left,corner.top=600,40
+ C.setup(corner.top*1.5<root:GetHeight(),'Z7: fixture: a corner 60 units above the screen\'s bottom would leave the bottom',root:GetHeight())
+ Click('Reset to 100%')
+ local _,_,_,_,y3=root:GetPoint(1)
+ C.expect(Near(y3,root:GetHeight()),'Z7: a corner that would leave the bottom is clamped to the panel height',y3)
+ C.guard(Saved().panelX==nil and Saved().panelY==nil,'Z7: neither size change near the bottom edge writes a panelX / panelY')
  corner.left,corner.top=600,700
  P.Render(Model())
 end)

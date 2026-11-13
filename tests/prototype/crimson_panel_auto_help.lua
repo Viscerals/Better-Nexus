@@ -409,9 +409,15 @@ end)
 C.scenario('A18 a named Wishlist, a named Wishlist with no target and an empty Saved Build keep their own words',function()
  C.setup(Option(true),'A18: fixture: the option is on')
  local named={state='ready',name='Auto plan'}
+ -- The approved compact header: while the Wishlist is the destination's
+ -- stated, named assignment its line shows the name alone, and that it is
+ -- assigned stays on the line's hover, whole (the fourth value: what the
+ -- hover must still say). EXPECT for those two cases: the line itself said
+ -- "Wishlist: Auto plan (assigned)", which the guard here asked for. Every
+ -- other state keeps its own words on the line, as before (GUARD).
  for _,case in ipairs({
-  {'a named Wishlist',{noWishlist=ABSENT,assignment=named},'Wishlist: Auto plan (assigned)'},
-  {'a named Wishlist with no target',{noWishlist=ABSENT,emptyWishlist=true,assignment=named},'Wishlist: Auto plan (assigned)'},
+  {'a named Wishlist',{noWishlist=ABSENT,assignment=named},'Wishlist: Auto plan','Wishlist: Auto plan (assigned)'},
+  {'a named Wishlist with no target',{noWishlist=ABSENT,emptyWishlist=true,assignment=named},'Wishlist: Auto plan','Wishlist: Auto plan (assigned)'},
   {'a Wishlist name beside an unassigned destination',{noWishlist=ABSENT},NONE},
   {'an empty Saved Build',{assignment={state='unassigned',emptySlot=true}},'Wishlist: Refused'},
  }) do
@@ -419,9 +425,13 @@ C.scenario('A18 a named Wishlist, a named Wishlist with no target and an empty S
    local o={level=level}
    for k,v in pairs(case[2]) do o[k]=v end
    local with=Shows(o)
+   local hover=LineHover()
    o.randomRoll=ABSENT
    local without=Shows(o)
-   C.guard(with==case[3] and without==case[3],'A18: '..case[1]..' at level '..level..': its own words, with and without the runtime fact',with..' | '..without)
+   ;(case[4] and C.expect or C.guard)(with==case[3] and without==case[3]
+    and (case[4]==nil or (hover:find(case[4],1,true)~=nil and LineHover():find(case[4],1,true)~=nil)),
+    'A18: '..case[1]..' at level '..level..': its own words, with and without the runtime fact'
+     ..(case[4] and '; that it is assigned is on the hover' or ''),with..' | '..without..' | hover '..hover)
   end
  end
 end)

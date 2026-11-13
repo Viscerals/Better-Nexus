@@ -14,6 +14,20 @@
 -- and the selected row is told by an accent outline around a dark fill. The
 -- former P2 band assertion (three one-line rows of small + 2 row gaps) is
 -- replaced by the grid's; the rows stay display only.
+-- The approved compact panel (design draft "Nexus compact panel"): that grid
+-- is replaced in turn by the compact row: the icon, the name, and at the
+-- row's right end the quality, a dot and the status on the name's line while
+-- they fit it, else on a line under it; a selected status stands after a
+-- star, which takes the place of the code-owned mark before its words (the
+-- mark and the words stay whole on the row's hover). With Auto OFF the
+-- heading over the offers is "Your offers", with the destination in a cell
+-- of its own at the row's right end; that Auto is OFF is the Auto control's
+-- own word in the header. EXPECT, failing at eef1608f by design (P2, P4,
+-- P7, P9); the grid's assertions and the fitted Auto OFF heading's are
+-- replaced by these, each marked where it stood, not relaxed. The draft is
+-- drawn in reference pixels, 420 of them across the panel that is 284 units
+-- wide at the reference text size, so one of its pixels is 284 / 420 unit
+-- here.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 local C=V.Checker('play_offer_cards')
@@ -40,6 +54,28 @@ local function Body() return tostring(NexusPanel._rollRec:GetText() or '') end
 -- What the player reads: the text without colour escapes (|cAARRGGBB, |r),
 -- whose hex digits are not shown. Nothing else is removed.
 local function Visible(s) return (tostring(s or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
+-- A length the approved draft gives in reference pixels, in whole units at
+-- the reference text size (1 at least); and whether `units` is such a length
+-- where it stands (a block's own place decides whether it rounds down or up).
+local UNIT=284/420
+local function Design(px) return math.max(1,math.floor(px*UNIT+0.5)) end
+local function Drawn(px,units) return units==math.floor(px*UNIT) or units==math.ceil(px*UNIT) end
+-- A selected row's tag as the compact row shows it: Readout's tag is the
+-- code-owned mark "> " and its words; the row shows the star and the words.
+-- The whole tag stays on the row for its hover.
+local function Starred(card,tag)
+ return type(tag)=='string' and tag:sub(1,2)=='> ' and #tag>2 and card.tag:GetText()==tag:sub(3)
+  and card.star~=nil and card.star:IsShown() and card._nexusTag==tag
+end
+-- The compact offer heading with Auto OFF: "Your offers", the destination in
+-- the cell at the row's right end (`slot` words, after a dot while charges
+-- stand before it) and the Auto state on the header's Auto control.
+local function ChoiceHeading(destination)
+ local head,cell,auto=NexusPanel._rollStatus,NexusPanel._offerSlot,NexusPanel._autoBtn
+ return Visible(head:GetText())==(Nexus.Localization.Text('panel.heading.your_offers'))
+  and cell~=nil and cell:IsShown() and Visible(cell:GetText())==destination
+  and auto~=nil and auto:IsShown() and Visible(auto:GetText())==(Nexus.Localization.Text('panel.button.auto_off'))
+end
 
 C.scenario('P1 Readout reads a card from its CardLine only; unknown is never blank',function()
  C.expect(R and type(R.OfferCard)=='function' and type(R.OfferHeading)=='function'
@@ -169,7 +205,7 @@ C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready'
 Nexus.DisableOrdinaryAutomation()
 P.Show()
 
-C.scenario('P2 three offer rows in one grid, the Wishlist pick set apart, and nothing chosen',function()
+C.scenario('P2 three compact offer rows, the Wishlist pick set apart, and nothing chosen',function()
  local before=Effects()
  C.setup(P.Render(Model({auto=false,cards=CARDS}))==true and NexusPanel:IsShown(),'P2: fixture: the HUD renders an offer with Auto OFF')
  local cards=NexusPanel._offerCards
@@ -178,77 +214,125 @@ C.scenario('P2 three offer rows in one grid, the Wishlist pick set apart, and no
  local shown=0
  for i=1,3 do if cards[i]:IsShown() then shown=shown+1 end end
  C.expect(shown==3,'P2: every offered card is shown',tostring(shown))
+ -- (The pick's words after its star: Starred. The check that stood here
+ -- asked for the tag with its code-owned mark as the row's text.)
  C.expect(cards[1].name:GetText()=='Cinder Lattice' and cards[1].quality:GetText()=='Epic'
-  and cards[1].tag:GetText()==R.OFFER_PICK_TAG and cards[1]._nexusMarked==true,
+  and Starred(cards[1],R.OFFER_PICK_TAG) and cards[1]._nexusMarked==true,
   'P2: the marked card names its Echo, its quality and the Wishlist pick',tostring(cards[1].tag:GetText()))
+ C.expect(cards[2].star~=nil and not cards[2].star:IsShown() and cards[3].star~=nil and not cards[3].star:IsShown(),
+  'P2: only the selected row has the star')
  C.expect(cards[2]._nexusMarked==false and cards[3]._nexusMarked==false,'P2: only the runtime-marked card is set apart')
  C.expect(cards[3].quality:GetText()=='Uncommon' and cards[3].tag:GetText()==R.OFFER_GUARANTEED_TAG,
   'P2: the guaranteed card says so on its tag line')
  -- design/current "Nexus Main Panel - Compact Redesign": compact offer rows.
  C.expect(cards[1]._nexusLayout=='rows','P2: the offers are compact rows, one per offer',tostring(cards[1]._nexusLayout))
  C.expect(cards[1]._nexusFull=='Cinder Lattice (Epic) wanted','P2: the complete card line stays on its hover')
- C.expect(Heading():find('Current offer - you choose',1,true)~=nil,'P2: the heading says the player chooses',Heading())
+ -- (EXPECT: the heading was "Current offer - you choose" with the Auto
+ -- state and the destination after it in one text. This model has no
+ -- Saved Build slot, so the destination is the preview tag.)
+ C.expect(ChoiceHeading((Nexus.Localization.Text('panel.label.preview_tag'))),
+  'P2: the heading is "Your offers", the destination stands in its own cell and the Auto control says Auto OFF',Heading())
  -- Geometry: disjoint full-width rows inside the roll area.
  local area=NexusPanel._rollArea
  local layout=NexusPanel._responsiveLayout
- -- The offer-row grid (main-panel visual correction): a row is two text
- -- lines, the name's primary line over the quality's secondary line, with a
- -- row gap above and below; rows are a row gap apart. The former check here
- -- held a row to one small line (small + 2 row gaps): that one-line row is
- -- intentionally gone, so its literal is replaced, not relaxed.
- local rowGap=layout and math.max(2,math.floor(layout.gap/3)) or 0
- local modelRow=layout and layout.normal+layout.small+2*rowGap or 0
+ -- The approved compact rows. A row's text column is the row less its
+ -- 6-pixel insets, the 24-pixel icon and the 8 pixels after it; at the
+ -- row's right end stands the phrase: the quality, a dot (5 pixels either
+ -- side) and the status, a selected status after its 12-pixel star and 4.
+ -- The name and the phrase share the row's line while the name, the draft's
+ -- 10 pixels and the phrase fit the column: the draft's 28-pixel row.
+ -- Otherwise the phrase stands on a line of its own under the name: 24
+ -- pixels more. Rows are 2 pixels apart. Which arrangement a row needs is
+ -- worked out here from its words as this harness measures them (6 units a
+ -- byte); nothing is read from the panel's own arrangement. The checks that
+ -- stood here held the grid: three rows of one height, at least the
+ -- two-line model row, with the name at 37 units over its quality and the
+ -- tag in a status column; that grid is intentionally gone, so its literals
+ -- are replaced by the compact row's, not relaxed.
+ C.setup(layout~=nil and layout.small==11 and layout.normal==14 and layout.gap==6 and layout.width==284
+  and area:GetWidth()==284-2*Design(7),
+  'P2: fixture: the reference text size (11 and 14-unit rows) in the 284-unit reference panel',
+  layout and (tostring(layout.small)..' / '..tostring(layout.normal)..' / '..tostring(layout.width)))
+ local row={inset=Design(6),icon=Design(24),pad=Design(2),textX=Design(6)+Design(24)+Design(8)}
+ C.setup(row.inset==4 and row.icon==16 and row.pad==1 and row.textX==25 and Design(10)==7 and Design(5)==3,
+  'P2: fixture: the draft\'s row lengths at the reference size: insets 4, icon 16, pad 1, the name from 25')
+ local function Arrangement(card)
+  local column=card:GetWidth()-row.textX-row.inset
+  local quality,tag=card.quality:GetText() or '',card.tag:GetText() or ''
+  local qualityW=quality~='' and card.quality:GetStringWidth() or 0
+  local tagW=tag~='' and card.tag:GetStringWidth() or 0
+  -- (The dot is two bytes in this harness's measure.)
+  local dotW=(qualityW>0 and tagW>0) and (2*Design(5)+6*#'\194\183') or 0
+  local starW=(tagW>0 and card._nexusMarked==true) and (Design(12)+Design(4)) or 0
+  local phrase=qualityW+dotW+starW+tagW
+  return {column=column,qualityW=qualityW,tagW=tagW,dotW=dotW,starW=starW,phrase=phrase,
+   inline=phrase==0 or card.name:GetStringWidth()+Design(10)+phrase<=column}
+ end
  local lastBottom,inside,first=nil,true,nil
+ local tops,plans={},{}
  for i=1,3 do
   local point,relative,_,x,y=cards[i]:GetPoint()
   first=first or -y
+  tops[i],plans[i]=-y,Arrangement(cards[i])
   if point~='TOPLEFT' or relative~=area or x<0 or x+cards[i]:GetWidth()>area:GetWidth() or y>0
    or (lastBottom and -y<lastBottom) then inside=false end
   lastBottom=-y+cards[i]:GetHeight()
  end
  C.expect(inside and lastBottom~=nil and lastBottom<=area:GetHeight(),'P2: the offers are three disjoint rows inside the roll area')
  local h1,h2,h3=cards[1]:GetHeight(),cards[2]:GetHeight(),cards[3]:GetHeight()
- C.expect(layout and select(2,Nexus.LayoutMetrics.OfferRows(layout.small,layout.gap,layout.normal))==modelRow
-  and h1>=modelRow and h1==h2 and h2==h3 and lastBottom-first==h1+h2+h3+2*rowGap,
-  'P2: the three rows share one height, at least the two-line grid row, a row gap apart',
-  h1..'/'..h2..'/'..h3..' model '..modelRow)
- -- The grid inside each row: the name and, under it in the same column, its
- -- quality; every name starts at one left edge after the icon column; every
- -- tag is right-aligned to one right inset (the status column).
- -- The grid's numbers are stated here for this fixture's reference rows (11
- -- and 14 units with a 6-unit gap), not read from the layout engine under
- -- test: the content is inset one gap (6), with the 2-unit row gap above and
- -- below the lines; the icon is a square as tall as the two lines (14 + 11 =
- -- 25); the text column starts one gap after it (6 + 25 + 6 = 37).
- C.setup(layout~=nil and layout.small==11 and layout.normal==14 and layout.gap==6 and rowGap==2,
-  'P2: fixture: the reference rows (11 and 14 units, a 6-unit gap)',
-  layout and (tostring(layout.small)..' / '..tostring(layout.normal)..' / '..tostring(layout.gap)))
- local grid={inset=6,pad=2,icon=25,textX=37}
+ -- This board: rows 1 and 2 fit one line; row 3's guarantee does not fit
+ -- beside its name (66 + 7 + 174 units in a column of 245).
+ C.setup(plans[1].inline and plans[2].inline and not plans[3].inline and plans[3].phrase<=plans[3].column,
+  'P2: fixture: rows 1 and 2 fit one line and row 3\'s phrase stands under its name',
+  tostring(plans[1].phrase)..' / '..tostring(plans[2].phrase)..' / '..tostring(plans[3].phrase)..' in '..tostring(plans[3].column))
+ C.expect(cards[1]:GetWidth()==area:GetWidth() and Drawn(28,h1) and Drawn(28,h2) and Drawn(52,h3)
+  and Drawn(2,tops[2]-(tops[1]+h1)) and Drawn(2,tops[3]-(tops[2]+h2)),
+  'P2: a one-line row is the draft\'s 28 pixels and a row with its phrase under the name 24 more; the rows span the block, 2 pixels apart',
+  h1..'/'..h2..'/'..h3..' at '..tops[1]..'/'..tops[2]..'/'..tops[3])
+ -- Inside each row: every name starts at one left edge after the icon; the
+ -- phrase ends at the row's right inset, the quality before the status on
+ -- one line with the dot between them, on the name's line or under it.
  local columns,notes=true,{}
  for i=1,3 do
-  local np,nrel,_,nx,ny=cards[i].name:GetPoint()
-  local qp,qrel,_,qx,qy=cards[i].quality:GetPoint()
-  local tp,trel,trp,tx=cards[i].tag:GetPoint()
+  local card,plan=cards[i],plans[i]
+  local np,nrel,_,nx,ny=card.name:GetPoint()
+  local qp,qrel,_,qx,qy=card.quality:GetPoint()
+  local tp,trel,_,tx,ty=card.tag:GetPoint()
+  local right=card:GetWidth()-row.inset
+  local dotShown=card.dot~=nil and card.dot:IsShown() and true or false
   notes[#notes+1]=i..': name '..tostring(nx)..','..tostring(ny)..' quality '..tostring(qx)..','..tostring(qy)..' tag '..tostring(tp)..' '..tostring(tx)
-  if not (np=='TOPLEFT' and nrel==cards[i] and nx==grid.textX and qp=='TOPLEFT' and qrel==cards[i] and qx==nx
-   and -qy>=-ny+cards[i].name:GetHeight() and cards[i].quality:GetWidth()==cards[i].name:GetWidth()
-   and tp=='TOPRIGHT' and trel==cards[i] and trp=='TOPRIGHT' and tx==-grid.inset
-   and cards[i].tag:GetWidth()==cards[1].tag:GetWidth()
-   and nx+cards[i].name:GetWidth()<=cards[i]:GetWidth()-grid.inset-cards[i].tag:GetWidth()) then columns=false end
+  local ok=np=='TOPLEFT' and nrel==card and nx==row.textX and -ny==row.pad
+   and qp=='TOPLEFT' and qrel==card and card.quality:GetWidth()==plan.qualityW
+  if ok and plan.tagW>0 then
+   ok=tp=='TOPLEFT' and trel==card and card.tag:GetWidth()==plan.tagW and tx+plan.tagW==right and ty==qy
+    and qx+plan.qualityW+plan.dotW+plan.starW==tx and dotShown
+  elseif ok then
+   ok=qx+plan.qualityW==right and not dotShown
+  end
+  if ok and plan.inline then
+   -- On the name's line, after the name's box and the draft's 10 pixels.
+   ok=qy==ny and card.name:GetWidth()>=card.name:GetStringWidth() and nx+card.name:GetWidth()+Design(10)<=qx
+  elseif ok then
+   -- Under the name, which has the whole text column.
+   ok=card.name:GetWidth()==plan.column and -qy>=-ny+card.name:GetHeight()
+  end
+  if not ok then columns=false end
  end
  C.expect(columns,
-  'P2: each row is one grid: the name at 37 units with its quality under it in the same column, the tag in the status column ending 6 units from the row\'s right',
+  'P2: each row is the compact row: the name at 25 units, and ending 4 units from the row\'s right the quality, the dot and the status, on the name\'s line while they fit it, else under it',
   table.concat(notes,' | '))
- -- The icon column: one square per row at the same inset, before the text column.
+ -- The icon: one square per row at the same inset, in the middle of the
+ -- row's first line (the draft's 24-pixel line, 2 pixels under the row's
+ -- top), before the text.
  local icons=true
  for i=1,3 do
   local icon=cards[i]._nexusSlot and cards[i]._nexusSlot.icon
   local ip,irel,_,ix,iy=nil,nil,nil,nil,nil
   if icon then ip,irel,_,ix,iy=icon:GetPoint() end
-  if not (icon and ip=='TOPLEFT' and irel==cards[i] and ix==grid.inset and -iy==grid.pad
-   and icon:GetWidth()==grid.icon and icon:GetHeight()==grid.icon and ix+icon:GetWidth()<grid.textX) then icons=false end
+  if not (icon and ip=='TOPLEFT' and irel==cards[i] and ix==row.inset and -iy==row.pad
+   and icon:GetWidth()==row.icon and icon:GetHeight()==row.icon and ix+icon:GetWidth()<row.textX) then icons=false end
  end
- C.expect(icons,'P2: every row keeps its 25-unit icon square at 6, 2 in the row, before its text')
+ C.expect(icons,'P2: every row keeps its 16-unit icon square (the draft\'s 24 pixels) at 4, 1 in the row, before its text')
  -- The selected row (the marked offer): a dark fill and an outline on the
  -- row's own four edges; no other row shows either.
  local function Selected(card)
@@ -268,6 +352,21 @@ C.scenario('P2 three offer rows in one grid, the Wishlist pick set apart, and no
   if cards[i]:GetScript('OnClick') or cards[i]:GetScript('OnMouseUp') or cards[i]:GetScript('OnMouseDown') then clickable=true end
  end
  C.guard(not clickable,'P2: a card has no click: it never chooses, banishes, rerolls or freezes')
+ -- The star and the dot are marks only (the draft's decision D7: a mark,
+ -- no gameplay action): plain regions on a layer of the offer block that
+ -- has no script of its own, so they add no hover, click or drag. EXPECT
+ -- (at eef1608f a row had neither). Whether the layer takes the mouse is
+ -- the client's to show (the harness keeps no mouse state): NOT RUN.
+ local star,dot=cards[1].star,cards[1].dot
+ local layer=star and star:GetParent()
+ local scripted=false
+ for _,name in ipairs({'OnClick','OnMouseUp','OnMouseDown','OnEnter','OnLeave','OnDragStart','OnDragStop','OnUpdate'}) do
+  if layer and layer:GetScript(name) then scripted=true end
+ end
+ C.expect(star~=nil and star.kind=='Texture' and dot~=nil and dot.kind=='FontString' and layer~=nil and layer.kind=='Frame'
+  and layer:GetParent()==area and dot:GetParent()==layer and not scripted,
+  'P2: the star and the dot are plain marks on a layer of the offer block that has no script: no hover, click or drag of their own',
+  tostring(layer and layer.kind))
  for i=1,3 do local enter=cards[i]:GetScript('OnEnter');if enter then enter(cards[i]) end end
  C.guard(Effects()==before,'P2: rendering and pointing at the cards make no game action, send or Auto change',Effects())
 end)
@@ -287,7 +386,8 @@ C.scenario('P4 Auto ON: the offer is recommended only, with what Auto may do',fu
  local before=Effects()
  C.setup(P.Render(Model({auto=true,cards=CARDS}))==true,'P4: fixture: a synthetic Auto ON model with an offer')
  local cards=NexusPanel._offerCards
- C.expect(cards and cards[1].tag:GetText()==R.OFFER_RECOMMENDED_TAG,'P4: the marked card is recommended, not promised')
+ C.expect(cards and Starred(cards[1],R.OFFER_RECOMMENDED_TAG),'P4: the marked card is recommended, not promised',
+  cards and cards[1].tag:GetText())
  -- Approved panel cleanup (Auto ON takes no row of its own): the Auto
  -- explanation control shares the heading's row, so the heading is fitted
  -- beside it and may show one of its shorter forms (Readout
@@ -394,11 +494,24 @@ C.scenario('P7 at 125% text the offer heading and every card status line fit wit
   local shown=Visible(head:GetText())
   C.expect(Fits(head),tag..': the heading fits its row beside the charges on one line',
    shown..' '..head:GetStringWidth()..'/'..head:GetWidth())
-  -- The shorter heading forms begin with whose choice it is ('You choose',
-  -- P1), so that phrase is matched without case; the Auto state and the
-  -- destination are matched exactly.
-  C.expect(shown:lower():find(case[2]:lower(),1,true)~=nil and shown:find(case[3],1,true)~=nil and shown:find('Slot 2',1,true)~=nil,
-   tag..': it still says whose choice it is, the Auto state and the destination',shown)
+  if case[1] then
+   -- The shorter heading forms begin with whose choice it is ('You
+   -- choose', P1), so that phrase is matched without case; the Auto state
+   -- and the destination are matched exactly.
+   C.expect(shown:lower():find(case[2]:lower(),1,true)~=nil and shown:find(case[3],1,true)~=nil and shown:find('Slot 2',1,true)~=nil,
+    tag..': it still says whose choice it is, the Auto state and the destination',shown)
+  else
+   -- The approved compact heading with Auto OFF: "Your offers"; the
+   -- destination is on the panel in the cell at the row's right end, after
+   -- the charges and a dot, whole on its line; and the Auto state is the
+   -- Auto control's own word in the header. Nothing of it moved to a
+   -- hover. (EXPECT: one fitted text said all three here.)
+   local cell=NexusPanel._offerSlot
+   C.expect(ChoiceHeading('\194\183 '..(Nexus.Localization.Format('panel.label.slot_number',{slot='2'})))
+    and Fits(cell),
+    tag..': the heading is "Your offers"; the destination, in its own cell after the charges, and the Auto state, on the Auto control, are still on the panel, whole',
+    shown..' | '..tostring(cell and cell:GetText())..' | '..tostring(NexusPanel._autoBtn:GetText()))
+  end
   local cards=NexusPanel._offerCards or {}
   local area,rects,clipped=Rect(NexusPanel._rollArea),{},{}
   for i=1,3 do
@@ -425,14 +538,18 @@ C.scenario('P7 at 125% text the offer heading and every card status line fit wit
  C.setup(Large(false,marked)==true,'P7: fixture: a marked guaranteed offer at 125% text')
  local c1=(NexusPanel._offerCards or {})[1]
  C.expect(c1 and Visible(c1.quality:GetText())=='Epic - guaranteed' and Fits(c1.quality)
-  and Visible(c1.tag:GetText())==R.OFFER_PICK_TAG and Fits(c1.tag),
+  and Starred(c1,R.OFFER_PICK_TAG) and Fits(c1.tag),
   'P7: a marked guaranteed card shows its guarantee and the pick, both whole',c1 and Visible(c1.quality:GetText()))
  P._playDetails=wasDetails
  G.UseFont(G.MODELS.default)
  P.Render(Model({auto=false}))
  C.setup(P.Render(Model({auto=false,cards=CARDS}))==true,'P7: fixture: the stock model again')
- C.guard(Heading():find('Current offer - you choose',1,true)~=nil and NexusPanel._offerCards[1]._nexusLayout=='rows',
-  'P7: with room the full heading returns, the offers stay compact rows',Heading())
+ -- (The offers stay compact rows: the GUARD it was. The heading it asked
+ -- for beside that, the full fitted form returning with room, is the
+ -- compact heading's one form now: an EXPECT.)
+ C.guard(NexusPanel._offerCards[1]._nexusLayout=='rows','P7: back at the stock text the offers stay compact rows')
+ C.expect(ChoiceHeading((Nexus.Localization.Text('panel.label.preview_tag'))),
+  'P7: back at the stock text the heading is the same "Your offers"',Heading())
  C.guard(Effects()==before,'P7: fitting and stacking change no game state',Effects())
 end)
 
@@ -485,7 +602,7 @@ C.scenario('P9 the HUD card of an unknown-quality "Shard (Rare)" keeps the whole
  local c=NexusPanel._offerCards
  if not C.setup(type(c)=='table' and c[1]:IsShown(),'P9: fixture: the offer cards show') then return end
  C.expect(c[1].name:GetText()=='Shard (Rare)' and c[1].quality:GetText()=='? Quality unknown'
-  and c[1].tag:GetText()==R.OFFER_PICK_TAG and c[1]._nexusFull==line and c[1]._nexusMarked==true,
+  and Starred(c[1],R.OFFER_PICK_TAG) and c[1]._nexusFull==line and c[1]._nexusMarked==true,
   'P9: the card shows the whole name, an unknown quality and the pick; its hover keeps the one-line text',
   tostring(c[1].name:GetText())..'|'..tostring(c[1].quality:GetText()))
  C.expect(c[2].name:GetText()=='Hollow Bell' and c[2].quality:GetText()=='Rare','P9: a known quality is the card\'s own')

@@ -135,6 +135,12 @@ local function Offer(cards) H.Board(cards);H.Notify();H.Advance(1.2) end
 -- The HUD's card rows as shown. The Play offer cards (Claude Design full UI)
 -- replace the shown rows with the same current choices: each shown card is
 -- read as its visible name, quality and tag lines, in that order.
+-- The approved compact panel (design draft "Nexus compact panel"): a
+-- selected row shows its tag's words after a star (the offer block's own
+-- mark standing on the row: card.star), which stands where the tag's
+-- code-owned "> " stood. The tag as the player reads it is that mark and the
+-- words, so a shown star is read as the "> " it replaces; a tag's words
+-- without the star are not a marker.
 local function CardRows()
  local f=NexusPanel
  local cards={}
@@ -148,6 +154,7 @@ local function CardRows()
     local parts={}
     for _,key in ipairs({'name','quality','tag'}) do
      local text=V.Plain(card[key]:GetText() or '')
+     if key=='tag' and text~='' and card.star and card.star:IsShown() then text='> '..text end
      if text~='' then parts[#parts+1]=text end
     end
     if #parts>0 then cards[#cards+1]=table.concat(parts,' ') end
@@ -737,8 +744,31 @@ C.scenario('P17 J4 a manual Needed card, passive reads and No keep Auto OFF; onl
  local n,at=Marked()
  local body=Body()
  print('OBSERVED','P17 manual body='..body)
- C.guard(n==1 and at==1 and body:find('Echo 1 (Uncommon)',1,true)~=nil and #H.actions==acts and not Auto(),
-  'P17: Auto OFF marks and names the one Needed card; nothing is performed',body)
+ -- The approved compact row: the recommendation stands inside the marked
+ -- offer's own row as the reason alone (the row names the Echo and its
+ -- quality), and the reason's own hover gives the whole sentence with its
+ -- target. The guard that stood here looked for the target's name in the
+ -- text under the rows; that one card is marked and nothing is performed
+ -- stays the guard it was, and how the card is named is the row's EXPECT.
+ C.guard(n==1 and at==1 and #H.actions==acts and not Auto(),
+  'P17: Auto OFF marks the one Needed card; nothing is performed',body)
+ local whole,inRow=body,false
+ do
+  local f=NexusPanel
+  local hover=f._recommendationHover
+  local enter=hover and hover:GetScript('OnEnter')
+  local lines=enter and V.TooltipLines(enter,hover) or {}
+  local leave=hover and hover:GetScript('OnLeave')
+  if leave then leave(hover) end
+  local text=V.Plain(table.concat(lines,'\n'))
+  if text~='' then whole=text end
+  local card=f._offerCards and f._offerCards[1]
+  local _,anchor=f._rollRec:GetPoint(1)
+  inRow=card~=nil and card:IsShown() and anchor==card
+ end
+ C.expect(inRow and body~='' and whole:find(body,1,true)==1 and whole:find('Echo 1 (Uncommon)',1,true)~=nil
+  and #H.actions==acts and not Auto(),
+  'P17: the recommendation stands in the marked card\'s own row and its hover names that card; reading it performs nothing',body..' | '..whole)
  local before,settings,seen=Counters(),Settings(),rawget(NexusDB,'hasSeenQuickStart')
  local tip=AutoTooltip()
  Nexus.Help.Show('rolling');Nexus.Help.Hide()

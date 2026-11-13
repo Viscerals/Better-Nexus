@@ -461,9 +461,9 @@ end)
 -- accent outline is the main-panel visual correction's own (REG-ROW,
 -- S.Outline). GUARD here: current text, tag, hover, band, hidden cards, the
 -- name's colour, passive input and the Shift drag; EXPECT: each row as tall
--- as its two lines need (S.Lines; the rows were one line until that
--- correction). Model geometry only: native pixel fit and desktop 125% are
--- NOT RUN.
+-- as its content needs (S.Lines: the approved compact row; the rows were
+-- the two-line grid before it and one line before that). Model geometry
+-- only: native pixel fit and desktop 125% are NOT RUN.
 local S={QC=Nexus.OrbHistory and Nexus.OrbHistory.QUALITY_COLORS or {}}
 function S.Offer(name,q,note)
  local qn=q and Nexus.OrbHistory.QUALITY_NAMES[q]
@@ -562,36 +562,77 @@ function S.Icon(o)
  for _,v in ipairs(o and o.visuals or {}) do if v.path~=nil then return S.Rect(v.region) end end
  return nil
 end
--- REG-ROW: the numbers the rows are built from, read from the panel's own
--- layout (its primary and secondary text lines and the section gap) and
--- derived here, not read back from the product.
--- Main-panel visual correction (approved: "fixed inset icon/text/status
--- grid, rarity on its secondary line without counts, selected accent
--- outline/dark fill and full selected reason INSIDE its row once"; "Equal
--- base row rhythm must grow for full real text/reason, never line-clamp or
--- omit it"): a row is a grid of two text lines, the name's primary line over
--- the quality's secondary line, with a row gap above and below them; its
--- content is inset one layout gap from both ends; the icon is a square as
--- tall as the two lines at the left inset, and the text column starts one
--- gap after it. At the reference lines (14 and 11 units, a 6-unit gap): row
--- gap 2, row 29, inset 6, icon 25, text column 37. The former row was one
--- small line with a row gap above and below (15 units), its icon a square
--- of that height at the row's left edge.
+-- REG-ROW: the numbers the rows are built from.
+-- The approved compact panel (design draft "Nexus compact panel") replaces
+-- the two-line grid row (the name over its quality, the tag in a status
+-- column; 29 units at the reference lines) by the compact row. The draft is
+-- drawn in reference pixels, 420 across the panel that is 284 units wide at
+-- the reference text size, so one of its pixels is 284 / 420 unit x the
+-- layout's font scale; S.L gives its row lengths in whole units, stated
+-- here from the draft and not read back from the product: the content is
+-- inset 6 pixels from both ends with 2 pixels above and below; the icon is
+-- a 24-pixel square on the row's first line (24 pixels), 8 pixels before
+-- the text column; at the row's right end stands the phrase: the quality,
+-- a dot (5 pixels either side) and the status, a selected status after its
+-- 12-pixel star and 4; 10 pixels separate a name and a phrase on one line;
+-- the selected offer's reason is a line of 18 pixels inside its row.
 function S.L()
  local l=root._responsiveLayout
- local rowGap=math.max(2,math.floor(l.gap/3))
- local icon=l.normal+l.small
- return {small=l.small,normal=l.normal,gap=l.gap,rowGap=rowGap,rowH=l.normal+l.small+2*rowGap,
-  inset=l.gap,icon=icon,textX=l.gap+icon+l.gap}
+ local unit=284/420*(tonumber(l.scale) or 1)
+ local function D(px) return math.max(1,math.floor(px*unit+0.5)) end
+ -- (rowGap: the 2 pixels between two rows, which a row's thin outline
+ -- edge is never thicker than.)
+ return {small=l.small,normal=l.normal,gap=l.gap,unit=unit,D=D,pad=D(2),rowGap=D(2),inset=D(6),icon=D(24),line=D(24),
+  textX=D(6)+D(24)+D(8),meta=D(10),word=D(5),mark=D(12),markGap=D(4),reason=D(18)}
 end
--- A row whose name, quality and status word each fit one line: its two lines
--- at the height the font model gives one line of text (approved: "Measure
--- actual line height for one-line text too"), never under the layout's own
--- lines, with a row gap above and below.
-function S.BaseRow()
+-- Whether `units` is a length the draft gives as `px` pixels, where it
+-- stands (a block's own place decides whether it rounds down or up).
+function S.Drawn(px,units)
+ local unit=S.L().unit
+ return math.abs(units-math.floor(px*unit))<0.01 or math.abs(units-math.ceil(px*unit))<0.01
+end
+-- One row as the draft arranges it, worked out from the row's own words in
+-- the font model in use; nothing is read from the panel's arrangement.
+--   inline: the name, 10 pixels and the phrase fit the text column on one
+--   line (the draft's 28-pixel row);
+--   under: otherwise the name has the column, wrapping there, and the
+--   phrase stands on a line of its own under it (24 pixels more);
+--   split: a phrase wider than the column stands as its two parts under the
+--   name, the quality and under it the status, without the dot (24 pixels
+--   each), a part wider than the column (the status: less its star)
+--   wrapping there.
+-- `need` is what the row's content needs in units and `pixels` the draft's
+-- own height for the arrangement.
+function S.Plan(card)
  local L=S.L()
- local line=math.ceil(G.model.line)
- return 2*L.rowGap+math.max(L.normal,line)+math.max(L.small,line)
+ local char,line=G.model.char,math.ceil(G.model.line)
+ local function W(t) local s=G.Visible(t:GetText() or '');return s~='' and math.ceil(G.Length(s)*char) or 0 end
+ local function H(t,room) return math.max(1,G.Rows(t:GetText() or '',room,char))*line end
+ local p={column=card:GetWidth()-L.textX-L.inset,nameW=W(card.name),qualityW=W(card.quality),tagW=W(card.tag)}
+ p.selected=card._nexusMarked==true or S.GroundShown(card)
+ p.dotW=(p.qualityW>0 and p.tagW>0) and (2*L.word+math.ceil(char)) or 0
+ p.starW=(p.tagW>0 and p.selected) and (L.mark+L.markGap) or 0
+ p.phrase=p.qualityW+p.dotW+p.starW+p.tagW
+ p.inline=p.phrase==0 or p.nameW+L.meta+p.phrase<=p.column
+ p.split=p.phrase>p.column
+ local under,lines=0,0
+ if p.split then
+  if p.qualityW>0 then under,lines=under+math.max(L.line,H(card.quality,p.column)),lines+1 end
+  if p.tagW>0 then under,lines=under+math.max(L.line,H(card.tag,p.column-p.starW)),lines+1 end
+ elseif not p.inline then
+  under,lines=math.max(L.line,line),1
+ end
+ p.first=p.inline and line or H(card.name,p.column)
+ p.under,p.need,p.pixels=under,2*L.pad+p.first+under,28+24*lines
+ return p
+end
+-- A row whose name and phrase fit one line: the draft's 28 pixels where it
+-- stands, never under what its one measured line and its pads need (it was
+-- the two-line grid row: a line of name over a line of quality).
+function S.BaseRow(height)
+ local L=S.L()
+ local need=2*L.pad+math.ceil(G.model.line)
+ return height>=need and (height==need or S.Drawn(28,height))
 end
 -- The appearance's roles (approved: "apply existing theme text/muted/accent
 -- roles explicitly"), from the appearance's own resolved tables, never
@@ -655,131 +696,149 @@ function S.Outline(o,selected)
  end
  return true,'the accent outline on its four edges over the dark fill'
 end
--- The borderless icon: a square as tall as the row's two text lines
--- (S.L().icon), at the row's left inset and one row gap under its top, where
--- the name's first line starts. A row whose text wraps is taller than its
--- two lines, and the icon keeps that square beside the first lines instead
--- of growing with the row. (The former icon was a square of the one-line
--- row's height at the row's left edge and top.)
+-- The borderless icon: the draft's 24-pixel square (S.L().icon) at the
+-- row's left inset, 2 pixels under its top, on the row's first line. A row
+-- whose text wraps is taller, and the icon keeps that square beside the
+-- first line instead of growing with the row. (It was a square as tall as
+-- the grid row's two text lines, one row gap under the row's top.)
 function S.IconFit(o)
  local icon,r=S.Icon(o),o.rect
  if not icon then return false,'no icon' end
  local L=S.L()
  local side=icon[3]-icon[1]
  if math.abs(side-(icon[4]-icon[2]))>0.01 or math.abs(side-L.icon)>0.01 then
-  return false,'icon '..G.Text(icon)..' is not a square of its row\'s two text lines '..L.icon..' in '..G.Text(r)
+  return false,'icon '..G.Text(icon)..' is not the draft\'s 24-pixel square '..L.icon..' in '..G.Text(r)
  end
- if math.abs(icon[1]-(r[1]+L.inset))>0.01 or math.abs(icon[2]-(r[2]+L.rowGap))>0.01 then
-  return false,'icon '..G.Text(icon)..' is not at the left inset, one row gap under the top, of its row '..G.Text(r)
+ if math.abs(icon[1]-(r[1]+L.inset))>0.01 or math.abs(icon[2]-(r[2]+L.pad))>0.01 then
+  return false,'icon '..G.Text(icon)..' is not at the left inset, 2 pixels under the top, of its row '..G.Text(r)
  end
  return true,G.Text(icon)
 end
--- The columns of one row (approved: "fixed inset icon/text/status grid,
--- rarity on its secondary line"): the name starts at the text column, one
--- layout gap after the icon's square (kept free without an icon, so names
--- stay aligned), one row gap under the row's top; the quality is under the
--- name, in the same column and as wide; the status word is in the status
--- column at the row's right, ending one layout gap from the row's right
--- edge and starting at least one gap after the text column; without a
--- status word the name ends no later than that right inset. Every shown
--- text stays inside the row's gaps and is set to the top of its box, so a
--- text that wraps keeps its first line where a one-line text has it. (The
--- former row had its three texts in one line, one gap apart, each set to
--- the middle of a box that spanned the row.)
+-- The places of one row's texts (the approved compact row): the name starts
+-- at the text column, 8 pixels after the icon's square (kept free without an
+-- icon, so names stay aligned), 2 pixels under the row's top. The phrase
+-- ends at the row's right inset: on one line the quality stands before the
+-- status with the dot between them, on the name's line while S.Plan says
+-- they fit it and under the name otherwise; a split phrase has the quality
+-- under the name and the status under the quality. Every shown text stays
+-- inside the row's pads. A one-line text stands in the middle of its line
+-- and a text taller than the row's line starts at its top. (The grid row had
+-- the quality under the name in the name's column and the status word in a
+-- column of its own, every text set to the top of its box.)
 function S.Columns(o)
  local L,r=S.L(),o.rect
  local name,quality,tag=o.texts.name,o.texts.quality,o.texts.tag
- local x=r[1]+L.textX
+ local plan=S.Plan(o.card)
+ local x,right=r[1]+L.textX,r[3]-L.inset
  if not name.rect then return false,'name has no box' end
  if math.abs(name.rect[1]-x)>0.01 then return false,string.format('name starts at %.1f, want %.1f',name.rect[1],x) end
- if math.abs(name.rect[2]-(r[2]+L.rowGap))>0.01 then
-  return false,'name '..G.Text(name.rect)..' is not one row gap under the top of its row '..G.Text(r)
+ if math.abs(name.rect[2]-(r[2]+L.pad))>0.01 then
+  return false,'name '..G.Text(name.rect)..' is not 2 pixels under the top of its row '..G.Text(r)
  end
- if quality.text~='' then
-  if not quality.rect then return false,'quality has no box' end
-  if math.abs(quality.rect[1]-x)>0.01 or math.abs(quality.rect[2]-name.rect[4])>0.01
-   or math.abs((quality.rect[3]-quality.rect[1])-(name.rect[3]-name.rect[1]))>0.01 then
-   return false,'quality '..G.Text(quality.rect)..' is not under its name '..G.Text(name.rect)..' in the same column'
+ if quality.text~='' and not quality.rect then return false,'quality has no box' end
+ if tag.text~='' and not tag.rect then return false,'tag has no box' end
+ local last=tag.text~='' and tag.rect or (quality.text~='' and quality.rect or nil)
+ if last and math.abs(last[3]-right)>0.01 then return false,string.format('the phrase ends at %.1f, want %.1f',last[3],right) end
+ local first=quality.text~='' and quality.rect or (tag.text~='' and tag.rect or nil)
+ if plan.inline then
+  if first and (first[1]<name.rect[3]+L.meta-0.01 or math.abs(first[2]-name.rect[2])>0.01) then
+   return false,'the phrase '..G.Text(first)..' is not on the line of its name '..G.Text(name.rect)..', 10 pixels after it'
+  end
+  if (name.rect[3]-name.rect[1])<plan.nameW-0.01 then return false,'the name\'s box is narrower than its words' end
+ else
+  if math.abs((name.rect[3]-name.rect[1])-plan.column)>0.01 then
+   return false,string.format('the name is %.1f wide, want the text column %.1f',name.rect[3]-name.rect[1],plan.column)
+  end
+  if first and first[2]<name.rect[4]-0.01 then return false,'the phrase '..G.Text(first)..' is not under its name '..G.Text(name.rect) end
+ end
+ if quality.text~='' and tag.text~='' then
+  if plan.split then
+   if tag.rect[2]<quality.rect[4]-0.01 or math.abs(quality.rect[3]-right)>0.01 or o.card.dot:IsShown() then
+    return false,'a split phrase: the status '..G.Text(tag.rect)..' is not under its quality '..G.Text(quality.rect)..' with no dot'
+   end
+  elseif quality.rect[3]>tag.rect[1]+0.01 or math.abs(quality.rect[2]-tag.rect[2])>0.01 or not o.card.dot:IsShown() then
+   return false,'the quality '..G.Text(quality.rect)..' is not before the status '..G.Text(tag.rect)..' on one line with the dot between them'
   end
  end
- local right=r[3]-L.inset
- if tag.text~='' then
-  if not tag.rect then return false,'tag has no box' end
-  if math.abs(tag.rect[3]-right)>0.01 then return false,string.format('the status word ends at %.1f, want %.1f',tag.rect[3],right) end
-  if tag.rect[1]<name.rect[3]+L.gap-0.01 then
-   return false,'the status word '..G.Text(tag.rect)..' starts less than a gap after the text column '..G.Text(name.rect)
-  end
- elseif name.rect[3]>right+0.01 then
-  return false,string.format('the name ends at %.1f, past the right inset %.1f',name.rect[3],right)
+ if (o.card.star:IsShown() and true or false)~=(plan.starW>0) then
+  return false,'star shown '..tostring(o.card.star:IsShown())..' for a selected status '..tostring(plan.starW>0)
  end
  for _,k in ipairs({'name','quality','tag'}) do
   local t=o.texts[k]
   if t.text~='' then
-   if t.rect[2]<r[2]+L.rowGap-0.01 or t.rect[4]>r[4]-L.rowGap+0.01 then
-    return false,k..' '..G.Text(t.rect)..' is not inside the row gaps of its row '..G.Text(r)
+   if t.rect[2]<r[2]+L.pad-0.01 or t.rect[4]>r[4]-L.pad+0.01 then
+    return false,k..' '..G.Text(t.rect)..' is not inside the pads of its row '..G.Text(r)
    end
-   if SlotSpy.justify[o.card[k]]~='TOP' then return false,k..' is set to '..tostring(SlotSpy.justify[o.card[k]])..', not to the top of its box' end
+   -- The name: taller than the row's line, from its top. A part of the
+   -- phrase: wrapped to more than one line, from its top; else in the
+   -- middle of its line.
+   local tall
+   if k=='name' then tall=o.card[k]:GetStringHeight()>L.line+0.01
+   else tall=o.card[k]:GetStringHeight()>math.ceil(G.model.line)+0.01 end
+   local want=tall and 'TOP' or 'MIDDLE'
+   if SlotSpy.justify[o.card[k]]~=want then
+    return false,k..' is set to '..tostring(SlotSpy.justify[o.card[k]])..', want '..want
+   end
   end
  end
  return true,G.Text(r)
 end
--- The band: the first row two row gaps under the heading line, each row its
--- height and one row gap from the next, and the text under the rows two row
--- gaps below the last.
--- The band starts two row gaps under the heading, which is one small line or
--- as tall as a heading that is measured taller or wraps. A row is exactly as
--- tall as its own lines need (approved: "Equal base row rhythm must grow for
--- full real text/reason, never line-clamp or omit it"): the name's measured
--- lines over the quality's line, or the status word where that is taller,
--- with a row gap above and below, and never under the grid's own row
--- (S.L().rowH). The heights are the texts' own measured heights at the
--- widths they have, never under the layout's lines. (The former row was one
--- line: its small line, or a name, quality or tag that wraps.)
+-- The band (the approved compact rows): the first row the draft's 3 pixels
+-- under the heading row, each row 2 pixels from the next, and the text under
+-- the rows 3 pixels below the last. The heading row is as tall as its box
+-- (one line of the heading, or a heading that is measured taller or wraps).
+-- A row is exactly as tall as its content needs (S.Plan: its pads, its
+-- name's measured lines and the phrase's lines under them), or the draft's
+-- own height for its arrangement when the content needs no more (approved:
+-- "Equal base row rhythm must grow for full real text/reason, never
+-- line-clamp or omit it"). (The grid row was the name's lines over the
+-- quality's, never under 29 units, two row gaps under the heading.)
 -- `selected` is the scenario's own statement of which row is the selected
 -- offer (nil: none); it is never read from the panel, so the panel cannot
 -- choose which of the two contracts below is checked.
---   No selected row: the text under the rows starts two row gaps below the
---   last row. This check is unconditional and fails when that text has no
---   box.
---   Selected row i: its reason is inside it, once: it starts one row gap
---   under the row's own lines, at the text column's left edge, ends no later
---   than the row's right inset and one row gap above the row's bottom, so
---   the row is its lines, that gap, its reason and the row gaps.
+--   No selected row: the text under the rows starts 3 pixels below the last
+--   row. This check is unconditional and fails when that text has no box.
+--   Selected row i: its reason is inside it, once: under the row's own
+--   lines, at the text column's left edge, ending no later than the row's
+--   right inset and 2 pixels above the row's bottom; the row is 18 pixels
+--   taller for it, or by the reason's own measured lines when they need
+--   more.
 function S.Rows(n,selected)
  local L,roll=S.L(),S.Rect(root._rollArea)
  local head=root._rollStatus
- local top=roll[2]+1+math.max(L.small,head and head:IsShown() and head:GetHeight() or 0)+2*L.rowGap
- local want=top
+ local bottom=roll[2]+(head and head:IsShown() and head:GetHeight() or 0)
+ local top
  local rec=S.Rect(root._rollRec)
  for i=1,n do
   local card=root._offerCards[i]
   local r=card:IsVisible() and S.Rect(card) or nil
   if not r then return false,'row '..i..' is not shown' end
-  local nameH=math.max(L.normal,math.ceil(card.name:GetStringHeight() or 0))
-  local qualityH=(card.quality:GetText() or '')~='' and math.max(L.small,math.ceil(card.quality:GetStringHeight() or 0)) or L.small
-  local tagH=(card.tag:GetText() or '')~='' and math.max(L.small,math.ceil(card.tag:GetStringHeight() or 0)) or 0
-  local lines=math.max(nameH+qualityH,tagH)
-  local height=math.max(L.rowH,lines+2*L.rowGap)
+  local plan=S.Plan(card)
+  local need,pixels=plan.need,plan.pixels
   if i==selected then
    if G.Visible(root._rollRec:GetText() or '')=='' or not rec then return false,'the selected row '..i..' has no reason text with a box' end
-   local from=r[2]+L.rowGap+lines+L.rowGap
-   if math.abs(rec[2]-from)>0.01 or math.abs(r[4]-rec[4]-L.rowGap)>0.01 or math.abs(rec[1]-(r[1]+L.textX))>0.01
+   local lines=r[2]+L.pad+plan.first+plan.under
+   if rec[2]<lines-0.01 or math.abs(r[4]-rec[4]-L.pad)>0.01 or math.abs(rec[1]-(r[1]+L.textX))>0.01
     or rec[3]>r[3]-L.inset+0.01 then
-    return false,string.format('the selected row %d %s holds its reason at %s, want it from %.1f to %.1f in the text and status columns',
-     i,G.Text(r),G.Text(rec),from,r[4]-L.rowGap)
+    return false,string.format('the selected row %d %s holds its reason at %s, want it from %.1f or lower to %.1f in the text column',
+     i,G.Text(r),G.Text(rec),lines,r[4]-L.pad)
    end
-   height=L.rowGap+lines+L.rowGap+(rec[4]-rec[2])+L.rowGap
+   need,pixels=need+math.max(L.reason,math.ceil(root._rollRec:GetStringHeight() or 0)),pixels+18
   end
-  if math.abs(r[2]-want)>0.01 or math.abs((r[4]-r[2])-height)>0.01 then
-   return false,string.format('row %d %s, want top %.1f and height %.1f',i,G.Text(r),want,height)
+  local height=r[4]-r[2]
+  if not S.Drawn(i==1 and 3 or 2,r[2]-bottom) then
+   return false,string.format('row %d %s starts %.1f under what stands above it, want the draft\'s %d pixels',i,G.Text(r),r[2]-bottom,i==1 and 3 or 2)
   end
-  want=r[4]+L.rowGap
+  if height<need-0.01 or not (math.abs(height-need)<0.01 or S.Drawn(pixels,height)) then
+   return false,string.format('row %d %s, want its content\'s %.1f or the draft\'s %d pixels',i,G.Text(r),need,pixels)
+  end
+  top=top or r[2]
+  bottom=r[4]
  end
- local body=want+L.rowGap
- if not selected and not (rec and math.abs(rec[2]-body)<=0.01) then
-  return false,string.format('the text under the rows starts at %.1f, want %.1f',rec and rec[2] or -1,body)
+ if not selected and not (rec and S.Drawn(3,rec[2]-bottom)) then
+  return false,string.format('the text under the rows starts at %.1f, want the draft\'s 3 pixels under %.1f',rec and rec[2] or -1,bottom)
  end
- return true,string.format('rows from %.1f, %s',top,selected and ('the reason inside row '..selected) or string.format('text from %.1f',body))
+ return true,string.format('rows from %.1f, %s',top or -1,selected and ('the reason inside row '..selected) or string.format('text %.1f under them',rec[2]-bottom))
 end
 -- The room the text under the rows had while they were one-line rows (to
 -- test.163021): the roll box's least height less the heading, three rows and
@@ -796,6 +855,14 @@ function S.BodyRoom()
  return rec~=nil and roll~=nil and G.Inside(rec,roll,0.01) and (rec[4]-rec[2])+0.5>=needs,
   string.format('%.1f for a text that needs %.1f',rec and rec[4]-rec[2] or -1,needs)
 end
+-- The row's words against the Readout's own card. The approved compact row
+-- shows a selected tag's words after its star in place of the code-owned
+-- mark before them. An unselected row shows the short "Wrong quality" status
+-- only where its model card itself carries a "different quality" annotation
+-- code (`annotation`: the Policy's 'wrong quality' or 'low quality') and is
+-- not a guaranteed offer; a card that carries only its line keeps its
+-- complete annotation on the row, whatever that annotation's words are. In
+-- every case the Readout's whole tag stays the row's own, for its hover.
 function S.Meaning(model,i,o)
  local R=Nexus.Readout
  local cards=model.cards
@@ -803,15 +870,23 @@ function S.Meaning(model,i,o)
  local frozen=model.auto==false and not marked and R.FreezeCard and R.FreezeCard(cards) or nil
  local c=cards[i]
  local shown=R.OfferCard(c.text,marked==i,model.auto,type(c.facts)=='table' and c.facts or nil,frozen==i)
- local want=tostring(shown.name)..' | '..tostring(shown.quality)..' | '..tostring(shown.shown or shown.tag)
+ local tag,starred=tostring(shown.shown or shown.tag),false
+ if (shown.marked or shown.freeze) and tag:sub(1,2)=='> ' and #tag>2 then
+  tag,starred=tag:sub(3),true
+ elseif not (shown.marked or shown.freeze) and not shown.guaranteed
+  and (c.annotation=='wrong quality' or c.annotation=='low quality') then
+  tag=(Nexus.Localization.Text('panel.label.offer_wrong_quality'))
+ end
+ local want=tostring(shown.name)..' | '..tostring(shown.quality)..' | '..tag..(starred and ' (after its star)' or '')
  if not o then return false,shown,'no card vs '..want end
  local got=o.texts.name.text..' | '..o.texts.quality.text..' | '..o.texts.tag.text
- return got==want,shown,got..' vs '..want
+  ..((o.card.star~=nil and o.card.star:IsShown()) and ' (after its star)' or '')
+ return got==want and o.card._nexusTag==shown.tag,shown,got..' vs '..want
 end
 -- The row in the roll box, its shown texts inside it and apart from each
 -- other. (Until the main-panel visual correction this also held the row to
--- the height of its name's box: the one-line row. A row is two lines now;
--- its height against them is S.Lines, checked beside every use of S.Band.)
+-- the height of its name's box: the one-line row. A row's height against
+-- its content is S.Lines, checked beside every use of S.Band.)
 function S.Band(o)
  local roll=S.Rect(root._rollArea)
  if not (o and o.rect and roll and G.Inside(o.rect,roll,0.01)) then return false,'row outside the roll box' end
@@ -826,23 +901,30 @@ function S.Band(o)
  end
  return true,G.Text(o.rect)
 end
--- The row's height against its own lines (approved: the two-line grid row;
--- "Equal base row rhythm must grow for full real text/reason"): the name's
--- box over the quality's line, or the status word's box where that is
--- taller, with a row gap above and below; a row that holds the selected
--- offer's reason is taller by a row gap and that reason's box; never under
--- the grid's own row (S.L().rowH). Read from the row's own boxes.
+-- The row's height against its own content (the approved compact row;
+-- "Equal base row rhythm must grow for full real text/reason"): what S.Plan
+-- says its words need, or the draft's own height for its arrangement when
+-- they need no more; a row that holds the selected offer's reason is taller
+-- by the draft's 18 pixels, or by that reason's own measured lines when they
+-- need more. No text of the row is cut: each box holds its measured lines.
 function S.Lines(o)
  if not (o and o.rect) then return false,'no row' end
  local L,card=S.L(),o.card
- local lines=math.max((card.name:GetHeight() or 0)+(card.quality:GetHeight() or 0),
-  o.texts.tag.text~='' and (card.tag:GetHeight() or 0) or 0)
+ local plan=S.Plan(card)
+ local need,pixels=plan.need,plan.pixels
  local rec=root._rollRec
  local rr=rec and G.Visible(rec:GetText() or '')~='' and S.Rect(rec) or nil
- local reason=rr and G.Inside(rr,o.rect,0.01) and (L.rowGap+(rr[4]-rr[2])) or 0
- local want=math.max(L.rowH,2*L.rowGap+lines+reason)
- if math.abs((card:GetHeight() or 0)-want)>0.01 then
-  return false,string.format('row height %.1f is not what its two lines need, %.1f',card:GetHeight() or -1,want)
+ if rr and G.Inside(rr,o.rect,0.01) then
+  need,pixels=need+math.max(L.reason,math.ceil(rec:GetStringHeight() or 0)),pixels+18
+ end
+ local height=card:GetHeight() or -1
+ if height<need-0.01 or not (math.abs(height-need)<0.01 or S.Drawn(pixels,height)) then
+  return false,string.format('row height %.1f is not what its content needs, %.1f, or the draft\'s %d pixels',height,need,pixels)
+ end
+ for _,k in ipairs({'name','quality','tag'}) do
+  if o.texts[k].text~='' and (card[k]:GetHeight() or 0)+0.5<(card[k]:GetStringHeight() or 0) then
+   return false,string.format('%s box %.1f is lower than its lines, %.1f',k,card[k]:GetHeight() or -1,card[k]:GetStringHeight() or -1)
+  end
  end
  return true,G.Text(o.rect)
 end
@@ -980,7 +1062,7 @@ C.scenario('REG-SLOT-0 controls: start-up, Auto OFF, real cards keep their curre
    local band,why=S.Band(o)
    C.guard(band,'REG-SLOT: card '..i..' keeps its compact row in the roll box, its texts inside and apart',why)
    local lines,lwhy=S.Lines(o)
-   C.expect(lines,'REG-SLOT: card '..i..'\'s row is as tall as its two lines need',lwhy)
+   C.expect(lines,'REG-SLOT: card '..i..'\'s row is as tall as its content needs',lwhy)
    local tip=V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' '))
    C.guard(tip:find(V.Plain(shown.full),1,true)~=nil,'REG-SLOT: card '..i..'\'s hover shows its complete line',tip)
   end
@@ -1051,13 +1133,14 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
   end
   P.Render(Model({cards={S.Offer('Frostwake Sigil',2),S.Offer('Hollow Bell',3,'Owned 1 of 2'),S.Offer('Ashen Crown',nil)}}))
   local h0,r0,c0=root:GetHeight(),S.Rect(root._rollArea),Controls()
-  -- The rows of the short board, each one line of name over one of quality:
-  -- the height the long board's rows grow from.
+  -- The rows of the short board, each one line (the name with its phrase
+  -- at the row's right end): the height the long board's rows grow from.
+  -- (They were the two-line grid row: a line of name over one of quality.)
   local short={}
   for i=1,3 do short[i]=root._offerCards[i]:GetHeight() end
-  C.expect(short[1]==S.BaseRow() and short[2]==short[1] and short[3]==short[1],
-   'REG-SLOT: at '..pct..' the three short rows share the two-line grid row: one measured line of name over one of quality, a row gap above and below',
-   tostring(short[1])..'/'..tostring(short[2])..'/'..tostring(short[3])..' for '..S.BaseRow())
+  C.expect(S.BaseRow(short[1]) and S.BaseRow(short[2]) and S.BaseRow(short[3]) and math.abs(short[1]-short[2])<=1 and math.abs(short[2]-short[3])<=1,
+   'REG-SLOT: at '..pct..' the three short rows are the one-line compact row: the draft\'s 28 pixels, never under their measured line and pads',
+   tostring(short[1])..'/'..tostring(short[2])..'/'..tostring(short[3]))
   P.Render(Model({cards={S.Offer(string.rep('Cinderbound ',8)..'Lattice',2,'Owned 2 of 3'),
    S.Offer('Hollow Bell of the '..string.rep('Ashen ',8)..'Choir',4,'Owned 0 of 1'),
    S.Offer(string.rep('Gravecall ',6)..'Chorus (Rare)',nil,'Owned 1 of 1')}}))
@@ -1069,8 +1152,7 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
   -- recommendation and the controls stay as they were.
   -- Main-panel visual correction: what a wrapped name adds is measured from
   -- the same row's own height on the short board (above), which is the
-  -- two-line grid row now; it was the one-line model row (S.L().rowH then:
-  -- one small line and two row gaps), which no row has any more.
+  -- one-line compact row now.
   local extra=0
   for i=1,3 do extra=extra+math.max(0,root._offerCards[i]:GetHeight()-short[i]) end
   C.guard(extra>0 and h1==h0+extra and r0~=nil and r1~=nil and math.abs((r1[4]-r1[2])-(r0[4]-r0[2])-extra)<0.01 and c1==c0,
@@ -1083,7 +1165,7 @@ C.scenario('REG-SLOT-3 at 50, 100, 125 and 150% long names and tags keep name, q
     local band,why=S.Band(o)
     C.guard(band,'REG-SLOT: at '..pct..' long card '..i..' keeps its compact row with its texts inside and apart',why)
     local lines,lwhy=S.Lines(o)
-    C.expect(lines,'REG-SLOT: at '..pct..' long card '..i..'\'s row is as tall as its wrapped name and its quality line need',lwhy)
+    C.expect(lines,'REG-SLOT: at '..pct..' long card '..i..'\'s row is as tall as its wrapped name and its phrase need',lwhy)
     local fine,fwhy=S.Fallback(o,want[i])
     C.guard(fine,'REG-SLOT: at '..pct..' long card '..i..' shows no icon and its name in its own colour',fwhy)
    end
@@ -1240,7 +1322,7 @@ C.scenario('REG-ICON-2 an offer with an exact spell id and a verified texture sh
    local band,bwhy=S.Band(o)
    C.guard(band,'REG-ICON: card '..i..' keeps its compact row in the roll box, its texts inside and apart',bwhy)
    local lines,lwhy=S.Lines(o)
-   C.expect(lines,'REG-ICON: card '..i..'\'s row is as tall as its two lines need',lwhy)
+   C.expect(lines,'REG-ICON: card '..i..'\'s row is as tall as its content needs',lwhy)
    local tip=V.Plain(table.concat(V.TooltipLines(o.card:GetScript('OnEnter'),o.card),' '))
    C.guard(tip:find(V.Plain(shown.full),1,true)~=nil,'REG-ICON: card '..i..'\'s hover still shows its complete line',tip)
   end
@@ -1268,7 +1350,7 @@ C.scenario('REG-ICON-3 at 50, 100, 125 and 150% the icon stays inside its row be
     local band,why=S.Band(o)
     C.guard(band,'REG-ICON: at '..pct..' long card '..i..' keeps its compact row with its texts inside and apart',why)
     local lines,lwhy=S.Lines(o)
-    C.expect(lines,'REG-ICON: at '..pct..' long card '..i..'\'s row is as tall as its wrapped name and its quality line need',lwhy)
+    C.expect(lines,'REG-ICON: at '..pct..' long card '..i..'\'s row is as tall as its wrapped name and its phrase need',lwhy)
     local ok,iwhy=S.IconShown(o,S.icon.Path(200000+i),q or nil)
     C.expect(ok,'REG-ICON: at '..pct..' long card '..i..' shows its icon inside its row, before the name and apart from its texts',iwhy)
    end
@@ -1442,16 +1524,18 @@ S.icon.Restore()
 -- the row nor a square around the icon; it shows only its icon and its
 -- texts. The selected row alone has a dark fill and the accent outline on
 -- its own four edges (S.Outline); nothing is painted around an icon. The
--- icon is a borderless square as tall as the row's two text lines at the
--- row's left inset; a row without one keeps that square free, so names stay
--- aligned. The name is one layout gap after the square with its quality
--- under it in the same column, and the status word is in the status column
--- at the row's right inset (S.Columns). A row is its two lines with a row
--- gap above and below; rows are a row gap apart, two row gaps under the
--- heading and above the text below (S.Rows). The three rows share one status
--- column, at most half of the row's text room: a status word wider than it
--- wraps there and stays whole, where the one-line row gave a status word
--- its whole width beside a short name. The status word takes the
+-- icon is a borderless square, the draft's 24 pixels, at the row's left
+-- inset; a row without one keeps that square free, so names stay aligned.
+-- The approved compact row: the name stands 8 pixels after the square, and
+-- at the row's right end the quality, a dot and the status word (S.Columns),
+-- on the name's line while they fit it and under the name otherwise; a
+-- phrase wider than the text column stands as its two parts under the
+-- name, each whole (REG-ROW-3). A row is as tall as its content needs or as
+-- the draft draws its arrangement; rows are 2 pixels apart, 3 pixels under
+-- the heading and above the text below (S.Rows). (Before it the row was the
+-- grid: the quality under the name and the status word in one status
+-- column of at most half the row's text room, where a wider status word
+-- wrapped.) The status word takes the
 -- appearance's accent on the selected row and its text colour elsewhere,
 -- and the quality the muted colour (S.Roles), where they were a fixed gold
 -- and grey.
@@ -1471,7 +1555,7 @@ function S.Hover(o) return V.Plain(table.concat(V.TooltipLines(o.card:GetScript(
 -- Whether a text's box holds its whole one-line text.
 function S.Whole(card,k) return (card[k]:GetWidth() or 0)+0.01>=(card[k]:GetStringWidth() or 0) end
 
-C.scenario('REG-ROW-1 the two-line grid: only the selected row has its accent outline and dark fill; the icon is a borderless square of the two lines; words and hover stay',function()
+C.scenario('REG-ROW-1 the compact row: only the selected row has its accent outline and dark fill; the icon is a borderless square on the row\'s first line; words and hover stay',function()
  local A,B=S.icon.Path(200001),S.icon.Path(200002)
  S.icon.Use({[200001]=A,[200002]=B})
  local marked=S.Echo('Hollow Bell',3,200002,'Owned 1 of 2')
@@ -1497,13 +1581,13 @@ C.scenario('REG-ROW-1 the two-line grid: only the selected row has its accent ou
     local shown,swhy=S.IconShown(o,want[1],want[2])
     C.guard(shown,'REG-ROW: row '..i..' still shows the texture of its own spell id and its name in its rarity colour',swhy)
     local fit,fwhy=S.IconFit(o)
-    C.expect(fit,'REG-ROW: row '..i..'\'s icon is a borderless square of the row\'s two text lines at the row\'s left inset',fwhy)
+    C.expect(fit,'REG-ROW: row '..i..'\'s icon is a borderless square, the draft\'s 24 pixels, at the row\'s left inset',fwhy)
    else
     local none,nwhy=S.Fallback(o,want[2])
     C.guard(none,'REG-ROW: row '..i..', without a spell id, shows no icon and its name in its rarity colour',nwhy)
    end
    local cols,cwhy=S.Columns(o)
-   C.expect(cols,'REG-ROW: row '..i..': the name one layout gap after the icon square with its quality under it, the status word in its column at the row\'s right inset',cwhy)
+   C.expect(cols,'REG-ROW: row '..i..': the name 8 pixels after the icon square, and ending at the row\'s right inset the quality, the dot and the status word (after its star when selected)',cwhy)
    starts[i]=o.texts.name.rect and o.texts.name.rect[1]
    local same,shown,detail=S.Meaning(m,i,o)
    C.guard(same,'REG-ROW: row '..i..' keeps the Readout name, quality and tag',detail)
@@ -1519,7 +1603,7 @@ C.scenario('REG-ROW-1 the two-line grid: only the selected row has its accent ou
   tostring(starts[1])..'/'..tostring(starts[2])..'/'..tostring(starts[3]))
  -- Row 2 is the selected offer here (marked.highlight above).
  local rows,rwhy=S.Rows(3,2)
- C.expect(rows,'REG-ROW: each row is exactly as tall as its lines need, a row gap from the next, two row gaps under the heading; the selected row 2 holds its reason inside it, one row gap under its lines and one above its bottom',rwhy)
+ C.expect(rows,'REG-ROW: each row is as tall as its content needs or the draft draws it, 2 pixels from the next, 3 pixels under the heading; the selected row 2 holds its reason inside it, under its lines and 2 pixels above its bottom',rwhy)
  local room,mwhy=S.BodyRoom()
  C.guard(room,'REG-ROW: the reason text is inside the roll box, in a box as tall as its text needs',mwhy)
  S.icon.Restore()
@@ -1544,7 +1628,7 @@ C.scenario('REG-ROW-2 at 50 to 150% and with the 16 px and 2.0 faces: long and o
     local band,why=S.Band(o)
     C.guard(band,'REG-ROW: '..label..' long row '..i..' keeps its texts inside the row and apart',why)
     local lines,lwhy=S.Lines(o)
-    C.expect(lines,'REG-ROW: '..label..' long row '..i..' is as tall as its wrapped name and its quality line need',lwhy)
+    C.expect(lines,'REG-ROW: '..label..' long row '..i..' is as tall as its wrapped name and its phrase need',lwhy)
     -- No row of this board is selected.
     local bare,bwhy=S.Outline(o,false)
     local cols,cwhy=S.Columns(o)
@@ -1561,7 +1645,7 @@ C.scenario('REG-ROW-2 at 50 to 150% and with the 16 px and 2.0 faces: long and o
    'REG-ROW: '..label..' each id is looked up once; the old-input row, a text without facts, is never looked up',#S.icon.calls)
   -- No row of this board is selected: the text is under the rows.
   local rows,rwhy=S.Rows(3)
-  C.expect(rows,'REG-ROW: '..label..' the rows keep their band: each exactly as tall as its lines need, and the text under them two row gaps below the last',rwhy)
+  C.expect(rows,'REG-ROW: '..label..' the rows keep their band: each as tall as its content needs or the draft draws it, and the text under them 3 pixels below the last',rwhy)
   local room,mwhy=S.BodyRoom()
   C.guard(room,'REG-ROW: '..label..' the text under the rows is inside the roll box, in a box as tall as its text needs',mwhy)
  end
@@ -1578,7 +1662,7 @@ C.scenario('REG-ROW-2 at 50 to 150% and with the 16 px and 2.0 faces: long and o
  S.Restore()
 end)
 
-C.scenario('REG-ROW-3 the rows share one status column of at most half the row: a wider status word wraps there and stays whole; a long name keeps its room',function()
+C.scenario('REG-ROW-3 a phrase wider than the text column stands as its two parts under the name, each whole; a long name keeps the whole column',function()
  local note='Different quality from target (wants 4)'
  P.Render(Model())
  P.Render(Model({cards={S.Echo('Ember Spark',2,nil,note),S.Echo(string.rep('Cinderbound ',8)..'Lattice',2,nil,note)}}))
@@ -1587,28 +1671,36 @@ C.scenario('REG-ROW-3 the rows share one status column of at most half the row: 
   'REG-ROW: fixture: a short and a long name, each with the same long status word',a and a.texts.tag.text) then return end
  local half=(a.rect[3]-a.rect[1])/2
  C.setup(a.card.tag:GetStringWidth()>half,'REG-ROW: fixture: that status word is wider than half the row',a.card.tag:GetStringWidth()..' of '..half)
- -- Main-panel visual correction (approved: "fixed inset icon/text/status
- -- grid"; "Preserve whole readable names/values/statuses/reasons"): the rows
- -- share one status column, as wide as the widest status word and at most
- -- half of the row's text room, so this status word, wider than that, wraps
- -- in the column and is whole there (its box is as tall as its wrapped
- -- lines), beside a short name as beside a long one. The check that stood
- -- here asked for the status word whole on one line beside the short name,
- -- which the one-line row gave it from that row's own unused room.
- C.expect(S.WholeWrapped(a.card,'tag') and a.card.tag:GetHeight()>S.L().small and S.Whole(a.card,'quality') and S.Whole(a.card,'name'),
+ -- The approved compact row ("Preserve whole readable names/values/
+ -- statuses/reasons"): there is no status column. This status word with its
+ -- quality is wider than the row's text column, so the phrase stands as its
+ -- two parts under the name, the quality and under it the status word, each
+ -- whole on one line ending at the row's right inset, beside a short name
+ -- as beside a long one; the long name has the whole text column and wraps
+ -- there, whole. The checks that stood here held the grid's status column:
+ -- at most half the row, the status word wrapped in it beside the short
+ -- name and shortened beside the long one, with the name kept a sixth.
+ local pa,pb=S.Plan(a.card),S.Plan(b.card)
+ C.setup(pa.split and pb.split and pa.tagW<=pa.column and pa.inline==false,
+  'REG-ROW: fixture: the quality and that status word together are wider than the text column; the status word alone fits it',
+  pa.phrase..' in '..pa.column)
+ C.expect(S.Whole(a.card,'tag') and S.WholeWrapped(a.card,'tag') and S.Whole(a.card,'quality') and S.Whole(a.card,'name'),
   'REG-ROW: beside a short name the status word, the quality and the name are all whole',
   a.card.tag:GetWidth()..'x'..a.card.tag:GetHeight()..' for '..a.card.tag:GetStringWidth()..' in lines of '..tostring(a.card.tag:GetStringHeight()))
- C.expect(a.card.tag:GetWidth()==b.card.tag:GetWidth() and a.card.name:GetWidth()==b.card.name:GetWidth() and a.card.tag:GetWidth()<=half,
-  'REG-ROW: the two rows share one status column and one text column; the status column has at most half the row',
-  a.card.tag:GetWidth()..' / '..b.card.tag:GetWidth()..' and '..a.card.name:GetWidth()..' / '..b.card.name:GetWidth())
- C.guard(not S.Whole(b.card,'tag') and b.card.tag:GetWidth()<=half and b.card.name:GetWidth()>=(b.rect[3]-b.rect[1])/6-0.01,
-  'REG-ROW: beside a long name the status word has at most half the row and the name at least a sixth',
+ local ca,cwa=S.Columns(a)
+ local cb,cwb=S.Columns(b)
+ C.expect(ca and cb and a.card.tag:GetWidth()==b.card.tag:GetWidth() and a.texts.tag.rect[3]==b.texts.tag.rect[3]
+  and a.texts.name.rect[1]==b.texts.name.rect[1],
+  'REG-ROW: both rows hold the phrase as its two parts under the name, ending at one right inset; their names start at one text column',
+  cwa..' / '..cwb)
+ C.expect(S.Whole(b.card,'tag') and b.card.name:GetWidth()==pb.column and S.WholeWrapped(b.card,'name') and not S.Whole(b.card,'name'),
+  'REG-ROW: beside a long name the status word is whole on its own line and the name has the whole text column, wrapped whole',
   b.card.tag:GetWidth()..' / '..b.card.name:GetWidth())
- C.guard(S.Hover(b):find(note,1,true)~=nil,'REG-ROW: the shortened status word is whole on the row\'s hover',S.Hover(b))
+ C.guard(S.Hover(b):find(note,1,true)~=nil,'REG-ROW: the status word is whole on the row\'s hover too',S.Hover(b))
  local band,why=S.Band(a)
  C.guard(band,'REG-ROW: the short-name row keeps its texts inside the row and apart',why)
  local lines,lwhy=S.Lines(a)
- C.expect(lines,'REG-ROW: the short-name row is as tall as its two lines need, the wrapped status word inside them',lwhy)
+ C.expect(lines,'REG-ROW: the short-name row is as tall as its name and the two lines of its phrase need',lwhy)
 end)
 
 C.scenario('REG-SLOT-5 after the offer checks: nothing else changed and unrelated textures keep their identity',function()
@@ -1635,38 +1727,94 @@ SlotSpy.methods.SetJustifyV=SlotSpy.saved.SetJustifyV
 
 -- V4 last: it loads the addon again (a fresh load) with the saved data.
 C.scenario('V4 a centre saved at a fitted size is kept on a fresh load',function()
- UIParent:SetSize(640,1080)
- P.SetPanelScale(1.5)
- P.Render(Model())
- local r=616/420
- C.setup(math.abs(root:GetScale()-r)<0.0005,'V4: fixture: 150% is reduced to fit a 640-wide screen',root:GetScale())
- Reset()
- Start(root._contextBuildHit)
- Move.x,Move.y=300,330
- Stop(root._contextBuildHit)
- local sx,sy=Saved()
- C.setup(sx==math.floor(300*r-960+0.5) and sy==math.floor(330*r-540+0.5),'V4: fixture: the drag saved its centre in UIParent units',
-  tostring(sx)..','..tostring(sy))
- local db=NexusDB
- H=F.Boot(db,function(h) F.OrbService(h) end)
- P,LM=Nexus.Panel,Nexus.LayoutMetrics
- RM=G.RegionMethods()
- RM.GetEffectiveScale=function(self)
-  local parent=self.parent
-  return (self.scale or 1)*(parent and parent.GetEffectiveScale and parent:GetEffectiveScale() or 1)
+ -- Two rounds. Each: the chosen 150% on a 640-wide screen, a drag that
+ -- saves its centre, then a fresh load on the same screen, where the saved
+ -- centre must be the panel's centre at the size the fit applies there.
+ --   First the original screen, 640 x 1080, with the original model. The
+ --   former 420-unit panel did not fit it at 150% (630 of the 616 that
+ --   screen leaves), which is how this scenario got its fitted size. The
+ --   approved compact panel is 284 units, 426 at 150%: the fit rule gives
+ --   the chosen size whole on this screen, so this round checks the saved
+ --   centre at the applied 150%, before and after the load.
+ --   Beside it, a 640 x 480 screen, where the fit still reduces the chosen
+ --   size: for a panel taller than that screen leaves (three offers with
+ --   long names, whose rows wrap, and Details open; taller with or without a
+ --   Callboard objective, which a fresh load does not show). This round
+ --   checks the saved centre at a size reduced to fit.
+ -- The fit rule is the one crimson_panel_scale states: the chosen size,
+ -- bounded by what the screen holds of the panel's own width and height
+ -- with the 24-unit margin, and never under 50%.
+ local function Tall()
+  return Model({cards={{text=string.rep('Cinderbound ',8)..'Lattice (Rare)'},
+   {text='Hollow Bell of the '..string.rep('Ashen ',8)..'Choir (Epic)'},
+   {text=string.rep('Gravecall ',6)..'Chorus (Uncommon)'}}})
  end
- UIParent:SetSize(640,1080)
- local saved=F.Serialize(NexusDB)
- P.Show()
- C.setup(P.Render(Model())==true,'V4: fixture: the panel renders after the fresh load')
- local fresh=NexusPanel
- local s=fresh:GetScale()
- local p,rel,relP,x,y=fresh:GetPoint(1)
- C.expect(math.abs(s-r)<0.0005 and fresh:GetNumPoints()==1 and p=='CENTER' and rel==UIParent and relP=='CENTER'
-  and math.abs(x*s-sx)<0.5 and math.abs(y*s-sy)<0.5,
-  'V4: after a fresh load the saved centre is the centre at the fitted size',
-  tostring(p)..' '..tostring(x and x*s)..','..tostring(y and y*s)..' at '..s)
- C.guard(F.Serialize(NexusDB)==saved,'V4: the fresh load writes no position, size or other saved data')
+ local function Fit(panel,screenH)
+  return math.max(0.5,math.min(1.5,(640-24)/panel:GetWidth(),(screenH-24)/panel:GetHeight()))
+ end
+ -- `reduced`: whether this screen is one the fit reduces the chosen size on
+ -- (a fixture fact, checked before and after the load). `details`: Details
+ -- as the round needs it (nil leaves it as it is, as the original did).
+ local function Round(tag,screenH,model,details,reduced)
+  UIParent:SetSize(640,screenH)
+  P.SetPanelScale(1.5)
+  if details~=nil then P._playDetails=details end
+  P.Render(model())
+  local r=Fit(root,screenH)
+  C.setup(((reduced and r<1.5) or (not reduced and r==1.5)) and root:GetWidth()*1.5<=640-24 and math.abs(root:GetScale()-r)<0.0005,
+   tag..': fixture: '..(reduced and '150% is reduced to fit this screen\'s height' or 'this screen holds the 284-unit panel at the chosen 150%'),
+   tostring(root:GetScale())..' for a panel '..tostring(root:GetWidth())..' x '..tostring(root:GetHeight()))
+  Reset()
+  Start(root._contextBuildHit)
+  Move.x,Move.y=300,330
+  Stop(root._contextBuildHit)
+  local sx,sy=Saved()
+  C.setup(sx==math.floor(300*r-960+0.5) and sy==math.floor(330*r-540+0.5),tag..': fixture: the drag saved its centre in UIParent units',
+   tostring(sx)..','..tostring(sy))
+  local db=NexusDB
+  H=F.Boot(db,function(h) F.OrbService(h) end)
+  P,LM=Nexus.Panel,Nexus.LayoutMetrics
+  RM=G.RegionMethods()
+  RM.GetEffectiveScale=function(self)
+   local parent=self.parent
+   return (self.scale or 1)*(parent and parent.GetEffectiveScale and parent:GetEffectiveScale() or 1)
+  end
+  -- The same screen, font model, offers and Details as before the load.
+  -- The fitted size is the fit's for the panel as it is after the load,
+  -- which is what the saved centre, kept in UIParent units, is restored
+  -- at.
+  UIParent:SetSize(640,screenH)
+  G.UseFont(G.MODELS.default)
+  local saved=F.Serialize(NexusDB)
+  P.Show()
+  if details~=nil then P._playDetails=details end
+  local rendered=P.Render(model())==true
+  local fresh=NexusPanel
+  r=Fit(fresh,screenH)
+  C.setup(rendered and ((reduced and r<1.5) or (not reduced and r==1.5)),
+   tag..': fixture: the panel renders after the fresh load, '
+    ..(reduced and 'still taller than the screen leaves at 150%' or 'and the screen still holds it at the chosen 150%'),fresh:GetHeight())
+  local s=fresh:GetScale()
+  local p,rel,relP,x,y=fresh:GetPoint(1)
+  C.expect(math.abs(s-r)<0.0005 and fresh:GetNumPoints()==1 and p=='CENTER' and rel==UIParent and relP=='CENTER'
+   and math.abs(x*s-sx)<0.5 and math.abs(y*s-sy)<0.5,
+   tag..': after a fresh load the saved centre is the centre at the fitted size',
+   tostring(p)..' '..tostring(x and x*s)..','..tostring(y and y*s)..' at '..s)
+  C.guard(F.Serialize(NexusDB)==saved,tag..': the fresh load writes no position, size or other saved data')
+  return fresh
+ end
+ -- The original screen and model.
+ local fresh=Round('V4',1080,Model,nil,false)
+ -- The first round's fresh load replaced the addon, its panel and the
+ -- harness's own queries. The drag seams this fixture installed at its start
+ -- (the root's centre read, UIParent's, and the held-Shift answer) are put
+ -- on the fresh panel the same way before the second round's drag.
+ root=fresh
+ rawset(root,'GetCenter',function() return Move.x,Move.y end)
+ rawset(UIParent,'GetCenter',function() return 960,540 end)
+ IsShiftKeyDown=function() return ShiftHeld.value end
+ -- Beside it: the screen that reduces the chosen size, with a tall panel.
+ Round('V4 (640 x 480)',480,Tall,true,true)
 end)
 
 -- Held-Shift fixture scope ends: the query saved before the drag helpers returns.

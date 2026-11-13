@@ -1345,10 +1345,35 @@ do
  -- heading leaves after the 4 px gap, and never under 72 px. Derived here
  -- from the layout's scale, the roll box and the heading's own measured
  -- line, not read from the panel. Returns the cell and that font scale.
+ -- The approved compact panel (design draft "Nexus compact panel": 420
+ -- reference pixels wide, where the reference panel is 284 units, so one
+ -- reference pixel is 284/420 of the text scale in units). With Auto OFF the
+ -- heading is "Your offers" and the destination has a cell of its own at the
+ -- row's right end (NexusPanel._offerSlot); the heading row has no side
+ -- inset of its own. So the room the heading leaves is the roll box less
+ -- that cell (its own measured line) and the draft's 10 pixels before it,
+ -- less the 4 px gap and the heading. EXPECT: the room that stood here was
+ -- the roll box less its two 2 px insets, the gap and the heading.
+ -- v9 (Root's ruling SPEC-A2: "allocate enough measured right-cell width for
+ -- whole charges/slot on one line when physically available; left text can
+ -- wrap"). EXPECT: the rule above, which this function stated until v9 (72
+ -- x the scale, in the room the heading's own line left). The cell is now
+ -- the charge row's own one-line width in whole units (`natural`, as the
+ -- font model measures the shown row), never under 72 px, and no wider than
+ -- the heading row leaves once the heading keeps, after the 4 px gap, the
+ -- 72 px a cell always had (`room`: the roll box less the destination cell
+ -- and its 10 pixels, the gap and those 72). Returns the cell, the font
+ -- scale, `natural` and `room`.
  local function ChargeCell()
-  local layout,heading=NexusPanel._responsiveLayout,NexusPanel._rollStatus
-  local scaled=math.max(72,math.floor(72*layout.scale+0.5))
-  return math.max(72,math.min(scaled,layout.boxes.roll.w-4-4-math.ceil(heading:GetStringWidth()))),layout.scale
+  local layout=NexusPanel._responsiveLayout
+  local slot=NexusPanel._offerSlot
+  local beside=0
+  if slot and slot:IsShown() then
+   beside=math.ceil(slot:GetStringWidth())+math.max(1,math.floor(10*284/420*layout.scale+0.5))
+  end
+  local natural=math.ceil(NexusPanel._chargesText:GetStringWidth())
+  local room=layout.boxes.roll.w-beside-4-72
+  return math.max(72,math.min(natural,room)),layout.scale,natural,room
  end
  local function Sets(widget)
   local out={};for _,entry in ipairs(log)do if entry[1]==widget then out[#out+1]=entry[2] end end;return out
@@ -1418,6 +1443,85 @@ do
    and (label:GetStringWidth()>label:GetWidth())==shortened,
    tag..': its actual FontString is one line inside the '..button:GetWidth()..'x'..button:GetHeight()
     ..' button less the end caps, '..(shortened and 'shortened there by the client' or 'whole'))
+ end
+ -- v9 (Root's ruling SPEC-A3-A7: "Preserve full long translated captions at
+ -- current native fonts, including ... My Builds ... Let owned
+ -- text/button/header/progress-row heights grow and wrap as needed. Remove
+ -- compact-path shortening"). My Builds in the compact header: a label
+ -- wider than its room in the button is not one shortened line any more
+ -- (EXPECT: Bounded asked it for exactly that, wordWrap==false and
+ -- shortened). It wraps in the button's width less the two end caps and is
+ -- whole there: its one-line width is more than that room, its box is that
+ -- room wide and as tall as its wrapped lines in the active font model
+ -- (stated here with G.Rows; the harness default has no wrapped height, so
+ -- there the box is at least one line), the button is as tall as the label
+ -- or taller, and the label stays inside the button less its end caps.
+ -- Assign Wishlist and Create Wishlist are not in that ruling and keep
+ -- Bounded; so does a My Builds label that fits.
+ local function Whole(button,text,tag)
+  local label=button:GetFontString()
+  local line=G.model and G.model.line or 14
+  local box=G.Rect(button,NexusPanel)
+  local room=button:GetWidth()-2*CAP
+  local rows=G.model and G.Rows(text,room,G.model.char) or 1
+  check(label and label:GetText()==text and button:GetText()==text and label.wordWrap==true
+   and label:GetWidth()==room and label:GetStringWidth()>room and (not G.model or rows>=2)
+   and label:GetHeight()>=rows*line-0.5 and label:GetHeight()<=button:GetHeight()
+   and G.Inside(G.Rect(label,NexusPanel),{box[1]+CAP,box[2],box[3]-CAP,box[4]}),
+   tag..': its actual FontString wraps inside the '..button:GetWidth()..'x'..button:GetHeight()
+    ..' button less the end caps and is whole there ('..tostring(label and label:GetHeight())..' units for '..rows..' line(s) of '..line..')')
+ end
+ -- v9 (the same ruling: "including Options, Auto and hidden Auto state"; no
+ -- compact-path font fitting). The Auto slot of header line 1, whichever it
+ -- shows after a render under a font model, with the active language's own
+ -- words. It is the draft's 22 pixels high while its words fit it. Stated
+ -- here from the words and the model, not read from the panel's fitting:
+ --   the Auto control: its labels' room is the control less the 12 units its
+ --   label fit keeps clear. When the widest of its three labels is wider
+ --   than that, its label wraps there (it is not drawn smaller) and the
+ --   control is as tall as the wrapped label with the draft's 3 pixels above
+ --   and below it, taller than 22 pixels; else it keeps the 22 pixels;
+ --   the state words (the control hidden): words wider than the slot wrap in
+ --   it, in a box as tall as the font model measures their lines; else the
+ --   slot keeps the 22 pixels.
+ -- One of the four branches runs at each call. EXPECT for the two wrapping
+ -- branches: at eef1608f the control and the state words kept one height
+ -- whatever their words (a long Auto label was drawn in a smaller font, long
+ -- state words were cut). GUARD for the two fitting branches.
+ local function AutoSlotWhole(model,tag)
+  local f=NexusPanel
+  local textScale=math.max(0.75,math.min(2,model.size/12))
+  local high=math.max(1,math.floor(22*284/420*textScale+0.5))
+  local pad=math.max(1,math.floor(3*284/420*textScale+0.5))
+  if f._autoBtn:IsShown() then
+   local control,label=f._autoBtn,f._autoBtn:GetFontString()
+   local widest=0
+   for _,key in ipairs({'panel.button.auto_on','panel.button.auto_off','panel.button.auto_unknown'})do
+    widest=math.max(widest,math.ceil(G.Length(G.Visible((Nexus.Localization.Text(key))))*model.char))
+   end
+   local room=control:GetWidth()-12
+   if widest>room then
+    check(label and label.wordWrap==true and label:GetWidth()==room and label:GetHeight()>=model.line
+     and control:GetHeight()==math.max(high,label:GetHeight()+2*pad) and control:GetHeight()>high,
+     tag..': the Auto control\'s widest label ('..widest..') is wider than its room ('..room..'), so its label wraps there and the control is as tall as the wrapped label needs ('
+      ..tostring(control:GetHeight())..' for a '..tostring(label and label:GetHeight())..'-unit label; '..high..' for one line)')
+   else
+    check(control:GetHeight()==high,tag..': the Auto control\'s labels fit its room ('..widest..' in '..room..') and it keeps the draft\'s 22 pixels ('
+     ..tostring(control:GetHeight())..' of '..high..')')
+   end
+  else
+   local state=f._contextAutoState
+   local words=G.Visible(state:GetText() or '')
+   if G.Length(words)*model.char>state:GetWidth() then
+    local own=math.ceil(state:GetStringHeight() or 0)
+    check(state:IsShown() and words~='' and state.wordWrap==true and state:GetHeight()==math.max(high,own),
+     tag..': the Auto state words are wider than the Auto slot, so they wrap there in a box as tall as their lines ('
+      ..tostring(state:GetHeight())..' for '..own..'; "'..words..'" in '..tostring(state:GetWidth())..')')
+   else
+    check(state:IsShown() and words~='' and state:GetHeight()==high,
+     tag..': the Auto state words fit the Auto slot on one line and it keeps the draft\'s 22 pixels ("'..words..'" in '..tostring(state:GetWidth())..')')
+   end
+  end
  end
  -- A button's actual registered hover as the tooltip receives it. clears: a
  -- synthetic SetOwner that drops every line added before it (an adversarial
@@ -1492,7 +1596,11 @@ do
   check(same(Lines(Child(P.need)),tips.need),tag..': the Still needed hover keeps its lines, the untranslated names and the shared editor link')
   local switchLabel=switch:GetFontString()
   check(switchLabel and switchLabel:GetText()==T('panel.button.my_builds'),'SETUP MODEL '..tag..': the My Builds text is also the text of the button FontString')
-  if bounded then Bounded(switch,T('panel.button.my_builds'),recovered,tag..': panel.button.my_builds') end
+  -- (v9: a My Builds label wider than its room wraps in its button, whole:
+  -- Whole. EXPECT: Bounded asked it for one shortened line. Its hover names
+  -- it in full first all the same, as below.)
+  if bounded and recovered then Whole(switch,T('panel.button.my_builds'),tag..': panel.button.my_builds')
+  elseif bounded then Bounded(switch,T('panel.button.my_builds'),recovered,tag..': panel.button.my_builds') end
   Hover(switch,recovered and WithLabel(T,tips,'switch') or tips.switch,tag..': the My Builds hover keeps its consequence, then the destination lines with the player and Wishlist names unchanged'
    ..(recovered and ', after the complete label' or ', with no added line'))
   for _,w in ipairs({{switch,'panel.button.my_builds',2},{Region(P.still),'panel.heading.still_needed',2},
@@ -1502,9 +1610,15 @@ do
    for _,value in ipairs(sets)do all=all and value==T(w[2]) end
    check(all and #sets>=w[3],tag..': every creation and render-reset SetText of '..w[2]..' shows it ('..#sets..' calls)')
   end
-  local cell,cellScale=ChargeCell()
-  check(NexusPanel._chargesText:IsShown() and NexusPanel._chargesText:GetWidth()==cell and (cellScale>1 or NexusPanel._chargesText:GetWidth()==72),
-   tag..': the compact charge row is shown in its cell: 72 px at font scale 1, the layout-derived width above it ('..cell..' px at font scale '..cellScale..')')
+  -- v9 (SPEC-A2): the cell is the row's own one-line width, never under
+  -- 72 px, in the room the heading row has for it; a row that fits that
+  -- room is whole on one line in its cell. EXPECT: the condition that stood
+  -- here was (cellScale>1 or width==72), the cell of the rule before.
+  local cell,cellScale,natural,room=ChargeCell()
+  check(NexusPanel._chargesText:IsShown() and NexusPanel._chargesText:GetWidth()==cell and (natural>72 or cell==72)
+   and (natural>room or (cell>=natural and NexusPanel._chargesText:GetStringWidth()<=NexusPanel._chargesText:GetWidth())),
+   tag..': the compact charge row is shown in its cell: its own one-line width, never under 72 px, in the room its row has ('..cell..' px for a '
+    ..natural..'-unit row in '..room..' at font scale '..cellScale..')')
  end
  local function Effects()
   local id,initialized=Nexus.Localization.ActiveLanguage()
@@ -1646,29 +1760,49 @@ do
  local message,fed=Nexus.UserText.Message,{}
  Nexus.UserText.Message=function(value,...)fed[#fed+1]=value;return message(value,...)end
  Verify(CANDT,'#143 candidate',true,true)
- for _,h in ipairs({{'_progressLabelHit',P.progress,'panel.heading.progress'},{'_needLabelHit',P.still,'panel.heading.still_needed'},
-  {'_shedLabelHit',P.extra,'panel.heading.extra_copies'}})do
+ -- Owner decision for the compact Details columns (v8): the approved rule
+ -- that nothing is cut comes before the one-line heading rule of issue #143
+ -- there. STILL NEEDED, EXTRA COPIES and LOCKED TARGETS wrap inside their
+ -- columns (the checks that stood here asked each for one no-wrap line,
+ -- wordWrap==false); the progress heading keeps its one line. What is
+ -- protected is unchanged: each heading shows the selected text and its
+ -- actual hover still recovers the complete heading. This boot measures
+ -- with the harness's own default, which has no wrapped height; the
+ -- headings' wrapped heights are asked per font model below.
+ -- v9 (Root's ruling SPEC-A3-A7: the PROGRESS caption is whole too): the
+ -- long candidate progress heading is wider than the room it has beside the
+ -- Details control, so it wraps there as well. EXPECT: its entry here was
+ -- false (one no-wrap line, wordWrap==false); it is true, with the same
+ -- text and the same hover.
+ for _,h in ipairs({{'_progressLabelHit',P.progress,'panel.heading.progress',true},{'_needLabelHit',P.still,'panel.heading.still_needed',true},
+  {'_shedLabelHit',P.extra,'panel.heading.extra_copies',true}})do
   local hit,label=NexusPanel[h[1]],Region(h[2])
-  check(hit and hit:IsShown() and label.wordWrap==false and same(Lines(hit),{{CAND[h[3]],1,1,1,true}}),'#143 candidate: '..h[3]..' is one line and its actual hover recovers the complete heading')
+  check(hit and hit:IsShown() and label:GetText()==CAND[h[3]] and label.wordWrap==h[4] and same(Lines(hit),{{CAND[h[3]],1,1,1,true}}),
+   '#143 candidate: '..h[3]..(h[1]=='_progressLabelHit' and ' wraps in its room beside Details' or ' wraps inside its Details column')
+    ..' and its actual hover recovers the complete heading')
  end
- check(NexusPanel.toLockLabel.wordWrap==false,'#143 candidate: LOCKED TARGETS is one line; its own row hover recovered it above')
+ check(NexusPanel.toLockLabel.wordWrap==true and NexusPanel.toLockLabel:GetText()==CAND['panel.heading.locked_targets'],
+  '#143 candidate: LOCKED TARGETS wraps inside its Details column; its own row hover recovered it above')
  local uiScale=rawget(UIParent,'GetEffectiveScale')
  -- Main-panel visual correction ("Let this panel width follow text scale
  -- through a bounded deterministic rule against actual screen width";
- -- "Readability has priority over fixed420 width"): the panel is 420 units
- -- times the model's font scale (its size over 12, from 1 to 2), or what the
- -- screen leaves it at its chosen size (the screen's width less the 24-unit
- -- margin, over that size, on a screen of 640 units or more) where that is
- -- less, and never under 420: 420 units at the default, 16 px and 0.75
- -- models, more at 2.0. Stated here from the model, the screen and the chosen
- -- size; not read from the layout engine. The checks below held the panel to
- -- 420 units at every model. The setup buttons, My Builds and the headings
- -- keep the boxes they had, whatever the panel's width.
+ -- "Readability has priority over fixed420 width"): the panel is its
+ -- reference width times the model's font scale (its size over 12, from 1 to
+ -- 2), or what the screen leaves it at its chosen size (the screen's width
+ -- less the 24-unit margin, over that size, on a screen of 640 units or more)
+ -- where that is less, and never under the reference width. Stated here from
+ -- the model, the screen and the chosen size; not read from the layout
+ -- engine. The setup buttons and the headings keep the boxes they had,
+ -- whatever the panel's width.
+ -- The approved compact panel: the reference width is 284 units (the
+ -- draft's 420 reference pixels): 284 units at the default, 16 px and 0.75
+ -- models, 568 at 2.0. EXPECT: the rule that stood here was stated from the
+ -- former 420-unit reference (420 units, and 840 at 2.0).
  local function PanelWidth(model)
-  local width=math.floor(420*math.max(1,math.min(2,model.size/12))+0.5)
+  local width=math.floor(284*math.max(1,math.min(2,model.size/12))+0.5)
   local screen,chosen=tonumber(UIParent:GetWidth()),Nexus.Panel.PanelScale()
   if screen and screen>=640 then width=math.min(width,math.floor((screen-24)/chosen)) end
-  return math.max(420,width)
+  return math.max(284,width)
  end
  for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
   for _,ui in ipairs({1,0.64})do
@@ -1687,20 +1821,74 @@ do
     Bounded(button,CAND[BUTTONS[which]],true,tag..': '..BUTTONS[which])
     Hover(button,WithLabel(CANDT,tips,which),tag..': the actual '..BUTTONS[which]..' hover recovers the complete label, then every original line')
    end
+   -- v9: the Auto slot is whole in the setup view and in the Play view
+   -- (AutoSlotWhole), with this boot's own frFR Auto words.
+   AutoSlotWhole(model,tag..', the setup view')
+   assert(Nexus.Panel.Render(Active()))
+   AutoSlotWhole(model,tag..', the Play view')
+   -- Owner decision for the compact Details columns (v8): the long
+   -- candidate headings wrap inside their columns, so the open Details block
+   -- is as tall as they need. Hide details must give all of it back and
+   -- Show details the same height again (the flag is the panel's own
+   -- memory-only state, set as native_details_measurement sets it; the same
+   -- model is rendered each time and Details is left open as it was).
+   local openH=NexusPanel:GetHeight()
+   Nexus.Panel._detailsHold=nil;Nexus.Panel._playDetails=false
+   assert(Nexus.Panel.Render(Active()))
+   local closedH=NexusPanel:GetHeight()
+   local headingsGone=not Region(P.still):IsShown() and not Region(P.extra):IsShown() and not NexusPanel.toLockLabel:IsShown()
+   Nexus.Panel._playDetails=true
    assert(Nexus.Panel.Render(Active()))
    layout=NexusPanel._responsiveLayout
+   check(headingsGone and Nexus.Panel._playDetails==true and NexusPanel:GetHeight()==openH and type(layout.detailHeadingH)=='number'
+    and openH-closedH>=layout.detailHeadingH,
+    tag..': Hide details takes the Details headings and their whole row away and Show details gives the same height again ('
+     ..tostring(closedH)..' / '..tostring(openH)..', heading row '..tostring(layout.detailHeadingH)..')')
    local box,panel=layout.boxes,{0,0,NexusPanel:GetWidth(),NexusPanel:GetHeight()}
    local switch=NexusPanel._switchBtn
-   -- Approved panel cleanup (compact header: the Build and Wishlist rows are
-   -- 20 units, 2 apart, each button at the top of its own row): the button
-   -- is 106x20, where it was 106x22. Its width, and so what of the label is
-   -- shown, is unchanged; Bounded below still requires the label's one-line
-   -- box to be no taller than the button and at least one model line.
-   check(NexusPanel:GetWidth()==PanelWidth(model) and switch:GetWidth()==106 and switch:GetHeight()==20 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x20 header box and keeps the selected text')
+   -- The one heading row over the Details name columns, as the font model
+   -- itself measures the three headings in their columns' widths: the
+   -- tallest of them.
+   local tallestHeading=0
+   for _,l in ipairs({Region(P.still),Region(P.extra),NexusPanel.toLockLabel})do
+    tallestHeading=math.max(tallestHeading,math.ceil(l:GetStringHeight() or 0))
+   end
+   -- Approved panel cleanup (compact header: the Build and Wishlist rows
+   -- are 2 apart, each button at the top of its own row). (Until v9 Bounded
+   -- was asked here: the label's one-line box no taller than the button and
+   -- at least one model line, inside its end caps. v9: Whole, below.)
+   -- The approved compact panel: My Builds and Change are one column as wide
+   -- as the wider of their two labels and its room (the draft's 14 pixels,
+   -- never under 14 units), held to two fifths of the panel, and the draft's
+   -- 20 pixels high (never taller than the Build row it stands in, which is
+   -- laid on whole units). The long candidate label is wider than that
+   -- column can be, so the button is the two fifths. EXPECT: it was the fixed
+   -- 106x20 box (106x22 before the cleanup).
+   -- v9 (Root's ruling SPEC-A3-A7): the long candidate label is whole in
+   -- that held column. It wraps in the column less the two 6-unit end caps
+   -- and the button is as tall as its wrapped lines in this font model with
+   -- the draft's 3 pixels above and below them (never under the draft's 20
+   -- pixels); the Build row holds the button. EXPECT: the check that stood
+   -- here held the button to the draft's 20 pixels (math.min(high, the
+   -- Build row), at least high-1) with the label shortened in it.
+   local column=math.floor(PanelWidth(model)*0.4)
+   local textScale=math.max(0.75,math.min(2,model.size/12))
+   local high=math.max(1,math.floor(20*284/420*textScale+0.5))
+   -- (The label's wrapped height as the font model itself measures it in
+   -- that room, as for the Details headings below.)
+   local wrapped=math.ceil(switch:GetFontString():GetStringHeight() or 0)
+   local tall=math.max(high,wrapped+2*math.max(1,math.floor(3*284/420*textScale+0.5)))
+   check(NexusPanel:GetWidth()==PanelWidth(model) and switch:GetWidth()==column
+    and wrapped>=2*model.line and switch:GetHeight()==tall and NexusPanel._contextBuild:GetHeight()>=switch:GetHeight()
+    and switch:GetText()==CAND['panel.button.my_builds'],
+    tag..': My Builds has its header column, two fifths of the panel for the long label, is as tall as that label\'s wrapped lines need, inside its Build row, and keeps the selected text ('
+     ..tostring(switch:GetWidth())..'x'..tostring(switch:GetHeight())..' of '..column..'x'..tall..' for a '..wrapped..'-unit label; Build row '
+     ..tostring(NexusPanel._contextBuild:GetHeight())..')')
    local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>switch:GetWidth()-12
-   Bounded(switch,CAND['panel.button.my_builds'],shortSwitch,tag..': panel.button.my_builds')
+   check(shortSwitch,'SETUP '..tag..': the long candidate My Builds label is wider than its room in the held column')
+   Whole(switch,CAND['panel.button.my_builds'],tag..': panel.button.my_builds')
    Hover(switch,shortSwitch and WithLabel(CANDT,tips,'switch') or tips.switch,
-    tag..': the actual My Builds hover keeps its consequence and destination lines, recovering the complete label when shortened')
+    tag..': the actual My Builds hover keeps its consequence and destination lines, naming the complete label first while its line is wider than its room')
    for _,h in ipairs({{Region(P.progress),box.progressHeader,'panel.heading.progress',NexusPanel._progressLabelHit},
     {Region(P.still),box.needed,'panel.heading.still_needed',NexusPanel._needLabelHit},
     {Region(P.extra),box.shed,'panel.heading.extra_copies',NexusPanel._shedLabelHit},
@@ -1715,13 +1903,54 @@ do
     -- least that line. The check that stood here held every heading to the
     -- modelled small row. One line, its box's width, inside the panel and
     -- shortened there with the complete text on its hover: all as before.
+    -- The approved compact panel: a name list's heading stands on the
+    -- draft's 18-pixel line (18 x 284/420 x the text scale, laid on whole
+    -- units: its whole part or one unit more) where that is taller than one
+    -- measured line of its face, and on that line otherwise, as before.
+    -- EXPECT: the check that stood here held it to the measured line alone.
+    -- Owner decision for the compact Details columns (v8): the approved
+    -- rule that nothing is cut comes before the one-line rule there. The
+    -- three headings over the name columns wrap inside their columns and
+    -- are whole: each box is its column's width at the column's top and as
+    -- tall as the one heading row, and that row is exactly what the tallest
+    -- of the three headings measures in its column in this font model
+    -- (never under one line or the draft's 18-pixel line), so it holds every
+    -- line of each. The check that stood here asked each for one no-wrap
+    -- line, shortened in its box. The progress heading is unchanged: one
+    -- line in its row beside the Details control, shortened there. Each
+    -- heading's complete text on its hover: as before, below.
+    -- v9 (Root's ruling SPEC-A3-A7: "Preserve full long translated captions
+    -- ... and PROGRESS. Let owned text/button/header/progress-row heights
+    -- grow and wrap as needed"): the progress heading is no longer the
+    -- exception. The long candidate is wider than the room it has beside
+    -- the Details control, so it wraps in that room and is whole: its box is
+    -- its layout box, and that box (the progress row) is at least as tall as
+    -- the heading's own wrapped lines measure there in this font model,
+    -- which are more than one line. EXPECT: the check that stood here asked
+    -- for one no-wrap line (wordWrap==false), shortened in its box.
     local oneLine=math.max(layout.small,math.ceil(G.model.line))
-    local tall
-    if h[2]==box.progressHeader then tall=label:GetHeight()==h[2].h and h[2].h>=oneLine
-    else tall=label:GetHeight()==oneLine end
-    check(label:GetText()==CAND[h[3]] and label.wordWrap==false and label:GetWidth()==h[2].w and tall
-     and G.Inside(G.Rect(label,NexusPanel),panel) and Nexus.LayoutMetrics.Shortened(label),tag..': '..h[3]
-     ..' stays one line in its layout box, as tall as one measured line of its face, shortened there ('..tostring(label:GetHeight())..' for a '..oneLine..'-unit line)')
+    local drawn=18*284/420*layout.scale
+    if h[2]==box.progressHeader then
+     local own=math.ceil(label:GetStringHeight() or 0)
+     check(label:GetText()==CAND[h[3]] and label.wordWrap==true and label:GetWidth()==h[2].w
+      and label:GetHeight()==h[2].h and h[2].h>=oneLine and label:GetStringWidth()>label:GetWidth()
+      and own>=2*G.model.line and h[2].h>=own
+      and h[2].h>=G.Rows(label:GetText() or '',label:GetWidth(),G.model.char)*G.model.line-0.5
+      and G.Inside(G.Rect(label,NexusPanel),panel),tag..': '..h[3]
+      ..' wraps in its layout box beside Details and is whole there: the progress row is as tall as its wrapped lines ('..tostring(label:GetHeight())
+      ..' for its own '..own..', a '..oneLine..'-unit line)')
+    else
+     local own=math.ceil(label:GetStringHeight() or 0)
+     local need=math.max(oneLine,tallestHeading)
+     local row=label:GetHeight()
+     local rect=G.Rect(label,NexusPanel)
+     check(label:GetText()==CAND[h[3]] and label.wordWrap==true and label:GetWidth()==h[2].w
+      and own>=2*G.model.line and row>=own and (row==math.max(need,math.floor(drawn)) or row==math.max(need,math.ceil(drawn)))
+      and layout.detailHeadingH==row and math.abs(rect[1]-h[2].x)<0.01 and math.abs(rect[2]-h[2].y)<0.01 and h[2].h>=row
+      and G.Inside(rect,panel),tag..': '..h[3]
+      ..' wraps inside its Details column and is whole there: at the column\'s top, in the one heading row, which is exactly as tall as the tallest of the three headings measures ('
+      ..tostring(row)..' for its own '..own..' of the tallest '..tallestHeading..', a '..oneLine..'-unit line)')
+    end
     if h[4]==NexusPanel.toLockHit then
      -- #143: the locked-target row owns its hover alone. Through the real
      -- Tooltip helper with the plain and the synthetic clearing SetOwner (no
@@ -1743,19 +1972,29 @@ do
     end
    end
    local charges=NexusPanel._chargesText
-   local cell=ChargeCell()
+   local cell,_,natural,room=ChargeCell()
    -- Approved panel cleanup (nothing on the main panel is shortened): the
    -- long charge row is no longer one shortened line. It keeps the same cell
    -- (72 px at font scale 1, the layout-derived width above it) and wraps
    -- there: more than one model line, in a box that holds those lines and is
    -- no taller than the heading row it shares needs, still inside the roll
    -- area. Its hover (below) still gives the complete row.
+   -- v9 (Root's ruling SPEC-A2: "If the complete right string cannot fit
+   -- even a whole row at the existing font, let it wrap and grow; never
+   -- truncate or shrink it"): this long row is wider than the whole room
+   -- its heading row has, so its cell is that whole room (the row less the
+   -- destination cell, the gap and the 72 px the heading keeps) and it wraps
+   -- there, as before in every other respect. EXPECT: the cell asked for
+   -- here was the one of the rule before (72 px at font scale 1, the
+   -- layout-derived width above it: layout.scale>1 or width==72), in which
+   -- the same row wrapped to more lines.
    local chargeRows=G.Rows(charges:GetText() or '',charges:GetWidth(),G.model.char)
    local headingRow=math.max(layout.small,chargeRows*G.model.line,NexusPanel._rollStatus:GetStringHeight())
-   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==cell and (layout.scale>1 or charges:GetWidth()==72)
+   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==cell and natural>room and room>=72 and cell==room
+    and NexusPanel._rollStatus:GetWidth()==72
     and chargeRows>1 and charges.wordWrap==true and charges:GetHeight()>=chargeRows*G.model.line-0.5 and charges:GetHeight()<=headingRow+1
     and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),
-    tag..': the long valid charge row keeps its cell (72 px at font scale 1, the layout-derived width above it: '..cell..' px) and is whole there, wrapped')
+    tag..': the long valid charge row has the whole room of its heading row ('..cell..' px of a '..natural..'-unit row; the heading keeps 72) and is whole there, wrapped')
    local lines=Lines(NexusPanel._chargesHover)
    check(same(lines[1],{'Charges',1,1,1}) and same(lines[2],{LONGROW,1,1,1,true}),tag..': the actual charge hover recovers the complete row')
   end
@@ -1783,7 +2022,10 @@ do
  end
  check(reused,'#143 candidate: repeated layouts, hovers and reopen keep each mapped button with its one FontString, the same regions and children and its own registered OnEnter and OnLeave; no label, frame or hook is added')
  local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>NexusPanel._switchBtn:GetWidth()-12
- Bounded(NexusPanel._switchBtn,CAND['panel.button.my_builds'],shortSwitch,'#143 candidate after reuse: panel.button.my_builds')
+ -- (v9: wrapped whole in its button, as above; EXPECT: Bounded, one
+ -- shortened line.)
+ check(shortSwitch,'SETUP #143 candidate after reuse: the long candidate My Builds label is still wider than its room')
+ Whole(NexusPanel._switchBtn,CAND['panel.button.my_builds'],'#143 candidate after reuse: panel.button.my_builds')
  Hover(NexusPanel._switchBtn,WithLabel(CANDT,Tips(CANDT),'switch'),'#143 candidate after reuse: the actual My Builds hover gives the complete label once, then its own lines')
  for _,w in ipairs({{NexusPanel._switchBtn,'panel.button.my_builds'},{Region(P.progress),'panel.heading.progress'},
   {Region(P.still),'panel.heading.still_needed'},{Region(P.extra),'panel.heading.extra_copies'},{NexusPanel.toLockLabel,'panel.heading.locked_targets'},
@@ -1822,12 +2064,17 @@ do
  check(after.byReason.unknown_key==diagnostics.byReason.unknown_key and after.byReason.invalid_key==diagnostics.byReason.invalid_key
   and after.byReason.missing_candidate>diagnostics.byReason.missing_candidate,'#143 fallback: only missing-candidate fallbacks, never a raw key, blank or unavailable status')
  -- Fitting-English control at every font model and both UI scales, with
- -- literal expectations from the visible characters at each model width
- -- against the 94 px and 134 px label bounds: My Builds (9) and the setup
- -- labels (15) fit the default face and 0.75; at 16 px My Builds still fits
- -- its wider header button; at 2.0 all three are shortened. A label that fits adds no
- -- hover line; a shortened one adds only its complete label, first.
- local FITS={{G.MODELS.default,true,true},{G.MODELS.px16,true,true},{G.MODELS.small,true,true},{G.MODELS.double,false,false}}
+ -- literal expectations from the visible characters at each model width:
+ -- the setup labels (15) against their 134 px label bound, which they fit at
+ -- the default face, at 16 px and at 0.75 and overrun at 2.0; My Builds (9)
+ -- against its own header column. A label that fits adds no hover line; a
+ -- shortened one adds only its complete label, first.
+ -- The approved compact panel: the header column is as wide as the wider of
+ -- My Builds and Change needs with its room, so My Builds fits it at every
+ -- model, 2.0 included (99 units of words in a 118-unit button with a
+ -- 106-unit label). EXPECT: in the fixed 106 px button with its 94 px label
+ -- it was shortened at 2.0.
+ local FITS={{G.MODELS.default,true,true},{G.MODELS.px16,true,true},{G.MODELS.small,true,true},{G.MODELS.double,true,false}}
  local scaled=rawget(UIParent,'GetEffectiveScale')
  for _,fit in ipairs(FITS)do
   for _,ui in ipairs({1,0.64})do
@@ -1873,18 +2120,25 @@ do
    'GUARD #143 real '..id..': the actual locked-target row takes the tooltip once and keeps all 11 locked-target lines in the pack text'
    ..(#lockWant>#lockBody and ', after the complete heading' or ', with no added heading'))
   local charges=NexusPanel._chargesText
-  local cell,cellScale=ChargeCell()
+  local cell,cellScale,natural,room=ChargeCell()
   -- Main-panel visual correction ("Measure actual line height for one-line
   -- text too"): the charge row shares the offer heading's row, which is as
   -- tall as the taller of the two one-line texts measures and never under
   -- the layout's small row (this boot measures with the harness's own
   -- default, as the fixture's Boot states). The check that stood here held
   -- the row to the modelled small row. Text, cell and width: as before.
+  -- v9 (SPEC-A2): the cell is the real row's own one-line width, never
+  -- under 72 px, in the room its heading row has, and a row that fits that
+  -- room is whole on its one line. EXPECT: the cell asked for here was the
+  -- one of the rule before (cellScale>1 or width==72), in which a real row
+  -- wider than 72 px wrapped at font scale 1. Text and row height: as
+  -- before.
   local headingRow=math.max(NexusPanel._responsiveLayout.small,math.ceil(charges:GetStringHeight() or 0),
    math.ceil(NexusPanel._rollStatus:GetStringHeight() or 0))
-  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==cell and (cellScale>1 or charges:GetWidth()==72) and charges:GetHeight()==headingRow,
-   'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its cell (72 px at font scale 1, the layout-derived width above it: '..cell
-   ..' px), as tall as the heading row\'s measured line ('..tostring(charges:GetHeight())..' of '..headingRow..')')
+  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==cell and (natural>72 or cell==72)
+   and (natural>room or (cell>=natural and charges:GetStringWidth()<=charges:GetWidth())) and charges:GetHeight()==headingRow,
+   'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its cell (its own one-line width, never under 72 px, in the room its row has: '..cell
+   ..' px for a '..natural..'-unit row in '..room..' at font scale '..cellScale..'), as tall as the heading row\'s measured line ('..tostring(charges:GetHeight())..' of '..headingRow..')')
   -- The legend in this pack's own input entries (as for the locked-target lines above), with
   -- the code-owned "?: " and "~: " markers; Readout.ChargesLegend must give the same lines.
   local legend={entries['readout.tooltip.charges_legend_letters'],'?: '..entries['readout.tooltip.charges_legend_unknown'],

@@ -21,6 +21,19 @@
 -- text and frames alike and does not change a fit. The heading is modeled
 -- for width only (one line); its line height is the layout's own row, as for
 -- every other heading. Native pixel fit is NOT established here.
+-- The approved compact panel (design draft "Nexus compact panel": 420
+-- reference pixels wide, where the reference panel is 284 units, so one
+-- reference pixel is 284/420 of the font scale in units). One assertion of
+-- the former geometry is replaced where it stood by the draft's own
+-- assertion, not relaxed: the offer heading's row is the draft's 18-pixel
+-- row at the scale (Scale). One relation of the former geometry is RETIRED
+-- by the owner's ruling recorded by Root (v9, ST8-1) and is no longer
+-- asserted: that the collapsed level-80 block is shorter than the ordinary
+-- block for the same guidance. It is not replaced by an equivalent; the
+-- collapsed block is asked instead for what it must itself be (exactly its
+-- guidance or its button, the whole guidance fitting, the button apart and
+-- inside, the collapsed state), and the retired comparison's figures are
+-- printed as a diagnostic at its original inputs (Fit).
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local SCALES={0.75,1,1.25,1.5,2}
 local HUD={
@@ -91,25 +104,34 @@ local function Scale(s)
  for _=1,3 do Nexus.RequestRecompute();H.Advance(.4) end
  local layout=Nexus.LayoutMetrics.Panel({width=272,fontScale=s,activeRoll=true})
  -- Main-panel visual correction ("Measure actual line height for one-line
- -- text too"): the offer heading's row is the small row of this scale or,
+ -- text too"): the offer heading's row is the design's row of this scale or,
  -- where the client measures the heading's own line taller, that line. The
  -- harness measures every text as one 14-unit line (as stated below for the
- -- Orb window), so here the row is the taller of the two: 14 units at 0.75
- -- and 1.0, the small row from 1.25. The collapsed block lays out no heading
- -- row and keeps the small row. The check that stood here took the
- -- heading's height for the small row at every scale, as the proof that the
- -- final layout pass ran at this scale; that proof is now read from the
- -- applied layout's own small row, which only this scale gives (9, 11, 14,
- -- 17 and 22 units), and the heading's height is checked against what this
- -- scale and the measured line require.
+ -- Orb window), so here the row is the taller of the two. The collapsed
+ -- block lays out no heading row and keeps the small row. The proof that the
+ -- final layout pass ran at this scale is read from the applied layout's own
+ -- small row, which only this scale gives (9, 11, 14, 17 and 22 units), and
+ -- the heading's height is checked against what this scale and the measured
+ -- line require.
+ -- The approved compact panel: the design's row is the draft's 18 reference
+ -- pixels, 18 x 284/420 x the scale (9.1, 12.2, 15.2, 18.3 and 24.3 units),
+ -- laid on whole units: the block's top and the row's end are each rounded
+ -- to a unit, so the row is that length's whole part or one unit more. With
+ -- the 14-unit line that is 14 units at 0.75 and 1.0, then 15 or 16, 18 or
+ -- 19, and 24 or 25. EXPECT: the check that stood here took the small row of
+ -- the scale for the design's row (14 units at 0.75, 1.0 and 1.25, then 17
+ -- and 22).
  local laid=NexusPanel._responsiveLayout or {}
  local head=NexusPanel._rollStatus
  local LINE=14
+ local ROW=18*284/420*s
  check(laid.noOffer or math.ceil(head:GetStringHeight() or 0)==LINE,
   'scale '..s..': fixture: the harness measures the shown heading as one '..LINE..'-unit line: '..tostring(head:GetStringHeight()))
- check(laid.small==layout.small and head:GetHeight()==(laid.noOffer and layout.small or math.max(layout.small,LINE)),
+ local row=head:GetHeight()
+ local drawn=row==math.max(LINE,math.floor(ROW)) or row==math.max(LINE,math.ceil(ROW))
+ check(laid.small==layout.small and ((laid.noOffer and row==layout.small) or (not laid.noOffer and drawn)),
   'scale '..s..': reached: the final layout pass ran at this scale (applied small row '..tostring(laid.small)..' of '..layout.small
-  ..', heading row '..tostring(head:GetHeight())..')')
+  ..', heading row '..tostring(row)..' for the draft\'s '..string.format('%.1f',ROW)..' units)')
  return layout
 end
 local function Top(region) local _,_,_,_,y=region:GetPoint(1);return -y end
@@ -141,19 +163,64 @@ local function Fit(label,expectButton,withCards)
    -- the inline button legitimately needs more than 104 px. The block is no
    -- taller than its own content in the conservative model (this file's
    -- word wrap at the body's real width, or the inline button when taller,
-   -- plus the layout gap), and shorter than the ordinary block for the same
-   -- guidance at the same scale (its rows at the ordinary 248 px body width).
+   -- plus the layout gap).
+   -- RETIRED by the owner's ruling recorded by Root (v9, ST8-1), for the
+   -- compact Main collapsed level-80 guidance only: the strict relation that
+   -- stood here at eef1608f, "the collapsed block is shorter than the
+   -- ordinary block for the same guidance at this scale"
+   -- (check(area:GetHeight()<ordinary) against LayoutMetrics.Panel at width
+   -- 420 with the guidance wrapped at the 248-unit ordinary body). In the
+   -- approved compact presentation readability and the block's natural
+   -- measured height come first, and the block is not always shorter than
+   -- the different ordinary presentation: beside its inline button the
+   -- guidance wraps to more rows than across the block's whole width. The
+   -- relation is NOT asserted here any more and is not protected by this
+   -- file. The comparison v6 to v8 put in its place (the ordinary block of
+   -- this panel's width holding the collapsed body's own row count) could
+   -- not fail beside the exact-height check below, protected nothing, and is
+   -- removed, not kept.
+   -- What is asserted is what the collapsed block itself must be, each from
+   -- the real widgets and this file's own word wrap:
+   --  - required height: the block is exactly its guidance's rows in the
+   --    conservative model, or its inline button when that is taller (no
+   --    heading row, no gap and no button row are laid out in it), and so
+   --    reserves nothing beyond its content;
+   --  - the full guidance fits: every line of it, in both font models, in
+   --    the body's real width and height, and the body is inside the block;
+   --  - the button: its label fits, it stands inline at the block's top
+   --    right, right of the guidance and apart from it, inside the block,
+   --    and the body and the button share the block's width with the layout
+   --    gap between them;
+   --  - state and visibility: collapsed exactly for a finished run without
+   --    an offer, no heading row, the button shown or hidden as the state
+   --    says, and no mini-panel control.
+   -- DIAGNOSTIC ONLY, printed and never asserted, at the same five scales:
+   -- 'original' is the ordinary block at the original inputs of the retired
+   -- relation, unchanged (width 420, the guidance wrapped at the 248-unit
+   -- body), as today's layout engine lays it out; 'own wrap' is the ordinary
+   -- block at this panel's width with the guidance wrapped across the
+   -- block's own width. Neither is a pass or a fail.
    local cchar,cline=HUD[2].char(s),HUD[2].line(s)
    local rows=Lines(rec:GetText(),rec:GetWidth(),cchar)
    local need=math.max(rows*cline,laid.orbButtonH or 0)+laid.gap
-   local ordinary=Nexus.LayoutMetrics.Panel({width=420,fontScale=s,activeRoll=true,orbButton=btn:IsShown(),
+   local original=Nexus.LayoutMetrics.Panel({width=420,fontScale=s,activeRoll=true,orbButton=btn:IsShown(),
     guidanceRows=Lines(rec:GetText(),248,cchar)}).boxes.roll.h
+   local own=Nexus.LayoutMetrics.Panel({width=NexusPanel:GetWidth(),fontScale=s,activeRoll=true,orbButton=btn:IsShown(),
+    guidanceRows=Lines(rec:GetText(),area:GetWidth(),cchar)}).boxes.roll.h
    print('ORB_FIT',tag,'collapsed','area',area:GetWidth()..'x'..area:GetHeight(),'body',rec:GetWidth()..'x'..rec:GetHeight(),
-    'rows',rows,'needs',need,'ordinary',ordinary)
+    'rows',rows,'needs',need)
+   print('ORB_FIT_DIAGNOSTIC',tag,'retired relation, not asserted: collapsed',area:GetHeight(),
+    'ordinary at the original inputs (width 420, 248-unit body)',original,'ordinary at this width, own wrap',own)
    check(area:GetHeight()<=need,tag..': the collapsed block reserves nothing beyond its content: '..area:GetHeight()..' <= '..need)
-   check(area:GetHeight()<ordinary,tag..': the collapsed block is shorter than the ordinary block at this scale: '
-    ..area:GetHeight()..' < '..ordinary)
+   check(math.abs(area:GetHeight()-math.max(rows*cline,laid.orbButtonH or 0))<1e-6,
+    tag..': the collapsed block is exactly its guidance or its inline button: '..area:GetHeight()..' = '
+    ..math.max(rows*cline,laid.orbButtonH or 0))
    check(Top(rec)>=0 and Top(rec)+rec:GetHeight()<=area:GetHeight(),tag..': the body is inside the collapsed block')
+   -- (The body and the inline button share the block's width: the body is
+   -- the block less the button and the layout gap, or the whole block
+   -- without a button.)
+   check(rec:GetWidth()==area:GetWidth()-(expectButton and (btn:GetWidth()+laid.gap) or 0),
+    tag..': the guidance body has the block\'s width less the inline button and the layout gap: '..rec:GetWidth()..' of '..area:GetWidth())
    for _,m in ipairs(HUD) do
     local char,line=m.char(s),m.line(s)
     local body=Lines(rec:GetText(),rec:GetWidth(),char)
