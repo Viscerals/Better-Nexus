@@ -518,6 +518,8 @@ function M.ShowSetup()
     -- in this session.
     local note = _G.NexusChangelogPopup
     if note and note.IsShown and note:IsShown() then pcall(note.Hide, note) end
+    -- The rest of the setup family gives way too (M.SetupFamilyGiveWay).
+    M.SetupFamilyGiveWay("info")
     SyncNote(f):Show()
     return true
 end
@@ -725,13 +727,121 @@ end
 
 function M.ShowChecklist()
     local f = EnsureChecklist()
+    -- Opened over the guided setup coach (from Help or the coach's own
+    -- step), the checklist stands beside the coach rather than replacing it.
+    -- The two would otherwise draw through each other (one strata, the same
+    -- level), so the checklist's whole window is drawn above the coach's
+    -- whole tree: its Theme base (one level under the window) at least two
+    -- levels above the coach's highest frame, every checklist frame at its
+    -- own offset above its parent. The raise is bounded: with the window at
+    -- most 26, the checklist's frames (its base and two levels of buttons and
+    -- hover areas) stay under the Orb window (30, its base 29), Help (40)
+    -- and Community (50), far inside the low band the journal layers keep
+    -- (under 100 and 128). A coach whose tree reaches above that bound is not
+    -- an ordinary geometry; the checklist then lets the coach give way, as
+    -- every other family member does. Not over a coach, the checklist keeps
+    -- its own default level, and every other shown family member gives way.
+    local coachFrame = _G.NexusGuidedSetup
+    local overCoach = coachFrame ~= nil and type(coachFrame.IsShown) == "function" and coachFrame:IsShown() and true or false
+    local function Level(w)
+        if type(w) ~= "table" or type(w.GetFrameLevel) ~= "function" then return nil end
+        local ok, value = pcall(w.GetFrameLevel, w)
+        return ok and tonumber(value) or nil
+    end
+    local function Children(w)
+        if type(w) ~= "table" or type(w.GetChildren) ~= "function" then return {} end
+        local ok, kids = pcall(function() return {w:GetChildren()} end)
+        return ok and kids or {}
+    end
+    local target
+    if overCoach then
+        local top = Level(coachFrame) or 0
+        local function Highest(w, depth)
+            for _, child in ipairs(Children(w)) do
+                local value = Level(child)
+                if value and value > top then top = value end
+                if depth < 8 then Highest(child, depth + 1) end
+            end
+        end
+        Highest(coachFrame, 1)
+        target = top + 3
+        if target > 26 then overCoach, target = false, nil end
+    end
+    M.SetupFamilyGiveWay("checklist", overCoach)
+    if f._nexusDefaultLevel == nil then f._nexusDefaultLevel = Level(f) or 1 end
+    local base = f._nexusWindowBase
+    local function Keep(w, depth)
+        local at = Level(w) or 0
+        for _, child in ipairs(Children(w)) do
+            if child ~= base and type(child) == "table" and type(child.SetFrameLevel) == "function" then
+                if child._nexusLevelOffset == nil then
+                    child._nexusLevelOffset = math.max(1, (Level(child) or (at + 1)) - at)
+                end
+                pcall(child.SetFrameLevel, child, at + child._nexusLevelOffset)
+                if depth < 8 then Keep(child, depth + 1) end
+            end
+        end
+    end
+    local want = target or f._nexusDefaultLevel
+    if Level(f) ~= want then
+        -- Each frame's offset is taken once, at the default level, before
+        -- any raise, so the order inside the window never changes.
+        if not f._nexusLevelOffsetsKept then Keep(f, 1); f._nexusLevelOffsetsKept = true end
+        pcall(f.SetFrameLevel, f, want)
+        Keep(f, 1)
+    end
     f:Show()
+    -- The Theme base follows the window's level (also when it was shown).
+    local theme = Nexus.Theme
+    if theme and type(theme._SyncWindowBase) == "function" then pcall(theme._SyncWindowBase, f) end
     RefreshChecklist()
     return f
 end
 
 function M.HideChecklist()
     if checklist then checklist:Hide() end
+end
+
+-- The setup family: Settings, the guided setup coach, this window as the
+-- information-only replay (ShowSetup) and the setup checklist. All four are
+-- dialogs of one strata at the same level, so two shown together draw
+-- through each other (each one's buttons over the other's body). The one
+-- about to be shown (`keep`: "settings", "coach", "info" or "checklist")
+-- calls this just before its own show, after its own refusals, and every
+-- other shown member gives way through its own display-only hide:
+--   * Settings: SettingsWindow.Hide.
+--   * The coach: GuidedSetupUI.Hide, its raw hide, and only while it is
+--     shown. It records no first use and keeps its first-use callback; a
+--     coach that stepped aside and waits (for Help or a route) is hidden
+--     already and is left waiting, so its own return still applies.
+--   * This window: only while shown as information only (_informational).
+--     A plain frame hide; the flag is left as it is, so its own Finish still
+--     treats it as information only (no first-use dismissal). The first-time
+--     Welcome, which is the same frame without that flag, is not touched.
+--   * The checklist: its own hide.
+-- `keepCoach` (the checklist opened over the coach, ShowChecklist) keeps a
+-- shown coach; the checklist is then drawn above it instead.
+-- Nothing is recorded, saved, asked or reopened; no other window is touched.
+function M.SetupFamilyGiveWay(keep, keepCoach)
+    if keep ~= "settings" then
+        local settings = Nexus.SettingsWindow
+        if settings and type(settings.IsShown) == "function" and type(settings.Hide) == "function"
+            and settings.IsShown() then
+            pcall(settings.Hide)
+        end
+    end
+    if keep ~= "coach" and not keepCoach then
+        local coach, coachFrame = Nexus.GuidedSetupUI, _G.NexusGuidedSetup
+        if coach and type(coach.Hide) == "function" and coachFrame and coachFrame.IsShown and coachFrame:IsShown() then
+            pcall(coach.Hide)
+        end
+    end
+    if keep ~= "info" and frame and frame:IsShown() and frame._informational == true then
+        pcall(frame.Hide, frame)
+    end
+    if keep ~= "checklist" and checklist and checklist:IsShown() then
+        pcall(checklist.Hide, checklist)
+    end
 end
 
 -- First use is the guided setup coach (ui/GuidedSetup.lua) in a healthy

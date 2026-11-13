@@ -2439,6 +2439,10 @@ function U.HelpEnded()
     local warning = Nexus.OverwriteWarning
     if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return end
     f.waiting, f.waitingKind = nil, nil
+    -- The setup family (Settings, the information window, the checklist)
+    -- gives way just before the coach comes back (QuickStart.SetupFamilyGiveWay).
+    local quick = Nexus.QuickStart
+    if quick and type(quick.SetupFamilyGiveWay) == 'function' then pcall(quick.SetupFamilyGiveWay, 'coach') end
     f:Show()
     U.Render()
 end
@@ -2464,6 +2468,9 @@ function U.Show()
     if settings and type(settings.IsShown) == 'function' and type(settings.Hide) == 'function' and settings.IsShown() then
         pcall(settings.Hide)
     end
+    -- And the rest of the setup family (QuickStart.SetupFamilyGiveWay).
+    local quick = Nexus.QuickStart
+    if quick and type(quick.SetupFamilyGiveWay) == 'function' then pcall(quick.SetupFamilyGiveWay, 'coach') end
     f:Show()
     U.Render()
     return true
@@ -2487,6 +2494,9 @@ function U.ShowFirstUse(onClose)
     if settings and type(settings.IsShown) == 'function' and type(settings.Hide) == 'function' and settings.IsShown() then
         pcall(settings.Hide)
     end
+    -- And the rest of the setup family (QuickStart.SetupFamilyGiveWay).
+    local quick = Nexus.QuickStart
+    if quick and type(quick.SetupFamilyGiveWay) == 'function' then pcall(quick.SetupFamilyGiveWay, 'coach') end
     f:Show()
     U.Render()
     return true

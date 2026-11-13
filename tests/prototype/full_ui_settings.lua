@@ -510,4 +510,409 @@ do
             ..layers..' layer checks): '..table.concat(misses,' | '),0)
     end
 end
+----------------------------------------------------------------------------
+-- F1-F7: the bounded setup family never draws through itself. Settings, the
+-- guided setup coach, the information-only setup window (QuickStart.ShowSetup,
+-- NexusQuickStart) and the setup checklist (QuickStart.ShowChecklist,
+-- NexusSetupChecklist) are all DIALOG windows of UIParent with no level of
+-- their own, each with Theme.StyleWindow's opaque base one level under it.
+-- Settings and the coach already give way to each other (v20, W1-W4 above);
+-- the information window and the checklist close neither each other nor
+-- either of those two. Native finding (test.163028-5a8b6922): the real
+-- QuickStart.ShowChecklist, then Settings, interleave titles, buttons and
+-- body rows.
+-- Real owners only, opened and closed through their own routes: Settings
+-- through its Options row "Open Settings..." and SettingsWindow.Hide; the
+-- coach through GuidedSetupUI.Show/Hide; the information window through
+-- QuickStart.ShowSetup and its own Close; the checklist through
+-- QuickStart.ShowChecklist/HideChecklist.
+-- EXPECT (by reading, expected to fail with 5a8b6922 plus the v20 pair
+-- repair; Root runs it only after that repair is reviewed and green): after
+-- every step, each pair of these windows that is shown has whole layer
+-- ranges that do not interleave (strata, then level; texts and textures draw
+-- with their frame; equal keys are not an order). Either may be in front,
+-- and hiding the earlier window is also accepted. Each pair is asked in both
+-- orders with a reopen; then over a first-use coach.
+-- GUARD (hard): every route still opens its window when asked; an open
+-- warning still refuses the information window and the coach and leaves the
+-- checklist shown; a first-use coach is acknowledged only by its own
+-- deliberate Close (a hide by another window records nothing, and first use
+-- is then offered again); opening and closing write no saved data; no game
+-- action, no send, Auto OFF.
+-- MODEL: the same test-local model as W1-W4 (copied here so that block and
+-- its Layers stay as they are): strata own or the nearest ancestor's
+-- (setting it clears descendants' own; UIParent MEDIUM); level own (absolute,
+-- at least 0) or parent + 1, read when asked (UIParent 0); Raise, Lower and
+-- SetToplevel recorded, not modelled. Not modelled: the client's re-levelling
+-- of children, raising on click, layers inside a frame, geometry and mouse
+-- hits (the overlap of these windows is the native findings', not modelled).
+do
+    local STRATA={BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,FULLSCREEN=6,FULLSCREEN_DIALOG=7,TOOLTIP=8}
+    local ORDER={unmodelled={}}
+    local function Modelled(f) return type(f)=='table' and rawget(f,'_orderModel')==true end
+    local function Strata(f)
+        local o,guard=f,0
+        while type(o)=='table' and guard<64 do
+            local s=rawget(o,'_orderStrata') or rawget(o,'strata')
+            if STRATA[s] then return s end
+            o=rawget(o,'parent');guard=guard+1
+        end
+        return 'MEDIUM'
+    end
+    local function Level(f,depth)
+        depth=(depth or 0)+1
+        local own=rawget(f,'_orderLevel')
+        if own then return own end
+        local parent=rawget(f,'parent')
+        if Modelled(parent) and depth<64 then return Level(parent,depth)+1 end
+        if type(parent)=='table' then return (tonumber(parent:GetFrameLevel()) or 0)+1 end
+        return 0
+    end
+    local function ClearStrata(f)
+        for _,child in ipairs(rawget(f,'children') or {}) do
+            if Modelled(child) then rawset(child,'_orderStrata',nil);ClearStrata(child) end
+        end
+    end
+    local function Adopt(f)
+        if type(f)~='table' then return f end
+        rawset(f,'_orderModel',true)
+        rawset(f,'GetFrameLevel',function(self) return Level(self) end)
+        rawset(f,'SetFrameLevel',function(self,v)
+            v=tonumber(v)
+            if v then rawset(self,'_orderLevel',math.max(0,math.floor(v))) end
+        end)
+        rawset(f,'GetFrameStrata',function(self) return Strata(self) end)
+        rawset(f,'SetFrameStrata',function(self,s)
+            if STRATA[s] then rawset(self,'_orderStrata',s);ClearStrata(self) end
+        end)
+        for _,call in ipairs({'Raise','Lower','SetToplevel'}) do
+            rawset(f,call,function(self)
+                ORDER.unmodelled[#ORDER.unmodelled+1]=call..' on '..tostring(rawget(self,'name') or rawget(self,'kind'))
+            end)
+        end
+        return f
+    end
+    local function InstallOrder(h,keepWarnings)
+        NexusSettingsWindow,NexusGuidedSetup,NexusGuidedSetupEscape=nil,nil,nil
+        NexusChangelogPopup,NexusQuickStart,NexusQuickStartEscape,NexusSetupChecklist=nil,nil,nil,nil
+        ORDER.unmodelled={}
+        if keepWarnings then h.keepOverwriteWarningPrompts=true end
+        Adopt(UIParent);rawset(UIParent,'_orderLevel',0)
+        local create=CreateFrame
+        CreateFrame=function(kind,name,parent,...) return Adopt(create(kind,name,parent,...)) end
+    end
+    local function Frames(root,out)
+        out=out or {}
+        if Modelled(root) and root:IsVisible() then out[#out+1]=root end
+        for _,child in ipairs(rawget(root,'children') or {}) do
+            if Modelled(child) then Frames(child,out) end
+        end
+        return out
+    end
+    local function Key(f) return STRATA[Strata(f)]*65536+Level(f) end
+    local function Describe(f)
+        local text=rawget(f,'text')
+        local label=rawget(f,'name') or (tostring(rawget(f,'kind'))..((type(text)=='string' and text~='') and (' "'..text..'"') or ''))
+        return label..' '..Strata(f)..'/'..Level(f)
+    end
+    local function Span(root)
+        local low,high,lowFrame
+        for _,f in ipairs(Frames(root)) do
+            local k=Key(f)
+            if not low or k<low then low,lowFrame=k,f end
+            if not high or k>high then high=k end
+        end
+        return low,high,lowFrame
+    end
+    local function Reach(back,floor)
+        local out={}
+        for _,f in ipairs(Frames(back)) do if Key(f)>=floor then out[#out+1]=Describe(f) end end
+        return out
+    end
+    -- The bounded family, by the global names their owners give them.
+    local FAMILY={
+        {'Settings','NexusSettingsWindow'},{'the coach','NexusGuidedSetup'},
+        {'the information window','NexusQuickStart'},{'the checklist','NexusSetupChecklist'},
+    }
+    local pairsChecked,misses=0,{}
+    local function Pending() return #misses>0 and (' (interleaving so far: '..table.concat(misses,' | ')..')') or '' end
+    -- Every pair of family windows shown now: their whole layer ranges must
+    -- be ordered. One collected miss per interleaving pair.
+    local function FamilyLayers(tag)
+        for i=1,#FAMILY-1 do
+            for j=i+1,#FAMILY do
+                local a,b=_G[FAMILY[i][2]],_G[FAMILY[j][2]]
+                if a and b and a:IsVisible() and b:IsVisible() then
+                    pairsChecked=pairsChecked+1
+                    local aLow,aHigh,aFloor=Span(a)
+                    local bLow,bHigh,bFloor=Span(b)
+                    check(aLow and bLow,tag..': fixture: '..FAMILY[i][1]..' and '..FAMILY[j][1]..' have shown frames'..Pending())
+                    if not (aHigh<bLow or bHigh<aLow) then
+                        misses[#misses+1]=tag..': '..FAMILY[i][1]..' and '..FAMILY[j][1]..' interleave. '
+                            ..FAMILY[j][1]..' frames at or above '..FAMILY[i][1]..'\'s lowest frame ('..Describe(aFloor)..'): '
+                            ..table.concat(Reach(b,aLow),', ')..'. '..FAMILY[i][1]..' frames at or above '..FAMILY[j][1]
+                            ..'\'s lowest frame ('..Describe(bFloor)..'): '..table.concat(Reach(a,bLow),', ')
+                            ..(#ORDER.unmodelled>0 and ('. Unmodelled order calls: '..table.concat(ORDER.unmodelled,', ')) or '')
+                    end
+                end
+            end
+        end
+    end
+    local function Shown(name) local w=_G[name];return w~=nil and w:IsShown() and true or false end
+    local function Seen() return type(NexusDB)=='table' and rawget(NexusDB,'hasSeenQuickStart') or nil end
+    -- Each window's real open and close.
+    local OPEN,CLOSE={},{}
+    OPEN.settings=function(tag)
+        local row
+        for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
+            if item.text=='Open Settings...' then row=item end
+        end
+        check(row and type(row.func)=='function',tag..': fixture: the Options row Open Settings... exists'..Pending())
+        row.func()
+        check(Nexus.SettingsWindow.IsShown(),tag..': Settings opens when asked'..Pending())
+    end
+    CLOSE.settings=function(tag)
+        Nexus.SettingsWindow.Hide()
+        check(not Nexus.SettingsWindow.IsShown(),tag..': Settings closes'..Pending())
+    end
+    OPEN.coach=function(tag)
+        local shown,why=Nexus.GuidedSetupUI.Show()
+        check(shown==true and Shown('NexusGuidedSetup'),tag..': the coach opens when asked: '..tostring(why)..Pending())
+    end
+    CLOSE.coach=function(tag)
+        Nexus.GuidedSetupUI.Hide()
+        check(not Shown('NexusGuidedSetup'),tag..': the coach hides'..Pending())
+    end
+    OPEN.info=function(tag)
+        local shown,why=Nexus.QuickStart.ShowSetup()
+        check(shown==true and why==nil and Shown('NexusQuickStart') and rawget(NexusQuickStart,'_informational')==true,
+            tag..': the information-only setup window opens when asked: '..tostring(why)..Pending())
+    end
+    CLOSE.info=function(tag)
+        local w=NexusQuickStart
+        local close=w and rawget(w,'close')
+        check(close~=nil,tag..': fixture: the information window has its Close'..Pending())
+        if w:IsShown() then close:Click() end
+        check(not Shown('NexusQuickStart'),tag..': the information window closes'..Pending())
+    end
+    OPEN.checklist=function(tag)
+        Nexus.QuickStart.ShowChecklist()
+        check(Shown('NexusSetupChecklist'),tag..': the checklist opens when asked'..Pending())
+    end
+    CLOSE.checklist=function(tag)
+        Nexus.QuickStart.HideChecklist()
+        check(not Shown('NexusSetupChecklist'),tag..': the checklist closes'..Pending())
+    end
+    local NAME={settings='Settings',coach='coach',info='information window',checklist='checklist'}
+    local function Quiet(L,tag,acts,sent)
+        check(#L.actions==acts and #L.sent==sent and not Nexus.RecomputeStats().autoEnabled,
+            tag..': no game action, no send, Auto OFF: actions '..(#L.actions-acts)..', sends '..(#L.sent-sent)..Pending())
+    end
+    local function Settled(extra)
+        return F.Database({mutate=function(d)
+            d.hasSeenQuickStart=true
+            d.lastChangelogSeen='prototype-P1.6-assigned-orbs'
+            d.settings.lastChangelogSeen='prototype-P1.6-assigned-orbs'
+            if extra then extra(d) end
+        end})
+    end
+    local function Boot(db,keepWarnings)
+        local L=F.Boot(db,function(h) F.OrbService(h);InstallOrder(h,keepWarnings) end)
+        L.Advance(3,.05)
+        return L
+    end
+    -- One pair in a settled session: `first`, then `second` over it; `first`
+    -- closed and reopened over `second`; `second` closed and reopened over
+    -- `first`. Every step through the owners' own routes; a window a repair
+    -- has already hidden is closed again harmlessly.
+    local function Pair(id,first,second)
+        local tag=id..' '..NAME[first]..' / '..NAME[second]
+        local L=Boot(Settled())
+        local saved,acts,sent=F.Serialize(NexusDB),#L.actions,#L.sent
+        OPEN[first](tag);OPEN[second](tag)
+        FamilyLayers(tag..', '..NAME[second]..' opened over '..NAME[first])
+        CLOSE[first](tag);OPEN[first](tag..' (reopened)')
+        FamilyLayers(tag..', '..NAME[first]..' reopened over '..NAME[second])
+        CLOSE[second](tag);OPEN[second](tag..' (reopened)')
+        FamilyLayers(tag..', '..NAME[second]..' reopened over '..NAME[first])
+        check(F.Serialize(NexusDB)==saved,tag..': opening, closing and reopening write no saved data'..Pending())
+        check(Seen()==true,tag..': first use stays as it was'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    Pair('F1','checklist','settings') -- the native order (test.163028)
+    Pair('F2','info','settings')
+    Pair('F3','coach','checklist')
+    Pair('F4','coach','info')
+    Pair('F5','info','checklist')
+
+    -- F6. A first-use coach, then the checklist, then the information window
+    -- over both. Neither may acknowledge first use; only the coach's own
+    -- Close does, and a coach hidden by another window is offered again.
+    do
+        local tag='F6 first-use coach'
+        local L=Boot(F.Database())
+        Nexus.QuickStart.ShowIfFirstTime()
+        check(Shown('NexusGuidedSetup') and type(rawget(NexusGuidedSetup,'firstUse'))=='function' and Seen()==nil,
+            tag..': fixture: the first-use coach is shown and first use is not recorded'..Pending())
+        local acts,sent=#L.actions,#L.sent
+        OPEN.checklist(tag)
+        FamilyLayers(tag..', checklist opened over the first-use coach')
+        check(Seen()==nil,tag..': opening the checklist records no first use'..Pending())
+        OPEN.info(tag)
+        FamilyLayers(tag..', information window opened over the coach and the checklist')
+        check(Seen()==nil,tag..': opening the information window records no first use'..Pending())
+        if Shown('NexusGuidedSetup') then
+            local close
+            for _,c in ipairs(rawget(NexusGuidedSetup,'children') or {}) do
+                local label=(tostring(c:GetText() or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''))
+                if rawget(c,'kind')=='Button' and c:IsShown() and label=='X' then close=c end
+            end
+            check(close~=nil,tag..': fixture: the coach offers its Close'..Pending())
+            close:Click()
+            check(not Shown('NexusGuidedSetup') and Seen()==true,tag..': the coach\'s deliberate Close records first use'..Pending())
+        else
+            check(Seen()==nil,tag..': a coach hidden by another window records nothing'..Pending())
+            Nexus.QuickStart.ShowIfFirstTime()
+            check(Shown('NexusGuidedSetup') and Seen()==nil,tag..': first use is offered again'..Pending())
+        end
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- F7. An open warning still refuses the information window and the
+    -- coach, and each refusal leaves the checklist shown (no hide before it).
+    do
+        local tag='F7 warning open'
+        local L=Boot(Settled(function(d) d.overwriteWarnings=nil end),true)
+        if not Nexus.OverwriteWarning.IsOpen() then Nexus.OverwriteWarning.EnsureOnboarding() end
+        check(Nexus.OverwriteWarning.IsOpen(),tag..': fixture: the onboarding warning is open and unanswered'..Pending())
+        local acts,sent=#L.actions,#L.sent
+        OPEN.checklist(tag)
+        local saved=F.Serialize(NexusDB)
+        local shown,why=Nexus.QuickStart.ShowSetup()
+        check(shown==false and why=='warning-open' and not Shown('NexusQuickStart'),
+            tag..': the information window refuses over the open warning: '..tostring(shown)..'/'..tostring(why)..Pending())
+        shown,why=Nexus.GuidedSetupUI.Show()
+        check(shown==false and why=='warning-open' and not Shown('NexusGuidedSetup'),
+            tag..': the coach refuses over the open warning: '..tostring(shown)..'/'..tostring(why)..Pending())
+        check(Shown('NexusSetupChecklist') and Nexus.OverwriteWarning.IsOpen(),
+            tag..': the refusals leave the checklist shown and the warning unanswered'..Pending())
+        FamilyLayers(tag..', information window and coach refused')
+        check(F.Serialize(NexusDB)==saved,tag..': the refusals write nothing'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- F8-F10: the coach's return from Help (review A1). The coach steps aside
+    -- for full Help (GuidedSetupUI.OpenHelp: waiting on Help, a raw hide, and
+    -- Help.Show given a return); Help's hide runs that return, and one frame
+    -- later U.HelpEnded brings the coach back unless it was reopened or
+    -- closed meanwhile or a warning waits. Settings opened while Help is
+    -- shown finds the coach hidden, so it does not end that wait (v20 hides
+    -- only a shown coach). EXPECT (as above): when the coach comes back, it
+    -- and Settings do not interleave. GUARD: Settings opening keeps the wait;
+    -- the coach comes back as HelpEnded's contract says (or, F10, stays away
+    -- while a warning waits); first use only by the coach's Close; no saved
+    -- write, no action, no send, Auto OFF. Each settled boot is advanced past
+    -- the start-up bookkeeping window before its saved baseline, so the one
+    -- return frame cannot carry an unrelated start-up write.
+    local function HelpReturn(tag,L,coachCheck)
+        local opened=Nexus.GuidedSetupUI.OpenHelp('rolling')
+        check(opened==true and not Shown('NexusGuidedSetup') and Shown('NexusHelpWindow')
+            and rawget(NexusGuidedSetup,'waitingKind')=='help',
+            tag..': the coach steps aside for the shown Reference and waits on it'..Pending())
+        OPEN.settings(tag)
+        check(Shown('NexusHelpWindow') and not Shown('NexusGuidedSetup') and rawget(NexusGuidedSetup,'waitingKind')=='help',
+            tag..': opening Settings over Help keeps the hidden coach waiting on Help'..Pending())
+        FamilyLayers(tag..', Settings opened while the coach waits on Help')
+        Nexus.Help.Hide()
+        check(not Shown('NexusHelpWindow'),tag..': Help closes through its own Hide'..Pending())
+        L.Advance(0.05,0.05) -- the one-frame return
+        coachCheck()
+        FamilyLayers(tag..', the coach returned from Help with Settings shown')
+    end
+
+    -- F8. A settled coach.
+    do
+        local tag='F8 Help return'
+        local L=Boot(Settled())
+        L.Advance(25,0.25)
+        local saved,acts,sent=F.Serialize(NexusDB),#L.actions,#L.sent
+        OPEN.coach(tag)
+        HelpReturn(tag,L,function()
+            check(Shown('NexusGuidedSetup') and rawget(NexusGuidedSetup,'waitingKind')==nil,
+                tag..': the coach comes back once Help has closed (HelpEnded)'..Pending())
+        end)
+        check(F.Serialize(NexusDB)==saved,tag..': stepping aside, Settings and the return write no saved data'..Pending())
+        check(Seen()==true,tag..': first use stays as it was'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- F9. A first-use coach: its callback survives the round trip, and only
+    -- its own Close acknowledges first use.
+    do
+        local tag='F9 first-use Help return'
+        local L=Boot(F.Database())
+        Nexus.QuickStart.ShowIfFirstTime()
+        check(Shown('NexusGuidedSetup') and type(rawget(NexusGuidedSetup,'firstUse'))=='function' and Seen()==nil,
+            tag..': fixture: the first-use coach is shown and first use is not recorded'..Pending())
+        local acts,sent=#L.actions,#L.sent
+        local callback=rawget(NexusGuidedSetup,'firstUse')
+        HelpReturn(tag,L,function()
+            check(Seen()==nil and rawget(NexusGuidedSetup,'firstUse')==callback,
+                tag..': Help, Settings and the return record no first use and keep the first-use callback'..Pending())
+            check(Shown('NexusGuidedSetup') or rawget(NexusGuidedSetup,'waiting')==nil,
+                tag..': the coach comes back once Help has closed, or its wait has ended'..Pending())
+        end)
+        if Shown('NexusGuidedSetup') then
+            local close
+            for _,c in ipairs(rawget(NexusGuidedSetup,'children') or {}) do
+                local label=(tostring(c:GetText() or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''))
+                if rawget(c,'kind')=='Button' and c:IsShown() and label=='X' then close=c end
+            end
+            check(close~=nil,tag..': fixture: the coach offers its Close'..Pending())
+            close:Click()
+            check(not Shown('NexusGuidedSetup') and Seen()==true,tag..': the coach\'s deliberate Close records first use'..Pending())
+        else
+            check(Seen()==nil,tag..': a coach kept away records nothing'..Pending())
+            Nexus.QuickStart.ShowIfFirstTime()
+            check(Shown('NexusGuidedSetup') and Seen()==nil,tag..': first use is offered again'..Pending())
+        end
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- F10. A warning that waits for its answer when Help closes: the coach
+    -- stays away (HelpEnded's refusal), still waiting, and Settings stays.
+    -- The Auto warning is opened through its real owner (RequestAuto); it is
+    -- never answered, so nothing is accepted or saved.
+    do
+        local tag='F10 Help return under a warning'
+        local L=Boot(Settled(function(d) d.overwriteWarnings={onboarding={version=1,suppressed=true}} end),true)
+        L.Advance(25,0.25)
+        check(not Nexus.OverwriteWarning.IsOpen(),tag..': fixture: no warning is open at first'..Pending())
+        local saved,acts,sent=F.Serialize(NexusDB),#L.actions,#L.sent
+        OPEN.coach(tag)
+        local opened=Nexus.GuidedSetupUI.OpenHelp('rolling')
+        check(opened==true and Shown('NexusHelpWindow') and rawget(NexusGuidedSetup,'waitingKind')=='help',
+            tag..': the coach steps aside for the shown Reference'..Pending())
+        OPEN.settings(tag)
+        local accepted=false
+        Nexus.OverwriteWarning.RequestAuto({fixture='F10'},function() accepted=true;return false end)
+        check(Nexus.OverwriteWarning.IsOpen() and not accepted,tag..': fixture: the Auto warning is open and unanswered'..Pending())
+        Nexus.Help.Hide()
+        L.Advance(0.05,0.05) -- the one-frame return
+        check(not Shown('NexusGuidedSetup') and rawget(NexusGuidedSetup,'waitingKind')=='help',
+            tag..': the coach does not come back over a waiting warning, and still waits'..Pending())
+        check(Nexus.SettingsWindow.IsShown() and Nexus.OverwriteWarning.IsOpen() and not accepted,
+            tag..': Settings stays and the warning stays unanswered'..Pending())
+        FamilyLayers(tag..', Help closed under a warning')
+        check(F.Serialize(NexusDB)==saved,tag..': nothing is saved'..Pending())
+        Quiet(L,tag,acts,sent)
+    end
+
+    -- The collected EXPECT fails only after every check above ran.
+    if #misses>0 then
+        error('full_ui_settings: EXPECT the setup family (Settings, coach, information window, checklist) never interleaves ('
+            ..#misses..' of '..pairsChecked..' shown-pair checks): '..table.concat(misses,' | '),0)
+    end
+end
 print('PASS full UI Settings owner routes and passive navigation')

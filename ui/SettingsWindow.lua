@@ -352,6 +352,9 @@ function M.Show(category)
     if coach and type(coach.Hide) == "function" and coachFrame and coachFrame.IsShown and coachFrame:IsShown() then
         pcall(coach.Hide)
     end
+    -- And the rest of the setup family (QuickStart.SetupFamilyGiveWay).
+    local quick = Nexus.QuickStart
+    if quick and type(quick.SetupFamilyGiveWay) == "function" then pcall(quick.SetupFamilyGiveWay, "settings") end
     frame:Show()
     return true
 end
