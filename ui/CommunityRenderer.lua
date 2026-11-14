@@ -4883,6 +4883,12 @@ end
         if Nexus.Panel and Nexus.Panel.CloseOtherWindows then
             Nexus.Panel.CloseOtherWindows("NexusCommunityBuildsFrame")
         end
+        -- v23 (native 163028): the Support report page shares this window's
+        -- DIALOG level 50 and would draw through it, so the window opened last
+        -- is the one shown. Its own public Hide is display only: the copied
+        -- summary, notes and stored report stay as they are.
+        local support = Nexus.SupportReportUI
+        if support and type(support.Hide) == "function" then pcall(support.Hide) end
         frame:Show()
         M.Refresh()
     end

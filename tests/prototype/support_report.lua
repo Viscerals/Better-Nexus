@@ -1217,4 +1217,134 @@ do
  Nexus.SupportReportUI.Show()
 end
 
+-- 34. v23 (C): the Build Library and this page, opened in either order, never
+-- draw over each other (native 163028 showed them overlapping: both are
+-- DIALOG level 50 and the Library's controls reach level 70). The window
+-- opened last is shown in full: the other is hidden for display only through
+-- its own public Hide, or lies wholly below it in the same DIALOG strata. The
+-- PROPOSED minimal owned route: SupportReportUI.Show hides the Library through
+-- Nexus.CommunityBuilds.Hide when it is shown, and the Library's Show hides
+-- this page through Nexus.SupportReportUI.Hide; no strata, window-manager or
+-- CloseOtherWindows change, and opening this page closes no other window (the
+-- Wishlist Editor stays). Every piece of state each owns is kept across both
+-- orders: the Library's search text, selected build and the open Share form
+-- with its typed draft; this page's copied summary, notes, incident, the
+-- private-details box and the stored report. Nothing is prepared, sent or
+-- synced and no game action is taken. Fixture (read in source): the page is
+-- ready (section 3 waits for it), so CommunityBuilds.Show and ShowPostBuild
+-- pass WaitForStartup and build the renderer lazily (CommunityBuilds.lua
+-- 53-55, 237-251, 361-412); ShowPostBuild opens NexusPostPopup even without a
+-- Wishlist and toggles it closed when it is already open, so it is called
+-- once (CommunityRenderer.lua 1816-1857). The Library is DIALOG level 50 with
+-- controls at +10 and +20 (3205, 3444, 3478, 4028). In-flight Share status is
+-- UNVERIFIED here: it needs a submitted Share (a send), and this fixture has no
+-- supported seam that holds one without acting. Misses are collected, then
+-- raised together.
+do
+ local misses={}
+ local function expect(v,m) if not v then misses[#misses+1]=m end end
+ local CB,UI=Nexus.CommunityBuilds,Nexus.SupportReportUI
+ local function descendant(f,parent) while f do if f==parent then return true end;f=f:GetParent() end;return false end
+ local function Highest(win)
+  local top=win:GetFrameLevel()
+  for _,f in ipairs(H.frames) do
+   if f~=win and f.kind~='Texture' and f.kind~='FontString' and f:IsVisible() and descendant(f,win) then
+    top=math.max(top,f:GetFrameLevel())
+   end
+  end
+  return top
+ end
+ local function Clear(front,back,tag)
+  expect(front~=nil and front:IsShown(),tag..': the window opened last is shown')
+  if not (front and back) then return end
+  expect(front:GetFrameStrata()=='DIALOG' and back:GetFrameStrata()=='DIALOG',tag..': both keep the DIALOG strata')
+  if back:IsShown() then
+   local top=Highest(back)
+   expect(front:GetFrameLevel()>top and Highest(front)<128,
+    tag..': the window opened last is drawn wholly above the other or the other is hidden (front '
+    ..front:GetFrameLevel()..', other window reaches '..top..')')
+  end
+ end
+ local function SupportState()
+  local report=NexusSupportDB and NexusSupportDB.report
+  return table.concat({tostring(page.copyBox:GetText()),tostring(page.copyNote:GetText()),tostring(page.prepared:GetText()),
+   tostring(page.incident:GetText()),tostring(page.advanced:GetChecked()),
+   tostring(report and report.meta and report.meta.id),tostring(report and report.chunks and #report.chunks)},'\n--\n')
+ end
+ local function LibraryState()
+  local search,popup=_G.NexusBuildsSearch,_G.NexusPostPopup
+  local title=popup and popup._postTitleBox
+  -- The draft as the Share form itself submits it (its raw-text accessor,
+  -- CommunityRenderer ConfigureSafeEditableText), and as shown.
+  local draft=title and (type(title._NexusRawText)=='function' and title:_NexusRawText() or title:GetText())
+  return table.concat({tostring(search and search:GetText()),tostring(popup and popup:IsShown() or false),
+   tostring(draft),tostring(title and title:GetText()),
+   tostring(CB and CB.GetSelectedBuildForPanelKey and CB.GetSelectedBuildForPanelKey())},'\n--\n')
+ end
+ -- The Library's public entries, guarded so a raise is reported, not fatal.
+ local function Library(name)
+  local ok,why=pcall(CB and CB[name] or error)
+  expect(ok,'Nexus.CommunityBuilds.'..name..' runs ('..tostring(why)..')')
+ end
+ -- Set up each window's own state through its real controls (typed text).
+ UI.Hide()
+ Library('Show')
+ local lib=_G.NexusCommunityBuildsFrame
+ expect(lib~=nil and lib:IsShown(),'SETUP: the Build Library opens through Nexus.CommunityBuilds.Show')
+ local search=_G.NexusBuildsSearch
+ expect(search~=nil,'SETUP: the Library search box')
+ if search then search:SetText('');search:Insert('v23 kept search') end
+ Library('ShowPostBuild')
+ local popup=_G.NexusPostPopup
+ expect(popup~=nil and popup:IsShown() and popup._postTitleBox~=nil,'SETUP: the Share form is open')
+ if popup and popup._postTitleBox then popup._postTitleBox:SetText('');popup._postTitleBox:Insert('v23 kept draft') end
+ local typed=popup and popup._postTitleBox and type(popup._postTitleBox._NexusRawText)=='function'
+  and popup._postTitleBox:_NexusRawText()
+ expect(typed=='v23 kept draft','SETUP: the Share form holds the typed draft ('..tostring(typed)..')')
+ expect(search==nil or search:GetText()=='v23 kept search','SETUP: the search box holds the typed search')
+ Library('Show')
+ UI.Show();button('Copy summary',page):Click();UI.Show()
+ local libBase,supBase=LibraryState(),SupportState()
+ expect(supBase:find('Nexus support summary',1,true)~=nil,'SETUP: the copied summary is in this page\'s buffer')
+ local acts,sent,loads=#H.actions,#H.sent,companionLoads
+ -- Library, then this page (counted: this page's own Show closes nothing).
+ local realClose=Nexus.Panel and Nexus.Panel.CloseOtherWindows
+ local closes=0
+ Library('Show')
+ expect(lib==nil or lib:IsShown(),'SETUP: the Library is open again')
+ if realClose then Nexus.Panel.CloseOtherWindows=function(...) closes=closes+1;return realClose(...) end end
+ UI.Show()
+ if realClose then Nexus.Panel.CloseOtherWindows=realClose end
+ Clear(page,lib,'Library, then Support')
+ expect(closes==0,'opening Support uses no blanket close of other windows ('..closes..' calls)')
+ expect(LibraryState()==libBase,'Library, then Support: the search, selection and Share draft are kept')
+ expect(SupportState()==supBase,'Library, then Support: the copied summary and report state are kept')
+ -- This page, then the Library.
+ UI.Show();Library('Show')
+ Clear(lib,page,'Support, then Library')
+ expect(LibraryState()==libBase,'Support, then Library: the search, selection and Share draft are kept')
+ -- Both again: the real command for this page, the public Show for the Library.
+ SlashCmdList.NEXUS('report')
+ Clear(page,lib,'Library, then /nexus report')
+ expect(SupportState()==supBase,'reopened Support keeps its copied summary and report state')
+ Library('Show')
+ Clear(lib,page,'/nexus report, then Library')
+ expect(LibraryState()==libBase,'reopened Library keeps its search, selection and Share draft')
+ -- Opening this page leaves another Nexus window, here the Wishlist Editor
+ -- with its draft, open.
+ Library('Hide');UI.Hide()
+ SlashCmdList.NEXUS('editor')
+ local editor=_G.NexusEditorFrame
+ if editor and editor:IsShown() then
+  UI.Show()
+  expect(editor:IsShown(),'opening Support leaves the Wishlist Editor open')
+  editor:Hide()
+ end
+ expect(#H.actions==acts and #H.sent==sent and companionLoads==loads,
+  'switching between the two windows takes no game action, sends nothing and loads no storage')
+ if popup then popup:Hide() end
+ UI.Show()
+ if #misses>0 then error('v23 Library/Support order: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0) end
+end
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

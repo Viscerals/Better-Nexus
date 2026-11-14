@@ -21,6 +21,152 @@ local function direct(b)b:GetScript('OnClick')(b)end
 -- units (units x the effective scale are nominal pixels); NOT RUN.
 local G=dofile('tests/prototype/layout_geometry_support.lua')
 local layoutMisses,layoutCases={},0
+-- v24 (native N1, test.163030): a synthetic client font model, so a line's
+-- measured height comes from the line itself and not from the harness's
+-- constant GetStringHeight (14 for every text, every width, every font).
+-- Stated model, not native glyph measurement: font objects carry a face and
+-- a size (SetFont / GetFont / SetFontObject); a FontString created from a
+-- template inherits that object, as in the client; GetStringHeight is the
+-- greedy word-wrap rows of the line's own shown text (read left to right as
+-- the client draws it: escaped pipes one character, colour codes invisible;
+-- Drawn and WrapRows below) at the line's own width, with 0.55 em a character (the panel_native_font_metrics
+-- model) and a 1.0101 em row: the client's own measurement on test.163030,
+-- 16.1616 units for one row of the 16-unit small font. Nothing here reads
+-- the mini's Rows, Fit or LayoutMetrics' conservative model. The native
+-- GameFont* objects are made at a chosen small-font height (10 is the default
+-- client, 16 the larger font of the native report). FONT.measure turns the
+-- measurement into an unusable answer for the fallback cases.
+local FONT={path='Fonts\\FRIZQT__.TTF',char=0.55,line=16.1616/16,height=10,measure='model',
+ installed=setmetatable({},{__mode='k'})}
+local FONT_RATIOS={GameFontHighlightSmall=1,GameFontNormalSmall=1,GameFontDisableSmall=1,
+ GameFontNormal=1.2,GameFontHighlight=1.2,GameFontDisable=1.2,GameFontNormalLarge=1.6}
+local measureMisses,measureCases={},0
+-- The size a region draws with: its own SetFont, else its font object's.
+local function FontSize(region)
+ local o,guard=region,0
+ while type(o)=='table' and guard<8 do
+  local size=rawget(o,'_fontSize')
+  if size then return size end
+  o=rawget(o,'_fontObject');guard=guard+1
+ end
+ return nil
+end
+-- The characters the client draws for a text, read left to right: "||" is
+-- one pipe, "|cAARRGGBB" and "|r" draw nothing (so an escaped "||cffffffff"
+-- is drawn as the ten characters "|cffffffff"); a UTF-8 character is one.
+local function Drawn(text)
+ local s,out,i=tostring(text or ''),{},1
+ while i<=#s do
+  local c=s:sub(i,i)
+  if c=='|' and s:sub(i+1,i+1)=='|' then out[#out+1]='|';i=i+2
+  elseif c=='|' and s:sub(i+1,i+1)=='c' and s:sub(i+2,i+9):match('^%x%x%x%x%x%x%x%x$') then i=i+10
+  elseif c=='|' and s:sub(i+1,i+1)=='r' then i=i+2
+  else out[#out+1]=c;i=i+1 end
+ end
+ return table.concat(out)
+end
+-- Greedy word wrap of the drawn text at `width` with `char` units a
+-- character; a word longer than a row is broken across rows.
+local function WrapRows(text,width,char)
+ local per=math.max(1,math.floor((tonumber(width) or 0)/char))
+ local rows=0
+ for row in (Drawn(text)..'\n'):gmatch('(.-)\n') do
+  rows=rows+1;local used=0
+  for word in row:gmatch('%S+') do
+   local n=G.Length(word);local gap=used>0 and 1 or 0
+   if used>0 and used+gap+n>per then rows=rows+1;used=0;gap=0 end
+   while n>per do rows=rows+1;n=n-per end
+   used=used+gap+n
+  end
+ end
+ return math.max(1,rows)
+end
+-- One row of the line's font, and the line's whole wrapped text, in the model.
+local function ModelLine(region) return (FontSize(region) or 12)*FONT.line end
+local function ModelRows(region)
+ local size=FontSize(region) or 12
+ return WrapRows(region:GetText() or '',tonumber(region:GetWidth()) or 0,FONT.char*size)
+end
+local function ModelHeight(region) return ModelRows(region)*ModelLine(region) end
+local function InstallFont(height,withCreateFont)
+ local m=G.RegionMethods()
+ FONT.height,FONT.measure=height,'model'
+ STANDARD_TEXT_FONT=FONT.path
+ m.SetFont=function(self,path,size,flags)
+  rawset(self,'_fontPath',path);rawset(self,'_fontSize',tonumber(size));rawset(self,'_fontFlags',flags or '')
+  return true
+ end
+ m.SetFontObject=function(self,font)
+  if type(font)=='string' then font=_G[font] end
+  rawset(self,'_fontObject',font)
+  -- A font string takes the object's face; a font object keeps what it set.
+  if self.kind~='Font' then rawset(self,'_fontSize',nil) end
+ end
+ m.GetFontObject=function(self) return rawget(self,'_fontObject') end
+ m.GetFont=function(self) return FONT.path,FontSize(self) or 12,'' end
+ -- Each harness (each fresh session has its own method table) is wrapped once;
+ -- the record is kept here, not on the method table its regions read.
+ local done=FONT.installed[m]
+ if not done then
+  done={create=rawget(m,'CreateFontString'),wrap=rawget(m,'SetWordWrap')}
+  FONT.installed[m]=done
+  m.CreateFontString=function(self,name,layer,template)
+   local region=done.create(self,name)
+   if template then m.SetFontObject(region,template) end
+   return region
+  end
+  -- The word-wrap request is recorded on the region, as section v22 does.
+  m.SetWordWrap=function(self,on,...)
+   if type(self)=='table' then rawset(self,'_wordWrap',on and true or false) end
+   if done.wrap then return done.wrap(self,on,...) end
+  end
+ end
+ m.GetStringHeight=function(self)
+  local mode=FONT.measure
+  if mode=='nil' then return nil
+  elseif mode=='zero' then return 0
+  elseif mode=='negative' then return -5
+  elseif mode=='nan' then return 0/0
+  elseif mode=='huge' then return math.huge
+  elseif mode=='text' then return 'tall'
+  elseif mode=='error' then error('synthetic font measurement failure') end
+  return ModelHeight(self)
+ end
+ -- The harness has no CreateFont; it is supplied only where the client's
+ -- owned fonts are to be built at a new reference height.
+ if withCreateFont then CreateFont=function(name) return CreateFrame('Font',name) end end
+ for name,ratio in pairs(FONT_RATIOS) do
+  local font=_G[name] or CreateFrame('Font',name)
+  rawset(font,'_fontPath',FONT.path);rawset(font,'_fontSize',height*ratio)
+ end
+end
+-- The default client font, before the first mini is made: every later line
+-- of this file is measured in the model (the mini's lines are created from
+-- GameFontHighlightSmall). At height 10 the owned fonts keep their reference
+-- (10 / 10 = 1), so nothing of the earlier geometry moves.
+InstallFont(10,false)
+-- One shown line against its own measurement in the model. GUARD (holds
+-- before and after): the line keeps the client small font it was created
+-- with (no font is shrunk to fit) and is at least as tall as its whole
+-- wrapped text measures (nothing clipped). EXPECT (N1, collected): it is less
+-- than one row of its own font taller than that measurement, so no blank row
+-- is reserved; one row's ceiling or a one-line minimum stays inside it.
+local function MeasuredLine(tag,key,line)
+ local text=line:GetText() or ''
+ if text=='' or not line:IsShown() then return end
+ measureCases=measureCases+1
+ local height=tonumber(line:GetHeight()) or 0
+ local need,row,rows=ModelHeight(line),ModelLine(line),ModelRows(line)
+ local size=FontSize(line)
+ check(size==FONT.height,tag..': the '..key..' line keeps the client small font '..FONT.height..' ('..tostring(size)..')')
+ check(height+1e-6>=need,tag..': the '..key..' line is at least its measured wrapped height ('
+  ..string.format('%.2f',height)..' >= '..string.format('%.2f',need)..', '..rows..' row(s) of '..string.format('%.2f',row)..')')
+ if height-need>=row-1e-6 then
+  measureMisses[#measureMisses+1]=tag..': the '..key..' line "'..Drawn(text)..'" is '..string.format('%.2f',height)
+   ..' units high for a measured '..string.format('%.2f',need)..' ('..rows..' row(s) of the '..tostring(size)
+   ..'-unit font at '..tostring(line:GetWidth())..' units): a blank row of '..string.format('%.2f',row)..' or more is reserved'
+ end
+end
 -- Wrapped lines (v22, Root option B): a status line, the notice and the
 -- closing note may take as many rows as their shown text needs in the
 -- conservative model this file uses (7 units a character, greedy word wrap,
@@ -58,7 +204,13 @@ local function Wrapped(tag,key,line)
  local rows=Rows(shown,width)
  check(rows==1 or rawget(line,'_wordWrap')~=false,
   tag..': the '..key..' line needs '..rows..' rows of its '..width..' units and wraps (its word wrap is not off)')
- check(height>=rows*17,tag..': the '..key..' line is tall enough for its '..rows..' row(s) of 17 units ('..height..')')
+ -- v24 (N1) REPLACED: was check(height>=rows*17): the conservative 7-unit
+ -- rows as a floor for a line the client measures, the floor N1 found
+ -- leaving a blank row under one-row text. Now the line is measured in the
+ -- installed font model (its own text, width and font): GUARD, at least its
+ -- whole wrapped height (no clipping, the bound kept); EXPECT (collected), less
+ -- than one more row of its font above it (no blank row).
+ MeasuredLine(tag,key,line)
 end
 local function MiniLayout(tag,w)
  layoutCases=layoutCases+1
@@ -370,9 +522,139 @@ recoveryCase('real checking and held phases are visible first',function()
  check(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD compact display never advances the held owner')
 end)
 if #recoveryFailures>0 then error(table.concat(recoveryFailures,'\n'),0)end
--- The collected v22 layout EXPECT fails only after every check above ran.
-if #layoutMisses>0 then
- error('orb_mini_panel: EXPECT the mini fits what it shows ('..#layoutMisses..' misses in '..layoutCases..' cases): '
-  ..table.concat(layoutMisses,' | ')..'; checks='..n,0)
+
+-- v24 N1 (native REQUIRED_CHANGES, test.163030-4aac70fb): with no approved
+-- run, at the larger client font (small font 16, NexusFontNormal 19.2, a
+-- 454-unit mini), the reason, usage, rolled-copies and closing-note lines are
+-- 40 units high where the client measures 16.1616 for their one row. Each case
+-- is a fresh real session with the font model installed before the first
+-- mini is made, the client's owned fonts built at that reference
+-- (LayoutMetrics.EnsureFonts, as a client that sets its fonts after start-up),
+-- and the real no-run strings, a refusal notice and real long reasons through
+-- the same read seam as above. Per shown line: MeasuredLine (GUARD: the client
+-- small font kept and the whole wrapped height held; EXPECT: no blank row).
+-- Per case: MiniLayout (GUARD: every line and control inside the mini, the
+-- lines apart, the footer apart), and no Orb spend, take or other action.
+-- A measurement the client cannot give (nil, 0, negative, NaN, infinite, not
+-- a number, or an error) is a separate GUARD only: the line is then still at
+-- least the model's whole wrapped height (the fallback is conservative and
+-- never clips), with no slack limit, and nothing raises.
+local KEYS7={'state','reason','usage','pending','missing','notice','note'}
+local function freshFont(height)
+ -- Font objects of an earlier session are not carried into this one.
+ for name in pairs(FONT_RATIOS) do _G[name]=nil end
+ for _,name in ipairs({'NexusFontSmall','NexusFontNormal','NexusFontLarge','NexusFontSecondary','NexusFontTitle'}) do _G[name]=nil end
+ CreateFont=nil
+ Nexus=nil;NexusDB=nil;NexusSupportDB=nil;NexusOrbRuntime=nil
+ local q=dofile('tests/prototype/orbs_support.lua');UIParent:SetSize(1920,1080)
+ InstallFont(height,true)
+ local LM=Nexus.LayoutMetrics
+ if LM and type(LM.EnsureFonts)=='function' then LM.EnsureFonts() end
+ q.OrbPlan({{spellId=410002,quality=2,stacks=3}})
+ return q,Nexus.OrbPanel,Nexus.OrbPanel.ShowMini()
+end
+local function Measured(tag,mf)
+ for _,key in ipairs(KEYS7) do MeasuredLine(tag,key,mf[key]) end
+ MiniLayout(tag,mf)
+end
+local function Passive(tag,q,before)
+ check(q.Count('orb-spend')==0 and q.Count('take')==0 and #q.actions==before,
+  tag..': measuring and laying out take no Orb spend, take or other game action')
+end
+local NO_RUN={state='No approved Orb run',reason='Open Orbs to review a maximum and start a run.',
+ usage='Orbs used: no run approved this session',pending='Pending: none',
+ missing='Rolled target copies missing: unavailable',note='Closing this panel does not stop the run.'}
+local function NoRunStrings(tag,mf)
+ for key,want in pairs(NO_RUN) do
+  check(Drawn(mf[key]:GetText() or '')==want,tag..': SETUP the real no-run '..key..' line reads "'..want..'" ('..tostring(mf[key]:GetText())..')')
+ end
+end
+do
+ -- a. The native report's state: no approved run at the 16-unit small font.
+ local q,u,mf=freshFont(16)
+ local tag='N1 native 16 no run'
+ local normal
+ if NexusFontNormal then local _,size=NexusFontNormal:GetFont();normal=tonumber(size) end
+ check(normal and math.abs(normal-19.2)<0.01,tag..': SETUP the owned normal font is 19.2 at this reference ('..tostring(normal)..')')
+ check(mf:GetWidth()==454,tag..': SETUP the mini is the native 454 units wide ('..tostring(mf:GetWidth())..')')
+ local before=#q.actions
+ NoRunStrings(tag,mf)
+ Measured(tag,mf)
+ -- b. The same state with a refusal notice shown (Resume with no run).
+ direct(mf.resume)
+ check((mf.notice:GetText() or '')~='' and mf.notice:IsShown(),tag..' with notice: SETUP a refusal notice is shown')
+ Measured(tag..' with notice',mf)
+ Passive(tag,q,before)
+ -- c. Long reasons, through the same read seam: one that needs two rows and
+ -- is shown whole, and one longer than two rows (cut, complete on hover),
+ -- with a literal pipe the mini shows escaped.
+ local raw=q.M.CompactStatus
+ local two='Synthetic paused reason that needs two rows at this width.'
+ local long='Synthetic long reason: the server answered later than expected | so the next Orb waits for a new read and the target is checked again.'
+ for i,reason in ipairs({two,long}) do
+  local case=tag..(i==1 and ' two-row reason' or ' long cut reason')
+  q.M.CompactStatus=function() return {state='PAUSED',running=false,pending=false,canResume=true,spent=1,limit=3,reserved=0,remaining=2,reason=reason} end
+  u.ShowMini()
+  local shown=Drawn(mf.reason:GetText() or '')
+  check(ModelRows(mf.reason)>=2 and rawget(mf.reason,'_wordWrap')~=false,
+   case..': SETUP the reason needs '..ModelRows(mf.reason)..' rows in the model and wraps: '..shown)
+  if i==1 then check(mf.reason._nexusFullText==nil and not shown:find('...',1,true),case..': the two-row reason is shown whole: '..shown)
+  else check(mf.reason._nexusFullText~=nil and shown:find('...',1,true)~=nil,case..': the long reason is cut with its complete text on hover') end
+  Measured(case,mf)
+ end
+ q.M.CompactStatus=raw
+ Passive(tag..' reasons',q,before)
+end
+do
+ -- d. The default client font (small font 10, the 284-unit mini).
+ local q,u,mf=freshFont(10)
+ local tag='N1 default 10 no run'
+ check(mf:GetWidth()==284,tag..': SETUP the mini is the 284-unit base width ('..tostring(mf:GetWidth())..')')
+ local before=#q.actions
+ NoRunStrings(tag,mf)
+ Measured(tag,mf)
+ Passive(tag,q,before)
+end
+do
+ -- e. Unusable measurements: the conservative fallback, separately.
+ local q,u,mf=freshFont(16)
+ local raw=q.M.CompactStatus
+ local before=#q.actions
+ for _,mode in ipairs({'nil','zero','negative','nan','huge','text','error'}) do
+  local tag='N1 fallback, measurement '..mode
+  -- A new reason each time, so every line is laid out again under this answer.
+  local reason='Fallback case '..mode..': the client gave no usable measurement for this line.'
+  q.M.CompactStatus=function() return {state='PAUSED',running=false,pending=false,canResume=true,spent=1,limit=3,reserved=0,remaining=2,reason=reason} end
+  FONT.measure=mode
+  local ok,why=pcall(u.ShowMini)
+  FONT.measure='model'
+  check(ok,tag..': laying out does not raise ('..tostring(why)..')')
+  for _,key in ipairs(KEYS7) do
+   local line=mf[key];local text=line:GetText() or ''
+   if text~='' and line:IsShown() then
+    local need=ModelHeight(line)
+    check((tonumber(line:GetHeight()) or 0)+1e-6>=need,
+     tag..': the '..key..' line still holds its whole wrapped text ('..tostring(line:GetHeight())..' >= '..string.format('%.2f',need)..')')
+   end
+  end
+  MiniLayout(tag,mf)
+ end
+ q.M.CompactStatus=raw
+ Passive('N1 fallback',q,before)
+end
+
+-- The collected EXPECTs fail only after every check above ran: the v22
+-- layout EXPECT and the v24 N1 measured-height EXPECT, reported together.
+if #layoutMisses>0 or #measureMisses>0 then
+ local parts={}
+ if #layoutMisses>0 then
+  parts[#parts+1]='EXPECT the mini fits what it shows ('..#layoutMisses..' misses in '..layoutCases..' cases): '
+   ..table.concat(layoutMisses,' | ')
+ end
+ if #measureMisses>0 then
+  parts[#parts+1]='EXPECT N1 each line is as tall as its measured text, with no blank row ('..#measureMisses
+   ..' misses in '..measureCases..' measured lines): '..table.concat(measureMisses,' | ')
+ end
+ error('orb_mini_panel: '..table.concat(parts,' ; ')..'; checks='..n,0)
 end
 print('PASS Orb mini real actions, stale/reentrant/failure gates, pending Stop, close/reopen, tooltips and synthetic geometry: '..n..' assertions')

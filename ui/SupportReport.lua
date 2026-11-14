@@ -364,8 +364,26 @@ function UI.PrepareFile(extended)
     return meta
 end
 
+-- v23 (native 163028): the Build Library shares this page's DIALOG level 50
+-- and its controls (up to level 70) would draw over it, so the window opened
+-- last is the one shown. Only a Library already on screen is hidden, through
+-- its own public IsShown and Hide (display only: its search, selection, Share
+-- form and draft, and any Share in progress keep their state; its own hide
+-- closes its menus, an unanswered Share confirmation and an open Sync-mode
+-- dialog, exactly as closing the Library does). No other window is closed,
+-- and a Library that was never opened is not created here.
+local function HideLibrary()
+    local shown = _G.NexusCommunityBuildsFrame
+    if not (shown and shown.IsShown and shown:IsShown()) then return end
+    local library = Nexus.CommunityBuilds
+    if not (library and type(library.IsShown) == "function" and type(library.Hide) == "function") then return end
+    local ok, open = pcall(library.IsShown)
+    if ok and open then pcall(library.Hide) end
+end
+
 function UI.Show()
     ensure()
+    HideLibrary()
     frame:Show()
     refresh()
     return frame

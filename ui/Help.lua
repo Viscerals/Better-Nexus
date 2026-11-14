@@ -415,6 +415,19 @@ function H.FormatQuestions(text)
     end
     return table.concat(out,"\n\n\n")
 end
+-- A reference page's text as shown (v23, owner-approved readability like
+-- Questions): the page's own localized title as a heading in the heading gold
+-- (|cffffd100), a blank line, then the page's complete text in the body's own
+-- white font. A catalog block can hold no "|", so every "|" in a page comes
+-- from a code-owned command argument (as "/nexus policy adaptive|released");
+-- it is written "||" here so the client shows it as typed instead of reading
+-- "|r" as a colour reset. Display only: H.PageText stays the raw text.
+function H.FormatReference(title, text)
+    local body=(tostring(text or ""):gsub("|","||"))
+    local head=(tostring(title or ""):gsub("|","||"))
+    if head=="" then return body end
+    return "|cffffd100"..head.."|r\n\n"..body
+end
 -- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
 -- Saved Builds, Auto, Sync, Orbs, Support), one per page: a few lines and one
 -- Open action to the real screen (H.OpenTopic). Each page's text stays below
@@ -528,6 +541,14 @@ local function refresh()
     -- .AutoDetailLines, from the last committed model and saved settings),
     -- below the complete reference. Reading it changes nothing.
     local text=PageText(p)
+    -- Questions (FAQ), owner-approved readability (issue #169): each group's
+    -- first line is its question, drawn in the Nexus heading gold; the answer
+    -- keeps the white body font, and the groups are one more blank line
+    -- apart. The wording is unchanged and the height is measured below.
+    -- Every other page opens with its own title in the same gold (v23,
+    -- H.FormatReference); its complete text and every command are unchanged.
+    if p.id=="faq" then text=H.FormatQuestions(text)
+    else text=H.FormatReference(PageTitle(p),text) end
     local panel=Nexus.Panel
     if p.id=="rolling" and panel and type(panel.AutoDetailLines)=="function" then
         local ok,lines=pcall(panel.AutoDetailLines)
@@ -536,11 +557,6 @@ local function refresh()
                 ..table.concat(lines,"\n")
         end
     end
-    -- Questions (FAQ), owner-approved readability (issue #169): each group's
-    -- first line is its question, drawn in the Nexus heading gold; the answer
-    -- keeps the white body font, and the groups are one more blank line
-    -- apart. The wording is unchanged and the height is measured below.
-    if p.id=="faq" then text=H.FormatQuestions(text) end
     frame.body:SetText(text)
     frame.page:SetText(TF("help.label.page_position",function(seam)
         return {page=seam.Count(index),total=seam.Count(#pages)} end,"Page "..index.." / "..#pages))

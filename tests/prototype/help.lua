@@ -25,9 +25,28 @@ end
 -- E14 and native_qa_163008 check the labels against the real menu). Issue
 -- #165: the panel's menu button reads Options (panel_options_label), so Help
 -- names that visible control, never the retired bare ellipsis.
+-- v23 display format (manual-opacity-v23, owner readability like Questions):
+-- each reference page except Questions opens with its own localized page title
+-- in the heading gold, then a blank line, then its complete text unchanged
+-- except that a literal "|" (only code-owned commands hold one, as
+-- "/nexus policy adaptive|released") is written "||" so the client shows it.
+-- This is the exact text a reference page is expected to show; Questions keeps
+-- H.FormatQuestions exactly as before.
+local function Title(p)
+ local seam=Nexus.Localization
+ if seam and type(seam.Text)=='function' then
+  local text,source=seam.Text(p.titleKey)
+  if source~='unavailable' then return text end
+ end
+ return p.title
+end
+local function Reference(p) return '|cffffd100'..Title(p)..'|r\n\n'..(p.text:gsub('|','||')) end
 Nexus.Help.Show('start')
 local start=f.body:GetText()
-check(start:find('Start here: Setup / Welcome opens Guided setup',1,true)==1,'start page leads with the first task')
+local startHead='|cffffd100'..Title(Nexus.Help.Pages[1])..'|r\n\n'
+check(Nexus.Help.Pages[1].id=='start' and start:sub(1,#startHead)==startHead
+ and start:find('Start here: Setup / Welcome opens Guided setup',1,true)==#startHead+1,
+ 'start page leads with its gold title, then the first task')
 local first,pages=start:find('Setup / Welcome opens Guided setup',1,true),start:find('the page buttons above open any page directly',1,true)
 check(first and pages and first<pages,'page navigation follows the first task')
 for _,route in ipairs({'(Options > Setup / Welcome)','Setup information (read only), in the Options menu,',
@@ -90,7 +109,11 @@ local function Card(tag,char,line)
   -- line between groups (faq_readability).
   local body=f.body:GetText()
   local plain=body:gsub('|cffffd100',''):gsub('|r','')
-  check((body==p.text or p.id=='rolling' and body:sub(1,#p.text+2)==p.text..'\n\n'
+  -- v23: a reference page is its gold title and its complete text (Reference
+  -- above); the Auto page adds its current values after it; Questions is
+  -- unchanged.
+  local expected=p.id~='faq' and Reference(p) or nil
+  check((p.id~='faq' and (body==expected or p.id=='rolling' and body:sub(1,#expected+2)==expected..'\n\n')
    or p.id=='faq' and body==Nexus.Help.FormatQuestions(p.text) and plain:gsub('\n\n\n','\n\n')==p.text) and f.body:IsShown(),
    tag..': the complete reference stays below the topic: '..p.id)
   check(f.reference:GetText():find('Reference',1,true)==1,tag..': the reference is labelled: '..p.id)

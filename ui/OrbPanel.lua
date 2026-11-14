@@ -3131,11 +3131,15 @@ local function ensureMini()
     -- while a notice is shown; the closing note (whole) at the same small
     -- gap; then the footer: one row where Pause, Resume, Stop and Open Orbs
     -- fit side by side, else Open Orbs on a second row. A line's height is
-    -- the larger of what the client measures for its text at the line's
-    -- width (LayoutMetrics.WrapHeight) and its rows in the conservative text
-    -- model (LayoutMetrics.ConservativeText: 7 units a character and a
-    -- 17-unit row at the normal font, wider and taller with the text scale),
-    -- so a face the client measures short is never clipped. Controls grow
+    -- what the client measures for its wrapped text at the line's width
+    -- (native N1, test.163030: a one-row line measured 16.16 units was given
+    -- two conservative rows, 40, leaving a blank row), at least one row of
+    -- the line's own font. Only when the client gives no usable measurement
+    -- (none, not a number, not above 0, infinite, or an error) is the line
+    -- as tall as its rows in the conservative text model
+    -- (LayoutMetrics.ConservativeText: 7 units a character and a 17-unit row
+    -- at the normal font, wider and taller with the text scale; a word longer
+    -- than a row broken across rows), so it is never clipped. Controls grow
     -- with the text scale and are never under their normal-font sizes.
     -- MINI_W / MINI_H are only the first size before the first refresh.
     -- Laid out again only when the text scale or a shown text changes: the
@@ -3166,16 +3170,36 @@ local function ensureMini()
         end
         return math.max(1,rows)
     end
-    -- Sizes one line for its text and returns its height.
+    -- Sizes one line for its text and returns its height. The client is
+    -- asked directly (LayoutMetrics.WrapHeight does not say whether its
+    -- answer was measured or its own fallback, and its fallback keeps a word
+    -- longer than a row on one row): at the line's width and height 0 a
+    -- wrapping FontString reports its wrapped height. A usable answer is a
+    -- finite number above 0; the line is then that tall (rounded up), and at
+    -- least its font's size, so a stray tiny answer cannot hide a row. Any
+    -- other answer falls back to the conservative rows.
     local function Fit(fs)
-        local least=Rows(fs:GetText())*(fit.row or MINI_LINE)
-        local metrics=Nexus.LayoutMetrics
-        if metrics and type(metrics.WrapHeight)=="function" then
-            local ok,height=pcall(metrics.WrapHeight,fs,MINI_TEXT_W,least)
-            if ok and tonumber(height) then return math.max(least,tonumber(height)) end
+        fs:SetWidth(MINI_TEXT_W);fs:SetHeight(0)
+        local measured
+        if type(fs.GetStringHeight)=="function" then
+            local ok,value=pcall(fs.GetStringHeight,fs)
+            value=ok and tonumber(value) or nil
+            if value and value>0 and value<math.huge then measured=value end
         end
-        fs:SetSize(MINI_TEXT_W,least)
-        return least
+        local height
+        if measured then
+            local size
+            if type(fs.GetFont)=="function" then
+                local ok,_,value=pcall(fs.GetFont,fs)
+                value=ok and tonumber(value) or nil
+                if value and value>0 and value<math.huge then size=value end
+            end
+            height=math.max(math.ceil(measured),math.ceil(size or 1))
+        else
+            height=Rows(fs:GetText())*(fit.row or MINI_LINE)
+        end
+        fs:SetSize(MINI_TEXT_W,height)
+        return height
     end
     f._nexusWidth=function()
         local scale=1
