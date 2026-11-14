@@ -6,12 +6,28 @@ local actions,sent=#H.actions,#H.sent
 -- (design/current "Nexus Setup Alternative"); /nexus help opens the coach.
 SlashCmdList.NEXUS('reference')
 local f=assert(NexusHelpWindow)
+-- v28 r4 representation (read seam only): the shown Reference document is the
+-- visible FontStrings under its scroll child (f.content), in creation order,
+-- each read as it stores its text (GetText), joined at part boundaries by a
+-- line break. f.body is part 1.
+local function Document()
+ local out={}
+ local function walk(o)
+  if o.kind=='FontString' then
+   local ok,vis=pcall(function() return o:IsVisible() end)
+   if ok and vis then out[#out+1]=o:GetText() or '' end
+  end
+  for _,c in ipairs(type(o.children)=='table' and o.children or {}) do walk(c) end
+ end
+ walk(f.content)
+ return table.concat(out,'\n')
+end
 check(f:IsShown(),'reference opens before addon initialization')
 check(not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),'reference does not open the guided setup coach')
 check(type(Nexus.StartupStatus)~='function' or not Nexus.StartupStatus().coreReady,'opening the reference cannot force readiness')
 check(f:GetWidth()==660 and f:GetHeight()==540,'bounded help panel')
 check(f:GetFrameStrata()=='DIALOG','normal parented dialog')
-check(f.body:GetText():find('Wishlist is a desired plan',1,true),'explain desired versus owned')
+check(Document():find('Wishlist is a desired plan',1,true),'explain desired versus owned')
 check(#H.actions==actions and #H.sent==sent,'read-only early help has no gameplay or traffic')
 check(#Nexus.Help.Pages==8,'eight complete guide pages (issue #169 added Questions (FAQ), last)')
 local function b(label)
@@ -42,7 +58,7 @@ local function Title(p)
 end
 local function Reference(p) return '|cffffd100'..Title(p)..'|r\n\n'..(p.text:gsub('|','||')) end
 Nexus.Help.Show('start')
-local start=f.body:GetText()
+local start=Document()
 local startHead='|cffffd100'..Title(Nexus.Help.Pages[1])..'|r\n\n'
 check(Nexus.Help.Pages[1].id=='start' and start:sub(1,#startHead)==startHead
  and start:find('Start here: Setup / Welcome opens Guided setup',1,true)==#startHead+1,
@@ -85,8 +101,8 @@ NexusSetupChecklist:Hide()
 Nexus.Help.Show('start')
 b('Next'):Click();check(f.title:GetText():find('locked targets',1,true),'real next handler')
 b('Previous'):Click();check(f.title:GetText():find('Getting started',1,true),'real previous handler')
-Nexus.Help.Show('orbs');check(f.body:GetText():find('one Orb per replacement',1,true),'Orb instructions explain one-Orb boundary')
-check(f.body:GetText():find('does not automatically re%-enable'),'no auto restart promise')
+Nexus.Help.Show('orbs');check(Document():find('one Orb per replacement',1,true),'Orb instructions explain one-Orb boundary')
+check(Document():find('does not automatically re%-enable'),'no auto restart promise')
 b('Close'):Click();check(not f:IsShown(),'close works')
 -- The full-UI design's Help: each page leads with a short task topic (a few
 -- lines and one Open action to the real screen); the page text stays below it
@@ -107,7 +123,7 @@ local function Card(tag,char,line)
   -- Issue #169: the Auto page adds the current values after its complete text;
   -- the FAQ shows its complete text with gold questions and one more blank
   -- line between groups (faq_readability).
-  local body=f.body:GetText()
+  local body=Document()
   local plain=body:gsub('|cffffd100',''):gsub('|r','')
   -- v23: a reference page is its gold title and its complete text (Reference
   -- above); the Auto page adds its current values after it; Questions is
@@ -202,7 +218,7 @@ check(commands:find('/nexus help or /nexus tutorial - Guided setup at your curre
  and commands:find('/nexus guide - Guided setup',1,true) and commands:find('/nexus reference - these reference pages',1,true)
  and not commands:find('- this guide',1,true),'the command list says help, tutorial and guide open the coach and reference opens these pages')
 b('Start page'):Click();check(f.title:GetText():find('Getting started',1,true),'home button')
-Nexus.Help.Show('troubleshooting');local text=f.body:GetText()
+Nexus.Help.Show('troubleshooting');local text=Document()
 check(text:find('Select this page',1,true) and text:find('copy pages in order',1,true),'copy pagination explained')
 for _,command in ipairs({'reroll','freeze','currentlocks','prototype'})do
  local joined='';for _,p in ipairs(Nexus.Help.Pages)do joined=joined..p.text end

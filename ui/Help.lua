@@ -428,6 +428,155 @@ function H.FormatReference(title, text)
     if head=="" then return body end
     return "|cffffd100"..head.."|r\n\n"..body
 end
+-- v28 r3 (native test.163033, one English session: H.PageText gave the Orbs
+-- page as 8452 bytes and its formatted text as 8486 before SetText, but the
+-- one body FontString stored 8189, so the tail and its final sentence were
+-- lost at or after FontString:SetText; no general client byte limit is
+-- claimed). The shown document is placed, unchanged, in a fixed pool of
+-- FontStrings under the one scroll child (frame.parts; frame.body is part 1),
+-- stacked in reading order. A page is split at its own line breaks (r4: a
+-- line longer than PART_BUDGET also after a space or a whole token), so no
+-- UTF-8 sequence, escaped pipe or colour code is cut (a colour still open at
+-- a split is closed and reopened, display only), and
+-- the parts joined with line breaks are the document. Nothing is shortened,
+-- dropped or reworded, and no catalog or validation bound changes.
+-- PART_BUDGET: the most bytes a part takes, 2 x the Localization template
+-- result limit (MAX_TEMPLATE_RESULT_BYTES 2048), so the largest single block
+-- result fits one part even with every '|' escaped; below the storage observed
+-- natively (no general limit is claimed). r4: a single line longer than the
+-- budget is cut into pieces within it (SplitLine), never stored whole.
+local PART_BUDGET=4096
+-- r4: the Auto page's "Auto right now" addition (refresh below): Help's heading
+-- (one Localization text, at most MAX_TEXT_BYTES) and Panel.AutoDetailLines,
+-- which returns at most 21 lines: its own 5 (ui/Panel.lua 9794-9800), the 14
+-- of Readout.AutomationScopeLines at most (ui/Readout.lua 663-722: Auto,
+-- paused-because, intro, ten permissions, read-only), then at most 2 (session
+-- pause, unknown pause, or AutoNowLine, 9817-9833). Each line is one
+-- Localization text or template result (at most MAX_TEMPLATE_RESULT_BYTES)
+-- with at most a two-byte "- " prefix. Without the seam the addition fails
+-- inside its pcall and is not shown.
+local AUTO_NOW_MAX_LINES=21
+local function AutoNowBound()
+    local L=Nexus.Localization
+    local resultMax=type(L)=="table" and tonumber(L.MAX_TEMPLATE_RESULT_BYTES) or nil
+    local textMax=type(L)=="table" and tonumber(L.MAX_TEXT_BYTES) or nil
+    if not (resultMax and textMax) then return 0 end
+    return textMax+3+AUTO_NOW_MAX_LINES*(resultMax+3)
+end
+-- An upper bound of a page's shown bytes from the existing contracts
+-- (core/Localization.lua): a plain block at most MAX_BLOCK_BYTES, a template
+-- block at most MAX_TEMPLATE_RESULT_BYTES (x2 for escaped pipes), 16 bytes a
+-- block for separators and FAQ/heading markup, and the title (at most
+-- MAX_TEXT_BYTES, escaped) with its heading markup; or the English page text
+-- with every '|' escaped, whichever is larger; plus the Auto page's addition.
+local function DocumentBound(p)
+    local L=Nexus.Localization
+    local blockMax=type(L)=="table" and tonumber(L.MAX_BLOCK_BYTES) or nil
+    local resultMax=type(L)=="table" and tonumber(L.MAX_TEMPLATE_RESULT_BYTES) or nil
+    local textMax=type(L)=="table" and tonumber(L.MAX_TEXT_BYTES) or 0
+    local bound=2*#p.text
+    local blocks=PAGE_BLOCKS[p.id]
+    if blocks and blockMax and resultMax then
+        local sum=0
+        for _,b in ipairs(blocks) do sum=sum+(b[3] and 2*resultMax or blockMax)+16 end
+        if sum>bound then bound=sum end
+    end
+    bound=bound+2*math.max(#p.title,textMax)+14
+    if p.id=="rolling" then bound=bound+AutoNowBound() end
+    return bound
+end
+-- Parts the pool needs for the largest page: packing keeps any two
+-- neighbouring parts above PART_BUDGET together, so at most
+-- 2 x ceil(bound / PART_BUDGET) + 1. Made once, when the window is made.
+local function DocumentPoolSize()
+    local most=0
+    for _,p in ipairs(pages) do most=math.max(most,DocumentBound(p)) end
+    return 2*math.ceil(most/PART_BUDGET)+1
+end
+-- The colour code still open at the end of a part's text, or nil ('||' is a
+-- shown pipe, never a code).
+local function OpenColour(s)
+    local open,i=nil,1
+    while true do
+        local a=s:find("|",i,true)
+        if not a then return open end
+        local c=s:sub(a+1,a+1)
+        if c=="|" then i=a+2
+        elseif c=="c" and s:sub(a+2,a+9):match("^%x%x%x%x%x%x%x%x$") then open=s:sub(a,a+9);i=a+10
+        elseif c=="r" then open=nil;i=a+2
+        else i=a+1 end
+    end
+end
+-- r4: a line longer than the budget as pieces of at most budget bytes, cut
+-- after the last space within it, else after the last whole token: never
+-- inside a UTF-8 sequence, an escaped '||', a '|r' or a '|c' colour code.
+-- The pieces concatenated are the line. (No current contract line comes
+-- near: the longest paragraph bound is six blocks, 6149 bytes, and the
+-- current English paragraphs are about 2,000 bytes or less.)
+local function SplitLine(line,budget)
+    local pieces={}
+    while #line>budget do
+        local i,lastSafe,lastSpace=1,0,0
+        while i<=#line do
+            local c=line:byte(i)
+            local step=1
+            if c==124 then
+                local n=line:sub(i+1,i+1)
+                if n=="|" or n=="r" then step=2
+                elseif n=="c" and line:sub(i+2,i+9):match("^%x%x%x%x%x%x%x%x$") then step=10 end
+            elseif c>=240 then step=4
+            elseif c>=224 then step=3
+            elseif c>=192 then step=2 end
+            if i+step-1>budget then break end
+            i=i+step;lastSafe=i-1
+            if c==32 then lastSpace=lastSafe end
+        end
+        local cut=lastSpace>0 and lastSpace or lastSafe
+        if cut<1 then cut=budget end
+        pieces[#pieces+1]=line:sub(1,cut);line=line:sub(cut+1)
+    end
+    pieces[#pieces+1]=line
+    return pieces
+end
+-- The document as parts, in order, each at most budget bytes (plus a colour
+-- close/reopen at a split). Whole lines are packed; an over-budget line's
+-- pieces each start a part. table.concat(parts,"\n") is the text, except that
+-- a line cut into pieces has a part boundary instead of no break. r4: there is
+-- no part limit here, so nothing is ever merged into an over-long last part.
+local function SplitDocument(text,budget)
+    local parts,cur,len={},{},0
+    local function flush() parts[#parts+1]=table.concat(cur,"\n");cur,len={},0 end
+    local function add(line)
+        local more=(#cur>0 and 1 or 0)+#line
+        if #cur>0 and len+more>budget then flush();more=#line end
+        cur[#cur+1]=line;len=len+more
+    end
+    for line in (tostring(text or "").."\n"):gmatch("(.-)\n") do
+        if #line<=budget then add(line)
+        else
+            for k,piece in ipairs(SplitLine(line,budget)) do
+                if k>1 then flush() end
+                add(piece)
+            end
+        end
+    end
+    flush()
+    for i=1,#parts-1 do
+        local open=OpenColour(parts[i])
+        if open then parts[i]=parts[i].."|r";parts[i+1]=open..parts[i+1] end
+    end
+    return parts
+end
+-- One document part: like the body, under the content frame, standing under
+-- the part before it, hidden until used.
+local function NewPart(i)
+    local fs=frame.content:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+    fs:SetPoint("TOPLEFT",frame.parts[i-1],"BOTTOMLEFT",0,0)
+    fs:SetWidth(585);fs:SetJustifyH("LEFT");fs:SetJustifyV("TOP");fs:SetWordWrap(true)
+    fs:Hide()
+    frame.parts[i]=fs
+    return fs
+end
 -- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
 -- Saved Builds, Auto, Sync, Orbs, Support), one per page: a few lines and one
 -- Open action to the real screen (H.OpenTopic). Each page's text stays below
@@ -557,7 +706,23 @@ local function refresh()
                 ..table.concat(lines,"\n")
         end
     end
-    frame.body:SetText(text)
+    -- v28 r3: the document goes into the part pool (see SplitDocument);
+    -- unused parts are emptied and hidden, so a shorter page leaves no text.
+    -- r4: a document within the contracts never needs more parts than the
+    -- pool made in ensure(). One that does (outside the known contracts)
+    -- still reaches whole FontStrings: the pool grows to what it needs, once,
+    -- and is reused (bounded by that document; recorded in
+    -- frame.documentBeyondContract), instead of anything being cut or merged.
+    local docParts=SplitDocument(text,PART_BUDGET)
+    if #docParts>#frame.parts then
+        frame.documentBeyondContract=#docParts
+        for i=#frame.parts+1,#docParts do NewPart(i) end
+    end
+    local shownParts=0
+    for i,fs in ipairs(frame.parts) do
+        local s=docParts[i]
+        if s then fs:SetText(s);fs:Show();shownParts=i else fs:SetText("");fs:Hide() end
+    end
     frame.page:SetText(TF("help.label.page_position",function(seam)
         return {page=seam.Count(index),total=seam.Count(#pages)} end,"Page "..index.." / "..#pages))
     layoutTopic(p)
@@ -571,10 +736,35 @@ local function refresh()
     end
     if frame.note and frame.noteIndex~=index then frame.note:SetText("");frame.noteIndex=nil end
     if frame.content then
-        frame.body:SetHeight(0)
-        local measured=frame.body:GetStringHeight()
-        local height=math.max(414,tonumber(measured) or 0)
-        frame.body:SetHeight(height);frame.content:SetHeight(height+24)
+        -- v28: a design caution kept from the topic card (topicHeight), not
+        -- the remedy for the stored-text loss above: one reading of
+        -- GetStringHeight is not trusted to have wrapped yet, so each shown
+        -- part is never below the conservative text model of the text it
+        -- stores, at its width. The text is unchanged; a larger model only
+        -- adds space below it. The parts stack; the document is at least 414.
+        local metrics=Nexus.LayoutMetrics
+        local scale,rowLine=1,nil
+        if metrics and metrics.TextRows and metrics.ConservativeText then
+            scale=metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
+            local _,l=metrics.ConservativeText(scale)
+            rowLine=l
+        end
+        local total,last=0,nil
+        for i=1,shownParts do
+            local fs=frame.parts[i]
+            fs:SetHeight(0)
+            local ok,measured=pcall(fs.GetStringHeight,fs)
+            measured=ok and tonumber(measured) or 0
+            if measured~=measured or measured<0 or measured==math.huge then measured=0 end
+            if rowLine then
+                local width=tonumber(fs:GetWidth()) or 585
+                measured=math.max(measured,metrics.TextRows(fs:GetText() or "",width,scale)*rowLine)
+            end
+            local h=math.ceil(measured)
+            fs:SetHeight(h);total=total+h;last=fs
+        end
+        if last and total<414 then last:SetHeight(last:GetHeight()+414-total);total=414 end
+        frame.content:SetHeight(math.max(414,total)+24)
     end
     -- v26 (native X1): while the game's "Select an Echo" control is shown in
     -- this strata above the Reference, its own frames are laid out over it
@@ -603,6 +793,10 @@ local function ensure()
     child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(HELP_LEVEL+2)
     frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
     frame.body:SetWidth(585);frame.body:SetJustifyH("LEFT");frame.body:SetJustifyV("TOP");frame.body:SetWordWrap(true)
+    -- v28 r3: the document part pool, made once (frame.body is part 1); each
+    -- further part is like the body and stands under the one before it.
+    frame.parts={frame.body}
+    for i=2,DocumentPoolSize() do NewPart(i) end
     local function b(x,w,label,fn)
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
         f:SetFrameLevel(HELP_LEVEL+2)

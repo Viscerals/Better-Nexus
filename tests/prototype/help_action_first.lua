@@ -20,7 +20,23 @@ local auto=Nexus.RecomputeStats().autoEnabled
 local ids={}
 for _,p in ipairs(Nexus.Help.Pages) do ids[#ids+1]=p.id end
 check(table.concat(ids,',')=='start,wishlists,rolling,sharing,orbs,troubleshooting,about,faq','page ids and order unchanged: '..table.concat(ids,','))
-local function Page(id) Nexus.Help.Show(id);return NexusHelpWindow.body:GetText() end
+-- v28 r4 representation (read seam only): a page's shown document is the
+-- visible FontStrings under the Reference scroll child (NexusHelpWindow.content),
+-- in creation order, each read as it stores its text (GetText), joined at part
+-- boundaries by a line break.
+local function Page(id)
+ Nexus.Help.Show(id)
+ local out={}
+ local function walk(o)
+  if o.kind=='FontString' then
+   local ok,vis=pcall(function() return o:IsVisible() end)
+   if ok and vis then out[#out+1]=o:GetText() or '' end
+  end
+  for _,c in ipairs(type(o.children)=='table' and o.children or {}) do walk(c) end
+ end
+ walk(NexusHelpWindow.content)
+ return table.concat(out,'\n')
+end
 local start,wishlists,rolling,sharing,orbs,trouble=Page('start'),Page('wishlists'),Page('rolling'),Page('sharing'),Page('orbs'),Page('troubleshooting')
 local file=assert(io.open('README-PROTOTYPE.md','rb'));local guide=file:read('*a');file:close()
 guide=guide:gsub('%s+',' ')

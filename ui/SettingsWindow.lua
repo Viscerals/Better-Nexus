@@ -210,6 +210,16 @@ local function EnsureFrame()
     frame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     frame:Hide()
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.96) end
+    -- v28 (native 163033: the game's "Select an Echo" control, DIALOG 110,
+    -- drew over this window): the window takes part in the owned-window lift
+    -- (LayoutMetrics.LiftOwned on show; a refresh only re-lays an already
+    -- lifted window through ReapplyOwned and never lifts an unlifted one), and
+    -- a hide gives its own default levels back (once, at creation, as Help
+    -- does). Levels only; the control is only read.
+    frame:HookScript("OnHide", function()
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.RestoreOwned) == "function" then pcall(metrics.RestoreOwned, frame) end
+    end)
     title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -17)
     title:SetText(T("settings.title.window", "Nexus Options"))
@@ -324,6 +334,10 @@ function M.Refresh()
     if page < pages then nextPage:Enable() else nextPage:Disable() end
     pageLabel:SetText(page .. " / " .. pages)
     if Nexus.Theme and Nexus.Theme.Refresh then Nexus.Theme.Refresh() end
+    -- v28: a refresh of a lifted window is laid out again from its recorded
+    -- defaults (no-op unless lifted).
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.ReapplyOwned) == "function" then pcall(metrics.ReapplyOwned, frame) end
 end
 
 function M.Select(category)
@@ -356,6 +370,11 @@ function M.Show(category)
     local quick = Nexus.QuickStart
     if quick and type(quick.SetupFamilyGiveWay) == "function" then pcall(quick.SetupFamilyGiveWay, "settings") end
     frame:Show()
+    -- v28: over the game's shown "Select an Echo" control in this strata, this
+    -- window's own frames are laid out above it (levels only; the shared
+    -- family rules decide, and a refusal keeps the defaults).
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.LiftOwned) == "function" then pcall(metrics.LiftOwned, frame) end
     return true
 end
 
