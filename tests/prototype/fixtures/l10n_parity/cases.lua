@@ -25,15 +25,16 @@
 -- byte is the real file.
 --
 -- Runtime cap (full visible-UI scope, issues #143-#148): runtimeCap.current
--- is the MAX_BASE_ENTRIES of the real core/Localization.lua (4096; the
--- harness checks the two agree); runtimeCap.pilot is the 64-entry cap of the
+-- is the MAX_BASE_ENTRIES of the real core/Localization.lua (5120 from v33
+-- slice A, 4096 before; the harness checks the two agree);
+-- runtimeCap.pilot is the 64-entry cap of the
 -- pilot runtime. runtime is the expectation of the current runtime. For the
 -- cases in runtimeCap.pilotCases, pilotRuntime (or, when absent, runtime)
 -- is the historical expectation observed under the pilot cap before
 -- 2026-10-30; the harness reproduces it with a legacy-cap loader, the real
 -- file with only its MAX_BASE_ENTRIES line set to the pilot cap in memory.
 -- The corpus bytes are unchanged. runtimeCap.controls are the current
--- 4096/4097 boundaries, derived in memory from a committed case by adding
+-- 5120/5121 boundaries, derived in memory from a committed case by adding
 -- generated entries (parity.gNNNN = "Generated NNNN") until the file holds
 -- `entries` entries, and optionally declaring extra keys without English.
 -- The offline side (tools/tests/test_l10n_parity.py) applies the same caps:
@@ -91,19 +92,19 @@ return {
     },
     unknownRows = {"P19", "P20"},
     runtimeCap = {
-        current = 4096,
+        current = 5120,
         pilot = 64,
         pilotCases = {"p03_english_65", "p06_pack_65", "p17_bounds_64"},
         controls = {
             {
-                id = "p03_english_4096",
+                id = "p03_english_5120",
                 rows = {"P3", "P17"},
                 from = "p03_english_65",
                 file = "english",
-                entries = 4096,
+                entries = 5120,
                 offline = {code = "valid"},
                 runtime = {
-                    base = {present = true, accepted = 4096, rejected = 0, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 0},
+                    base = {present = true, accepted = 5120, rejected = 0, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 0},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
                     languages = {"enUS"},
                     probes = {
@@ -112,14 +113,14 @@ return {
                 },
             },
             {
-                id = "p03_english_4097",
+                id = "p03_english_5121",
                 rows = {"P3", "P17"},
                 from = "p03_english_65",
                 file = "english",
-                entries = 4097,
+                entries = 5121,
                 offline = {code = "english-too-many"},
                 runtime = {
-                    base = {present = true, accepted = 0, rejected = 4097, oversized = true, formatted = 0, undeclared = 0, missingDeclared = 4096},
+                    base = {present = true, accepted = 0, rejected = 5121, oversized = true, formatted = 0, undeclared = 0, missingDeclared = 5120},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
                     languages = {"enUS"},
                     probes = {
@@ -134,15 +135,15 @@ return {
                 },
             },
             {
-                id = "p03_declarations_4097",
+                id = "p03_declarations_5121",
                 rows = {"P3", "P17"},
                 from = "p03_english_65",
                 file = "english",
-                entries = 4096,
+                entries = 5120,
                 extraDeclarations = {"parity.zz_declared_only"},
                 offline = {code = "registry-too-many"},
                 runtime = {
-                    base = {present = true, accepted = 0, rejected = 4096, oversized = false, formatted = 0, undeclared = 4096, missingDeclared = 0},
+                    base = {present = true, accepted = 0, rejected = 5120, oversized = false, formatted = 0, undeclared = 5120, missingDeclared = 0},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
                     languages = {"enUS"},
                     probes = {
@@ -157,11 +158,11 @@ return {
                 },
             },
             {
-                id = "p06_pack_4096",
+                id = "p06_pack_5120",
                 rows = {"P6", "P17"},
                 from = "p06_pack_65",
                 file = "packs",
-                entries = 4096,
+                entries = 5120,
                 offline = {code = "orphan-entry", key = "parity.k01"},
                 runtime = {
                     base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
@@ -170,7 +171,7 @@ return {
                         adopted = 1,
                         refused = 0,
                         rows = {
-                            {id = "qaQA", accepted = 0, rejected = 4096},
+                            {id = "qaQA", accepted = 0, rejected = 5120},
                         },
                     },
                     languages = {"enUS", "qaQA"},
@@ -180,11 +181,11 @@ return {
                 },
             },
             {
-                id = "p06_pack_4097",
+                id = "p06_pack_5121",
                 rows = {"P6", "P17"},
                 from = "p06_pack_65",
                 file = "packs",
-                entries = 4097,
+                entries = 5121,
                 offline = {code = "pack-too-many-entries", key = "qaQA"},
                 runtime = {
                     base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},

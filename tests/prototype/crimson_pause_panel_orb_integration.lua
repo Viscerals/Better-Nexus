@@ -65,7 +65,8 @@ local function Title() return V.Plain(NexusPanel._contextTitle:GetText() or '') 
 local function Heading() return V.Plain(NexusPanel._rollStatus:GetText() or '') end
 local function HelpText()
  local w=_G.NexusHelpWindow
- return w and w:IsShown() and V.Plain((w.title:GetText() or '')..'\n'..(w.body:GetText() or '')) or ''
+ -- The window title and the whole shown page (all of Help's parts, V.HelpShown).
+ return w and w:IsShown() and (V.Plain(w.title:GetText() or '')..'\n'..V.HelpShown(w)) or ''
 end
 local function Has(text,s) return tostring(text or ''):find(s,1,true)~=nil end
 local function Run()

@@ -60,6 +60,153 @@ function V.Plain(text)
  return (tostring(text or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''))
 end
 
+-- The Reference document as the player sees it (ui/Help.lua v28 r3/r4: one
+-- page is stored in the part pool w.parts, part 1 being w.body; each later
+-- part is anchored TOPLEFT to the BOTTOMLEFT of the part before it, and the
+-- page is split only at line breaks, the boundary line feed not stored).
+-- Test-only reader of the actual shown FontStrings: the shown parts must be a
+-- prefix of the pool (no hidden part between shown ones), and each shown part
+-- after the first must be anchored under the previous one. Without a pool it
+-- reads w.body alone. It never reads Help.PageText, the catalog or a hidden
+-- retained text.
+function V.HelpParts(w)
+ w=w or _G.NexusHelpWindow
+ if not w then return nil,'no Reference window' end
+ local pool=type(w.parts)=='table' and #w.parts>0 and w.parts or {w.body}
+ local shown,hidden={},nil
+ for i,fs in ipairs(pool) do
+  if fs and fs:IsShown() then
+   if hidden then return nil,'shown part '..i..' after hidden part '..hidden end
+   if i>1 then
+    local point,rel,relPoint=fs:GetPoint(1)
+    if point~='TOPLEFT' or rel~=pool[i-1] or relPoint~='BOTTOMLEFT' then
+     return nil,'part '..i..' is not anchored under part '..(i-1)
+    end
+   end
+   shown[#shown+1]=fs
+  else
+   hidden=hidden or i
+  end
+ end
+ if #shown==0 then return nil,'no shown part' end
+ return shown
+end
+-- The exact stored document: the shown parts' GetText joined by the boundary
+-- line feed. A broken part order or an empty document raises (a scenario
+-- reports it as RAISED, an assert-style test stops).
+function V.HelpDocument(w)
+ local parts,why=V.HelpParts(w)
+ if not parts then error('HelpDocument: '..tostring(why),2) end
+ local out={}
+ for i,fs in ipairs(parts) do out[i]=fs:GetText() or '' end
+ return table.concat(out,'\n')
+end
+-- The visible text of the document, for substring checks: the client's escape
+-- '||' is the one '|' it shows, and colour codes are not visible. The escape is
+-- decoded first, so an escaped command such as 'adaptive||released' is never
+-- read as a colour reset.
+function V.HelpShown(w)
+ local s=V.HelpDocument(w):gsub('||','\1'):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
+ return (s:gsub('\1','|'))
+end
+-- The accepted v23 reference-page form (H.FormatReference), restated
+-- independently for exact checks: the page title as a heading in the heading
+-- gold, a blank line, then the page text with every '|' written '||'.
+function V.HelpReferenceExpected(title,text)
+ return '|cffffd100'..tostring(title)..'|r\n\n'..(tostring(text):gsub('|','||'))
+end
+
+-- The Orb mini panel's lines (ui/OrbPanel.lua, accepted layout: each status
+-- line holds at most a character budget of two estimated rows at the panel's
+-- current width, wraps at word boundaries (which can take more rows) and is as
+-- tall as the client measures its wrapped text; lines stack one under another;
+-- the control row stands below the closing note). The harness measures no
+-- wrap (GetStringHeight is a constant), so a test declares its own model of
+-- the client: `char` units per visible character and `line` units per row.
+-- Test-only; the text, the widths and the expected results stay the product's.
+V.MINI_LINE_MODEL={char=7,line=14}
+V.MINI_LINE_KEYS={'state','reason','usage','pending','missing','notice','note'}
+-- Visible characters of a line: '||' shows one '|', colour codes none, a
+-- UTF-8 character counts once.
+function V.MiniVisible(text)
+ local s=tostring(text or ''):gsub('||','\1'):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
+ return (s:gsub('\1','|'))
+end
+function V.MiniChars(text) return #(V.MiniVisible(text):gsub('[\128-\191]','')) end
+-- Rows of a text at a width under the model: greedy word wrap, a word longer
+-- than a row broken across rows.
+function V.ModelRows(text,width,char)
+ text=V.MiniVisible(text)
+ if text=='' then return 0 end
+ local per=math.max(1,math.floor((tonumber(width) or 0)/char))
+ local rows=0
+ for row in (text..'\n'):gmatch('(.-)\n') do
+  rows=rows+1
+  local used=0
+  for word in row:gmatch('%S+') do
+   local n=#(word:gsub('[\128-\191]',''))
+   local gap=used>0 and 1 or 0
+   if used>0 and used+gap+n>per then rows=rows+1;used=0;gap=0 end
+   while n>per do rows=rows+1;n=n-per end
+   used=used+gap+n
+  end
+ end
+ return rows
+end
+-- Installs the model's GetStringHeight on the mini's own lines only and lays
+-- the mini out again through its own layout (mini._nexusStack, which runs when
+-- a shown text changed). Returns a function that removes the stand-ins. That
+-- reflow after installing the model is an explicit offline setup step, not
+-- evidence of how the native client's fonts settle; no text or dimension of a
+-- widget is set by the test.
+function V.UseMiniLineModel(mini,model)
+ model=model or V.MINI_LINE_MODEL
+ local saved={}
+ for _,key in ipairs(V.MINI_LINE_KEYS) do
+  local fs=mini[key]
+  if fs then
+   saved[fs]=rawget(fs,'GetStringHeight') or false
+   rawset(fs,'GetStringHeight',function(self) return V.ModelRows(self:GetText(),self:GetWidth(),model.char)*model.line end)
+  end
+ end
+ if type(mini._nexusStack)=='function' then
+  local keep=mini.note:GetText()
+  mini.note:SetText('');mini._nexusStack()
+  mini.note:SetText(keep);mini._nexusStack()
+ end
+ return function()
+  for fs,prior in pairs(saved) do rawset(fs,'GetStringHeight',prior or nil) end
+ end
+end
+-- Distance of a region's top below its parent's top (its TOPLEFT anchor).
+function V.TopOf(region)
+ local _,x,y=region:GetPoint(1)
+ if type(x)~='number' then _,_,_,x,y=region:GetPoint(1) end
+ return -(tonumber(y) or 0)
+end
+-- One mini line fits visibly under the model: its visible characters are
+-- within the line's character budget (two ESTIMATED rows of the model at its
+-- actual width, the product's MINI_CHARS rule), its allocated height covers
+-- all of its wrapped rows, and the next element stands at or below its
+-- bottom. The rows themselves are not capped at two: word wrap breaks only
+-- between words, so a text within that character budget can still need three
+-- or more rows (for example a 74-character reason in 37-character rows). The
+-- product allocates the actual wrapped height for that (OrbPanel Fit), and
+-- that height is what must cover the rows. Returns ok and a detail string.
+function V.MiniLineFits(mini,key,nextRegion,model)
+ model=model or V.MINI_LINE_MODEL
+ local fs=mini[key]
+ local text=fs:GetText() or ''
+ local width=tonumber(fs:GetWidth()) or 0
+ local per=math.max(1,math.floor(width/model.char))
+ local chars,rows=V.MiniChars(text),V.ModelRows(text,width,model.char)
+ local top,height=V.TopOf(fs),tonumber(fs:GetHeight()) or 0
+ local below=nextRegion and V.TopOf(nextRegion) or math.huge
+ local ok=chars<=2*per and height>=rows*model.line and below>=top+height
+ return ok,('%s: %d chars (budget %d), %d rows, height %s, top %s, next %s'):format(key,chars,2*per,rows,
+  tostring(height),tostring(top),tostring(below))
+end
+
 local function Pattern(text)
  return (tostring(text):lower():gsub('(%p)','%%%1'))
 end

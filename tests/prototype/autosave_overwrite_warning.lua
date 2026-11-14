@@ -17,6 +17,9 @@ local T=dofile('tests/prototype/startup_support.lua')
 local A=Nexus.GameAdapter
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local function has(text,s) return type(text)=='string' and text:find(s,1,true)~=nil end
+-- A Reference page is the whole shown document (Help's part pool), read by
+-- the test-only V.HelpShown, not only its first FontString.
+local V=dofile('tests/prototype/view_regression_support.lua')
 
 -- Baseline: nothing below may save a build, spend, or change a setting.
 local saves,spends,uploads=H.Count('save'),H.Count('orb-spend'),H.Count('upload')
@@ -71,7 +74,7 @@ end
 
 -- 1. Help: Getting started (assignment step) and Rolling and settings.
 check(#Nexus.Help.Pages==8,'still eight Help pages (issue #169 added Questions (FAQ))')
-Nexus.Help.Show('start');local start=NexusHelpWindow.body:GetText()
+Nexus.Help.Show('start');local start=V.HelpShown(NexusHelpWindow)
 check(has(start,'select the intended Saved Build and assign the Wishlist to it'),'Help names the targeted Saved Build')
 check(has(start,'Assigning only chooses the target; by itself it does not change the Saved Build.'),'Help: assignment changes no Saved Build')
 check(has(start,'With Auto ON, Nexus may replace that active Saved Build with a better finished run'),'Help: Auto can update that active Saved Build')
@@ -89,7 +92,7 @@ check(stepCreate and stepAssign and stepAuto and stepAuto<stepCreate and stepAut
 local stepAutoOn=start:find('Click Auto OFF',1,true)
 check(stepAutoOn and stepAuto<stepAutoOn,'warning precedes the instruction that turns Auto ON')
 honest('Help start',start)
-Nexus.Help.Show('rolling');local rolling=NexusHelpWindow.body:GetText()
+Nexus.Help.Show('rolling');local rolling=V.HelpShown(NexusHelpWindow)
 check(has(rolling,'Automatic save is separate from Take, Banish, Reroll and Freeze.'),'Help: save distinct from Take/Banish/Reroll/Freeze')
 check(has(rolling,'Auto may replace your active Saved Build with that run and give it the Wishlist\'s name.'),'Help: destination is the active Saved Build')
 check(has(rolling,'compares the run with the Wishlist assigned to that loadout'),'Help: compared with the assigned Wishlist')

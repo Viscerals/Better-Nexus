@@ -333,7 +333,9 @@ end
 local function Details()
  local row=Row('Auto explained')
  row.func(row)
- local body=V.Plain(NexusHelpWindow.body:GetText())
+ -- The whole shown Auto page (all of Help's parts, V.HelpShown), with the
+ -- "Auto right now" details appended at its end.
+ local body=V.HelpShown(NexusHelpWindow)
  Nexus.Help.Hide()
  return body
 end

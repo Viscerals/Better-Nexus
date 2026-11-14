@@ -17,7 +17,7 @@
 -- MAX_BASE_ENTRIES must equal cases.lua runtimeCap.current); the pilot cases
 -- are also loaded by a legacy-cap loader, the same bytes with only that line
 -- set to runtimeCap.pilot in memory, which must reproduce the historical
--- pilot expectation. runtimeCap.controls add the current 4096/4097 English,
+-- pilot expectation. runtimeCap.controls add the current cap / cap + 1 English,
 -- declaration and pack boundaries in memory. A bound registry row checks its
 -- change from the unedited real load, so no catalog count is fixed here.
 -- That change is entry-level, so it holds where entries are judged one by
@@ -264,7 +264,8 @@ for _,case in ipairs(corpus.cases)do
  end
 end
 
--- The current 4096/4097 boundaries, derived in memory from committed cases.
+-- The current cap / cap + 1 boundaries (runtimeCap.current), derived in memory
+-- from committed cases.
 local controls=0
 do
  local function grow(entries,count)
@@ -410,6 +411,9 @@ end
 -- The safe status text is the documented one, stated here.
 local UNAVAILABLE='This status cannot be shown right now.'
 local staticText,declarationLines={},0
+-- Times aboveCap ran (checked once all registry rows are done) and the
+-- English registry row variants that must each have reached it.
+local aboveCapRuns,englishRowVariants=0,0
 do
  local block=runtimeBytes:sub(#head+1,-#tail-1)
  for key in block:gmatch('\n    %["([^"]+)"%] = {kind = "text"},')do staticText[key]=true end
@@ -434,6 +438,28 @@ local function aboveCap(o,supplied,want,label)
   check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=UNAVAILABLE,source='unavailable',reason=validKey(p.key) and 'unknown_key' or 'invalid_key'}),
    'registry probe '..i..' above the cap '..label..': '..show(o.probes[i]))
  end
+ aboveCapRuns=aboveCapRuns+1
+end
+-- v33 slice A (review finding F1 / SA-1): the real English is far below the
+-- bounded cap (4096 entries at cap 5120), so a bound row's own edit alone no
+-- longer goes above it. Each English registry edit is therefore also padded,
+-- in memory, with generated legal entries (parity.gNNNN = "Generated NNNN",
+-- the corpus controls' own generation rule, undeclared) up to exactly
+-- CAP.current + 1 and loaded with the real packs and the real enum, and that
+-- load must satisfy aboveCap. The row's own prediction is still checked on the
+-- unpadded edit (and on the fitted edit when the edit itself is above the
+-- cap). aboveCapRuns must equal the number of English row variants, so this
+-- real-data above-cap guard cannot silently stop running again.
+local function padded(english,count)
+ local out,n={},0
+ for key,value in pairs(english)do out[key]=value;n=n+1 end
+ local index=0
+ while n<count do
+  index=index+1
+  local key=('parity.g%04d'):format(index)
+  if out[key]==nil then out[key]=('Generated %04d'):format(index);n=n+1 end
+ end
+ return out,n
 end
 -- The edit at exactly the cap, and every key it is then without (the row's
 -- removed key and the entries left out here).
@@ -472,7 +498,7 @@ for _,row in ipairs(registry.rows)do
    for name in pairs(part)do check(type(unedited.base[name])=='number','baseChange names a load fact: '..name)end
   end
   local wantRows=packRowsAfter(unedited.packs.rows,removed)
-  local seen,seenFitted
+  local seen,seenFitted,seenPadded
   for _,ev in ipairs(variants(englishBytes,row.id..'/english'))do
    for _,pv in ipairs(variants(packsBytes,'data/LocalizationPacks.lua'))do
     local label=row.id..' english '..ev[1]..' packs '..pv[1]
@@ -483,6 +509,17 @@ for _,row in ipairs(registry.rows)do
     local expectBase,expectRows=wantBase,wantRows
     local supplied=0
     for _ in pairs(english)do supplied=supplied+1 end
+    local baseLabel=label
+    englishRowVariants=englishRowVariants+1
+    if supplied<=CAP.current then
+     -- F1 / SA-1: the same edit padded to exactly cap + 1 (see padded).
+     local over,count=padded(english,CAP.current+1)
+     check(count==CAP.current+1,'the padded edit holds exactly cap + 1: '..baseLabel..': '..count)
+     local plabel=baseLabel..' padded to cap + 1'
+     local po=outcome(over,packs,{enum=registry.enum},true,want)
+     if seenPadded then check(same(seenPadded,po),'LF and CRLF give equal registry outcomes: '..plabel) else seenPadded=po end
+     aboveCap(po,count,want,plabel)
+    end
     if supplied>CAP.current then
      aboveCap(o,supplied,want,label)
      local over=supplied-CAP.current
@@ -533,6 +570,10 @@ do
  end
 end
 
+-- F1 / SA-1 liveness: every English registry row variant reached the
+-- real-data above-cap contract (padded, or by its own edit).
+check(englishRowVariants>0 and aboveCapRuns==englishRowVariants,
+ 'the real-data above-cap guard ran for every English registry row variant: '..aboveCapRuns..' of '..englishRowVariants)
 check(Nexus==savedNexus,'the global Nexus is restored after every load')
-print(('localization_parity: %d cases (%d also under the pilot cap %d), %d cap controls (cap %d), %d bound registry runtime rows, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
- :format(#corpus.cases,#CAP.pilotCases,CAP.pilot,controls,CAP.current,bound,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))
+print(('localization_parity: %d cases (%d also under the pilot cap %d), %d cap controls (cap %d), %d bound registry runtime rows, %d real-data above-cap runs, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
+ :format(#corpus.cases,#CAP.pilotCases,CAP.pilot,controls,CAP.current,bound,aboveCapRuns,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))

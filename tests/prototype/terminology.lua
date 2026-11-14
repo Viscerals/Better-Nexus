@@ -19,9 +19,12 @@ end
 local all=table.concat(text,'\n')
 check(all:find('EXTRA COPIES',1,true),'panel actual extra-copy heading')
 check(not all:find('TO SHED',1,true),'old main heading absent')
-SlashCmdList.NEXUS('reference');check(NexusHelpWindow.body:GetText():find('experimental',1,true),'help identifies experimental build')
+-- The Reference page is the whole shown document (Help's part pool, read by
+-- the test-only V.HelpShown), not only its first FontString.
+local V=dofile('tests/prototype/view_regression_support.lua')
+SlashCmdList.NEXUS('reference');check(V.HelpShown(NexusHelpWindow):find('experimental',1,true),'help identifies experimental build')
 local auto=Nexus.RecomputeStats().autoEnabled
-Nexus.Help.Show('rolling');check(NexusHelpWindow.body:GetText():find('Target 2/current 5 means 3 extras',1,true),'extra-copy definition in help')
+Nexus.Help.Show('rolling');check(V.HelpShown(NexusHelpWindow):find('Target 2/current 5 means 3 extras',1,true),'extra-copy definition in help')
 check(Nexus.RecomputeStats().autoEnabled==auto,'wording/navigation does not enable automation')
 -- design/current "Nexus Setup Alternative": the Welcome's Help is the guided
 -- setup coach; the long manual is its separately named Reference.
@@ -354,11 +357,12 @@ end
 local CHARGE_DECLARATION=runtimeSource:match('%["readout%.charge_counts"%] = (%b{})')
 check(CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\r\n        kind = "format", slot = "count", resultLimit = 254}'
  or CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\n        kind = "format", slot = "count", resultLimit = 254}','R: the charge row declares its three count fields, in order, and the 254-byte result limit')
--- Full-UI scope: the declaration/entry cap is the bounded 4096 (it was the
--- 64-entry pilot cap); the boundary fixtures below run at exactly CAP and
--- CAP + 1 entries.
-local CAP=4096
-check(L.MAX_BASE_ENTRIES==CAP,'the bounded full-UI declaration and entry cap is 4096')
+-- Full-UI scope: the declaration/entry cap is the bounded 5120 (catalog
+-- capacity slice A; it was 4096, and the 64-entry pilot cap before that).
+-- CAP is stated here independently, never read from the runtime; the boundary
+-- fixtures below run at exactly CAP and CAP + 1 entries.
+local CAP=5120
+check(L.MAX_BASE_ENTRIES==CAP,'the bounded full-UI declaration and entry cap is 5120')
 local function testKey(key)
  return type(key)=='string' and #key>=3 and #key<=64 and key:find('^[a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_]$')~=nil and not key:find('%.[^a-z]')
 end
@@ -854,7 +858,8 @@ do
  local d=L.Diagnostics()
  check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
  -- Full visible-UI catalog (#143-#148). The reviewed English is whole and
- -- strict: its 4096 keys, each with admitted English. A real pack may be
+ -- strict: its 4116 keys (the 4096 full-UI keys plus the 4 opacity and 16
+ -- FAQ keys of v33 B/C), each with admitted English. A real pack may be
  -- partial (the partial-locale disposition): it holds valid entries for
  -- reviewed English keys only, the six-message and Panel cohorts below among
  -- them, and a meaning it has no entry for is shown in its exact English. A
@@ -865,7 +870,7 @@ do
  -- never from a load's own facts: every supplied entry is admitted and none
  -- is rejected.
  local englishKeys=L.Keys()
- check(#englishKeys==4096 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4096 keys, each with English')
+ check(#englishKeys==4116 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4116 keys, each with English')
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')

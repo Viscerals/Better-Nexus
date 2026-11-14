@@ -63,7 +63,9 @@ for _,palette in ipairs(T.Palettes())do
  check(found,'the menu shows the name with its hue: '..palette.label)
 end
 local styleChecked=0
-for _,item in ipairs(items)do if item.checked and item.func then styleChecked=styleChecked+1 end end
+-- v23: scoped to the style and colour rows; the background opacity rows
+-- (item.opacity) carry their own single check mark, checked in section 14.
+for _,item in ipairs(items)do if item.checked and item.func and item.opacity==nil then styleChecked=styleChecked+1 end end
 check(styleChecked==2,'one style and one colour entry carry the check mark: '..styleChecked)
 
 -- 4. A selected tab or view has a bar and a held highlight, not only a colour.
@@ -459,4 +461,368 @@ RolesHold('after a tree walk through the offer rows')
 T.SetStyle('vista');T.SetPalette(nil)
 check(T.Current().style=='vista' and T.Current().palette=='amethyst','the default appearance is back')
 RolesHold('Nexus Vista, Nexus Amethyst again')
+
+-- 14. v23 (B): background opacity, a third presentation-only Appearance
+-- choice. Contract accepted by Root (ROOT_TEST_DISPOSITION), refined: the
+-- first three rows that are not titles are opacity 100%, 90%, 80%, so the
+-- Settings window's Appearance page shows the control and the current 100%
+-- first (a title row before them is allowed, not required); the style and
+-- colour rows follow unchanged. Section 3's check-mark count is scoped to the
+-- style and colour rows (item.opacity==nil). Accepted terms, as first written:
+--   key T.OPACITY_KEY = "uiBackgroundOpacity", an integer percent;
+--   T.OPACITY_MIN 50, T.OPACITY_MAX 100, T.OPACITY_STEP 10, T.OPACITY_DEFAULT
+--   100; absent means 100 and reading never writes it;
+--   T.SetBackgroundOpacity(percent) -> outcome, message through Choose and
+--   StoreAuthorityOwner.UpdateSettingsV1 (durable / database / session /
+--   unavailable, as style and colour); T.SetBackgroundOpacity(nil) is Reset:
+--   it clears the key and never stores 100; a value off the bounds or steps
+--   (or not an integer) is refused with nil and changes nothing;
+--   T.Current().backgroundOpacity (effective), explicitBackgroundOpacity,
+--   unknownBackgroundOpacity, savedBackgroundOpacity (shown form);
+--   T.MenuItems(): one row per allowed value carrying item.opacity=<percent>,
+--   100, 90, 80 first, with one check mark (100 is the Default row and clears
+--   the key); an unknown saved value checks nothing, is named as kept ("it
+--   stays saved", a disabled row after the six opacity rows) and stays saved until
+--   the player chooses.
+--   Painting: every styled window's backdrop colour alpha, its opaque base and
+--   its shade are multiplied by percent/100; the window border, accent line,
+--   buttons, inputs and text keep their alphas; no window SetAlpha; the exempt
+--   difficulty card, bar and ticks are untouched; no texture or hook is added.
+-- The colour, alpha and SetAlpha calls are recorded here (the harness keeps
+-- none); a texture's SetVertexColor and SetGradientAlpha both set its vertex
+-- alphas and the later call wins, as on the client. Native look: NOT_RUN.
+-- Misses are collected and raised together at the end of this section.
+-- v39: rebased onto the current Source 35 test (sections 1-13 unchanged); the
+-- reviewed section and its R2 styled-button probe are ported as approved.
+do
+ local misses={}
+ local function expect(v,m) if not v then misses[#misses+1]=m end end
+ local function near(a,b) return type(a)=='number' and type(b)=='number' and math.abs(a-b)<1e-6 end
+ local KEY='uiBackgroundOpacity'
+ local alphaLog=nil
+ local function Recorder(h)
+  F.OrbService(h)
+  local RM=G.RegionMethods()
+  local function wrap(name,fn)
+   local prior=rawget(RM,name)
+   RM[name]=function(self,...) fn(self,...);if prior then return prior(self,...) end end
+  end
+  wrap('SetBackdropColor',function(self,r,g,b,a) rawset(self,'_v23bg',a==nil and 1 or a) end)
+  wrap('SetBackdropBorderColor',function(self,r,g,b,a) rawset(self,'_v23edge',a==nil and 1 or a) end)
+  wrap('SetVertexColor',function(self,r,g,b,a) local v=a==nil and 1 or a;rawset(self,'_v23va',{v,v}) end)
+  wrap('SetGradientAlpha',function(self,o,r1,g1,b1,a1,r2,g2,b2,a2) rawset(self,'_v23va',{a1,a2}) end)
+  wrap('SetTextColor',function(self,r,g,b,a) rawset(self,'_v23text',a==nil and 1 or a) end)
+  wrap('SetAlpha',function(self,a) rawset(self,'_v23alpha',a);if alphaLog then alphaLog[#alphaLog+1]={self,a} end end)
+ end
+ local Hh,Th
+ local function Start(mutate)
+  Hh=F.Boot(F.Database({mutate=mutate}),Recorder);Th=Nexus.Theme
+  Nexus.Help.Show('start');Nexus.OrbPanel.Show();Nexus.Panel.Show();Hh.Advance(.5)
+ end
+ local function Reopen()
+  Hh=F.Reload(Recorder);Th=Nexus.Theme
+  Nexus.Help.Show('start');Nexus.OrbPanel.Show();Nexus.Panel.Show();Hh.Advance(.5)
+ end
+ local function Windows()
+  local out={}
+  for _,w in ipairs(Hh.frames) do if w._nexusWindowStyled and not w._nexusThemeExempt then out[#out+1]=w end end
+  return out
+ end
+ local function Name(w) return tostring(w.GetName and w:GetName() or w.name or w) end
+ -- The effective alphas of one window's background layers.
+ local function Layers(w)
+  local base=w._nexusWindowBase;local fill=base and base._nexusFill;local shade=w._nexusWindowShade
+  local fa=fill and rawget(fill,'_v23va');local sa=shade and rawget(shade,'_v23va')
+  local la=w._nexusWindowAccent and rawget(w._nexusWindowAccent,'_v23va')
+  local baseAlpha=base and (rawget(base,'_v23alpha') or 1) or 1
+  local fillAlpha=fill and (rawget(fill,'_v23alpha') or 1) or 1
+  return {bg=rawget(w,'_v23bg'),base=fa and fa[1]*baseAlpha*fillAlpha,
+   lo=sa and sa[1]*((shade and rawget(shade,'_v23alpha')) or 1),hi=sa and sa[2]*((shade and rawget(shade,'_v23alpha')) or 1),
+   edge=rawget(w,'_v23edge'),accent=la and la[1]}
+ end
+ -- The expected alphas, from the appearance's own tables.
+ local function Want(w,o)
+  local style=Th.STYLES[Th.Current().style]
+  local lo,hi
+  if style.shade then lo,hi=style.shade[4],style.shade[4] else lo,hi=style.shadeBottom[4],style.glowAlpha end
+  return {bg=(w._nexusWindowAlpha or 0.90)*o,base=o,lo=lo*o,hi=hi*o,edge=0.95,accent=style.accentAlpha}
+ end
+ local function LayersHold(o,tag)
+  local n=0
+  for _,w in ipairs(Windows()) do
+   n=n+1
+   local got,want=Layers(w),Want(w,o)
+   expect(near(got.bg,want.bg),tag..': '..Name(w)..' backdrop alpha '..tostring(got.bg)..', wanted '..want.bg)
+   expect(near(got.base,want.base),tag..': '..Name(w)..' opaque base alpha '..tostring(got.base)..', wanted '..want.base)
+   expect(near(got.lo,want.lo) and near(got.hi,want.hi),tag..': '..Name(w)..' shade alphas '..tostring(got.lo)..'/'..tostring(got.hi)
+    ..', wanted '..want.lo..'/'..want.hi)
+   expect(near(got.edge,want.edge),tag..': '..Name(w)..' border keeps its alpha ('..tostring(got.edge)..')')
+   if want.accent then expect(near(got.accent,want.accent),tag..': '..Name(w)..' accent line keeps its alpha ('..tostring(got.accent)..')') end
+   expect(rawget(w,'_v23alpha')==nil or rawget(w,'_v23alpha')==1,tag..': '..Name(w)..' is never faded as a whole window')
+  end
+  expect(n>=2,'SETUP: '..tag..': styled windows are open ('..n..')')
+ end
+ -- Every styled button keeps its fill and text alpha.
+ local function Controls()
+  local out={}
+  for _,b in ipairs(Hh.frames) do
+   if b._nexusDarkStyled then
+    local t=b.GetFontString and b:GetFontString() or nil
+    out[b]={bg=rawget(b,'_v23bg'),text=t and rawget(t,'_v23text')}
+   end
+  end
+  return out
+ end
+ local function ControlsKept(before,tag)
+  local changed,n=0,0
+  for b,v in pairs(before) do
+   n=n+1
+   local t=b.GetFontString and b:GetFontString() or nil
+   if rawget(b,'_v23bg')~=v.bg or (t and rawget(t,'_v23text'))~=v.text then changed=changed+1 end
+  end
+  expect(n>0 and changed==0,tag..': buttons and their text keep their own alphas ('..changed..' of '..n..' changed)')
+ end
+ -- Only the background layers may take SetAlpha (none is needed).
+ local function AlphaCalls(tag)
+  local allowed={}
+  for _,w in ipairs(Windows()) do
+   local base=w._nexusWindowBase
+   if base then allowed[base]=true;if base._nexusFill then allowed[base._nexusFill]=true end end
+   if w._nexusWindowShade then allowed[w._nexusWindowShade]=true end
+  end
+  local bad=0
+  for _,call in ipairs(alphaLog or {}) do if not allowed[call[1]] then bad=bad+1 end end
+  expect(bad==0,tag..': no window, control or text is faded with SetAlpha ('..bad..' calls)')
+ end
+ -- The opacity rows, and the first three rows that are not titles (the ones
+ -- the Settings window's Appearance page lists first).
+ local function Rows()
+  local rows,items,first={},Th.MenuItems(),{}
+  for _,item in ipairs(items) do
+   if type(item.opacity)=='number' then rows[#rows+1]=item end
+   if not item.isTitle and #first<3 then first[#first+1]=item end
+  end
+  return rows,first,items
+ end
+ local function Plain(text) return (tostring(text or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
+ local function Row(percent)
+  for _,item in ipairs((Rows())) do if item.opacity==percent then return item end end
+ end
+ local function Choose(percent,tag)
+  local f=type(Th.SetBackgroundOpacity)=='function' and Th.SetBackgroundOpacity or nil
+  if not f then expect(false,tag..': T.SetBackgroundOpacity exists');return nil end
+  alphaLog={}
+  local ok,outcome,message=pcall(f,percent)
+  expect(ok,tag..': SetBackgroundOpacity('..tostring(percent)..') does not raise: '..tostring(outcome))
+  AlphaCalls(tag);alphaLog=nil
+  if ok then return outcome,message end
+ end
+ local function Effective() local c=Th.Current();return c.backgroundOpacity,c end
+
+ -- a. A player who never chose: the current look, exactly, and nothing written.
+ Start(function(d) d.settings.opacitySentinel='keep' end)
+ expect(Th.OPACITY_KEY==KEY and Th.OPACITY_MIN==50 and Th.OPACITY_MAX==100 and Th.OPACITY_STEP==10 and Th.OPACITY_DEFAULT==100,
+  'the bounds are named: key '..tostring(Th.OPACITY_KEY)..', '..tostring(Th.OPACITY_MIN)..'-'..tostring(Th.OPACITY_MAX)
+  ..' in steps of '..tostring(Th.OPACITY_STEP)..', default '..tostring(Th.OPACITY_DEFAULT))
+ local before=Settings()
+ local eff,cur=Effective()
+ expect(eff==100 and not cur.explicitBackgroundOpacity and not cur.unknownBackgroundOpacity,'no saved opacity is 100% ('..tostring(eff)..')')
+ LayersHold(1,'default')
+ local rows,first=Rows()
+ local values={};for _,item in ipairs(rows) do values[#values+1]=item.opacity end
+ table.sort(values)
+ expect(table.concat(values,',')=='50,60,70,80,90,100','Appearance lists the opacity choices 50-100% in tens ('..table.concat(values,',')..')')
+ local lead={};for i=1,3 do lead[i]=tostring(first[i] and first[i].opacity) end
+ expect(table.concat(lead,',')=='100,90,80',
+  'the first three Appearance rows (after any title) are opacity 100%, 90%, 80% ('..table.concat(lead,',')..')')
+ -- The real Settings window's Appearance page lists those rows first, with
+ -- the current 100% checked.
+ local SW=Nexus.SettingsWindow
+ local page=SW and type(SW.Rows)=='function' and SW.Rows('appearance') or {}
+ local same=#page>=3
+ for i=1,3 do if not (page[i] and first[i] and page[i].text==Plain(first[i].text)) then same=false end end
+ expect(same and page[1].checked==true and page[1].action~=nil,
+  'Settings > Appearance shows the opacity rows first, 100% checked ('..tostring(page[1] and page[1].text)..')')
+ local checked=0;for _,item in ipairs(rows) do if item.checked then checked=checked+1 end end
+ expect(checked==1 and Row(100) and Row(100).checked,'one opacity row is checked, and it is 100% (Default)')
+ Th.Refresh();Th.MenuItems();Nexus.Help.Show('faq')
+ expect(Settings()==before and NexusDB.settings[KEY]==nil,'reading, the menu and showing windows write no opacity')
+
+ -- b. An explicit choice from the menu row: saved through the owner, only that
+ -- key, and every background layer of every window follows at once.
+ -- R2 fixture: the harness gives no Button a font string (its __index answers
+ -- GetFontString with a no-op, harness.lua 6-9), so Theme's TextRegion finds
+ -- no text and T.StyleButton styles nothing; the Controls() record below was
+ -- empty and "buttons keep their alphas" was vacuous. One real styled Button,
+ -- set up exactly as section 4's tab (GetFontString returns the button), is
+ -- styled through T.StyleButton BEFORE the stats and control alphas are
+ -- recorded, so the no-growth check still compares only the opacity changes
+ -- and ControlsKept verifies a real button fill and text alpha.
+ local probe=CreateFrame('Button',nil,UIParent);probe:SetText('Probe')
+ probe.GetFontString=function() return probe end
+ Th.StyleButton(probe)
+ expect(probe._nexusDarkStyled==true and rawget(probe,'_v23bg')~=nil and rawget(probe,'_v23text')~=nil,
+  'SETUP: the probe button is styled by the appearance (fill and text colour recorded)')
+ local stats0=Th.Stats();local controls=Controls()
+ local card
+ for _,f in ipairs(Hh.frames) do if f._nexusThemeExempt and f.intensityBar then card=f end end
+ expect(card~=nil,'SETUP: the difficulty card is present')
+ local touched=0
+ local function Count(obj,names) for _,m in ipairs(names) do rawset(obj,m,function() touched=touched+1 end) end end
+ if card then
+  Count(card,{'SetBackdrop','SetBackdropColor','SetBackdropBorderColor','SetAlpha'})
+  local bar=card.intensityBar
+  Count(bar,{'SetAlpha','SetStatusBarColor','SetVertexColor','SetValue','SetMinMaxValues'})
+  for _,owner in ipairs({card,bar}) do
+   for _,region in ipairs(owner.regions or {}) do Count(region,{'SetAlpha','SetVertexColor','SetGradientAlpha','SetTexture'}) end
+  end
+ end
+ local unrelated=Without({[KEY]=true})
+ local row70=Row(70)
+ if row70 and type(row70.func)=='function' then
+  alphaLog={};row70.func();AlphaCalls('menu 70%');alphaLog=nil
+ else expect(false,'the 70% row can be chosen') end
+ eff,cur=Effective()
+ expect(NexusDB.settings[KEY]==70 and Without({[KEY]=true})==unrelated and NexusDB.settings.opacitySentinel=='keep',
+  'choosing 70% saves only '..KEY..' ('..tostring(NexusDB.settings[KEY])..')')
+ expect(eff==70 and cur.explicitBackgroundOpacity and NexusDB.settings.uiStyle==nil and NexusDB.settings.uiPalette==nil,
+  'it is in effect and the style and colour stay unchosen')
+ LayersHold(0.7,'70%')
+ ControlsKept(controls,'70%')
+ local checked70=0;for _,item in ipairs((Rows())) do if item.checked then checked70=checked70+1 end end
+ expect(checked70==1 and Row(70) and Row(70).checked,'the 70% row alone carries the check mark')
+ local outcome,message=Choose(50,'direct 50%')
+ expect(outcome=='durable' and type(message)=='string' and message~='','a direct choice reports Saved ('..tostring(outcome)..')')
+ LayersHold(0.5,'50%')
+ ControlsKept(controls,'50%')
+ local stats1=Th.Stats()
+ expect(stats1.textures==stats0.textures and stats1.hooks==stats0.hooks and stats1.windowsStyled==stats0.windowsStyled
+  and stats1.windowBases==stats0.windowBases and stats1.treeWalks==stats0.treeWalks,
+  'an opacity change repaints the registry and adds no texture, hook, window or walk')
+ expect(touched==0,'no opacity choice touches the difficulty card, its bar or ticks ('..touched..' calls)')
+
+ -- c. Out of bounds, off the steps, or not an integer: refused, nothing changes.
+ local kept=Settings()
+ for _,bad in ipairs({30,49,101,150,75,72.5,'80',0/0,true,{}}) do
+  -- D1 fixed: a correct refusal returns nil, which an and/or chain would lose.
+  local ok,result=true,'absent'
+  if type(Th.SetBackgroundOpacity)=='function' then ok,result=pcall(Th.SetBackgroundOpacity,bad) end
+  expect(ok and result==nil and Settings()==kept and Effective()==50,
+   'the value '..tostring(bad)..' is refused and changes nothing ('..tostring(result)..')')
+ end
+
+ -- d. Saved: a new session keeps it on every window.
+ Reopen()
+ expect(Effective()==50 and NexusDB.settings[KEY]==50,'50% is kept on a new session')
+ LayersHold(0.5,'50% after reload')
+
+ -- e. Reset: the Default row clears the key (never stores 100) and the look
+ -- is exactly the default again.
+ unrelated=Without({[KEY]=true})
+ local row100=Row(100)
+ if row100 and type(row100.func)=='function' then
+  alphaLog={};row100.func();AlphaCalls('Default row');alphaLog=nil
+ else expect(false,'the Default (100%) row can be chosen') end
+ expect(NexusDB.settings[KEY]==nil and Without({[KEY]=true})==unrelated and Effective()==100,
+  'the Default row clears only the saved opacity ('..tostring(NexusDB.settings[KEY])..')')
+ LayersHold(1,'after Reset')
+ Choose(80,'direct 80%')
+ outcome=Choose(nil,'Reset (nil)')
+ expect(outcome=='durable' and NexusDB.settings[KEY]==nil and Effective()==100,'SetBackgroundOpacity(nil) is Reset ('..tostring(outcome)..')')
+ -- The same choice and Reset through the real Settings window: Appearance
+ -- page, explicit row clicks (SettingsWindow.Activate re-reads the row).
+ local SW=Nexus.SettingsWindow
+ if SW and type(SW.Show)=='function' and type(SW.Activate)=='function' then
+  SW.Show('appearance');SW.Select('appearance')
+  local page=SW.Rows('appearance')
+  local untouched=Without({[KEY]=true})
+  alphaLog={}
+  local chose=page[2] and SW.Activate(2,page[2].text)
+  AlphaCalls('Settings 90%');alphaLog=nil
+  expect(chose and NexusDB.settings[KEY]==90 and Effective()==90 and Without({[KEY]=true})==untouched,
+   'Settings > Appearance, second row: 90% is saved and in effect ('..tostring(NexusDB.settings[KEY])..')')
+  LayersHold(0.9,'Settings 90%')
+  page=SW.Rows('appearance')
+  local reset=page[1] and SW.Activate(1,page[1].text)
+  expect(reset and NexusDB.settings[KEY]==nil and Effective()==100 and Without({[KEY]=true})==untouched,
+   'Settings > Appearance, first row (100%, Default) clears the saved opacity')
+  LayersHold(1,'Settings Reset')
+  if type(SW.Hide)=='function' then SW.Hide() end
+ else
+  expect(false,'SETUP: the Settings window offers Show, Select, Rows and Activate')
+ end
+
+ -- f. A saved value this build does not accept is shown as the default look,
+ -- named as kept, and never rewritten until the player chooses an opacity.
+ for _,bad in ipairs({'heavy',30,75,150,0/0,{70}}) do
+  Start(function(d) d.settings[KEY]=bad;d.settings.opacitySentinel='keep' end)
+  local label='saved '..tostring(type(bad)=='table' and 'table' or bad)
+  before=Settings()
+  eff,cur=Effective()
+  expect(eff==100 and cur.unknownBackgroundOpacity and not cur.explicitBackgroundOpacity,label..': shown as 100% and reported unknown')
+  LayersHold(1,label)
+  local named=0;for _,item in ipairs(Th.MenuItems()) do if item.text and item.text:find('it stays saved',1,true) then named=named+1 end end
+  local any=0;for _,item in ipairs((Rows())) do if item.checked then any=any+1 end end
+  expect(named==1 and any==0,label..': the menu names it as kept and checks no opacity ('..named..' named, '..any..' checked)')
+  Th.Refresh();Nexus.Help.Show('faq');Th.SetPalette('emerald')
+  expect(F.Serialize(NexusDB.settings[KEY])==F.Serialize(bad),label..': it stays saved through reading and another choice')
+  Reopen()
+  expect(F.Serialize(NexusDB.settings[KEY])==F.Serialize(bad) and Effective()==100,label..': and through a reload')
+  Choose(60,label..' then 60%')
+  expect(NexusDB.settings[KEY]==60 and Effective()==60,label..': an explicit choice replaces it')
+ end
+
+ -- g. A read-only saved root: its saved opacity is shown; a choice applies for
+ -- this session only and saved data is unchanged; a reload brings it back.
+ Start(function(d) d.settingsVersion=99;d.settings[KEY]=70 end)
+ before=Settings()
+ expect(Effective()==70,'a read-only root shows its saved 70% ('..tostring(Effective())..')')
+ LayersHold(0.7,'read-only 70%')
+ outcome,message=Choose(90,'read-only 90%')
+ expect(outcome=='session' and type(message)=='string' and message:find('this session only',1,true),
+  'on a read-only root the choice is for this session only ('..tostring(outcome)..')')
+ expect(Effective()==90 and Th.Current().sessionOnly and Settings()==before,'it applies now; saved data is unchanged')
+ LayersHold(0.9,'read-only session 90%')
+ Reopen()
+ expect(Effective()==70 and Settings()==before,'after a reload the saved 70% is back')
+
+ -- h. No settings owner: applied for this session, nothing saved.
+ Start()
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ Nexus.MainInternals.StoreAuthorityOwner=nil
+ outcome=Choose(60,'no owner 60%')
+ Nexus.MainInternals.StoreAuthorityOwner=owner
+ expect(outcome=='unavailable' and NexusDB.settings[KEY]==nil,'without an owner nothing is saved ('..tostring(outcome)..')')
+ expect(Effective()==60 and Th.Current().sessionOnly,'and the opacity applies for this session')
+ LayersHold(0.6,'no owner 60%')
+
+ -- i. Saved data still loading. The client sets NexusDB when saved data
+ -- loads; until then Store.Settings() serves its transient table (Store.lua
+ -- 2734-2744) and UpdateSettingsV1 answers {mode="session",reason="database"}
+ -- (2863-2868). The real path is used with NexusDB absent for the call and
+ -- restored at once: the choice applies now, and nothing reaches saved data.
+ Start(function(d) d.settings.opacitySentinel='keep' end)
+ local root=NexusDB
+ before=Settings()
+ NexusDB=nil
+ local okLoading,loading,loadingMessage=true,nil,nil
+ if type(Th.SetBackgroundOpacity)=='function' then
+  alphaLog={}
+  okLoading,loading,loadingMessage=pcall(Th.SetBackgroundOpacity,70)
+  AlphaCalls('loading 70%');alphaLog=nil
+ else
+  expect(false,'loading: T.SetBackgroundOpacity exists')
+ end
+ local okRead,loadingEffective=pcall(Effective)
+ if not okRead then loadingEffective=nil end
+ NexusDB=root
+ expect(okLoading and loading=='database' and type(loadingMessage)=='string' and loadingMessage:find('still loading',1,true),
+  'while saved data is loading the choice says so ('..tostring(loading)..')')
+ expect(loadingEffective==70,'and applies for this session ('..tostring(loadingEffective)..')')
+ expect(Settings()==before and NexusDB.settings[KEY]==nil,'and nothing reaches the saved data')
+ if #misses>0 then
+  local shown={};for i=1,math.min(#misses,60) do shown[i]=misses[i] end
+  error('v23 background opacity: '..#misses..' expectation(s) missed:\n'..table.concat(shown,'\n'),0)
+ end
+end
 print('PASS ui_theme_appearance: Vista/Amethyst by default, one Default row per style by painted colour, explicit and unknown choices kept, owner-routed writes, no repaint allocation, exempt card untouched checks='..checks)

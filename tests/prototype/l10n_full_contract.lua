@@ -43,22 +43,48 @@ local BLOCK='{kind = "block"}'
 
 -- 1. Cap: a complete measured UI catalog (thousands of meanings) fits a
 -- bounded cap; one more fails closed exactly as the 64-entry pilot did.
-check(type(L.MAX_BASE_ENTRIES)=='number' and L.MAX_BASE_ENTRIES==4096,'EXPECT the bounded full-UI cap is 4096 entries')
+-- v33 slice A: the bound is 5120 (4116 planned meanings with 1004 headroom).
+-- BOUND is restated here, not read from the runtime, so these fixtures test
+-- the real loader against the intended boundary. load() keeps every byte of
+-- the real file, its MAX_BASE_ENTRIES line included, and replaces only the
+-- literal declaration data between the registry markers. The fixtures are
+-- 5120 declarations, English entries and optional-pack entries (accepted
+-- whole) and 5121 of each (refused whole by the existing fail-closed rules).
+-- A runtime still at 4096 declares nothing and adopts nothing at 5120.
+local BOUND=5120
 do
- local cap=L.MAX_BASE_ENTRIES
- local decl,eng={},{}
- for i=1,cap do local k='cap.entry_'..i;decl[k]=TEXT;eng[k]='Entry '..i end
- local full=load(decl,eng,nil)
+ local decl,eng,pack={},{},{}
+ for i=1,BOUND do local k='cap.entry_'..i;decl[k]=TEXT;eng[k]='Entry '..i;pack[k]='Eintrag '..i end
+ local full=load(decl,eng,{deDE={name='Deutsch',entries=pack}})
  local b=full.Diagnostics().base
- check(b.present and b.accepted==cap and b.rejected==0 and not b.oversized and #full.Keys()==cap,'EXPECT exactly cap declared entries are admitted')
- check(full.Text('cap.entry_'..cap)=='Entry '..cap,'EXPECT the last entry at the cap resolves')
- eng['cap.entry_'..(cap+1)]='One more'
+ check(b.present and b.accepted==BOUND and b.rejected==0 and not b.oversized and #full.Keys()==BOUND,
+  'EXPECT exactly '..BOUND..' declared entries are admitted (accepted '..tostring(b.accepted)..', undeclared '
+  ..tostring(b.undeclared)..', oversized '..tostring(b.oversized)..')')
+ check(full.Text('cap.entry_'..BOUND)=='Entry '..BOUND,'EXPECT the last entry at the cap resolves')
+ -- Languages of the real enum without a supplied pack count as refused in
+ -- both loads, so the pack facts are compared between the two loads.
+ local function Row(packs,id) for _,r in ipairs(packs.rows) do if r.id==id then return r end end end
+ local p0=full.Diagnostics().packs
+ local row=Row(p0,'deDE')
+ check(p0.adopted==1 and row and row.accepted==BOUND and row.rejected==0,
+  'EXPECT a '..BOUND..'-entry optional pack is adopted whole (adopted '..tostring(p0.adopted)..', deDE '
+  ..tostring(row and row.accepted)..')')
+ pack['cap.entry_'..(BOUND+1)]='Noch einer'
+ local packOver=load(decl,eng,{deDE={name='Deutsch',entries=pack}})
+ local p=packOver.Diagnostics().packs;b=packOver.Diagnostics().base
+ check(p.adopted==0 and p.refused==p0.refused+1 and Row(p,'deDE')==nil and b.accepted==BOUND and not b.oversized,
+  'GUARD a pack of cap+1 entries is refused whole; the English base is unaffected')
+ pack['cap.entry_'..(BOUND+1)]=nil
+ eng['cap.entry_'..(BOUND+1)]='One more'
  local over=load(decl,eng,nil);b=over.Diagnostics().base
- check(b.oversized and b.accepted==0 and b.rejected==cap+1 and over.Text('cap.entry_1')==U,'GUARD cap+1 English entries fail closed')
- decl['cap.entry_'..(cap+1)]=TEXT;eng['cap.entry_'..(cap+1)]=nil
+ check(b.oversized and b.accepted==0 and b.rejected==BOUND+1 and over.Text('cap.entry_1')==U,'GUARD cap+1 English entries fail closed')
+ decl['cap.entry_'..(BOUND+1)]=TEXT;eng['cap.entry_'..(BOUND+1)]=nil
  local none=load(decl,eng,nil);b=none.Diagnostics().base
- check(not b.oversized and b.accepted==0 and b.undeclared==cap and #none.Keys()==0,'GUARD more than cap declarations declare nothing')
+ check(not b.oversized and b.accepted==0 and b.undeclared==BOUND and #none.Keys()==0,'GUARD more than cap declarations declare nothing')
 end
+-- The real runtime constant agrees with the bound the fixtures above proved.
+check(type(L.MAX_BASE_ENTRIES)=='number' and L.MAX_BASE_ENTRIES==BOUND,
+ 'EXPECT the bounded full-UI cap is '..BOUND..' entries (runtime '..tostring(L.MAX_BASE_ENTRIES)..')')
 
 -- 2. Block kind: one meaning in several lines (LF only), at most 1024 bytes.
 check(L.MAX_BLOCK_BYTES==1024,'EXPECT block limit is 1024 bytes')
@@ -242,7 +268,7 @@ end
 -- templates are lines = true with result limit 2048, two static texts are
 -- blocks, the offer paragraph's three keys each fit raw 1024 and, with the
 -- largest text slot (1024 bytes), render within 2048. The catalog stays at or
--- below the unchanged 4096 cap.
+-- below the bounded cap (v33 slice A: 5120, section 1's BOUND).
 do
  local function Declared(key)
   return source:match('\n    %["'..key:gsub('%.','%%.')..'"%] = (%b{}),')
@@ -262,12 +288,117 @@ do
  check(Declared('editor.reason.every_saved_build_already_holds_a_plan_this')=='{kind = "text"}','S16 contract: RU-18 keeps its text contract (justified, fits 256)')
  local english=Nexus.LocalizationEnglish
  local n=0;for _ in pairs(english) do n=n+1 end
- check(n<=L.MAX_BASE_ENTRIES and L.MAX_BASE_ENTRIES==4096,'S16 contract: the catalog ('..n..') stays within the unchanged 4096 cap')
+ check(n<=BOUND and L.MAX_BASE_ENTRIES==BOUND,'S16 contract: the catalog ('..n..') stays within the bounded '..BOUND..' cap')
  local seg1,seg2,seg3=english['orb.recovery.offer_open_proposed'],english['orb.recovery.offer_open_proposed_exits'],english['orb.recovery.offer_open_proposed_route']
  check(#seg1<=1024 and #seg2<=1024 and #seg3<=1024,'S16 contract: each offer paragraph is within raw 1024')
  check(1024-#'{echo}'+1024<=2048,'S16 contract: paragraph 1 renders within 2048 with a 1024-byte Echo slot')
  local shown,source1=L.Format('orb.recovery.offer_open_proposed',{echo=string.rep('e',1024)})
  check(source1~='unavailable' and #shown<=2048,'S16 contract: paragraph 1 with a 1024-byte Echo name renders ('..#shown..' bytes)')
+end
+
+-- v33 slice A: the six current packs are valid partial packs. Root's
+-- mechanical key-set measurement of exact 35 (PACK_KEY_SHAPE, no translated
+-- value read) shows each lacking exactly the 18 meanings below. Here, from the
+-- loaded real data (keys only), each real pack must lack exactly those 18
+-- English keys and hold no key outside English. Then the REAL
+-- core/Localization.lua, loaded whole with the real English and packs, is run
+-- once per language with that language active: each of the 18 must show its
+-- exact English through the documented fallback (source "base", reason
+-- "missing_candidate"), and a dated cohort key must show the pack's own entry
+-- (source "candidate"), so the language is really active. This proves the
+-- fallback only. It is not a translation, and the 18 stay missing: coverage,
+-- language and native gates remain OPEN.
+-- v39 (B/C RED): the 20 accepted new meanings (v33 PLAN newKeys20: 4 opacity
+-- rows of the Appearance menu, 16 FAQ question/answer keys) are English keys
+-- with their exact accepted text and declared kind, and no pack holds them
+-- yet: each pack then lacks exactly the 18 legacy plus these 20 (38), and each
+-- of the 38 shows its exact English through the fallback in every language.
+-- The text is restated here (PLAN / FAQ_DRAFT r3), not read from production.
+do
+ local LEGACY18={'command.chat.reference_random_roll','command.chat.reference_random_roll_limits',
+  'command.chat.reference_random_roll_rule','editor.button.rarity_mode','editor.chat.manage_restored_from_first_run',
+  'editor.menu.rarity_mode','editor.menu.rarity_mode_state','panel.button.hub_builds','panel.button.hub_wishlist',
+  'panel.heading.your_offers','panel.label.offer_wrong_quality','panel.value.wishlist_rarity_mode',
+  'readout.body.scope_random_roll','readout.body.scope_random_roll_limits','readout.body.scope_random_roll_rule',
+  'readout.menu.random_roll','readout.menu.random_roll_limits','readout.menu.random_roll_rule'}
+ local NEW20={
+  {'theme.menu.opacity_choice','template','Background opacity: {percent}%'},
+  {'theme.menu.opacity_default','text','Background opacity: 100% (default)'},
+  {'theme.menu.unknown_opacity','template','Saved background opacity "{value}" is not in this build; it stays saved.'},
+  {'theme.tooltip.opacity','text','Changes only how see-through Nexus window backgrounds are; text, buttons and the difficulty card stay solid. 100% is the default look and clears the choice.'},
+  {'help.label.faq_echo_not_counted_question','text',"Why doesn't an Echo I can see count for my Wishlist?"},
+  {'help.body.faq_echo_not_counted_answer','block','A target is one exact Echo at one exact quality. A lower-quality copy does not count for a higher-quality target; on the panel, an offer at another quality can show Wrong quality. An Echo your Wishlist does not ask for never counts. Only copies you have count, up to the copies the plan asks for; locked copies count only up to its locked targets. Copies above a target are extras. See the Wishlists tab above.'},
+  {'help.label.faq_orb_start_maximum_question','text','Does Auto ON start an Orb run, and what is the maximum?'},
+  {'help.body.faq_orb_start_maximum_answer','block','No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and click Start; starting it turns ordinary Automation off and does not turn it back on. The maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, which does not change during a run. Until you type an amount, it follows your confirmed Orb balance, up to 1000.'},
+  {'help.label.faq_orb_blocked_question','text',"Why can't I start an Orb run, or why did it stop early?"},
+  {'help.body.faq_orb_blocked_answer','block','Open the Orb window: it shows what is blocked, then what you can do now. An Orb action without a confirmed result blocks new runs until it settles, or until you use Continue... where it is offered. A run ends when your rolled targets are complete or no safe source is left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.'},
+  {'help.label.faq_auto_replace_build_question','text','Can Auto replace a Saved Build that has Echoes I value?'},
+  {'help.body.faq_auto_replace_build_answer','block','Yes, while Auto is ON. After a finished run, Nexus may save it over your active Saved Build when overall Wishlist progress is higher, or equal with cleanup. It counts Wishlist progress, not Orbs spent, so an Echo you got with Orbs can be lost. At level 80 after a finished run, turning Auto ON or changing the assigned Wishlist can lead to a replacement without a new run. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. Nexus cannot undo a save, and Unassign does not restore a Saved Build. There is no separate automatic-save switch: keep Auto OFF to leave it unchanged.'},
+  {'help.label.faq_hidden_panel_reload_question','text','Does a hidden panel stay hidden after a reload?'},
+  {'help.body.faq_hidden_panel_reload_answer','block',"Yes. Hide Nexus Panel is saved as your choice, so the panel stays hidden after a reload or login. Type /nexus panel to show it again. If Nexus's saved data is read-only, the choice lasts this session only. Hiding changes no Auto setting."},
+  {'help.label.faq_library_empty_question','text','Why is the Build Library empty?'},
+  {'help.body.faq_library_empty_answer','block','Check the scope: All Shared, or Mine (your Saved Builds and shared listings). The class button can limit the list to your current class; click it to switch between your class and all classes. Require both DPS records lists only builds with both a Training Dummy and a Lich King record this client holds; uncheck it to drop that requirement. Updating results... means a filter change is still applying, and a gray Explore control means shared views are loading or unavailable (/nexus loading). The list shows only what this client has stored. See the Sharing tab above.'},
+  {'help.label.faq_before_reload_question','text','Something went wrong. What do I do before a reload?'},
+  {'help.body.faq_before_reload_answer','block','Do not reload, relog or change builds first. Type /nexus report, click Copy summary and paste it into your report. Add your exact build (/nexus update shows it), what happened versus what you expected, and Auto ON or OFF. If reporting fails or says Not prepared, say so and send what you have. Never post the report file in public. See the Problems tab above.'},
+  {'help.label.faq_random_roll_leveling_question','text','Can Nexus pick Echoes while I level without a Wishlist?'},
+  {'help.body.faq_random_roll_leveling_answer','block',"Yes, with Random Roll, an optional mode. Type /nexus leveling on or /nexus leveling off; /nexus leveling alone shows whether it is ON or OFF. It picks only when no Wishlist is assigned, at levels 2 to 79, with Auto ON and its Take permission allowed. Turning it on does not turn Auto ON. It takes the highest-rarity Echo offered (the first offer on a tie), not a random one. If an offer's rarity is unknown, it waits: pick by hand. It never rerolls, banishes, freezes, spends, saves or uses Orbs, and it makes no new pick at level 80. An assigned Wishlist always uses the normal rules instead."},
+ }
+ -- The one count slot of the 20 (theme.menu.opacity_choice percent).
+ local COUNT={['theme.menu.opacity_choice']={percent=true}}
+ local MISSING={}
+ for _,key in ipairs(LEGACY18) do MISSING[#MISSING+1]=key end
+ for _,row in ipairs(NEW20) do MISSING[#MISSING+1]=row[1] end
+ local LANGS={'frFR','deDE','esES','plPL','ptBR','ruRU'}
+ local missing={};for _,key in ipairs(MISSING) do missing[key]=true end
+ check(#LEGACY18==18 and #NEW20==20 and #MISSING==38,'SETUP the 18 measured legacy keys and the 20 accepted new keys')
+ for _,key in ipairs(LEGACY18) do check(type(realData[key])=='string','SETUP '..key..' is a current English key') end
+ for _,row in ipairs(NEW20) do
+  check(realData[row[1]]==row[3] and L.Kind(row[1])==row[2],
+   'EXPECT v39: '..row[1]..' is a declared '..row[2]..' with its exact accepted English (English '..type(realData[row[1]])..', kind '..tostring(L.Kind(row[1]))..')')
+ end
+ for _,id in ipairs(LANGS) do
+  local pack=type(realPacks)=='table' and realPacks[id] or nil
+  check(type(pack)=='table' and type(pack.entries)=='table','SETUP the real '..id..' pack is loaded')
+  local lacks,other,extra=0,{},0
+  for key in pairs(realData) do
+   if pack.entries[key]==nil then lacks=lacks+1;if not missing[key] then other[#other+1]=key end end
+  end
+  for key in pairs(pack.entries) do if realData[key]==nil then extra=extra+1 end end
+  table.sort(other)
+  check(lacks==38 and #other==0 and extra==0,'EXPECT the real '..id..' pack lacks exactly the 18 legacy and 20 new English keys and no other, with no extra key ('
+   ..lacks..' lacking, other: '..table.concat(other,', ')..'; '..extra..' extra)')
+ end
+ local function LoadReal()
+  local chunk=assert(loadstring(source,'=core/Localization.lua'))
+  Nexus.LocalizationEnglish,Nexus.LocalizationPacks=realData,realPacks
+  local ok,err=pcall(chunk);local module=Nexus.Localization
+  Nexus.Localization,Nexus.LocalizationEnglish,Nexus.LocalizationPacks=real,realData,realPacks
+  assert(ok,err)
+  return module
+ end
+ for _,id in ipairs(LANGS) do
+  local m=LoadReal()
+  check(m.InitializeActiveLanguage(id)==id,'SETUP '..id..' is the session language')
+  local t,s=m.Text('panel.button.options')
+  check(s=='candidate' and t==realPacks[id].entries['panel.button.options'],'SETUP '..id..': a dated cohort key shows the pack entry, so '..id..' is active')
+  for _,key in ipairs(MISSING) do
+   local english=realData[key]
+   local args,shown={},{}
+   for field in english:gmatch('{(%w+)}') do
+    if COUNT[key] and COUNT[key][field] then args[field]={known=true,value=70};shown[field]='70'
+    else args[field]='v_'..field;shown[field]='v_'..field end
+   end
+   local r
+   if next(args) then
+    local want=(english:gsub('{(%w+)}',shown))
+    t,s,r=m.Format(key,args)
+    check(t==want and s=='base' and r=='missing_candidate','EXPECT '..id..' '..key..' shows its exact English (fallback): '..tostring(s)..' '..tostring(r))
+   else
+    t,s,r=m.Text(key)
+    check(t==english and s=='base' and r=='missing_candidate','EXPECT '..id..' '..key..' shows its exact English (fallback): '..tostring(s)..' '..tostring(r))
+   end
+  end
+ end
 end
 
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')

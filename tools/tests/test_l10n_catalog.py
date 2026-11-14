@@ -406,13 +406,25 @@ CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "P
                              "nativeAcceptance": "NOT_RUN"}
 
 
-# Full visible-UI scope (#143-#148): the reviewed catalog holds 4078 English
-# meanings (the runtime cap is 4096). The dated 28 above stay first and
-# unchanged; the generated rows that follow them are read from
-# KEY_CONTEXT.json with the json module, apart from the tool under test, so
-# the English file and the context rows are compared, not the tool with
-# itself. Each complete current pack holds an entry for every one of them.
-CURRENT_FULL_UI_KEYS = 4078
+# Full visible-UI scope (#143-#148): the reviewed catalog holds 4096 English
+# meanings (v33 slice A: the bounded runtime limit is 5120, SCHEMA_MAX_ENTRIES
+# below). The dated 28 above stay first and unchanged; the generated rows that
+# follow them are read from KEY_CONTEXT.json with the json module, apart from
+# the tool under test, so the English file and the context rows are compared,
+# not the tool with itself. Each complete current pack holds an entry for
+# every one of them.
+# v33 slice A: 4096 is the English and declaration count of exact 35
+# (ea812b41). It was 4078 when the context last matched; 18 later meanings
+# (CONTEXT_SHAPE legacyMissingKeys) reached English and the declarations
+# without context rows. Slice A adds those 18 rows and no meaning, so after A
+# English = declarations = context = 4096. Until then every test here that
+# reads full_english_oracle() reports the real 18-row gap.
+# v39 (B/C RED): the 20 accepted new meanings (v33 PLAN newKeys20: 4 opacity,
+# 16 FAQ; SLICE_BC_NEW_KEYS below) are appended after the 4096 in English,
+# declaration and context order, so the reviewed catalog holds 4116; the
+# bounded runtime limit stays 5120. Until B/C every test that reads
+# full_english_oracle() reports the 20 missing rows.
+CURRENT_FULL_UI_KEYS = 4116
 
 
 def current_english_oracle():
@@ -443,6 +455,65 @@ def full_english_oracle():
     if len(table) != CURRENT_FULL_UI_KEYS:
         raise AssertionError("the current catalog holds %d meanings" % len(table))
     return table
+
+
+# v33 slice A: the English count (CURRENT_FULL_UI_KEYS, 4096) is kept apart
+# from the protected pack cohort. Root's mechanical key-set measurement of
+# exact 35 (PACK_KEY_SHAPE: counts and key sets only, no translated value read)
+# shows each of the six current packs holding 4078 entries, the historical
+# translated cohort, and lacking exactly the 18 English meanings below, with no
+# extra key. The documented contract of tools/l10n_catalog.py allows a valid
+# partial pack: a missing entry is reported as missing (technicalCatalog
+# entryPresence 'PARTIAL') and resolves to the English base, never as a
+# translation. This records that measured state only. It does not bless any
+# other missing key, deliver or review a translation, or close the coverage,
+# language or native gates, which stay OPEN. A pack that loses a cohort key,
+# gains any key or lacks any other English key fails, and the cohort's order
+# and exact value-map pins (CURRENT_PACK_VALUE_MAPS) are unchanged.
+CURRENT_PACK_COHORT_KEYS = 4078
+SLICE_A_PACK_MISSING_KEYS = (
+    "command.chat.reference_random_roll", "command.chat.reference_random_roll_limits",
+    "command.chat.reference_random_roll_rule", "editor.button.rarity_mode",
+    "editor.chat.manage_restored_from_first_run", "editor.menu.rarity_mode",
+    "editor.menu.rarity_mode_state", "panel.button.hub_builds", "panel.button.hub_wishlist",
+    "panel.heading.your_offers", "panel.label.offer_wrong_quality",
+    "panel.value.wishlist_rarity_mode", "readout.body.scope_random_roll",
+    "readout.body.scope_random_roll_limits", "readout.body.scope_random_roll_rule",
+    "readout.menu.random_roll", "readout.menu.random_roll_limits",
+    "readout.menu.random_roll_rule",
+)
+# v39 (B/C): the 20 accepted new meanings, in their appended order. No pack
+# holds them until competent translations are delivered (no Pack is written
+# here), so each pack then lacks exactly these 20 and the 18 above (38). That
+# is the expected partial state only: coverage, language and native gates stay
+# OPEN, and no other missing key is accepted.
+SLICE_BC_NEW_KEYS = (
+    "theme.menu.opacity_choice", "theme.menu.opacity_default", "theme.menu.unknown_opacity",
+    "theme.tooltip.opacity",
+    "help.label.faq_echo_not_counted_question", "help.body.faq_echo_not_counted_answer",
+    "help.label.faq_orb_start_maximum_question", "help.body.faq_orb_start_maximum_answer",
+    "help.label.faq_orb_blocked_question", "help.body.faq_orb_blocked_answer",
+    "help.label.faq_auto_replace_build_question", "help.body.faq_auto_replace_build_answer",
+    "help.label.faq_hidden_panel_reload_question", "help.body.faq_hidden_panel_reload_answer",
+    "help.label.faq_library_empty_question", "help.body.faq_library_empty_answer",
+    "help.label.faq_before_reload_question", "help.body.faq_before_reload_answer",
+    "help.label.faq_random_roll_leveling_question", "help.body.faq_random_roll_leveling_answer",
+)
+PACK_MISSING_KEYS = tuple(sorted(SLICE_A_PACK_MISSING_KEYS + SLICE_BC_NEW_KEYS))
+
+
+def current_pack_cohort(oracle):
+    """The protected pack cohort: every current English key of the oracle
+    except the 38 expected missing ones (18 legacy, 20 new), in English
+    (context) order."""
+    missing = set(PACK_MISSING_KEYS)
+    if (len(SLICE_A_PACK_MISSING_KEYS) != 18 or len(SLICE_BC_NEW_KEYS) != 20 or len(missing) != 38
+            or not missing <= set(oracle)):
+        raise AssertionError("the expected missing keys are 38 distinct current English keys")
+    cohort = [key for key in oracle if key not in missing]
+    if len(cohort) != CURRENT_PACK_COHORT_KEYS:
+        raise AssertionError("the protected pack cohort holds %d keys" % len(cohort))
+    return cohort
 
 
 def pack_value_map_sha256(entries):
@@ -1536,9 +1607,13 @@ class CatalogParserGrammar(unittest.TestCase):
         packs = self.catalog.parse_packs(data)
         self.assertIs(type(packs), dict)
         self.assertEqual(list(packs), ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"])
-        # Full visible-UI scope: every current English key, in English source
-        # order, with exactly the selected draft values of each language.
-        keys = list(full_english_oracle())
+        # Full visible-UI scope: the protected cohort of current English keys,
+        # in English source order, with exactly the selected draft values of
+        # each language; the English keys it lacks are exactly the 18 measured
+        # ones (v33 slice A, SLICE_A_PACK_MISSING_KEYS) and the 20 new ones (v39
+        # B/C, SLICE_BC_NEW_KEYS), with no extra key.
+        english_keys = list(full_english_oracle())
+        keys = current_pack_cohort(english_keys)
         autonyms = {row[0]: row[3] for row in EXPECTED_PRODUCTS[1:]}
         for pack_id, pack in packs.items():
             with self.subTest(pack_id):
@@ -1546,7 +1621,10 @@ class CatalogParserGrammar(unittest.TestCase):
                 self.assertEqual(pack["name"], autonyms[pack_id])
                 self.assertEqual(pack["name"], CATALOG_CURRENT_PACKS[pack_id]["name"])
                 self.assertEqual(list(pack["entries"]), keys)
-                self.assertEqual(len(pack["entries"]), CURRENT_FULL_UI_KEYS)
+                self.assertEqual(len(pack["entries"]), CURRENT_PACK_COHORT_KEYS)
+                self.assertEqual(sorted(set(english_keys) - set(pack["entries"])),
+                                 sorted(PACK_MISSING_KEYS))
+                self.assertEqual(sorted(set(pack["entries"]) - set(english_keys)), [])
                 self.assertLessEqual(set(CATALOG_CURRENT_PACKS[pack_id]["entries"]), set(keys))
                 self.assertEqual(pack_value_map_sha256(pack["entries"]),
                                  CURRENT_PACK_VALUE_MAPS[pack_id])
@@ -1685,9 +1763,13 @@ SCHEMA_STATUS = "IMPLEMENTED_DRAFT_REVIEW_PENDING"
 SCHEMA_OLD_STATUS = "PARSER_ONLY_" + "FULL_VALIDATION_PENDING"
 SCHEMA_CHARGE = "readout.charge_counts"
 # The runtime MAX_BASE_ENTRIES of core/Localization.lua (full visible-UI
-# scope; it was 64 for the pilot cohort). The cap and cap + 1 controls below
-# use it.
-SCHEMA_MAX_ENTRIES = 4096
+# scope; it was 64 for the pilot cohort, then 4096). The cap and cap + 1
+# controls below use it. v33 slice A: the bounded limit is 5120 (4116 planned
+# meanings with 1004 headroom). This is an independent restatement, not read
+# from the tool: the 5120-entry English and pack fixtures must be accepted by
+# the unchanged tool code and 5121 refused (english-too-many,
+# pack-too-many-entries). A tool still at 4096 refuses the 5120 fixtures.
+SCHEMA_MAX_ENTRIES = 5120
 # C1, Unicode spaces, line separator, zero-width, bidi, combining, BOM inside
 # text and noncharacters: scalars the runtime text contract does not exclude.
 SCHEMA_ALLOWED_SCALARS = (
@@ -1871,9 +1953,13 @@ class CatalogSchemaApi(unittest.TestCase):
                          list(oracle.items()))
         self.assertEqual(current["release"], self.current_release)
         self.assertEqual(list(current["packs"]), PACK_IDS)
+        cohort = current_pack_cohort(list(oracle))
         for pack_id, pack in current["packs"].items():
             with self.subTest(pack_id):
-                self.assertEqual(list(pack["entries"]), list(oracle))
+                # v33 slice A: the protected cohort, lacking exactly the 18.
+                self.assertEqual(list(pack["entries"]), cohort)
+                self.assertEqual(sorted(set(oracle) - set(pack["entries"])),
+                                 sorted(PACK_MISSING_KEYS))
                 self.assertLessEqual(set(CURRENT_PACK_KEYS), set(pack["entries"]))
                 self.assertEqual(pack["name"], CATALOG_CURRENT_PACKS[pack_id]["name"])
                 self.assertEqual(pack_value_map_sha256(pack["entries"]),
@@ -3630,11 +3716,18 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual(list(result["packs"]), PACK_IDS)
         # Independent of the report: declared and placeholder entries are
         # byte-identical to their English, every draft entry differs from it.
+        # v33 slice A: each pack is the protected cohort (every English key
+        # but the 18 measured missing ones); the 18 are reported as missing,
+        # every English key is still reported (denominator), and none of the
+        # 18 is counted as translated.
+        cohort = current_pack_cohort(list(oracle))
+        present = sorted(cohort)
+        missing = sorted(PACK_MISSING_KEYS)
         for pack_id, pack in result["packs"].items():
-            draft, declared, placeholder = current_categories(self.release, pack_id, keys)
+            draft, declared, placeholder = current_categories(self.release, pack_id, present)
             with self.subTest(pack_id, part="values"):
-                self.assertEqual(list(pack["entries"]), list(oracle))
-                self.assertEqual([key for key in keys if pack["entries"][key] == oracle[key]],
+                self.assertEqual(list(pack["entries"]), cohort)
+                self.assertEqual([key for key in present if pack["entries"][key] == oracle[key]],
                                  sorted(declared + placeholder))
         report = self.catalog.catalog_report(*self.arguments())
         self.assertEqual((report["englishBaseline"]["keyCount"], report["englishBaseline"]["keys"]),
@@ -3646,22 +3739,23 @@ class CatalogCurrentSource(unittest.TestCase):
                 self.assertEqual(list(row["counts"]), list(REPORT_CATEGORIES))
                 for category in REPORT_CATEGORIES:
                     self.assertEqual(row["counts"][category], len(row["keys"][category]), category)
-                draft, declared, placeholder = current_categories(self.release, row["productId"], keys)
+                draft, declared, placeholder = current_categories(self.release, row["productId"], present)
                 self.assertEqual((row["denominator"], row["entriesPresent"]),
-                                 (len(keys), len(keys)))
+                                 (len(keys), len(present)))
                 self.assertEqual(row["reconciliation"],
                                  {"denominator": len(keys), "inDenominatorTotal": len(keys)})
                 self.assertEqual(row["keys"]["draft_unreviewed"], draft)
                 self.assertEqual(row["keys"]["reviewed_legitimately_identical"], declared)
                 self.assertEqual(row["keys"]["deliberate_english_placeholder"], placeholder)
-                self.assertEqual(row["keys"]["missing"], [])
+                self.assertEqual(row["keys"]["missing"], missing)
                 self.assertEqual(len(declared), CURRENT_DECLARED_COUNTS[row["productId"]])
                 for category in REPORT_CATEGORIES:
                     if category not in ("draft_unreviewed", "reviewed_legitimately_identical",
-                                        "deliberate_english_placeholder"):
+                                        "deliberate_english_placeholder", "missing"):
                         self.assertEqual(row["keys"][category], [], category)
                 self.assertEqual(row["declarationsApplied"], len(declared))
-        self.assertEqual(report_reasons(report, "entries-missing"), [])
+        self.assertEqual([(r["subject"], r["keys"]) for r in report_reasons(report, "entries-missing")],
+                         [(pack_id, missing) for pack_id in PACK_IDS])
         self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
                          PACK_IDS)
         # The report states a category reason only for a pack whose list is
@@ -3925,17 +4019,20 @@ class CatalogCurrentSource(unittest.TestCase):
             with self.subTest(row["productId"]):
                 self.assertEqual((row["denominator"], row["reconciliation"]["inDenominatorTotal"]),
                                  (len(keys), len(keys)))
-                draft, declared, placeholder = current_categories(self.release, row["productId"], actual)
+                # v33 slice A: the actual packs are the protected cohort; the
+                # 18 measured English keys stay missing in every pack.
+                present = sorted(current_pack_cohort(full_english_oracle()))
+                draft, declared, placeholder = current_categories(self.release, row["productId"], present)
                 if row["productId"] == "frFR":
-                    draft, missing = sorted(draft + [extra]), []
+                    draft, missing = sorted(draft + [extra]), sorted(PACK_MISSING_KEYS)
                 else:
-                    missing = [extra]
+                    missing = sorted(list(PACK_MISSING_KEYS) + [extra])
                 self.assertEqual(row["keys"]["draft_unreviewed"], draft)
                 self.assertEqual(row["keys"]["missing"], missing)
                 self.assertEqual(row["keys"]["reviewed_legitimately_identical"], declared)
                 self.assertEqual(row["keys"]["deliberate_english_placeholder"], placeholder)
                 self.assertEqual(row["entriesPresent"],
-                                 len(actual) + (1 if row["productId"] == "frFR" else 0))
+                                 len(present) + (1 if row["productId"] == "frFR" else 0))
         self.assertEqual(report["families"][0]["adoptedKeys"], hud + [extra])
         self.assertEqual(report["families"][0]["adoptedKeys"][:len(CURRENT_HUD_ADOPTED_KEYS)],
                          CURRENT_HUD_ADOPTED_KEYS)
@@ -3973,12 +4070,15 @@ class CatalogCurrentSource(unittest.TestCase):
                 self.assertEqual([row["sha256"] for row in record["report"]["inputs"]],
                                  [hashlib.sha256(data).hexdigest() for data in before[:4]])
                 technical = record["technicalCatalog"]
+                # v33 slice A: valid partial packs. Each lacks exactly the 18
+                # measured keys; no translation is claimed for them.
+                missing = len(PACK_MISSING_KEYS)
                 self.assertEqual((technical["validity"], technical["englishKeys"],
                                   technical["missingEntries"], technical["entryPresence"]),
-                                 ("VALID", count, 0, "EVERY_CURRENT_ENGLISH_KEY_PRESENT"))
+                                 ("VALID", count, missing * len(PACK_IDS), "PARTIAL"))
                 self.assertEqual([(row["productId"], row["denominator"], row["entriesPresent"])
                                   for row in technical["products"]],
-                                 [(pack_id, count, count) for pack_id in PACK_IDS])
+                                 [(pack_id, count, CURRENT_PACK_COHORT_KEYS) for pack_id in PACK_IDS])
                 readiness = record["externalReadiness"]
                 self.assertEqual((readiness["state"], readiness["externalAcceptance"],
                                   readiness["reportCompletenessState"]),
@@ -3987,7 +4087,7 @@ class CatalogCurrentSource(unittest.TestCase):
 
 # Full visible-UI scope (Refs #143-#148): the input memo of the tool
 # (_memoized) keeps a successful parse or strict verdict of exact input bytes,
-# because every seam re-parses the 4078-key catalog. These controls are
+# because every seam re-parses the 4096-key catalog. These controls are
 # causal: any changed byte is a new key (changed file), a kept result is never
 # served for other bytes nor changed by a caller (stale cache), a failure is
 # never kept, the memo stays bounded (least recently used first out), a kept

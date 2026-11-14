@@ -150,7 +150,9 @@ C.scenario('A6 Options > Auto explained opens every disclosure with the current 
  row.func(row)
  local f=NexusHelpWindow
  C.expect(f and f:IsShown() and V.Plain(f.title:GetText()):find('Auto',1,true)~=nil,'A6: it opens the Help Auto page',f and f.title:GetText())
- local body=V.Plain(f.body:GetText())
+ -- The whole shown Auto page (all of Help's parts, V.HelpShown), with the
+ -- "Auto right now" details appended at its end.
+ local body=V.HelpShown(f)
  for _,want in ipairs({'Automation and enabled actions','consume charges or change saved-build state',
   'Locked-Echo slot','management is a separate opt-in','Orb runs require separate approval',
   'OFF keeps recommendations visible; it does not turn off Sync','Later improvement is not guaranteed',
@@ -162,7 +164,11 @@ C.scenario('A6 Options > Auto explained opens every disclosure with the current 
  local page=Nexus.Help.Pages
  local rolling
  for _,p in ipairs(page) do if p.id=='rolling' then rolling=p end end
- C.guard(rolling and body:find(V.Plain(rolling.text),1,true)==1,'A6: the complete Auto reference stays, first')
+ -- Accepted v23 form: the page's own title heading, a blank line, then the
+ -- complete Auto reference, before the appended details.
+ local L=Nexus.Localization
+ local title=rolling and (L and L.Text and rolling.titleKey and L.Text(rolling.titleKey) or rolling.title)
+ C.guard(rolling and body:find(title..'\n\n'..rolling.text,1,true)==1,'A6: the complete Auto reference stays, first, under its title')
  Nexus.Help.Hide()
 end)
 
@@ -171,7 +177,7 @@ C.scenario('A7 Options > Questions (FAQ) opens short answers; its tab fits',func
  if not C.expect(row~=nil and type(row.func)=='function','A7: Options offers Questions (FAQ)') then return end
  row.func(row)
  local f=NexusHelpWindow
- local body=V.Plain(f.body:GetText())
+ local body=V.HelpShown(f)
  C.expect(f:IsShown() and V.Plain(f.title:GetText()):find('Questions',1,true)~=nil,'A7: it opens the FAQ page',f.title:GetText())
  for _,want in ipairs({'What do I do next?','assigned Wishlist','example','Auto','Sync','Pause Nexus for this session',
   'Hide Nexus Panel','get back','memory','Main panel size'}) do

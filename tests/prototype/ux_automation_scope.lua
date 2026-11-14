@@ -96,7 +96,9 @@ local function AutoTooltip()
   if item.text=='Auto explained (full details)' and type(item.func)=='function' then
    item.func(item)
    if _G.NexusHelpWindow and NexusHelpWindow:IsShown() then
-    lines[#lines+1]=NexusHelpWindow.body:GetText()
+    -- The whole shown Auto page (all of Help's parts, V.HelpShown), with the
+    -- "Auto right now" lines appended at its end, not only its first part.
+    lines[#lines+1]=V.HelpShown(NexusHelpWindow)
     Nexus.Help.Hide()
    end
   end
@@ -487,14 +489,24 @@ C.scenario('P10 M2 N5: secondary Welcome does not dismiss the primary first-use 
  C.setup(coach and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
   'P10: fixture: the first-time guided coach is open')
  local sent,actions=#H.sent,#H.actions
+ -- Accepted setup family (ui/QuickStart.lua M.SetupFamilyGiveWay): windows of
+ -- one strata never draw through each other, so the informational Welcome
+ -- takes the coach's place by a display-only hide (GuidedSetupUI.Hide) that
+ -- records no first use and keeps the coach's first-use callback. Nothing
+ -- re-shows the coach on its own; the player reopens it by a real route.
  local shown=Nexus.QuickStart.ShowSetup()
  C.expect(shown and NexusQuickStart:IsShown() and Title()=='Nexus setup (information only)'
-  and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
-  'P10: secondary Setup / Welcome does not dismiss the first-use coach',Title())
+  and not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: secondary Setup / Welcome takes the coach\'s place without dismissing first use',Title())
  local dismiss=WelcomeDismissal('P10: the informational Welcome')
  if dismiss then dismiss:Click() end
- C.guard(coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+ C.guard(not NexusQuickStart:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
   'P10: closing the informational Welcome records no first-use acknowledgement')
+ -- The coach's own real route (the Options Setup / Welcome row's call) brings
+ -- it back with its first-use callback kept (GuidedSetupUI.Show).
+ local reopened=Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.Show and Nexus.GuidedSetupUI.Show()
+ C.expect(reopened==true and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: the coach reopens through its real route, first use still not acknowledged')
  local coachClose=CoachClose(coach)
  if coachClose then coachClose:Click() end
  C.expect(not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==true,
@@ -691,9 +703,10 @@ end)
 C.scenario('P16 UX-10 Help lists the Automation scope and the tome paragraph; the editor actions are named as shown',function()
  BootPlan()
  local before,settings=Counters(),Settings()
- Nexus.Help.Show('rolling');local rolling=V.Plain(NexusHelpWindow.body:GetText() or '')
- Nexus.Help.Show('start');local start=V.Plain(NexusHelpWindow.body:GetText() or '')
- Nexus.Help.Show('wishlists');local lists=V.Plain(NexusHelpWindow.body:GetText() or '')
+ -- Each page is its whole shown document (all of Help's parts, V.HelpShown).
+ Nexus.Help.Show('rolling');local rolling=V.HelpShown(NexusHelpWindow)
+ Nexus.Help.Show('start');local start=V.HelpShown(NexusHelpWindow)
+ Nexus.Help.Show('wishlists');local lists=V.HelpShown(NexusHelpWindow)
  Nexus.Help.Hide()
  local R=Nexus.Readout
  C.expect(rolling:find('What Auto may do:',1,true)~=nil and rolling:find('(autoLockEchoes) is off by default',1,true)~=nil

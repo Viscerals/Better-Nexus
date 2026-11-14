@@ -164,7 +164,7 @@
 -- Full-UI kinds (issues #143-#148, full visible-UI scope). The "text" and
 -- "format" rules above are unchanged. Two more declared kinds exist, and the
 -- cap MAX_BASE_ENTRIES (declarations, English base and each pack) is the
--- bounded 4096 instead of the 64-entry pilot cap; above it the same
+-- bounded 5120 instead of the 64-entry pilot cap; above it the same
 -- fail-closed rules apply.
 --  * {kind = "block"}: one static meaning that needs several lines (a Help
 --    or FAQ paragraph). The text contract with two differences: at most
@@ -199,10 +199,10 @@ Nexus.Localization = L
 local MAX_KEY_BYTES = 64
 local MAX_TEXT_BYTES = 256
 -- Full visible-UI scope (issues #143-#148): the cap bounds the declarations,
--- the English base and each pack. It was 64 for the pilot cohort; 4096 holds
--- the complete measured UI catalog with headroom and still fails closed
--- above it (see "Full-UI kinds" below).
-local MAX_BASE_ENTRIES = 4096
+-- the English base and each pack. It was 64 for the pilot cohort, then 4096;
+-- 5120 holds the complete measured UI catalog with headroom and still fails
+-- closed above it (see "Full-UI kinds" below).
+local MAX_BASE_ENTRIES = 5120
 local MAX_DIAGNOSTIC_KEYS = 8
 local MAX_NAME_BYTES = 64
 local MAX_LANGUAGES = 16
@@ -4435,6 +4435,29 @@ local DECLARATIONS = {
     ["overlay.value.locked_target"] = {kind = "text"},
     ["wishlist.status.export_locked_excess"] = {kind = "template", fields = {"held", "max"}, slots = {"count", "count"}, resultLimit = 312},
     -- NEXUS-L10N-FULL-UI END
+    -- v33 B/C (hand-reviewed, not generated): the 4 background-opacity rows of
+    -- Appearance (ui/Theme.lua) and the 8 accepted FAQ groups (ui/Help.lua),
+    -- in the same order as data/LocalizationEnglish.lua and KEY_CONTEXT.json.
+    ["theme.menu.opacity_choice"] = {kind = "template", fields = {"percent"}, slots = {"count"}, resultLimit = 256},
+    ["theme.menu.opacity_default"] = {kind = "text"},
+    ["theme.menu.unknown_opacity"] = {kind = "template", fields = {"value"}, slots = {"text"}, resultLimit = 256},
+    ["theme.tooltip.opacity"] = {kind = "text"},
+    ["help.label.faq_echo_not_counted_question"] = {kind = "text"},
+    ["help.body.faq_echo_not_counted_answer"] = {kind = "block"},
+    ["help.label.faq_orb_start_maximum_question"] = {kind = "text"},
+    ["help.body.faq_orb_start_maximum_answer"] = {kind = "block"},
+    ["help.label.faq_orb_blocked_question"] = {kind = "text"},
+    ["help.body.faq_orb_blocked_answer"] = {kind = "block"},
+    ["help.label.faq_auto_replace_build_question"] = {kind = "text"},
+    ["help.body.faq_auto_replace_build_answer"] = {kind = "block"},
+    ["help.label.faq_hidden_panel_reload_question"] = {kind = "text"},
+    ["help.body.faq_hidden_panel_reload_answer"] = {kind = "block"},
+    ["help.label.faq_library_empty_question"] = {kind = "text"},
+    ["help.body.faq_library_empty_answer"] = {kind = "block"},
+    ["help.label.faq_before_reload_question"] = {kind = "text"},
+    ["help.body.faq_before_reload_answer"] = {kind = "block"},
+    ["help.label.faq_random_roll_leveling_question"] = {kind = "text"},
+    ["help.body.faq_random_roll_leveling_answer"] = {kind = "block"},
 }
 -- NEXUS-L10N-REGISTRY END
 

@@ -146,11 +146,21 @@ C.scenario('F3 a finished run: Start new run returns with its two steps; the min
  C.guard(M.Status().resumeTarget==nil and M.CompactStatus().resumeTarget==nil,'F3: a finished run has no Resume target')
  local mini=UI.ShowMini()
  C.guard(mini.usage:GetText()=='Orbs used: 1 of 1 approved','F3: the mini panel keeps its usage form')
+ -- Accepted mini layout: the status lines stack at their wrapped heights and
+ -- the control row stands below the closing note, so its height follows the
+ -- content (it was the fixed -164). The horizontal places and the sizes stay
+ -- fixed (a repeated press of one can never become another). The client's
+ -- wrap is modelled on the mini's own lines only (V.UseMiniLineModel).
+ local restoreLines=V.UseMiniLineModel(mini)
  local function P(b) return X(b),Y(b),b:GetWidth() end
- local x,y,w=P(mini.pause);local ok=x==12 and y==-164 and w==66
- x,y,w=P(mini.resume);ok=ok and x==84 and y==-164 and w==74
- x,y,w=P(mini.stop);ok=ok and x==164 and y==-164 and w==60
- C.guard(ok,'F3: the mini Pause, Resume and Stop keep their places and sizes')
+ local x,y,w=P(mini.pause);local row=y;local ok=x==12 and w==66
+ x,y,w=P(mini.resume);ok=ok and x==84 and y==row and w==74
+ x,y,w=P(mini.stop);ok=ok and x==164 and y==row and w==60
+ local noteBottom=V.TopOf(mini.note)+mini.note:GetHeight()
+ ok=ok and type(row)=='number' and -row>=noteBottom
+ restoreLines()
+ C.guard(ok,'F3: the mini Pause, Resume and Stop keep their places and sizes, on one row below the closing note',
+  'row '..tostring(row)..' note bottom '..tostring(noteBottom))
  C.guard(not mini.pause:IsEnabled() and not mini.resume:IsEnabled() and not mini.stop:IsEnabled(),'F3: the finished mini panel offers no run action')
 end)
 

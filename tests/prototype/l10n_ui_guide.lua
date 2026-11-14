@@ -27,6 +27,8 @@
 --     the saved interface language, and in English as the name-role control.
 -- Synthetic offline evidence only: no glyph, font, layout or native claim.
 local S=dofile('tests/prototype/l10n_pseudo_support.lua')
+-- The Reference document as shown (all of Help's parts, test-only V.HelpDocument).
+local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 -- The loader before any pseudo boot hook (S.InstallBootHook replaces it until
 -- its one use); P6 boots only with this one.
@@ -489,10 +491,13 @@ do
  local H=Boot(nil,entries)
  Nexus.Help.Show('start')
  local w=_G.NexusHelpWindow
- local body=w.body:GetText()
+ local body=V.HelpDocument(w)
  local first=Nexus.Localization.Resolve('help.body.start_first_task')
- check(body:sub(1,#first+2)==first..'\n\n','P4 a missing page block shows its exact English in place')
- check(body:find(OPEN,1,true)~=nil,'P4 the other blocks of the page stay translated')
+ -- Accepted v23 form: the page's own (translated) title as the gold heading
+ -- and a blank line come first; the missing first block follows at once.
+ local head='|cffffd100'..Nexus.Localization.Text('help.title.page_start')..'|r\n\n'
+ check(body:sub(1,#head+#first+2)==head..first..'\n\n','P4 a missing page block shows its exact English in place, under its title')
+ check(body:find(OPEN,1,true)~=nil,'P4 the other blocks of the page stay translated (whole shown document)')
  check(buttonWith(w,'Previous') and buttonWith(w,'Previous'):GetText()=='Previous','P4 a missing button key shows exact English')
  check(w.tabs[8]:GetText()=='FAQ' and S.IsPseudo(w.tabs[1]:GetText()),'P4 a missing tab shows English beside translated tabs')
  Nexus.Help.Hide()
@@ -522,7 +527,11 @@ do
  for _,p in ipairs(Help.Pages) do
   check(Help.PageText(p)==p.text,'P5 page '..p.id..': its catalog blocks join to the exact English page text')
   Help.Show(p.id)
-  if p.id~='faq' and p.id~='rolling' then check(_G.NexusHelpWindow.body:GetText()==p.text,'P5 page '..p.id..' is shown exactly') end
+  -- Accepted v23 form, restated independently (V.HelpReferenceExpected),
+  -- compared with the whole shown document.
+  if p.id~='faq' and p.id~='rolling' then
+   check(V.HelpDocument(_G.NexusHelpWindow)==V.HelpReferenceExpected((L.Text(p.titleKey)),p.text),'P5 page '..p.id..' is shown exactly, under its title')
+  end
  end
  Help.Show('start')
  check(_G.NexusHelpWindow.title:GetText()=='Nexus Reference - Getting started' and _G.NexusHelpWindow.page:GetText()=='Page 1 / 8',

@@ -924,4 +924,61 @@ do
   error('v29 Reference spacing: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0)
  end
 end
+-- v39 (C): the FAQ appends the eight accepted r3 groups after its original
+-- seven (15 groups). Through the real Help.Show and the actual part pool
+-- under the existing harness: the shown parts are a prefix of the pool, each
+-- anchored under the one before; the joined shown text holds fifteen gold
+-- question lines, the first new question right after the original last
+-- answer, and the Random Roll answer as the page's last text; every part is
+-- inside the scroll child, and at the scroll bottom the last line is in view.
+-- The expected questions and the last sentence are restated here (FAQ_DRAFT
+-- r3), not read from production. Harness model only; native wrap NOT_RUN.
+do
+ local Help=assert(Nexus.Help,'v39 SETUP: the Help module')
+ local misses={}
+ local function expect(v,m) if not v then misses[#misses+1]=m end end
+ local OLD_LAST='Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.'
+ local FIRST_NEW="Why doesn't an Echo I can see count for my Wishlist?"
+ local LAST='An assigned Wishlist always uses the normal rules instead.'
+ Help.Show('start');Help.Show('faq');H.Advance(0.5)
+ local w=assert(NexusHelpWindow,'v39 SETUP: the Help window')
+ local pool=w.parts or {w.body}
+ local order,hidden,shown=true,nil,{}
+ for i,fs in ipairs(pool) do
+  if fs:IsShown() then
+   if hidden then order=false end
+   if i>1 then
+    local point,rel,relPoint=fs:GetPoint(1)
+    if point~='TOPLEFT' or rel~=pool[i-1] or relPoint~='BOTTOMLEFT' then order=false end
+   end
+   shown[#shown+1]=fs
+  else
+   hidden=hidden or i
+  end
+ end
+ expect(order and #shown>0,'v39 FAQ: the shown parts are a prefix of the pool, each under the one before')
+ local texts={}
+ for i,fs in ipairs(shown) do texts[i]=fs:GetText() or '' end
+ local doc=table.concat(texts,'\n')
+ local gold=0
+ for line in (doc..'\n'):gmatch('(.-)\n') do
+  if line:sub(1,10)=='|cffffd100' and line:sub(-2)=='|r' then gold=gold+1 end
+ end
+ expect(gold==15,'v39 FAQ: fifteen gold question lines are shown ('..gold..')')
+ local oldAt=doc:find(OLD_LAST,1,true)
+ local newAt=doc:find('|cffffd100'..FIRST_NEW..'|r',1,true)
+ expect(oldAt~=nil and newAt~=nil and newAt>oldAt and doc:sub(oldAt+#OLD_LAST,newAt-1)=='\n\n\n',
+  'v39 FAQ: the first new question follows the original last answer, one more blank line apart')
+ expect(doc:sub(-#LAST)==LAST,'v39 FAQ: the Random Roll answer is the last shown text ("'..doc:sub(-60)..'")')
+ local sum=0
+ for _,fs in ipairs(shown) do sum=sum+(tonumber(fs:GetHeight()) or 0) end
+ local content,view=tonumber(child:GetHeight()) or 0,tonumber(scroll:GetHeight()) or 0
+ expect(sum>0 and content>=sum,'v39 FAQ: the scroll child holds every shown part ('..sum..' in '..content..')')
+ expect(content<=view or content-sum<=view-17,
+  'v39 FAQ: at the scroll bottom the last line is in view (blank after the text '..(content-sum)..', viewport '..view..')')
+ Help.Hide()
+ if #misses>0 then
+  error('v39 FAQ extension: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0)
+ end
+end
 print('PASS explicit Help layering, anchors, text dimensions, seven-page navigation and passive reopen')

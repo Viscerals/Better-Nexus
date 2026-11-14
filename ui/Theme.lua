@@ -63,6 +63,14 @@ local WHITE = "Interface\\Buttons\\WHITE8X8"
 local EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
 T.STYLE_KEY, T.PALETTE_KEY = "uiStyle", "uiPalette"
 T.DEFAULT_STYLE = "vista"
+-- v23: background opacity, a third presentation-only choice. A whole percent
+-- from 50 to 100 in steps of 10, saved as uiBackgroundOpacity only when the
+-- player chooses; absent is 100 (the look every window had), and Default
+-- clears the key. It scales only each styled window's background layers
+-- (backdrop colour, opaque base, shade); text, buttons, inputs, borders, the
+-- accent line and the exempt difficulty card keep their own look.
+T.OPACITY_KEY = "uiBackgroundOpacity"
+T.OPACITY_MIN, T.OPACITY_MAX, T.OPACITY_STEP, T.OPACITY_DEFAULT = 50, 100, 10, 100
 
 -- Text colours belong to the style, so a colour choice never lowers text
 -- contrast; a palette only moves borders, hover, glow and selection accents.
@@ -230,6 +238,7 @@ local function SavedChoices()
     local ok, settings = pcall(store.Settings)
     if not ok or type(settings) ~= "table" then return nil, nil, nil end
     local style, palette = settings[T.STYLE_KEY], settings[T.PALETTE_KEY]
+    local opacity = settings[T.OPACITY_KEY]
     -- A read-only saved root (future or unverified format) runs with a
     -- validated copy of its settings that leaves these presentation keys out.
     -- Its saved choice is then read, never written, from the saved table, so
@@ -239,8 +248,24 @@ local function SavedChoices()
     if type(saved) == "table" and saved ~= settings then
         if style == nil then style = rawget(saved, T.STYLE_KEY) end
         if palette == nil then palette = rawget(saved, T.PALETTE_KEY) end
+        if opacity == nil then opacity = rawget(saved, T.OPACITY_KEY) end
     end
-    return style, palette, settings
+    return style, palette, settings, opacity
+end
+
+-- A saved opacity this build accepts: a whole percent within the bounds, on
+-- a step. Anything else (another number, text, NaN, a table) is unknown: it is
+-- shown as 100% and stays saved until the player chooses.
+local function ValidOpacity(value)
+    return type(value) == "number" and value == value and value == math.floor(value)
+        and value >= T.OPACITY_MIN and value <= T.OPACITY_MAX
+        and (value - T.OPACITY_MIN) % T.OPACITY_STEP == 0
+end
+T.ValidOpacity = ValidOpacity
+-- The cache identity of a raw opacity (NaN is never equal to itself).
+local function OpacityToken(value)
+    if type(value) == "number" and value ~= value then return "nan" end
+    return value
 end
 
 -- A primary action (T.SetPrimary) is filled with the palette's hover colour
@@ -318,8 +343,13 @@ T._SyncWindowBase = SyncWindowBase
 local function PaintWindow(window)
     local style, palette = active.style, active.palette
     local c = style.windowColor
+    -- The background opacity scales the background layers only (1 = the
+    -- look every window had); the border, accent line, controls and text
+    -- below and in the window keep their own alphas, and the window itself
+    -- is never faded as a whole.
+    local o = (tonumber(active.opacity) or T.OPACITY_DEFAULT) / 100
     pcall(window.SetBackdrop, window, style.windowBackdrop)
-    pcall(window.SetBackdropColor, window, c[1], c[2], c[3], window._nexusWindowAlpha or 0.90)
+    pcall(window.SetBackdropColor, window, c[1], c[2], c[3], (window._nexusWindowAlpha or 0.90) * o)
     pcall(window.SetBackdropBorderColor, window, Color(palette.windowBorder, 0.95))
     local base = window._nexusWindowBase
     if base then
@@ -329,19 +359,19 @@ local function PaintWindow(window)
         base:SetPoint("TOPLEFT", window, "TOPLEFT", inset, -inset)
         base:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -inset, inset)
         local b = style.baseColor or c
-        pcall(base._nexusFill.SetVertexColor, base._nexusFill, b[1], b[2], b[3], 1)
+        pcall(base._nexusFill.SetVertexColor, base._nexusFill, b[1], b[2], b[3], o)
         SyncWindowBase(window)
     end
     local shade = window._nexusWindowShade
     if shade and style.shade then
         local s = style.shade
-        pcall(shade.SetGradientAlpha, shade, "VERTICAL", s[1], s[2], s[3], s[4], s[1], s[2], s[3], s[4])
-        pcall(shade.SetVertexColor, shade, s[1], s[2], s[3], s[4])
+        pcall(shade.SetGradientAlpha, shade, "VERTICAL", s[1], s[2], s[3], s[4] * o, s[1], s[2], s[3], s[4] * o)
+        pcall(shade.SetVertexColor, shade, s[1], s[2], s[3], s[4] * o)
     elseif shade then
         local b, g = style.shadeBottom, palette.accent
         pcall(shade.SetVertexColor, shade, 1, 1, 1, 1)
         pcall(shade.SetGradientAlpha, shade, "VERTICAL",
-            b[1], b[2], b[3], b[4], g[1], g[2], g[3], style.glowAlpha)
+            b[1], b[2], b[3], b[4] * o, g[1], g[2], g[3], style.glowAlpha * o)
     end
     local line = window._nexusWindowAccent
     if line and style.accentAlpha then
@@ -389,20 +419,30 @@ end
 -- table the Store serves, or a session-only choice changed; a change repaints
 -- the registry once.
 local function Active()
-    local savedStyle, savedPalette, settings = SavedChoices()
-    local rawStyle, rawPalette = savedStyle, savedPalette
+    local savedStyle, savedPalette, settings, savedOpacity = SavedChoices()
+    local rawStyle, rawPalette, rawOpacity = savedStyle, savedPalette, savedOpacity
     if session.style then rawStyle = session.style.value end
     if session.palette then rawPalette = session.palette.value end
+    if session.opacity then rawOpacity = session.opacity.value end
     if active and active.source == settings and active.rawStyle == rawStyle
-        and active.rawPalette == rawPalette then
+        and active.rawPalette == rawPalette
+        and active.opacityToken == OpacityToken(rawOpacity) then
         return active
     end
     local previous = active
     active = T.Resolve(rawStyle, rawPalette)
     active.source, active.rawStyle, active.rawPalette = settings, rawStyle, rawPalette
-    active.sessionOnly = session.style ~= nil or session.palette ~= nil
+    -- The opacity in effect: a valid saved or session value, else 100. An
+    -- unknown saved value is reported and kept, never rewritten.
+    active.opacityToken = OpacityToken(rawOpacity)
+    active.savedOpacity = rawOpacity
+    active.explicitOpacity = ValidOpacity(rawOpacity)
+    active.unknownOpacity = rawOpacity ~= nil and not active.explicitOpacity
+    active.opacity = active.explicitOpacity and rawOpacity or T.OPACITY_DEFAULT
+    active.sessionOnly = session.style ~= nil or session.palette ~= nil or session.opacity ~= nil
     stats.resolves = stats.resolves + 1
-    if previous and (previous.style ~= active.style or previous.palette ~= active.palette) then
+    if previous and (previous.style ~= active.style or previous.palette ~= active.palette
+        or previous.opacity ~= active.opacity) then
         Reapply()
     end
     return active
@@ -837,6 +877,10 @@ function T.Current()
         savedStyle=a.savedStyle ~= nil and DisplayValue(a.savedStyle) or nil,
         savedPalette=a.savedPalette ~= nil and DisplayValue(a.savedPalette) or nil,
         sessionOnly=a.sessionOnly == true,
+        backgroundOpacity=a.opacity,
+        explicitBackgroundOpacity=a.explicitOpacity == true,
+        unknownBackgroundOpacity=a.unknownOpacity == true,
+        savedBackgroundOpacity=a.savedOpacity ~= nil and DisplayValue(a.savedOpacity) or nil,
     }
 end
 
@@ -910,6 +954,17 @@ function T.SetPalette(id)
     return outcome, Applied(outcome)
 end
 
+-- nil is Reset: it clears the saved opacity (100% is never stored). Any value
+-- off the bounds or steps, or not a whole number, is refused with nil and
+-- changes nothing; the menu offers only valid values. The write is the same
+-- explicit Store-owner choice as style and colour, with the same outcomes.
+function T.SetBackgroundOpacity(percent)
+    if percent ~= nil and not ValidOpacity(percent) then return nil, "invalid-value" end
+    if percent == T.OPACITY_DEFAULT then percent = nil end
+    local outcome = Choose("opacity", T.OPACITY_KEY, percent)
+    return outcome, Applied(outcome)
+end
+
 function T.Notify(message)
     if message and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
         DEFAULT_CHAT_FRAME:AddMessage("Nexus: " .. tostring(message))
@@ -935,6 +990,45 @@ end})
 -- "Default" row. It is checked for no saved colour and for a saved palette
 -- with those colours; opening the menu never rewrites either. Choosing it
 -- clears the saved colour, as "Style colours" did.
+--
+-- v23: the background opacity rows come first (100% Default, then 90% down
+-- to 50%), so the Settings window's Appearance page, which lists the first
+-- rows, shows the control and the current value at once. Each row carries
+-- item.opacity; the Default row clears the saved value; an unknown saved
+-- value checks no row and is named as kept after the six rows.
+local OPACITY_ROWS = {100, 90, 80, 70, 60, 50}
+local OPACITY_HELP = "Changes only how see-through Nexus window backgrounds are; text, buttons "
+    .. "and the difficulty card stay solid. 100% is the default look and clears the choice."
+local function PercentArgument(value)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Count) == "function" then
+        return localization.Count(value)
+    end
+    return {known = true, value = value}
+end
+local function OpacityItems(a, pick, items)
+    local help = Say("theme.tooltip.opacity", OPACITY_HELP)
+    for _, value in ipairs(OPACITY_ROWS) do
+        local text = value == T.OPACITY_DEFAULT
+            and Say("theme.menu.opacity_default", "Background opacity: 100% (default)")
+            or SayF("theme.menu.opacity_choice", {percent = PercentArgument(value)},
+                "Background opacity: " .. value .. "%")
+        items[#items + 1] = {
+            text=text, opacity=value,
+            checked=not a.unknownOpacity and a.opacity == value,
+            tooltipTitle=text, tooltipText=help,
+            func=pick(T.SetBackgroundOpacity, value ~= T.OPACITY_DEFAULT and value or nil),
+        }
+    end
+    if a.unknownOpacity then
+        local value = DisplayValue(a.savedOpacity)
+        items[#items + 1] = {notCheckable=true, disabled=true,
+            text=SayF("theme.menu.unknown_opacity", {value = value},
+                "Saved background opacity \"" .. value .. "\" is not in this build; it stays saved.")}
+    end
+    return items
+end
+
 function T.MenuItems(close)
     local a = Active()
     local function pick(fn, id)
@@ -944,7 +1038,8 @@ function T.MenuItems(close)
             T.Notify(message)
         end
     end
-    local items = {{text=Say("theme.menu.style_title", "Appearance: style"), isTitle=true, notCheckable=true}}
+    local items = OpacityItems(a, pick, {})
+    items[#items + 1] = {text=Say("theme.menu.style_title", "Appearance: style"), isTitle=true, notCheckable=true}
     for _, style in ipairs(T.Styles()) do
         local label = StyleLabel(style)
         items[#items + 1] = {

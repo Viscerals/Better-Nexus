@@ -151,7 +151,8 @@ C.scenario('R3 the menu button has one name, and Help uses the same words',funct
   'R3: the menu button has one name, Options, on the control and its hover',tip)
  local before=Effects()
  if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show('start') end
- local body=V.Plain(NexusHelpWindow and NexusHelpWindow.body and NexusHelpWindow.body:GetText() or '')
+ -- The whole shown Start page (all of Help's parts, V.HelpShown).
+ local body=NexusHelpWindow and V.HelpShown(NexusHelpWindow) or ''
  C.expect(body:find('Best known: the best shared DPS record this client holds',1,true)~=nil
   and body:find('Options: the Options button on the Nexus panel header',1,true)~=nil
   and not body:find('Menu and status: the ... button',1,true)

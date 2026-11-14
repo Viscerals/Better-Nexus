@@ -220,7 +220,31 @@ Can I make the panel smaller or move it?
 Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Hold Shift and drag any part of the panel that is not a button to move it. Release Shift to stop. Options > Reset Panel Position puts it back.
 
 How do I get back to what I was doing?
-Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.]]},
+Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.
+
+Why doesn't an Echo I can see count for my Wishlist?
+A target is one exact Echo at one exact quality. A lower-quality copy does not count for a higher-quality target; on the panel, an offer at another quality can show Wrong quality. An Echo your Wishlist does not ask for never counts. Only copies you have count, up to the copies the plan asks for; locked copies count only up to its locked targets. Copies above a target are extras. See the Wishlists tab above.
+
+Does Auto ON start an Orb run, and what is the maximum?
+No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and click Start; starting it turns ordinary Automation off and does not turn it back on. The maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, which does not change during a run. Until you type an amount, it follows your confirmed Orb balance, up to 1000.
+
+Why can't I start an Orb run, or why did it stop early?
+Open the Orb window: it shows what is blocked, then what you can do now. An Orb action without a confirmed result blocks new runs until it settles, or until you use Continue... where it is offered. A run ends when your rolled targets are complete or no safe source is left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.
+
+Can Auto replace a Saved Build that has Echoes I value?
+Yes, while Auto is ON. After a finished run, Nexus may save it over your active Saved Build when overall Wishlist progress is higher, or equal with cleanup. It counts Wishlist progress, not Orbs spent, so an Echo you got with Orbs can be lost. At level 80 after a finished run, turning Auto ON or changing the assigned Wishlist can lead to a replacement without a new run. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. Nexus cannot undo a save, and Unassign does not restore a Saved Build. There is no separate automatic-save switch: keep Auto OFF to leave it unchanged.
+
+Does a hidden panel stay hidden after a reload?
+Yes. Hide Nexus Panel is saved as your choice, so the panel stays hidden after a reload or login. Type /nexus panel to show it again. If Nexus's saved data is read-only, the choice lasts this session only. Hiding changes no Auto setting.
+
+Why is the Build Library empty?
+Check the scope: All Shared, or Mine (your Saved Builds and shared listings). The class button can limit the list to your current class; click it to switch between your class and all classes. Require both DPS records lists only builds with both a Training Dummy and a Lich King record this client holds; uncheck it to drop that requirement. Updating results... means a filter change is still applying, and a gray Explore control means shared views are loading or unavailable (/nexus loading). The list shows only what this client has stored. See the Sharing tab above.
+
+Something went wrong. What do I do before a reload?
+Do not reload, relog or change builds first. Type /nexus report, click Copy summary and paste it into your report. Add your exact build (/nexus update shows it), what happened versus what you expected, and Auto ON or OFF. If reporting fails or says Not prepared, say so and send what you have. Never post the report file in public. See the Problems tab above.
+
+Can Nexus pick Echoes while I level without a Wishlist?
+Yes, with Random Roll, an optional mode. Type /nexus leveling on or /nexus leveling off; /nexus leveling alone shows whether it is ON or OFF. It picks only when no Wishlist is assigned, at levels 2 to 79, with Auto ON and its Take permission allowed. Turning it on does not turn Auto ON. It takes the highest-rarity Echo offered (the first offer on a tie), not a random one. If an offer's rarity is unknown, it waits: pick by hand. It never rerolls, banishes, freezes, spends, saves or uses Orbs, and it makes no new pick at level 80. An assigned Wishlist always uses the normal rules instead.]]},
 }
 H.Pages=pages
 -- Each page's text as catalog blocks, in order: {key, separator after it
@@ -376,7 +400,25 @@ local PAGE_BLOCKS = {
   {"help.label.faq_panel_size_question", "\n"},
   {"help.body.faq_panel_size_answer", "\n\n"},
   {"help.label.faq_get_back_question", "\n"},
-  {"help.body.faq_get_back_answer", nil},
+  {"help.body.faq_get_back_answer", "\n\n"},
+  -- v33 C: the eight accepted FAQ groups (FAQ_DRAFT r3), after the original
+  -- seven; the last answer ends the page.
+  {"help.label.faq_echo_not_counted_question", "\n"},
+  {"help.body.faq_echo_not_counted_answer", "\n\n"},
+  {"help.label.faq_orb_start_maximum_question", "\n"},
+  {"help.body.faq_orb_start_maximum_answer", "\n\n"},
+  {"help.label.faq_orb_blocked_question", "\n"},
+  {"help.body.faq_orb_blocked_answer", "\n\n"},
+  {"help.label.faq_auto_replace_build_question", "\n"},
+  {"help.body.faq_auto_replace_build_answer", "\n\n"},
+  {"help.label.faq_hidden_panel_reload_question", "\n"},
+  {"help.body.faq_hidden_panel_reload_answer", "\n\n"},
+  {"help.label.faq_library_empty_question", "\n"},
+  {"help.body.faq_library_empty_answer", "\n\n"},
+  {"help.label.faq_before_reload_question", "\n"},
+  {"help.body.faq_before_reload_answer", "\n\n"},
+  {"help.label.faq_random_roll_leveling_question", "\n"},
+  {"help.body.faq_random_roll_leveling_answer", nil},
  },
 }
 H.PageBlocks=PAGE_BLOCKS

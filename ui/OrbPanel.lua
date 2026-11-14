@@ -2860,7 +2860,9 @@ local function miniMissingLine(v)
         tail=T("orb.value.unnamed_short")
         if t.name~=nil then
             local name=(tostring(t.name):gsub("%c"," "))
-            local room=math.max(4,math.floor(MINI_TEXT_W/11)-#shown-2)
+            -- The name has the line's own visible character budget (MINI_CHARS,
+            -- set by the width pass) less the count part and the two quotes.
+            local room=math.max(4,MINI_CHARS-#shown-2)
             if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then name=Nexus.LayoutMetrics.Truncate(name,room)
             elseif #name>room then name=name:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
             tail="'"..name:gsub("|","||").."'"
@@ -3221,8 +3223,11 @@ local function ensureMini()
             if ok and tonumber(c) and tonumber(r) then char,row=tonumber(c),math.max(MINI_LINE,tonumber(r)) end
         end
         fit.row,fit.per=row,math.max(1,math.floor(MINI_TEXT_W/char))
-        -- A value is shown whole up to two rows; a longer one (a long reason)
-        -- is cut there and is complete in its hover.
+        -- A value is shown whole up to a character budget of two ESTIMATED
+        -- rows of the conservative model at this width; a longer one (a long
+        -- reason) is cut there and is complete in its hover. Word wrap can
+        -- still need more rows than that estimate, so a line is given the
+        -- height of its actual wrapped text (Fit, below), not a fixed two rows.
         MINI_CHARS=math.max(4,2*fit.per)
         local closeW=Scaled(58)
         local closeX=w-MINI_PAD-closeW

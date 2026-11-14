@@ -498,10 +498,21 @@ do
  assert(waitFor(H,function()return H.Count('orb-spend')==2 end));local mini=Nexus.OrbPanel.ShowMini()
  local p=mini.pending;local text=p._nexusFullText or p:GetText()
  check(text:find('Unknown spend: 1',1,true) and text:find('current exposure: 1',1,true),'EXPECT mini retains archived unknown and current reserved exposure together')
+ -- Accepted mini layout: a line wraps to at most two rows at the mini's width
+ -- and is as tall as the client measures its wrapped text. The harness
+ -- measures no wrap, so the client is modelled on the mini's own lines only
+ -- (V.UseMiniLineModel: 7 units a character, 14 a row, a declared model).
+ -- The VISIBLE line (not its hover) must hold all three facts within the
+ -- two-row budget, its allocated height must cover its wrapped rows, and the
+ -- next line must stand below it.
+ local V=dofile('tests/prototype/view_regression_support.lua')
+ local restore=V.UseMiniLineModel(mini)
  local visible=p:GetText()
+ local fits,detail=V.MiniLineFits(mini,'pending',mini.missing)
+ restore()
  check(visible:find('Unknown spend: 1',1,true) and visible:find('Reserved: 1',1,true)
-  and visible:find('Outcomes: 1',1,true) and #visible*7<=p:GetWidth(),
-  'EXPECT actual visible mini line fits unknown spend, current reservation and unconfirmed outcome together')
+  and visible:find('Outcomes: 1',1,true) and fits,
+  'EXPECT actual visible mini line fits unknown spend, current reservation and unconfirmed outcome together ('..detail..')')
 end
 
 

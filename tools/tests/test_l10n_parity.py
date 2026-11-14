@@ -18,8 +18,11 @@ variants are derived in memory. Runtime cap: the tool applies the runtime
 MAX_BASE_ENTRIES (runtimeCap.current). The pilot cases keep their dated
 pilot-cap verdicts, reproduced by the offline counterpart of the Lua
 legacy-cap loader (the real tool with only its one entry-cap line set to
-runtimeCap.pilot, compiled in memory), and each derived 4096/4097 control has
-its own current-cap offline verdict. P19 and P20 native WoW behaviour stays
+runtimeCap.pilot, compiled in memory), and each derived current cap / cap + 1
+control has its own current-cap offline verdict. Each English registry edit is
+also padded with generated entries to runtimeCap.current + 1 and must be
+refused offline (english-too-many), the counterpart of the Lua harness's
+real-data above-cap guard. P19 and P20 native WoW behaviour stays
 UNKNOWN; only offline decoding and metadata are checked here.
 
 Registry interlock (G1). The declaration marker convention is exact and
@@ -319,6 +322,20 @@ def edited_input(data, edit):
     if found != 1:
         raise ValueError("the edited line must occur exactly once")
     return newline.join(out)
+
+
+def padded_english(data, count):
+    """English base bytes with count generated legal entries
+    (parity.gNNNN = "Generated NNNN", the corpus controls' rule, undeclared)
+    inserted after the table's opening line, in the input's own line breaks.
+    The opening line must occur exactly once."""
+    newline = b"\r\n" if b"\r\n" in data else b"\n"
+    opener = b"Nexus.LocalizationEnglish = {" + newline
+    if data.count(opener) != 1:
+        raise ValueError("the English table opening line must occur exactly once")
+    lines = b"".join(b'    ["parity.g%04d"] = "Generated %04d",' % (index, index) + newline
+                     for index in range(1, count + 1))
+    return data.replace(opener, opener + lines)
 
 
 def registry_verdicts(catalog, row, inputs):
@@ -621,7 +638,7 @@ class ParityCorpusTests(unittest.TestCase):
             self.assertNotIn(control["id"], self.by_id)
 
     def test_cap_controls_reproduce_their_offline_verdicts(self):
-        # Each derived 4096/4097 control has its own current-cap offline
+        # Each derived cap / cap + 1 control has its own current-cap offline
         # verdict: the same over-cap rule as the dated pilot cases, at the
         # current cap. Every control above the cap is refused offline.
         cap = self.corpus["runtimeCap"]
@@ -716,6 +733,42 @@ class RegistrySentinelTests(unittest.TestCase):
                 self.assertEqual(list(verdicts.values()), [expected[row["id"]]] * len(verdicts))
         # The unedited real inputs pass, so each verdict comes from its edit.
         self.catalog.validate_registry_catalog_data(*self.inputs)
+
+    def test_english_rows_padded_above_the_cap_are_refused_offline(self):
+        # v33 slice A (review finding F1 / SA-1): the real English is below the
+        # bounded cap, so a row's own edit no longer goes above it. Each English
+        # registry edit, padded with generated entries to exactly
+        # runtimeCap.current + 1 (the cap stated by the corpus, not read from the
+        # tool), is refused by the registry-bound API with english-too-many in
+        # both line-break variants. This is the offline counterpart of the Lua
+        # harness's real-data above-cap guard. The rows' own verdicts stay
+        # checked on their unpadded edits above.
+        cap = self.catalog._parse_literal_table(CASES.read_bytes())["runtimeCap"]["current"]
+        errors = (self.catalog.CatalogSyntaxError, self.catalog.CatalogValidationError,
+                  getattr(self.catalog, "CatalogRegistryError", self.catalog.CatalogValidationError))
+        ran = expected = 0
+        for row in self.registry["rows"]:
+            if row["input"]["file"] != "data/LocalizationEnglish.lua":
+                continue
+            data = edited_input(self.inputs[0], row["input"])
+            for name, value in variants(data).items():
+                expected += 1
+                with self.subTest(row=row["id"], variant=name):
+                    natural = len(self.catalog.parse_english(value))
+                    padded = padded_english(value, max(0, cap + 1 - natural))
+                    self.assertEqual(len(self.catalog.parse_english(padded)), max(natural, cap + 1))
+                    changed = list(self.inputs)
+                    changed[0] = padded
+                    try:
+                        getattr(self.catalog, REGISTRY_API)(*changed)
+                        verdict = {"code": "valid"}
+                    except errors as error:
+                        verdict = {"code": error.code}
+                    self.assertEqual(verdict, {"code": "english-too-many"})
+                    ran += 1
+        # Liveness: every English row variant reached the above-cap refusal.
+        self.assertGreater(expected, 0)
+        self.assertEqual(ran, expected)
 
     def test_registry_enum_is_the_release_product_list(self):
         release = json.loads(self.inputs[3].decode("utf-8"))

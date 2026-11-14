@@ -1022,7 +1022,8 @@ end)
 C.scenario('HELP the share sentence is qualified',function()
  Boot()
  Nexus.Help.Show('sharing')
- local help=V.Plain(NexusHelpWindow and NexusHelpWindow.body:GetText() or ''):gsub('%s+',' ')
+ -- The whole shown Sharing page (all of Help's parts, V.HelpShown).
+ local help=(NexusHelpWindow and V.HelpShown(NexusHelpWindow) or ''):gsub('%s+',' ')
  C.expect(help:find('Sharing a build always needs your click',1,true)==nil,'HELP: the false categorical claim is gone')
  C.expect(help:find('Your own Share actions need your click',1,true)~=nil
   and help:find('an eligible new character best for Training Dummy or Lich King may send without a click',1,true)~=nil

@@ -96,8 +96,16 @@ C.scenario('H1 Help during loading: direct pages; setup routes say why they wait
   C.expect(f.title:GetText():find('Orbs / Lost Memories',1,true)~=nil and f.page:GetText()=='Page 5 / 8'
    and not orbs:IsEnabled(),'H1: a page button opens its page directly and shows it as current',f.title:GetText())
   HelpButton('Start'):Click()
-  C.expect(f.page:GetText()=='Page 1 / 8' and f.body:GetText():find('Start here',1,true)==1,
-   'H1: the Start page leads with the setup path',f.body:GetText():sub(1,60))
+  -- Accepted v23 form: the page opens with its own title as the gold
+  -- heading, then a blank line; the setup path is the first body text, at
+  -- the very next byte of the shown document (V.HelpDocument, all parts).
+  local L=Nexus.Localization
+  local title=L and L.Text and L.Text('help.title.page_start') or 'Getting started'
+  local head='|cffffd100'..title..'|r\n\n'
+  local ok,doc=pcall(V.HelpDocument,f)
+  doc=ok and doc or ''
+  C.expect(f.page:GetText()=='Page 1 / 8' and doc:sub(1,#head)==head and doc:find('Start here',1,true)==#head+1,
+   'H1: the Start page leads with the setup path, right under its title',doc:sub(1,80))
  end
  local assign,editor,setup=HelpButton('Assign Wishlist...'),HelpButton('Wishlist Editor'),HelpButton('Setup / Welcome')
  C.expect(assign~=nil and editor~=nil and setup~=nil,'H1: the setup row offers Setup / Welcome, Assign Wishlist... and Wishlist Editor')

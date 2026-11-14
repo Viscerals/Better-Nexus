@@ -13,7 +13,10 @@ local function before(text,a,b,label)
  check(i and j and i<j,label..' ("'..a..'" before "'..b..'")')
 end
 local actions,sent=#H.actions,#H.sent
-local function Page(id) Nexus.Help.Show(id);return NexusHelpWindow.body:GetText() end
+-- A Reference page is the whole shown document (Help's part pool), read by
+-- the test-only V.HelpShown, not only its first FontString.
+local V=dofile('tests/prototype/view_regression_support.lua')
+local function Page(id) Nexus.Help.Show(id);return V.HelpShown(NexusHelpWindow) end
 local start,rolling,orbs=Page('start'),Page('rolling'),Page('orbs')
 local file=assert(io.open('README-PROTOTYPE.md','rb'));local guide=file:read('*a'):gsub('%s+',' '):gsub('%*%*','');file:close()
 

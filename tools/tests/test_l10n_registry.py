@@ -82,12 +82,137 @@ CURRENT_KEYS = (
 )
 CHARGE_DECLARATION = {"kind": "format", "fields": CHARGE_FIELDS, "slot": "count",
                       "resultLimit": 254}
-# Full visible-UI scope (#143-#148): the reviewed catalog declares 4078 keys
-# (the runtime cap is 4096), the dated 28 above first and unchanged. The full
-# key order and each row's kind, slot types, limit and lines flag are read
-# from KEY_CONTEXT.json with the json module, apart from the tool under test.
-CURRENT_FULL_UI_KEYS = 4078
-RUNTIME_CAP = 4096
+# Full visible-UI scope (#143-#148): the reviewed catalog declares 4096 keys
+# (the bounded runtime limit is 5120), the dated 28 above first and
+# unchanged. The full key order and each row's kind, slot types, limit and
+# lines flag are read from KEY_CONTEXT.json with the json module, apart from
+# the tool under test.
+# v33 slice A: exact 35 (ea812b41) declares and holds 4096 English meanings.
+# KEY_CONTEXT.json has 4078 rows, without the 18 SLICE_A_LEGACY_ROWS below.
+# Slice A adds those rows and no meaning, so 4096 is the count after A. Until
+# then full_context_rows() reports the real gap. RUNTIME_CAP is an
+# independent restatement of the bounded limit (not read from the tool): 5120
+# declarations parse and 5121 are refused (registry-too-many). A tool still at
+# 4096 refuses the 5120-declaration block.
+# v39 (B/C RED): the 20 accepted new meanings (SLICE_BC_NEW_ROWS below) are
+# appended after the 4096, so the catalog declares 4116; the bounded limit
+# stays 5120 (not patched for the features).
+CURRENT_FULL_UI_KEYS = 4116
+RUNTIME_CAP = 5120
+# v39 (B/C): the 20 accepted new meanings, an independent oracle restated from
+# the v33 PLAN newKeys20 (opacity: the v23 Theme reference; FAQ: FAQ_DRAFT r3).
+# Each row: key, kind, exact English, (field, slot type) pairs in declared
+# order, result limit (None for text and block). They are the LAST 20
+# declarations, English entries and context rows, in this order.
+SLICE_BC_NEW_ROWS = (
+    ("theme.menu.opacity_choice", "template", "Background opacity: {percent}%",
+     (("percent", "count"),), 256),
+    ("theme.menu.opacity_default", "text", "Background opacity: 100% (default)", (), None),
+    ("theme.menu.unknown_opacity", "template",
+     "Saved background opacity \"{value}\" is not in this build; it stays saved.",
+     (("value", "text"),), 256),
+    ("theme.tooltip.opacity", "text",
+     "Changes only how see-through Nexus window backgrounds are; text, buttons and the difficulty "
+     "card stay solid. 100% is the default look and clears the choice.", (), None),
+    ("help.label.faq_echo_not_counted_question", "text",
+     "Why doesn't an Echo I can see count for my Wishlist?", (), None),
+    ("help.body.faq_echo_not_counted_answer", "block",
+     "A target is one exact Echo at one exact quality. A lower-quality copy does not count for a "
+     "higher-quality target; on the panel, an offer at another quality can show Wrong quality. An "
+     "Echo your Wishlist does not ask for never counts. Only copies you have count, up to the copies "
+     "the plan asks for; locked copies count only up to its locked targets. Copies above a target "
+     "are extras. See the Wishlists tab above.", (), None),
+    ("help.label.faq_orb_start_maximum_question", "text",
+     "Does Auto ON start an Orb run, and what is the maximum?", (), None),
+    ("help.body.faq_orb_start_maximum_answer", "block",
+     "No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and "
+     "click Start; starting it turns ordinary Automation off and does not turn it back on. The "
+     "maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled "
+     "targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, "
+     "which does not change during a run. Until you type an amount, it follows your confirmed Orb "
+     "balance, up to 1000.", (), None),
+    ("help.label.faq_orb_blocked_question", "text",
+     "Why can't I start an Orb run, or why did it stop early?", (), None),
+    ("help.body.faq_orb_blocked_answer", "block",
+     "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action "
+     "without a confirmed result blocks new runs until it settles, or until you use Continue... "
+     "where it is offered. A run ends when your rolled targets are complete or no safe source is "
+     "left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes "
+     "locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See "
+     "the Orbs tab above.", (), None),
+    ("help.label.faq_auto_replace_build_question", "text",
+     "Can Auto replace a Saved Build that has Echoes I value?", (), None),
+    ("help.body.faq_auto_replace_build_answer", "block",
+     "Yes, while Auto is ON. After a finished run, Nexus may save it over your active Saved Build "
+     "when overall Wishlist progress is higher, or equal with cleanup. It counts Wishlist progress, "
+     "not Orbs spent, so an Echo you got with Orbs can be lost. At level 80 after a finished run, "
+     "turning Auto ON or changing the assigned Wishlist can lead to a replacement without a new run. "
+     "Saving edits to the assigned Wishlist can also lead to a replacement without a new run. Nexus "
+     "cannot undo a save, and Unassign does not restore a Saved Build. There is no separate "
+     "automatic-save switch: keep Auto OFF to leave it unchanged.", (), None),
+    ("help.label.faq_hidden_panel_reload_question", "text",
+     "Does a hidden panel stay hidden after a reload?", (), None),
+    ("help.body.faq_hidden_panel_reload_answer", "block",
+     "Yes. Hide Nexus Panel is saved as your choice, so the panel stays hidden after a reload or "
+     "login. Type /nexus panel to show it again. If Nexus's saved data is read-only, the choice lasts "
+     "this session only. Hiding changes no Auto setting.", (), None),
+    ("help.label.faq_library_empty_question", "text", "Why is the Build Library empty?", (), None),
+    ("help.body.faq_library_empty_answer", "block",
+     "Check the scope: All Shared, or Mine (your Saved Builds and shared listings). The class button "
+     "can limit the list to your current class; click it to switch between your class and all "
+     "classes. Require both DPS records lists only builds with both a Training Dummy and a Lich King "
+     "record this client holds; uncheck it to drop that requirement. Updating results... means a "
+     "filter change is still applying, and a gray Explore control means shared views are loading or "
+     "unavailable (/nexus loading). The list shows only what this client has stored. See the Sharing "
+     "tab above.", (), None),
+    ("help.label.faq_before_reload_question", "text",
+     "Something went wrong. What do I do before a reload?", (), None),
+    ("help.body.faq_before_reload_answer", "block",
+     "Do not reload, relog or change builds first. Type /nexus report, click Copy summary and paste "
+     "it into your report. Add your exact build (/nexus update shows it), what happened versus what "
+     "you expected, and Auto ON or OFF. If reporting fails or says Not prepared, say so and send what "
+     "you have. Never post the report file in public. See the Problems tab above.", (), None),
+    ("help.label.faq_random_roll_leveling_question", "text",
+     "Can Nexus pick Echoes while I level without a Wishlist?", (), None),
+    ("help.body.faq_random_roll_leveling_answer", "block",
+     "Yes, with Random Roll, an optional mode. Type /nexus leveling on or /nexus leveling off; "
+     "/nexus leveling alone shows whether it is ON or OFF. It picks only when no Wishlist is "
+     "assigned, at levels 2 to 79, with Auto ON and its Take permission allowed. Turning it on does "
+     "not turn Auto ON. It takes the highest-rarity Echo offered (the first offer on a tie), not a "
+     "random one. If an offer's rarity is unknown, it waits: pick by hand. It never rerolls, "
+     "banishes, freezes, spends, saves or uses Orbs, and it makes no new pick at level 80. An "
+     "assigned Wishlist always uses the normal rules instead.", (), None),
+)
+# v33 slice A: the 18 meanings that are declared and in English at exact 35
+# but have no KEY_CONTEXT.json row (CONTEXT_SHAPE.json legacyMissingKeys).
+# Independent oracle of their declarations, restated from the reviewed block
+# of core/Localization.lua at ea812b41 (lines 414-416, 1238-1240, 1271-1273,
+# 2426-2427, 2467, 2495, 2789, 4077, 4117, 4166-4167): kind, then for a
+# template its (field, slot type) pairs in declared order and result limit.
+SLICE_A_LEGACY_ROWS = (
+    ("command.chat.reference_random_roll", "template",
+     (("command", "text"), ("rule", "text"), ("limits", "text")), 720),
+    ("command.chat.reference_random_roll_limits", "text", (), None),
+    ("command.chat.reference_random_roll_rule", "text", (), None),
+    ("readout.body.scope_random_roll", "template",
+     (("value", "text"), ("rule", "text"), ("limits", "text"), ("command", "text")), 816),
+    ("readout.body.scope_random_roll_limits", "text", (), None),
+    ("readout.body.scope_random_roll_rule", "text", (), None),
+    ("readout.menu.random_roll", "template",
+     (("value", "text"), ("rule", "text"), ("limits", "text")), 657),
+    ("readout.menu.random_roll_limits", "text", (), None),
+    ("readout.menu.random_roll_rule", "text", (), None),
+    ("panel.button.hub_builds", "text", (), None),
+    ("panel.button.hub_wishlist", "text", (), None),
+    ("panel.heading.your_offers", "text", (), None),
+    ("panel.label.offer_wrong_quality", "text", (), None),
+    ("panel.value.wishlist_rarity_mode", "template", (("state", "text"),), 256),
+    ("editor.button.rarity_mode", "text", (), None),
+    ("editor.chat.manage_restored_from_first_run", "template",
+     (("name", "text"), ("slot", "text"), ("state", "text")), 2048),
+    ("editor.menu.rarity_mode", "text", (), None),
+    ("editor.menu.rarity_mode_state", "template", (("state", "text"),), 256),
+)
 
 
 def full_context_rows():
@@ -267,6 +392,123 @@ class RegistryParserTests(unittest.TestCase):
         self.assertEqual(set(declarations), {row["key"] for row in context["keys"]})
         self.assertEqual(len(context["keys"]), CURRENT_FULL_UI_KEYS)
 
+    def test_slice_a_legacy_meanings_have_matching_context_rows(self):
+        # v33 slice A. Each of the 18 declared English meanings without a
+        # context row must, after A, have exactly one row at its declaration
+        # position. That row repeats the declared kind, the exact English,
+        # the typed placeholders in declared order (each with a stated
+        # meaning) and, for a template, the declared result limit; a text row
+        # has none of these. The declarations and English are checked against
+        # the independent oracle first, so a missing row is reported as the
+        # context gap and not as declaration drift. At exact 35 every row is
+        # missing (the real 18-row gap); no new meaning is added.
+        self.assertEqual(len(SLICE_A_LEGACY_ROWS), 18)
+        declarations = self.parse(self.source)
+        english = self.catalog.parse_english((ROOT / INPUTS[0]).read_bytes())
+        context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
+        rows = [row for row in context["keys"] if type(row) is dict]
+        by_key = {}
+        for index, row in enumerate(rows):
+            by_key.setdefault(row.get("key"), []).append((index, row))
+        order = list(declarations)
+        for key, kind, slots, limit in SLICE_A_LEGACY_ROWS:
+            with self.subTest(key=key):
+                if kind == "template":
+                    self.assertEqual(declarations.get(key), {
+                        "kind": "template", "fields": tuple(name for name, _ in slots),
+                        "slots": tuple(slot for _, slot in slots), "resultLimit": limit})
+                else:
+                    self.assertEqual(declarations.get(key), {"kind": "text"})
+                self.assertIn(key, english)
+                found = by_key.get(key, [])
+                self.assertEqual(len(found), 1, "slice A: exactly one KEY_CONTEXT row for " + key)
+                index, row = found[0]
+                self.assertEqual(index, order.index(key),
+                                 "the context row stands at its declaration position")
+                self.assertEqual(row.get("kind"), kind)
+                self.assertEqual(row.get("english"), english[key])
+                self.assertIs(type(row.get("meaning")), str)
+                self.assertNotEqual(row["meaning"].strip(), "")
+                placeholders = row.get("placeholders")
+                self.assertIs(type(placeholders), list)
+                self.assertEqual([(slot.get("name"), slot.get("type")) for slot in placeholders],
+                                 list(slots))
+                for slot in placeholders:
+                    self.assertIs(type(slot.get("meaning")), str)
+                    self.assertNotEqual(slot["meaning"].strip(), "")
+                if limit is None:
+                    self.assertNotIn("resultLimitBytes", row)
+                else:
+                    self.assertEqual(row.get("resultLimitBytes"), limit)
+                self.assertNotIn("lines", row)
+        # After A the three key sets are equal at 4096: no gap and no extra.
+        context_keys = {row.get("key") for row in rows}
+        self.assertEqual(sorted(set(english) - context_keys), [],
+                         "English meanings without a context row")
+        self.assertEqual(sorted(context_keys - set(english)), [],
+                         "context rows without an English meaning")
+        self.assertEqual((len(declarations), len(english), len(rows)), (CURRENT_FULL_UI_KEYS,) * 3)
+
+    def test_slice_bc_new_meanings_are_declared_english_and_context_rows_in_order(self):
+        # v39 (B/C RED). The 20 accepted meanings are the LAST 20 declarations,
+        # English entries and context rows, in SLICE_BC_NEW_ROWS order. Each
+        # is declared with the oracle's kind, typed fields and limit; its
+        # English is exactly the accepted text; its context row repeats the
+        # kind, the English, the typed placeholders in order (each with a
+        # meaning), the limit (absent for text and block) and a non-empty
+        # meaning, with no lines flag. FAQ questions are static text of at most
+        # 256 bytes, FAQ answers blocks of at most 1024, neither with a
+        # placeholder or a '|'. The bounded limit is unchanged.
+        self.assertEqual(len(SLICE_BC_NEW_ROWS), 20)
+        declarations = self.parse(self.source)
+        english = self.catalog.parse_english((ROOT / INPUTS[0]).read_bytes())
+        context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
+        rows = [row for row in context["keys"] if type(row) is dict]
+        keys = [key for key, _, _, _, _ in SLICE_BC_NEW_ROWS]
+        self.assertEqual(list(declarations)[-20:], keys, "the 20 are the last declarations, in order")
+        self.assertEqual(list(english)[-20:], keys, "the 20 are the last English entries, in order")
+        self.assertEqual([row.get("key") for row in rows[-20:]], keys, "the 20 are the last context rows, in order")
+        for key, kind, text, slots, limit in SLICE_BC_NEW_ROWS:
+            with self.subTest(key=key):
+                if kind == "template":
+                    self.assertEqual(declarations.get(key), {
+                        "kind": "template", "fields": tuple(name for name, _ in slots),
+                        "slots": tuple(slot for _, slot in slots), "resultLimit": limit})
+                else:
+                    self.assertEqual(declarations.get(key), {"kind": kind})
+                self.assertEqual(english.get(key), text)
+                if key.startswith("help."):
+                    self.assertEqual(slots, ())
+                    self.assertNotIn("|", text)
+                    self.assertNotIn("{", text)
+                    if key.startswith("help.label."):
+                        self.assertEqual(kind, "text")
+                        self.assertLessEqual(len(text.encode("utf-8")), 256)
+                        self.assertNotIn("\n", text)
+                    else:
+                        self.assertEqual(kind, "block")
+                        self.assertLessEqual(len(text.encode("utf-8")), 1024)
+                found = [row for row in rows if row.get("key") == key]
+                self.assertEqual(len(found), 1, "exactly one KEY_CONTEXT row for " + key)
+                row = found[0]
+                self.assertEqual(row.get("kind"), kind)
+                self.assertEqual(row.get("english"), text)
+                self.assertIs(type(row.get("meaning")), str)
+                self.assertNotEqual(row["meaning"].strip(), "")
+                placeholders = row.get("placeholders")
+                self.assertIs(type(placeholders), list)
+                self.assertEqual([(slot.get("name"), slot.get("type")) for slot in placeholders], list(slots))
+                for slot in placeholders:
+                    self.assertIs(type(slot.get("meaning")), str)
+                    self.assertNotEqual(slot["meaning"].strip(), "")
+                if limit is None:
+                    self.assertNotIn("resultLimitBytes", row)
+                else:
+                    self.assertEqual(row.get("resultLimitBytes"), limit)
+                self.assertNotIn("lines", row)
+        self.assertEqual((len(declarations), len(english), len(rows)), (CURRENT_FULL_UI_KEYS,) * 3)
+        self.assertLessEqual(CURRENT_FULL_UI_KEYS, RUNTIME_CAP)
+
     def test_actual_marker_lines_are_the_s1_contract(self):
         lines = self.source.replace(b"\r\n", b"\n").split(b"\n")
         self.assertEqual(lines.count(OPEN.encode()), 1)
@@ -401,8 +643,10 @@ class RegistryParserTests(unittest.TestCase):
         self.assertEqual(self.parse(block(charge % good)), {CHARGE: CHARGE_DECLARATION})
 
     def test_declaration_count_is_bounded_by_the_base_limit(self):
-        # The runtime cap (MAX_BASE_ENTRIES, 64 for the pilot cohort): the cap
-        # is accepted and one more declaration is refused.
+        # The runtime cap (MAX_BASE_ENTRIES: 64 for the pilot cohort, 4096,
+        # then the bounded 5120 of v33 slice A): the cap is accepted and one
+        # more declaration is refused. The key names stay within the key
+        # schema at 5120 ("reason.k5119").
         items = ['["reason.k%04d"] = {kind = "text"},' % index for index in range(RUNTIME_CAP)]
         self.assertEqual(len(self.parse(block(*items))), RUNTIME_CAP)
         items.append('["reason.k%04d"] = {kind = "text"},' % RUNTIME_CAP)

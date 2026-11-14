@@ -268,7 +268,8 @@ end)
 
 C.scenario('Q6 Help gives the same count words',function()
  if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show('start') end
- local body=V.Plain(NexusHelpWindow and NexusHelpWindow.body and NexusHelpWindow.body:GetText() or '')
+ -- The whole shown Start page (all of Help's parts, V.HelpShown).
+ local body=NexusHelpWindow and V.HelpShown(NexusHelpWindow) or ''
  C.expect(body:find('Unavailable is not 0',1,true)~=nil and body:find('Echo families represented counts a family once',1,true)~=nil
   and body:find('rolled copies this run',1,true)~=nil,'Q6: Help names the count units and that unavailable is not 0',body:sub(-500))
 end)

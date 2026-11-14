@@ -587,18 +587,68 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  -- the 15-unit "title" role; the Build and Wishlist captions are secondary
  -- text. Each is still one of Nexus's owned fonts, so it follows the same
  -- native-reference scale, and no body role is smaller for it.
+ -- The controls' labels take the panel's one control role (Panel.ApplyOwnedFonts:
+ -- "a step under the names and values (they were the normal role)"),
+ -- P.CONTROL_ROLE, accepted as "secondary"; Change is one of those controls.
  local function Name(font) return tostring(type(font)=='table' and font.GetName and font:GetName() or font) end
- C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
-  and build._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
-  and wishlist._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
-  and f._contextAutoState._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
-  and buildCaption~=nil and buildCaption._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
-  and wishlistCaption~=nil and wishlistCaption._testFontObject==Nexus.LayoutMetrics.FontObject('secondary')
-  and change._testNormalFontObject==Nexus.LayoutMetrics.FontObject('normal'),
+ local LM=Nexus.LayoutMetrics
+ C.expect(P.CONTROL_ROLE=='secondary'
+  and title._testFontObject==LM.FontObject('normal')
+  and build._testFontObject==LM.FontObject('normal')
+  and wishlist._testFontObject==LM.FontObject('normal')
+  and f._contextAutoState._testFontObject==LM.FontObject('secondary')
+  and buildCaption~=nil and buildCaption._testFontObject==LM.FontObject('secondary')
+  and wishlistCaption~=nil and wishlistCaption._testFontObject==LM.FontObject('secondary')
+  and change._testNormalFontObject==LM.FontObject(P.CONTROL_ROLE),
   'V3a: context and Change text join Nexus owned-font scaling at 125 percent',
   Name(title._testFontObject)..' '..Name(build._testFontObject)..' '..Name(wishlist._testFontObject)
    ..' '..Name(f._contextAutoState._testFontObject)..' '..Name(buildCaption and buildCaption._testFontObject)
    ..' '..Name(wishlistCaption and wishlistCaption._testFontObject)..' '..Name(change._testNormalFontObject))
+ -- 125 percent proof for every owned object these seven widgets use. The
+ -- harness has no CreateFont, so a test-local stand-in records the real
+ -- LayoutMetrics.EnsureFonts SetFont calls per owned object, with the client
+ -- reference font (GameFontHighlightSmall) at 12.5, 125 percent of its
+ -- 10-unit size. EnsureFonts rebuilds when the reference changes, so it is
+ -- first read at 10 and then at 12.5. Every stand-in is restored afterwards.
+ do
+  local NAMES={'NexusFontSmall','NexusFontNormal','NexusFontLarge','NexusFontSecondary','NexusFontTitle'}
+  local saved={create=rawget(_G,'CreateFont'),reference=rawget(_G,'GameFontHighlightSmall')}
+  for _,name in ipairs(NAMES) do saved[name]=rawget(_G,name);rawset(_G,name,nil) end
+  local made={}
+  rawset(_G,'CreateFont',function(name)
+   local o={name=name}
+   function o:SetFont(_,size) self.size=size end
+   function o:GetFont() return 'Fonts\\FRIZQT__.TTF',self.size,'' end
+   function o:GetName() return self.name end
+   made[name]=o;rawset(_G,name,o)
+   return o
+  end)
+  local referenceSize=10
+  rawset(_G,'GameFontHighlightSmall',{GetFont=function() return 'Fonts\\FRIZQT__.TTF',referenceSize,'' end})
+  LM.EnsureFonts()
+  referenceSize=12.5
+  LM.EnsureFonts()
+  local used={}
+  for _,widget in ipairs({title,build,wishlist,f._contextAutoState,buildCaption,wishlistCaption}) do
+   used[#used+1]=widget and widget._testFontObject
+  end
+  used[#used+1]=change._testNormalFontObject
+  local want={NexusFontNormal=15,NexusFontSecondary=13.75}
+  local sized,detail=true,{}
+  for _,name in ipairs(used) do
+   local o=made[name]
+   local size=o and o.size
+   detail[#detail+1]=tostring(name)..'='..tostring(size)
+   if not (want[name] and size==want[name]) then sized=false end
+  end
+  local all=made.NexusFontSmall and made.NexusFontSmall.size==12.5 and made.NexusFontLarge and made.NexusFontLarge.size==17.5
+   and made.NexusFontTitle and made.NexusFontTitle.size==18.75
+  rawset(_G,'CreateFont',saved.create);rawset(_G,'GameFontHighlightSmall',saved.reference)
+  for _,name in ipairs(NAMES) do rawset(_G,name,saved[name]) end
+  C.expect(#used==7 and sized and all,
+   'V3a: at 125 percent every owned font object the seven widgets use is set by LayoutMetrics to its role size x 1.25 (normal 15, secondary 13.75)',
+   table.concat(detail,' '))
+ end
  local plan=Spy(Nexus.FullUIWorkspaces,'ShowPlan',function() change:Click() end)
  C.expect(plan.n==1,'V3a: Change opens Plan without silently assigning a Wishlist')
  C.guard(GameplayEffects()==before,'V3a: header navigation and hover do not automate, spend or send')

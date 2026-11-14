@@ -204,7 +204,8 @@ local function Run(tag,database,mode,line)
  local lbBtn=LeaderboardSync()
  local lbTip=lbBtn and lbBtn:GetScript('OnEnter') and V.TooltipLines(lbBtn:GetScript('OnEnter'),lbBtn) or {}
  Nexus.Help.Show('sharing')
- local help=NexusHelpWindow and V.Plain(NexusHelpWindow.body:GetText() or ''):gsub('%s+',' ') or ''
+ -- The whole shown Sharing page (all of Help's parts, V.HelpShown).
+ local help=NexusHelpWindow and V.HelpShown(NexusHelpWindow):gsub('%s+',' ') or ''
  local modeButtons,libraryModeButtons={},ModeButtons(lib)
  for _,root in ipairs({qs,NexusLeaderboardFrame,NexusHelpWindow}) do
   for _,label in ipairs(ModeButtons(root)) do modeButtons[#modeButtons+1]=label end

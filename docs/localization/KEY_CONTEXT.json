@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4078,
+    "declaredKeys": 4116,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -1246,6 +1246,56 @@
       "consumer": "core/Main.lua CommandReference",
       "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
       "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.reference_random_roll",
+      "kind": "template",
+      "english": "{command} -- Random Roll: optional, off by default. {rule} {limits}",
+      "placeholders": [
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "slash command syntax \"/nexus leveling on|off\" (protocol, never translated)"
+        },
+        {
+          "name": "rule",
+          "type": "text",
+          "meaning": "the shown rule sentence (command.chat.reference_random_roll_rule)"
+        },
+        {
+          "name": "limits",
+          "type": "text",
+          "meaning": "the shown limits sentence (command.chat.reference_random_roll_limits)"
+        }
+      ],
+      "resultLimitBytes": 720,
+      "group": "command",
+      "meaning": "Command summary line for the optional Random Roll: the command that turns it on or off, that it is optional and off by default, then its rule and limits. Printing it reads and changes nothing. \"Random Roll\" is the feature's name.",
+      "consumer": "core/Main.lua CommandReference",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "command.chat.reference_random_roll_limits",
+      "kind": "text",
+      "english": "needs Auto ON and autoPick; no reroll or spending; no new pick at level 80.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "The limits part of the Random Roll command summary line ({limits} of command.chat.reference_random_roll): it needs Auto ON and the autoPick permission, never rerolls or spends, and makes no new pick at level 80. \"autoPick\" is the permission's setting name.",
+      "consumer": "core/Main.lua CommandReference (limits slot of command.chat.reference_random_roll)",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "command.chat.reference_random_roll_rule",
+      "kind": "text",
+      "english": "With no Wishlist at levels 2-79 Auto takes the highest-rarity offer (first current offer on a tie);",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "The rule part of the Random Roll command summary line ({rule} of command.chat.reference_random_roll): with no Wishlist, at levels 2 to 79, Auto takes the offer of the highest rarity, and on a tie the first current offer. It ends with a semicolon because the limits follow.",
+      "consumer": "core/Main.lua CommandReference (rule slot of command.chat.reference_random_roll)",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "command.chat.reference_rolling_permissions",
@@ -11254,6 +11304,61 @@
       "cohort": "fullui:hud"
     },
     {
+      "key": "readout.body.scope_random_roll",
+      "kind": "template",
+      "english": "Random Roll: {value}; optional; {rule}; {limits}; change with {command}",
+      "placeholders": [
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the shown value of the autoPickLeveling setting (the scope list's own on / off / not set words)"
+        },
+        {
+          "name": "rule",
+          "type": "text",
+          "meaning": "the shown rule (readout.body.scope_random_roll_rule)"
+        },
+        {
+          "name": "limits",
+          "type": "text",
+          "meaning": "the shown limits (readout.body.scope_random_roll_limits)"
+        },
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "slash command syntax \"/nexus leveling on|off\" (protocol, never translated)"
+        }
+      ],
+      "resultLimitBytes": 816,
+      "group": "readout",
+      "meaning": "One permission line of the Auto scope list (the code adds \"- \" before it): the optional Random Roll setting with its current value, its rule and limits, and the command that changes it.",
+      "consumer": "Readout.AutomationScopeLines",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "readout.body.scope_random_roll_limits",
+      "kind": "text",
+      "english": "needs Auto ON and autoPick; no reroll or spending; no new pick at level 80",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "The limits part of the Random Roll scope line ({limits} of readout.body.scope_random_roll): it needs Auto ON and the autoPick permission, never rerolls or spends, and makes no new pick at level 80.",
+      "consumer": "Readout.AutomationScopeLines (limits slot of readout.body.scope_random_roll)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "readout.body.scope_random_roll_rule",
+      "kind": "text",
+      "english": "with no Wishlist at levels 2-79 it takes the highest-rarity offer (first current offer on a tie), not a random one",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "The rule part of the Random Roll scope line ({rule} of readout.body.scope_random_roll): with no Wishlist, at levels 2 to 79, it takes the offer of the highest rarity (the first current offer on a tie); despite the feature's name it does not choose at random.",
+      "consumer": "Readout.AutomationScopeLines (rule slot of readout.body.scope_random_roll)",
+      "familySurface": "hud: Nexus HUD panel: Auto explained (Options > Auto explained / Auto hover) and the Auto overwrite warning (body); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
       "key": "readout.body.scope_read_only",
       "kind": "text",
       "english": "Saved data is read-only: a permission counts as on only when it was saved as on, and a change lasts this session only.",
@@ -11697,6 +11802,56 @@
       "consumer": "Readout.AutomationSettingsRows",
       "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
       "cohort": "fullui:hud"
+    },
+    {
+      "key": "readout.menu.random_roll",
+      "kind": "template",
+      "english": "Random Roll: {value}; {rule}; {limits}",
+      "placeholders": [
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the shown value of the autoPickLeveling setting (the menu's own on / off / not set words)"
+        },
+        {
+          "name": "rule",
+          "type": "text",
+          "meaning": "the shown rule (readout.menu.random_roll_rule)"
+        },
+        {
+          "name": "limits",
+          "type": "text",
+          "meaning": "the shown limits (readout.menu.random_roll_limits)"
+        }
+      ],
+      "resultLimitBytes": 657,
+      "group": "readout",
+      "meaning": "Toggle row of the Automation settings menu for the optional Random Roll (autoPickLeveling): its value, rule and limits. Choosing the row runs /nexus leveling on or off; it is checked only when the setting is saved as on.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "readout.menu.random_roll_limits",
+      "kind": "text",
+      "english": "needs Auto ON and autoPick; optional, off by default; no new pick at 80; no reroll or spending",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "The limits part of the Random Roll menu row ({limits} of readout.menu.random_roll): it needs Auto ON and the autoPick permission, is optional and off by default, makes no new pick at level 80, and never rerolls or spends.",
+      "consumer": "Readout.AutomationSettingsRows (limits slot of readout.menu.random_roll)",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "readout.menu.random_roll_rule",
+      "kind": "text",
+      "english": "no Wishlist, levels 2-79: takes the highest-rarity offer (first current offer on a tie)",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "The rule part of the Random Roll menu row ({rule} of readout.menu.random_roll): with no Wishlist, at levels 2 to 79, it takes the offer of the highest rarity (the first current offer on a tie).",
+      "consumer": "Readout.AutomationSettingsRows (rule slot of readout.menu.random_roll)",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "readout.menu.read_only",
@@ -26360,6 +26515,28 @@
       "cohort": "fullui:panel"
     },
     {
+      "key": "panel.button.hub_builds",
+      "kind": "text",
+      "english": "Builds",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Name on the Explore hub button of the compact footer, named by what its menu holds: the Build Library and the Leaderboard. The wider footer shows panel.button.explore instead. Very short: one of three equal footer buttons.",
+      "consumer": "ui/Panel.lua M.HubLabel (compact footer)",
+      "familySurface": "panel: Nexus main panel (HUD), footer (button); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "panel.button.hub_wishlist",
+      "kind": "text",
+      "english": "Wishlist",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Name on the Plan hub button of the compact footer, named by what its menu holds: the Wishlist Editor, Assign Wishlist and the game's My Builds page. The wider footer shows panel.button.plan instead. Very short: one of three equal footer buttons.",
+      "consumer": "ui/Panel.lua M.HubLabel (compact footer)",
+      "familySurface": "panel: Nexus main panel (HUD), footer (button); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
       "key": "panel.button.open_orbs",
       "kind": "text",
       "english": "Open Orbs...",
@@ -26843,6 +27020,17 @@
       "cohort": "fullui:panel"
     },
     {
+      "key": "panel.heading.your_offers",
+      "kind": "text",
+      "english": "Your offers",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Compact roll-area heading while the player chooses (Auto OFF, compact layout): the Echo offers shown now. The destination (\"Slot N\" or the preview tag) is shown apart at the right of the row.",
+      "consumer": "ui/Panel.lua roll heading (compact layout, Auto OFF)",
+      "familySurface": "panel: Nexus main panel (HUD), roll area (heading); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
       "key": "panel.label.active_prefix",
       "kind": "text",
       "english": "Active:",
@@ -27187,6 +27375,17 @@
       "consumer": "Nexus main panel (HUD), Details columns (still needed / extra copies / locked targets rows) label",
       "familySurface": "panel: Nexus main panel (HUD), Details columns (still needed / extra copies / locked targets rows) (label); family coverage PENDING review",
       "cohort": "fullui:panel"
+    },
+    {
+      "key": "panel.label.offer_wrong_quality",
+      "kind": "text",
+      "english": "Wrong quality",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Short status of an offer row that is not selected, when the offered card's annotation is the different-quality one (the Echo is not at the quality the target asks for). Very short: one row status.",
+      "consumer": "ui/Panel.lua OFFER.short (offer rows)",
+      "familySurface": "panel: Nexus main panel (HUD), roll area offer rows (label); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "panel.label.play_extra_copies",
@@ -30797,6 +30996,24 @@
       "consumer": "inside panel.tooltip.dps_held_by",
       "familySurface": "panel: Nexus main panel (HUD), DPS record hover (value); family coverage PENDING review",
       "cohort": "fullui:panel"
+    },
+    {
+      "key": "panel.value.wishlist_rarity_mode",
+      "kind": "template",
+      "english": "Auto-pick by rarity ({state})",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "the mode's short state word from Readout.RarityMode (for example ON, waiting, off, not in use)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "panel",
+      "meaning": "Says that Auto-pick by rarity (Random Roll's option, used instead of a Wishlist) is what this destination uses, with its short state. Shown in place of the Wishlist line, without a \"Wishlist:\" caption.",
+      "consumer": "ui/Panel.lua header context line (M.RarityModeFacts); ui/WishlistRenderer.lua M.RarityButtonState (Wishlist editor destination row)",
+      "familySurface": "panel: Nexus main panel (HUD), header Wishlist line, and the Wishlist editor destination row (value); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "leaderboard.body.both_records_order",
@@ -47502,6 +47719,17 @@
       "cohort": "fullui:wishlist"
     },
     {
+      "key": "editor.button.rarity_mode",
+      "kind": "text",
+      "english": "Auto-pick by rarity",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Wishlist editor button: asks the Echo Journal to use Auto-pick by rarity (Random Roll's option, the alternative to a Wishlist) for this destination. It is lit while that is what the destination uses; showing or hovering it chooses nothing. 150px button.",
+      "consumer": "ui/WishlistRenderer.lua frame._rarityBtn (M.ChooseRarityMode)",
+      "familySurface": "wishlist: Wishlist editor, bottom button row (button); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
       "key": "editor.button.reference",
       "kind": "text",
       "english": "Reference",
@@ -48028,6 +48256,34 @@
       "consumer": "Chat line after the code-owned 'Nexus:' prefix chat",
       "familySurface": "wishlist: Chat line after the code-owned 'Nexus:' prefix (chat); family coverage PENDING review",
       "cohort": "fullui:wishlist"
+    },
+    {
+      "key": "editor.chat.manage_restored_from_first_run",
+      "kind": "template",
+      "english": "\"{name}\" was removed from the first-run target and came back as Saved Build {slot}. The first-run target is unchanged: {state}.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the restored plan's name (player data, inserted verbatim, never translated)"
+        },
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build slot number the plan came back as"
+        },
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "what the first-run target holds now (usertext.value.wishlist_assigned_named or usertext.value.wishlist_none_assigned)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat result of restoring a forgotten plan (its restore row in the Wishlist editor): the plan was no longer on the first-run target and came back as a Saved Build; the first-run target itself is unchanged and its current Wishlist is named.",
+      "consumer": "ui/WishlistRenderer.lua restore-forgotten-plan row (Chat line after the code-owned 'Nexus:' prefix)",
+      "familySurface": "wishlist: Chat line after the code-owned 'Nexus:' prefix (chat); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "editor.chat.manage_restored_moved",
@@ -48812,6 +49068,35 @@
       "consumer": "Wishlist editor, Manage list and wishlist switch list pager rows menu",
       "familySurface": "wishlist: Wishlist editor, Manage list and wishlist switch list pager rows (menu); family coverage PENDING review",
       "cohort": "fullui:wishlist"
+    },
+    {
+      "key": "editor.menu.rarity_mode",
+      "kind": "text",
+      "english": "No Wishlist: auto-pick by rarity",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Last row of the Wishlist chooser, set apart below the saved Wishlists, while the option is not on: choose Auto-pick by rarity instead of a Wishlist for this destination. Hover explains the rule; choosing goes through the Echo Journal.",
+      "consumer": "ui/WishlistRenderer.lua M.RarityModeRow",
+      "familySurface": "wishlist: Wishlist editor, Wishlist chooser (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
+    },
+    {
+      "key": "editor.menu.rarity_mode_state",
+      "kind": "template",
+      "english": "No Wishlist: auto-pick by rarity ({state})",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "the mode's short state word from Readout.RarityMode (for example ON, waiting, off, not in use)"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "editor",
+      "meaning": "The same chooser row while the option is on, with the mode's short state; it is checked while the mode is what this destination uses.",
+      "consumer": "ui/WishlistRenderer.lua M.RarityModeRow",
+      "familySurface": "wishlist: Wishlist editor, Wishlist chooser (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_legacy_context_rows"
     },
     {
       "key": "editor.menu.switch_empty",
@@ -52306,6 +52591,240 @@
       "consumer": "Export Wishlist popup (EBH1 code to copy) status",
       "familySurface": "wishlist: Export Wishlist popup (EBH1 code to copy) (status); family coverage PENDING review",
       "cohort": "fullui:wishlist"
+    },
+    {
+      "key": "theme.menu.opacity_choice",
+      "kind": "template",
+      "english": "Background opacity: {percent}%",
+      "placeholders": [
+        {
+          "name": "percent",
+          "type": "count",
+          "meaning": "the background opacity of this row, a whole percent from 50 to 90 in steps of 10"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Appearance menu row: make Nexus window backgrounds this see-through. Only the window backgrounds change; '%' is the percent sign. Choosing it saves the choice through the settings owner.",
+      "consumer": "Theme.MenuItems (opacity rows)",
+      "familySurface": "hud: Options > Appearance menu and the Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_opacity"
+    },
+    {
+      "key": "theme.menu.opacity_default",
+      "kind": "text",
+      "english": "Background opacity: 100% (default)",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Appearance menu row for the default, fully solid background. Choosing it clears the saved choice (100% is never stored).",
+      "consumer": "Theme.MenuItems (opacity rows)",
+      "familySurface": "hud: Options > Appearance menu and the Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_opacity"
+    },
+    {
+      "key": "theme.menu.unknown_opacity",
+      "kind": "template",
+      "english": "Saved background opacity \"{value}\" is not in this build; it stays saved.",
+      "placeholders": [
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the saved value as shown (Theme DisplayValue), never translated"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "theme",
+      "meaning": "Disabled Appearance menu row: the saved opacity is not one this build accepts, so the default look is shown and the saved value is kept unchanged until the player chooses an opacity.",
+      "consumer": "Theme.MenuItems (opacity rows)",
+      "familySurface": "hud: Options > Appearance menu and the Settings window Appearance page (menu); family coverage PENDING review",
+      "cohort": "fullui:v33_opacity"
+    },
+    {
+      "key": "theme.tooltip.opacity",
+      "kind": "text",
+      "english": "Changes only how see-through Nexus window backgrounds are; text, buttons and the difficulty card stay solid. 100% is the default look and clears the choice.",
+      "placeholders": [],
+      "group": "theme",
+      "meaning": "Hover text of every background opacity row: what the choice changes and what it never changes.",
+      "consumer": "Theme.MenuItems (opacity rows, tooltipText)",
+      "familySurface": "hud: Options > Appearance menu (tooltip); family coverage PENDING review",
+      "cohort": "fullui:v33_opacity"
+    },
+    {
+      "key": "help.label.faq_echo_not_counted_question",
+      "kind": "text",
+      "english": "Why doesn't an Echo I can see count for my Wishlist?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (group 8 of the Questions page, drawn in the heading gold): why a visible Echo is not counted toward the Wishlist.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_echo_not_counted_answer",
+      "kind": "block",
+      "english": "A target is one exact Echo at one exact quality. A lower-quality copy does not count for a higher-quality target; on the panel, an offer at another quality can show Wrong quality. An Echo your Wishlist does not ask for never counts. Only copies you have count, up to the copies the plan asks for; locked copies count only up to its locked targets. Copies above a target are extras. See the Wishlists tab above.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer (white body text) to the uncounted-Echo question: exact Echo and quality, only owned copies up to the plan, locked copies up to locked targets, extras above a target. 'Wrong quality' quotes the panel label; 'Wishlists' is the page tab. Accepted FAQ r3 group 1.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_orb_start_maximum_question",
+      "kind": "text",
+      "english": "Does Auto ON start an Orb run, and what is the maximum?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): whether Auto starts an Orb run, and what the Orb maximum means.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_orb_start_maximum_answer",
+      "kind": "block",
+      "english": "No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and click Start; starting it turns ordinary Automation off and does not turn it back on. The maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, which does not change during a run. Until you type an amount, it follows your confirmed Orb balance, up to 1000.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: Auto never starts an Orb run; only Start in the Orb window does; the maximum is a fixed limit per run, defaulting to the confirmed balance up to 1000. 'Start', 'Orbs used' quote the Orb window. Accepted FAQ r3 group 2.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_orb_blocked_question",
+      "kind": "text",
+      "english": "Why can't I start an Orb run, or why did it stop early?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): why an Orb run cannot start or ended early.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_orb_blocked_answer",
+      "kind": "block",
+      "english": "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action without a confirmed result blocks new runs until it settles, or until you use Continue... where it is offered. A run ends when your rolled targets are complete or no safe source is left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: the Orb window says what blocks a run and what to do; an unconfirmed result blocks new runs; when a run ends or pauses; never clear saved data. 'Continue...' quotes the Orb window button. Accepted FAQ r3 group 3.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_auto_replace_build_question",
+      "kind": "text",
+      "english": "Can Auto replace a Saved Build that has Echoes I value?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): whether Auto can overwrite a Saved Build holding valued Echoes.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_auto_replace_build_answer",
+      "kind": "block",
+      "english": "Yes, while Auto is ON. After a finished run, Nexus may save it over your active Saved Build when overall Wishlist progress is higher, or equal with cleanup. It counts Wishlist progress, not Orbs spent, so an Echo you got with Orbs can be lost. At level 80 after a finished run, turning Auto ON or changing the assigned Wishlist can lead to a replacement without a new run. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. Nexus cannot undo a save, and Unassign does not restore a Saved Build. There is no separate automatic-save switch: keep Auto OFF to leave it unchanged.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: with Auto ON a better finished run may replace the active Saved Build (progress, not Orbs spent); the two routes to a replacement without a new run; no undo; keep Auto OFF to prevent it. A warning: it must not soften the risk. Accepted FAQ r3 group 4.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_hidden_panel_reload_question",
+      "kind": "text",
+      "english": "Does a hidden panel stay hidden after a reload?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): whether hiding the Nexus panel lasts across a reload.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_hidden_panel_reload_answer",
+      "kind": "block",
+      "english": "Yes. Hide Nexus Panel is saved as your choice, so the panel stays hidden after a reload or login. Type /nexus panel to show it again. If Nexus's saved data is read-only, the choice lasts this session only. Hiding changes no Auto setting.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: hiding is saved; /nexus panel shows it again (a command, never translated); a read-only saved root keeps it for the session only; hiding changes no Auto setting. 'Hide Nexus Panel' quotes the menu row. Accepted FAQ r3 group 5.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_library_empty_question",
+      "kind": "text",
+      "english": "Why is the Build Library empty?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): why the Build Library shows no builds.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_library_empty_answer",
+      "kind": "block",
+      "english": "Check the scope: All Shared, or Mine (your Saved Builds and shared listings). The class button can limit the list to your current class; click it to switch between your class and all classes. Require both DPS records lists only builds with both a Training Dummy and a Lich King record this client holds; uncheck it to drop that requirement. Updating results... means a filter change is still applying, and a gray Explore control means shared views are loading or unavailable (/nexus loading). The list shows only what this client has stored. See the Sharing tab above.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: the Build Library's scope, class and DPS-record filters, loading states and local-only list explain an empty list. 'Require both DPS records' and 'Updating results...' quote Library labels; /nexus loading is a command. Accepted FAQ r3 group 6.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_before_reload_question",
+      "kind": "text",
+      "english": "Something went wrong. What do I do before a reload?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): what to do first when something went wrong.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_before_reload_answer",
+      "kind": "block",
+      "english": "Do not reload, relog or change builds first. Type /nexus report, click Copy summary and paste it into your report. Add your exact build (/nexus update shows it), what happened versus what you expected, and Auto ON or OFF. If reporting fails or says Not prepared, say so and send what you have. Never post the report file in public. See the Problems tab above.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: report before any reload with /nexus report and Copy summary, add the build and what happened, never post the report file publicly. Commands are never translated; 'Copy summary' and 'Not prepared' quote the Support report. Accepted FAQ r3 group 7.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.label.faq_random_roll_leveling_question",
+      "kind": "text",
+      "english": "Can Nexus pick Echoes while I level without a Wishlist?",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ question (heading gold): whether Nexus picks Echoes while levelling with no Wishlist (Random Roll).",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (question); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "help.body.faq_random_roll_leveling_answer",
+      "kind": "block",
+      "english": "Yes, with Random Roll, an optional mode. Type /nexus leveling on or /nexus leveling off; /nexus leveling alone shows whether it is ON or OFF. It picks only when no Wishlist is assigned, at levels 2 to 79, with Auto ON and its Take permission allowed. Turning it on does not turn Auto ON. It takes the highest-rarity Echo offered (the first offer on a tie), not a random one. If an offer's rarity is unknown, it waits: pick by hand. It never rerolls, banishes, freezes, spends, saves or uses Orbs, and it makes no new pick at level 80. An assigned Wishlist always uses the normal rules instead.",
+      "placeholders": [],
+      "group": "help",
+      "meaning": "FAQ answer: Random Roll's command, its conditions (no Wishlist, levels 2-79, Auto ON and Take allowed), its highest-rarity rule, what it never does, and that an assigned Wishlist wins. 'Random Roll' is the feature name; the commands are never translated. Accepted FAQ r3 group 8; the last text of the page.",
+      "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
+      "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
+      "cohort": "fullui:v33_faq"
     }
   ],
   "currentAdoption": {
@@ -54591,14 +55110,14 @@
   "fullUiCatalog": {
     "status": "AUTHOR_COMPOSED_REVIEW_PENDING",
     "authority": "core/Localization.lua DECLARATIONS (generated section NEXUS-L10N-FULL-UI) and data/LocalizationEnglish.lua",
-    "cap": 4096,
+    "cap": 5120,
     "kinds": [
       "text",
       "block",
       "format",
       "template"
     ],
-    "totalKeys": 4078,
+    "totalKeys": 4116,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -54625,8 +55144,11 @@
       "v5_source86_supplemental": 73,
       "v6_source16_amendments": 0,
       "v6_source16_supplemental": 8,
-      "v8_source16_journal_names": 2
+      "v8_source16_journal_names": 2,
+      "v33_legacy_context_rows": 18,
+      "v33_opacity": 4,
+      "v33_faq": 16
     },
-    "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py validates the full catalog against the runtime contract: text, block, format and template kinds, typed placeholders and the lines policy, within the bounded runtime cap of 4096 entries (4097 fails closed)."
+    "note": "Rows with cohort fullui:<family> are generated from the family fragments, except cohort fullui:v33_legacy_context_rows: the 18 meanings that were already declared and in English without a context row, whose rows are author-composed from their current producers (ui/Panel.lua, ui/Readout.lua, ui/WishlistRenderer.lua and core/Main.lua CommandReference) and add no meaning; and except cohorts fullui:v33_opacity (4 Appearance background-opacity rows, ui/Theme.lua) and fullui:v33_faq (the 8 accepted FAQ question/answer groups, ui/Help.lua), whose 20 new meanings are hand-reviewed, appended last in the declarations, the English base and here in the same order, and have no pack entry yet (each optional pack lacks them; they show English). The original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py validates the full catalog against the runtime contract: text, block, format and template kinds, typed placeholders and the lines policy, within the bounded runtime cap of 5120 entries (5121 fails closed; the cap was 4096 before)."
   }
 }

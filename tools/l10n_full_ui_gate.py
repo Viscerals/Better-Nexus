@@ -17,7 +17,7 @@ to 256 bytes on one line; block 1 to 1024 bytes where only the line feed is an a
 byte; the original charge `format` keeps named count slots and result limit 254; a `template`
 has unique field names, a parallel list of count/text slots, a result limit of 1 to 2048 and an
 optional `lines = true`. Every text is well-formed UTF-8 without "|". Declarations, English and
-each pack fail closed above 4096 entries. The English base, KEY_CONTEXT.json rows, the TOC load
+each pack fail closed above 5120 entries. The English base, KEY_CONTEXT.json rows, the TOC load
 order, the uiLanguages enum and the products and autonyms of RELEASE_LANGUAGES.json must agree.
 No key count, family total or contract version is hard-coded: a later declaration change is
 followed. A supplied composition receipt is checked against the current bytes and declaration
@@ -83,7 +83,7 @@ ARCHIVE_CONTRACT = ('archive member Nexus/<path> == supplied bytes with every CR
 
 # Independent restatement of the code-owned contract of core/Localization.lua.
 CONTRACT = types.MappingProxyType({
-    'MAX_KEY_BYTES': 64, 'MAX_TEXT_BYTES': 256, 'MAX_BASE_ENTRIES': 4096, 'MAX_NAME_BYTES': 64,
+    'MAX_KEY_BYTES': 64, 'MAX_TEXT_BYTES': 256, 'MAX_BASE_ENTRIES': 5120, 'MAX_NAME_BYTES': 64,
     'MAX_LANGUAGES': 16, 'MAX_BLOCK_BYTES': 1024, 'MAX_TEMPLATE_RESULT_BYTES': 2048,
     'MAX_SLOT_TEXT_BYTES': 1024})
 MAX_KEY = CONTRACT['MAX_KEY_BYTES']
@@ -133,12 +133,37 @@ RECEIVER_PROBES = (
      'receiver': 'core/UserText.lua T.GLOSSARY (display-time field)',
      'code': 'return Nexus.UserText.GLOSSARY'},
     # A lines = true template: the Reference window's Troubleshooting page, opened by H.Show and
-    # read back from the FontString refresh() filled with PageText; then hidden again.
+    # read back from the FontStrings refresh() filled; then hidden again. The page is stored in
+    # Help's part pool (frame.parts, part 1 being frame.body; each later part anchored TOPLEFT to
+    # the BOTTOMLEFT of the one before; split only at line breaks, the boundary line feed not
+    # stored). The receiver reads every SHOWN part in pool order, requires the shown parts to be a
+    # prefix of the pool with each anchored under the previous one (else it raises:
+    # receiver-error), joins their GetText with the boundary line feed, and decodes the client's
+    # literal '||' (Help writes every '|' of a page that way) as the '|' the client shows.
     {'id': 'help.page_troubleshooting_body', 'key': 'help.body.troubleshooting_commands_2',
-     'receiver': 'ui/Help.lua H.Show("troubleshooting") -> NexusHelpWindow.body:GetText()',
+     'receiver': 'ui/Help.lua H.Show("troubleshooting") -> every shown NexusHelpWindow.parts '
+                 'FontString:GetText(), in order, the client escape || shown as |',
      'match': 'segment',
      'code': "local frame = Nexus.Help.Show('troubleshooting')\n"
-             "local text = frame.body:GetText()\nframe:Hide()\nreturn text",
+             "local pool = frame.parts or {frame.body}\n"
+             "local out, hidden = {}, nil\n"
+             "for i, fs in ipairs(pool) do\n"
+             " if fs:IsShown() then\n"
+             "  if hidden then error('shown part ' .. i .. ' after hidden part ' .. hidden) end\n"
+             "  if i > 1 then\n"
+             "   local point, rel, relPoint = fs:GetPoint(1)\n"
+             "   if point ~= 'TOPLEFT' or rel ~= pool[i - 1] or relPoint ~= 'BOTTOMLEFT' then\n"
+             "    error('part ' .. i .. ' is not anchored under part ' .. (i - 1))\n"
+             "   end\n"
+             "  end\n"
+             "  out[#out + 1] = fs:GetText() or ''\n"
+             " else\n"
+             "  hidden = hidden or i\n"
+             " end\n"
+             "end\n"
+             "frame:Hide()\n"
+             "if #out == 0 then error('no shown part') end\n"
+             "return (table.concat(out, '\\n'):gsub('||', '|'))",
      'slots': {'policy_command': '/nexus policy adaptive|released'}},
 )
 RECEIVER_SCOPE = ('bounded subset: the listed real receiver paths under every optional language, '

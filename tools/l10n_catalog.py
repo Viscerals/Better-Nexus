@@ -9,7 +9,7 @@ API: from the exact bytes of the English base, the packs file, KEY_CONTEXT.json
 and RELEASE_LANGUAGES.json it checks keys, text, blocks, the template grammar,
 pack IDs, autonyms and entries, the key-context rows and the release product
 metadata against the runtime contract of core/Localization.lua (text, block,
-format and template kinds within its 4096-entry cap), and raises
+format and template kinds within its 5120-entry cap), and raises
 CatalogValidationError (stable .code) on a semantic failure. Missing translated
 entries are valid partial data. catalog_report, appended after that, is a pure
 in-memory coverage and evidence report API. It first calls
@@ -647,10 +647,10 @@ _MAX_KEY_BYTES = 64
 _MAX_TEXT_BYTES = 256
 # Full visible-UI scope (issues #143-#148): the runtime's MAX_BASE_ENTRIES
 # bounds the declarations, the English base and each pack. It was 64 for the
-# pilot cohort; the runtime now declares 4096 and fails closed above it, and
-# so does every API here (english-too-many, registry-too-many,
+# pilot cohort, then 4096; the runtime now declares 5120 and fails closed
+# above it, and so does every API here (english-too-many, registry-too-many,
 # pack-too-many-entries).
-_MAX_BASE_ENTRIES = 4096
+_MAX_BASE_ENTRIES = 5120
 _MAX_BLOCK_BYTES = 1024
 _MAX_TEMPLATE_RESULT_BYTES = 2048
 _MAX_NAME_BYTES = 64
@@ -2081,7 +2081,7 @@ def _parse_literal_table(source):
 # exactly {kind = "template", fields = {"name", ...}, slots = {"count" or
 # "text", ...}, resultLimit = N} with optionally lines = true: one or more
 # distinct lower-case field names, a slot type per field and N a whole number
-# from 1 to MAX_TEMPLATE_RESULT_BYTES (2048). At most MAX_BASE_ENTRIES (4096)
+# from 1 to MAX_TEMPLATE_RESULT_BYTES (2048). At most MAX_BASE_ENTRIES (5120)
 # declarations. Any other declaration, key or count is a CatalogRegistryError
 # (REGISTRY_CODES). The runtime leaves such a declaration out at load (or,
 # above the cap, every declaration); offline it fails.

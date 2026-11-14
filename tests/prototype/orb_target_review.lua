@@ -195,6 +195,15 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
  C.guard(bar.stop:IsEnabled(),'A: the strip keeps Stop')
  C.expect(not bar.resume:IsEnabled() and not bar.primary:IsEnabled(),'A: the strip offers no Resume for a changed target')
  local mini=UI.ShowMini()
+ -- Accepted mini layout (each line within a character budget of two estimated
+ -- rows at the mini's width, word-wrapped, as tall as its actual wrapped rows,
+ -- however many, and stacked): the client's wrap is modelled on the mini's own
+ -- lines only (V.UseMiniLineModel, a declared 7-unit character and 14-unit
+ -- row); removed at the end of this scenario's mini checks.
+ local restoreLines=V.UseMiniLineModel(mini)
+ local function After(key) if key=='missing' then return mini.notice:IsShown() and mini.notice or mini.note end
+  if key=='notice' then return mini.note end
+  return mini[({state='reason',reason='usage',usage='pending',pending='missing'})[key]] end
  C.expect(mini.state:GetText()=='Paused - review the new target in Open Orbs','A: the mini panel says where to review',mini.state:GetText())
  -- F5 current-contract adaptation: the reason row shows the run's actual
  -- reason (complete on its hover); the target moved to the missing row
@@ -204,8 +213,12 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
  local mp=M.Status().progress
  C.setup(mc.remaining~=nil and mp~=nil and mc.remaining==mp.rolledMissing,'A: fixture: the compact read carries the rolled copies of the full read',mc.remaining)
  local missing=mini.missing:GetText() or ''
- C.expect(MiniRow(missing,'New legitimate target',mc.remaining) and Chars(missing)*7<=mini.missing:GetWidth(),
-  'A: the mini panel names the new target',missing)
+ -- The VISIBLE row must name the whole target (not only its hover) and fit
+ -- visibly: character budget, allocated height covering every wrapped row,
+ -- and the next line below it.
+ local missFits,missDetail=V.MiniLineFits(mini,'missing',After('missing'))
+ C.expect(MiniRow(missing,'New legitimate target',mc.remaining) and missFits,
+  'A: the mini panel names the new target',missing..' | '..missDetail)
  local missFull=Hover(mini.missingHit)[1] or ''
  C.expect(missFull==mini.missing._nexusFullText and missFull:find("New target: 'New legitimate target'",1,true)~=nil
   and MiniCount(missFull,mc.remaining) and not missFull:find('...',1,true),
@@ -213,9 +226,10 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
  C.setup(type(mc.reason)=='string' and mc.reason~='','A: fixture: the runtime reports a current reason',mc.reason)
  local reasonShown=mini.reason:GetText() or ''
  local reasonFull=Hover(mini.reasonHit)[1] or ''
- C.expect(ReasonShown(reasonShown,mc.reason) and Chars(reasonShown)*7<=mini.reason:GetWidth()
+ local reasonFits,reasonDetail=V.MiniLineFits(mini,'reason',After('reason'))
+ C.expect(ReasonShown(reasonShown,mc.reason) and reasonFits
   and reasonFull==Flat(mc.reason) and (mini.reason._nexusFullText or reasonShown)==reasonFull,
-  'A: the mini reason row keeps the actual reason, complete on hover',reasonShown)
+  'A: the mini reason row keeps the actual reason, complete on hover',reasonShown..' | '..reasonDetail)
  C.expect(not mini.resume:IsEnabled() and mini.stop:IsEnabled(),'A: the mini panel withholds Resume and keeps Stop')
 
  -- Every Resume route before the review: refused with the reason, no effect.
@@ -223,8 +237,9 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
  Direct(f.resume)
  C.expect(f.notice:GetText():find('Review the new target first',1,true)~=nil,'A: a Resume click that reaches the handler is refused with the reason',f.notice:GetText())
  Direct(f.start);Direct(bar.resume);Direct(bar.primary);Direct(mini.resume)
- -- A mini line is one line of at most MINI_CHARS (47) characters under the 7 px
- -- model, cut with "..." and complete on hover (orb_mini_panel). The refusal
+ -- A mini line holds at most MINI_CHARS characters (two estimated rows of the
+ -- 7 px model at the mini's width), cut with "..." and complete on hover
+ -- (orb_mini_panel); it is as tall as its wrapped rows. The refusal
  -- must fit whole, so the line itself says why and names the real button to
  -- use; a cut or a different destination does not count.
  local function whyAndWhere(text)
@@ -234,11 +249,15 @@ C.scenario('A changed ready target after settlement: named everywhere, reviewed 
   'A: oracle: a cut destination and a different destination are both rejected')
  local notice=mini.notice:GetText()
  C.expect(whyAndWhere(notice) and mini.notice._nexusFullText==nil,'A: the mini panel says why and where to review, unshortened',notice)
- local visible=notice:gsub('||','|');local _,chars=visible:gsub('[^\128-\191]','')
- C.guard(chars*7<=mini.notice:GetWidth(),'A: the notice stays within the one-line model',chars)
+ -- Accepted line model (was one row): the notice is shown whole within its
+ -- character budget, its height covers its wrapped rows and the note stands
+ -- below.
+ local noticeFits,noticeDetail=V.MiniLineFits(mini,'notice',After('notice'))
+ C.guard(mini.notice:IsShown() and noticeFits,'A: the notice stays within the mini line model',noticeDetail)
  GameTooltip:SetText('sentinel');mini.noticeHit:GetScript('OnEnter')(mini.noticeHit)
  local tip=GameTooltip:GetText()
  C.guard(tip==(mini.notice._nexusFullText or notice),'A: hovering the notice gives its complete text',tip)
+ restoreLines()
  mini.noticeHit:GetScript('OnLeave')(mini.noticeHit)
  C.expect(Same(before,Effects()),'A: no Resume route adopted, selected, wrote or spent before the review')
 
@@ -369,16 +388,22 @@ C.scenario('D pending original: every surface names the operation Resume continu
  C.expect(dwhole==bar.summary._nexusFullText and dwhole:find("Resume uses: 'Orb test'",1,true)~=nil and StripFact(dwhole,dc),
   'D: hovering the strip gives the complete original target and its fact',dwhole)
  local mini=UI.ShowMini()
+ -- Accepted mini lines (character budget, actual wrapped height) under the
+ -- declared client model (see A).
+ local restoreLines=V.UseMiniLineModel(mini)
  local dmiss=mini.missing:GetText() or ''
- C.expect(MiniRow(dmiss,'Orb test',dc.remaining) and Chars(dmiss)*7<=mini.missing:GetWidth(),'D: the mini panel names it',dmiss)
+ local dmissFits,dmissDetail=V.MiniLineFits(mini,'missing',mini.notice:IsShown() and mini.notice or mini.note)
+ C.expect(MiniRow(dmiss,'Orb test',dc.remaining) and dmissFits,'D: the mini panel names it',dmiss..' | '..dmissDetail)
  local dmissFull=Hover(mini.missingHit)[1] or ''
  C.expect(dmissFull==mini.missing._nexusFullText and dmissFull:find("Resume uses: 'Orb test'",1,true)~=nil
   and MiniCount(dmissFull,dc.remaining),'D: hovering the missing row gives the complete count and original target',dmissFull)
  C.setup(type(dc.reason)=='string' and dc.reason~='','D: fixture: the runtime reports a current reason',dc.reason)
  local dreason=mini.reason:GetText() or ''
  local dreasonFull=Hover(mini.reasonHit)[1] or ''
- C.expect(ReasonShown(dreason,dc.reason) and Chars(dreason)*7<=mini.reason:GetWidth() and dreasonFull==Flat(dc.reason),
-  'D: the mini reason row keeps the actual reason, complete on hover',dreason)
+ local dreasonFits,dreasonDetail=V.MiniLineFits(mini,'reason',mini.usage)
+ restoreLines()
+ C.expect(ReasonShown(dreason,dc.reason) and dreasonFits and dreasonFull==Flat(dc.reason),
+  'D: the mini reason row keeps the actual reason, complete on hover',dreason..' | '..dreasonDetail)
  C.guard(bar.stop:IsEnabled() and mini.stop:IsEnabled(),'D: the strip and the mini panel keep Stop')
  C.expect(f.resume:IsEnabled() and bar.resume:IsEnabled() and mini.resume:IsEnabled() and not f.review:IsShown(),
   'D: continuing the original operation needs no review')
@@ -521,6 +546,9 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  local mini=UI.ShowMini()
  mini:GetScript('OnUpdate')(mini,1)
  UI.Refresh()
+ -- Accepted mini lines (character budget, actual wrapped height) under the
+ -- declared client model (see A).
+ local restoreLines=V.UseMiniLineModel(mini)
  local summary=bar.summary:GetText() or ''
  local row=TargetRow(summary,'Main')
  C.expect(StripRow(summary,'Main',c,'new') and row~=nil and row:find("'Main'",1,true)~=nil and Chars(row)*7<=bar.summary:GetWidth()
@@ -528,11 +556,13 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
   'G: the strip shows the whole short target and its kind on one bounded line, with no count',summary)
  C.guard(summary:find('review it in the Orb window',1,true)~=nil,'G: the strip still says where to review it',summary)
  local missing=mini.missing:GetText() or ''
- C.expect(MiniRow(missing,'Main',2) and missing:find("'Main'",1,true)~=nil and Chars(missing)*7<=mini.missing:GetWidth(),
-  'G: the mini missing row shows the whole short target beside the two rolled copies missing',missing)
+ local gMissFits,gMissDetail=V.MiniLineFits(mini,'missing',mini.notice:IsShown() and mini.notice or mini.note)
+ C.expect(MiniRow(missing,'Main',2) and missing:find("'Main'",1,true)~=nil and gMissFits,
+  'G: the mini missing row shows the whole short target beside the two rolled copies missing',missing..' | '..gMissDetail)
  local reasonShown=mini.reason:GetText() or ''
- C.expect(ReasonShown(reasonShown,c.reason) and Chars(reasonShown)*7<=mini.reason:GetWidth(),
-  'G: the mini reason row keeps the actual runtime reason, bounded',reasonShown)
+ local gReasonFits,gReasonDetail=V.MiniLineFits(mini,'reason',mini.usage)
+ C.expect(ReasonShown(reasonShown,c.reason) and gReasonFits,
+  'G: the mini reason row keeps the actual runtime reason, bounded',reasonShown..' | '..gReasonDetail)
  C.guard(mini.state:GetText()=='Paused - review the new target in Open Orbs','G: the mini state says where to review',mini.state:GetText())
  local whole=Hover(bar.summaryHit)[1] or ''
  local wl,sl=Lines(whole),Lines(summary)
@@ -559,8 +589,11 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  local la,lb=lead:find("'Main'",1,true)
  C.expect(la~=nil and KindOnly(lead:sub(1,la-1)..' '..lead:sub(lb+1),'new'),
   'G: the short target and its kind lie within the first '..cols..' synthetic columns of the strip line',lead)
- C.expect(Chars(missing)*G.MODELS.double.char<=mini.missing:GetWidth(),
-  'G: the short mini missing row lies within its width in the same synthetic columns',Chars(missing))
+ -- The larger-font case, horizontal only: under the doubled model the short
+ -- row stays within the accepted two-row budget of the line's width.
+ local wideRows=V.ModelRows(missing,mini.missing:GetWidth(),G.MODELS.double.char)
+ C.expect(Chars(missing)<=2*math.floor(mini.missing:GetWidth()/G.MODELS.double.char) and wideRows<=2,
+  'G: the short mini missing row lies within its two-row width in the same synthetic columns',Chars(missing)..' chars, '..wideRows..' rows')
  local sumRect,miniRect=G.Rect(bar.summary,bar),G.Rect(mini,mini)
  local missRect,reasonRect=G.Rect(mini.missing,mini),G.Rect(mini.reason,mini)
  local clear=G.Inside(missRect,miniRect) and G.Inside(reasonRect,miniRect) and G.Apart(missRect,reasonRect)
@@ -568,10 +601,22 @@ C.scenario('G short new target: the actual reason and the true copies stay visib
  for _,b in ipairs({mini.pause,mini.resume,mini.stop,mini.open}) do
   local r=G.Rect(b,mini);clear=clear and G.Inside(r,miniRect) and G.Apart(r,missRect) and G.Apart(r,reasonRect)
  end
- C.guard(clear and bar:GetHeight()==100 and bar.summary:GetWidth()==252 and bar.summary:GetHeight()==52
-  and mini:GetWidth()==356 and mini:GetHeight()==196 and mini.missing:GetWidth()==332 and mini.missing:GetHeight()==17
-  and mini.reason:GetWidth()==332 and mini.reason:GetHeight()==17,
-  'G: the strip, the mini lines and their buttons keep their boxes, inside and apart',G.Text(sumRect)..' '..G.Text(missRect))
+ -- Accepted mini geometry, stated independently: at the normal font the mini
+ -- is the main panel's base width, 284 units, and each line 284 - 2 x 12 =
+ -- 260 wide; each line is as tall as its wrapped rows under the declared
+ -- model; the control row stands below the closing note; the mini holds it
+ -- all. The strip boxes are unchanged.
+ local m=V.MINI_LINE_MODEL
+ local rowsOK=mini.missing:GetHeight()>=V.ModelRows(mini.missing:GetText(),260,m.char)*m.line
+  and mini.reason:GetHeight()>=V.ModelRows(mini.reason:GetText(),260,m.char)*m.line
+ local below=V.TopOf(mini.pause)>=V.TopOf(mini.note)+mini.note:GetHeight()
+  and V.TopOf(mini.resume)==V.TopOf(mini.pause) and V.TopOf(mini.stop)==V.TopOf(mini.pause)
+  and mini:GetHeight()>=V.TopOf(mini.pause)+mini.pause:GetHeight()
+ C.guard(clear and rowsOK and below and bar:GetHeight()==100 and bar.summary:GetWidth()==252 and bar.summary:GetHeight()==52
+  and mini:GetWidth()==284 and mini.missing:GetWidth()==260 and mini.reason:GetWidth()==260,
+  'G: the strip, the mini lines and their buttons keep their boxes, inside and apart',G.Text(sumRect)..' '..G.Text(missRect)
+   ..' mini '..tostring(mini:GetWidth())..'x'..tostring(mini:GetHeight()))
+ restoreLines()
  mini:Hide()
 end)
 

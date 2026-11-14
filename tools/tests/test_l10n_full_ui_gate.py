@@ -15,7 +15,7 @@ its declarations, English and key-context rows regenerated from the actual ones)
 stays inside the whole-process limit; each mutant must fail for its intended reason. Synthetic
 offline evidence only: no translation quality, rights, native glyph, layout or reload claim.
 """
-import hashlib, importlib.util, io, json, pathlib, sys, tempfile, unittest, zipfile
+import hashlib, importlib.util, io, json, pathlib, re, sys, tempfile, unittest, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -78,6 +78,13 @@ def packs_source(packs):
         lines.append('    },')
     lines.append('}')
     return ('\r\n'.join(lines) + '\r\n').encode('utf-8')
+
+
+# v33 slice A: the bounded entry limit of declarations, the English base and each pack (4116
+# planned meanings with 1004 headroom). An independent restatement, not G.MAX_ENTRIES, so the
+# cap and cap + 1 fixtures below test the gate code against the intended boundary. A gate, tool
+# or runtime still at 4096 refuses the 5120-entry fixtures and fails the agreement checks.
+BOUNDED_ENTRIES = 5120
 
 
 ACTUAL = G.read_sources(ROOT)
@@ -504,9 +511,9 @@ class PackCoverageMutants(unittest.TestCase):
                 for index in range(count - len(entries)):
                     entries['zz.extra_%04d' % index] = 'x'
             return mutate
-        at_cap = G.evaluate(composed(grow(G.MAX_ENTRIES)))
+        at_cap = G.evaluate(composed(grow(BOUNDED_ENTRIES)))
         self.assertEqual(codes(at_cap), ['entry-orphan'])
-        over = G.evaluate(composed(grow(G.MAX_ENTRIES + 1)))
+        over = G.evaluate(composed(grow(BOUNDED_ENTRIES + 1)))
         self.assertIn('pack-over-cap', codes(over))
         self.assertEqual(self.product(over, 'frFR')['counts']['missing'], len(REDUCED_MODEL['active']))
 
@@ -551,7 +558,7 @@ class ContractMutants(unittest.TestCase):
         self.assertEqual(problem_keys(report, 'declaration-invalid'), ['panel.button.my_builds'])
 
     def test_declaration_and_english_caps_fail_closed_at_cap_plus_one(self):
-        room = G.MAX_ENTRIES - len(REDUCED_MODEL['declarations'])
+        room = BOUNDED_ENTRIES - len(REDUCED_MODEL['declarations'])
         extra = ['["zz.extra_%04d"] = {kind = "text"},' % index for index in range(room)]
         at_cap = G.evaluate(composed(localization=with_declarations(extra)))
         self.assertNotIn('declarations-over-cap', codes(at_cap))
@@ -567,7 +574,15 @@ class ContractMutants(unittest.TestCase):
     def test_runtime_contract_constant_change_is_not_followed_silently(self):
         observed = G.runtime_constants(ACTUAL['localization'])
         self.assertEqual({name: observed.get(name) for name in G.CONTRACT}, dict(G.CONTRACT))
-        source = with_declarations(replace=[('local MAX_BASE_ENTRIES = 4096', 'local MAX_BASE_ENTRIES = 4097')])
+        # v33 slice A: the runtime, the static catalog validator and this gate agree at the bounded
+        # limit. Each is read from its own source (the runtime and tool cap lines, the gate CONTRACT).
+        tool_caps = re.findall(rb'^_MAX_BASE_ENTRIES = (\d+)\r?$',
+                               (ROOT / 'tools' / 'l10n_catalog.py').read_bytes(), re.M)
+        self.assertEqual((observed.get('MAX_BASE_ENTRIES'), G.CONTRACT['MAX_BASE_ENTRIES'],
+                          [int(value) for value in tool_caps]),
+                         (BOUNDED_ENTRIES, BOUNDED_ENTRIES, [BOUNDED_ENTRIES]))
+        source = with_declarations(replace=[('local MAX_BASE_ENTRIES = %d' % BOUNDED_ENTRIES,
+                                             'local MAX_BASE_ENTRIES = %d' % (BOUNDED_ENTRIES + 1))])
         self.assertEqual(codes(G.evaluate(composed(localization=source))), ['contract-constant'])
 
     def test_english_and_context_must_agree_with_the_declarations(self):
@@ -755,7 +770,72 @@ DISCARD_CONTROLS = (
      'slots': {'policy_command': '/nexus policy adaptive|released'},
      'receiver': 'test-only: another Help page',
      'code': "local f = Nexus.Help.Show('about'); local text = f.body:GetText(); f:Hide(); return text"},
+    # The forced multipart pair (v39 fix): see FORCED_HELP below. The positive control reads every
+    # shown part of the forced page exactly as the real receiver does and must PASS in all 18 runs;
+    # the negative control reads the same forced page but discards every part after the first and
+    # must be receiver-mismatch in all 18 runs. Both raise if the forced page fits one part.
+    {'id': 'control.help_forced_multipart', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: every shown part of the Troubleshooting page under a 1024-byte Help part budget',
+     'code': None},
+    {'id': 'control.help_later_parts_dropped', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: the same forced page with every part after the first discarded',
+     'code': None},
 )
+# The forced multipart fixture, test-local and synthetic only. The real ui/Help.lua bytes are
+# loaded once more inside the probe with only their part budget line lowered from 4096 to 1024
+# bytes in memory, so the Troubleshooting page is split across several actual FontStrings by
+# Help's own formatter and part pool (a split-boundary test input; the shipped Help.lua, its
+# 4096 budget and the catalog cap MAX_BASE_ENTRIES 5120 are unchanged). The page is shown by that
+# Help.Show and read from its actual shown FontStrings; Nexus.Help and the window globals are
+# restored afterwards, whatever happens.
+def _forced_help_probe(body):
+    return ("local f = assert(io.open('ui/Help.lua', 'rb'))\n"
+            "local src = f:read('*a'); f:close()\n"
+            "local patched, n = src:gsub('local PART_BUDGET=4096', 'local PART_BUDGET=1024')\n"
+            "assert(n == 1, 'exactly one Help part budget line')\n"
+            "local saved = {Nexus.Help, _G.NexusHelpWindow, _G.NexusHelpScroll}\n"
+            "local ok, result = pcall(function()\n"
+            " assert(loadstring(patched, '=ui/Help.lua (test-local part budget 1024)'))()\n"
+            " local frame = Nexus.Help.Show('troubleshooting')\n"
+            " local pool = frame.parts or {frame.body}\n"
+            + body +
+            "end)\n"
+            "if _G.NexusHelpWindow and _G.NexusHelpWindow ~= saved[2] then _G.NexusHelpWindow:Hide() end\n"
+            "Nexus.Help, _G.NexusHelpWindow, _G.NexusHelpScroll = saved[1], saved[2], saved[3]\n"
+            "if not ok then error(result, 0) end\n"
+            "return result")
+
+
+FORCED_HELP = {
+    'control.help_forced_multipart': _forced_help_probe(
+        " local out, hidden = {}, nil\n"
+        " for i, fs in ipairs(pool) do\n"
+        "  if fs:IsShown() then\n"
+        "   if hidden then error('shown part ' .. i .. ' after hidden part ' .. hidden) end\n"
+        "   if i > 1 then\n"
+        "    local point, rel, relPoint = fs:GetPoint(1)\n"
+        "    if point ~= 'TOPLEFT' or rel ~= pool[i - 1] or relPoint ~= 'BOTTOMLEFT' then\n"
+        "     error('part ' .. i .. ' is not anchored under part ' .. (i - 1))\n"
+        "    end\n"
+        "   end\n"
+        "   out[#out + 1] = fs:GetText() or ''\n"
+        "  else\n"
+        "   hidden = hidden or i\n"
+        "  end\n"
+        " end\n"
+        " assert(#out > 1, 'the forced Troubleshooting page spans more than one part')\n"
+        " return (table.concat(out, '\\n'):gsub('||', '|'))\n"),
+    'control.help_later_parts_dropped': _forced_help_probe(
+        " local shown = 0\n"
+        " for _, fs in ipairs(pool) do if fs:IsShown() then shown = shown + 1 end end\n"
+        " assert(shown > 1, 'the forced Troubleshooting page spans more than one part')\n"
+        " return ((pool[1]:GetText() or ''):gsub('||', '|'))\n"),
+}
+for _control in DISCARD_CONTROLS:
+    if _control['id'] in FORCED_HELP:
+        _control['code'] = FORCED_HELP[_control['id']]
 ORPHAN_IDS = {probe['id'] for probe in ORPHAN_CONTROLS}
 DISCARD_IDS = {probe['id'] for probe in DISCARD_CONTROLS}
 
@@ -971,6 +1051,13 @@ class RealReceivers(unittest.TestCase):
         probe = next(p for p in G.RECEIVER_PROBES if p['id'] == HELP_PROBE)
         self.assertEqual(probe['key'], HELP_KEY)
         self.assertEqual(probe['match'], 'segment')
+        # The receiver reads every shown Help part (not frame.body alone) and shows the client
+        # escape '||' as '|'; the slot carries the literal pipe that every run below must show.
+        self.assertIn('frame.parts', probe['code'])
+        self.assertIn("gsub('||', '|')", probe['code'])
+        self.assertNotIn('frame.body:GetText()', probe['code'])
+        self.assertIn('|', probe['slots']['policy_command'])
+        self.assertNotIn('||', probe['slots']['policy_command'])
         self.assertIs(MODEL['declarations'][HELP_KEY].get('lines'), True)
         self.assertEqual(MODEL['declarations'][HELP_KEY]['slots'], ('text',))
         self.assertIn('\n', MODEL['active'][HELP_KEY])
@@ -1021,6 +1108,16 @@ class RealReceivers(unittest.TestCase):
             for condition in ('missing', 'invalid'):
                 self.assertEqual(results['control.discarded_panel']['%s:%s' % (condition, product)], 'PASS')
                 self.assertEqual(results['control.discarded_help']['%s:%s' % (condition, product)], 'PASS')
+            # Forced multipart pair (test-local 1024-byte Help part budget): read whole, the page
+            # holds the target in every condition (positive proof); with every part after the
+            # first discarded it does not (the target lies in a later actual FontString), so a
+            # part-1-only receiver cannot pass.
+            for condition in ('complete', 'missing', 'invalid'):
+                run = '%s:%s' % (condition, product)
+                self.assertEqual(results['control.help_forced_multipart'][run], 'PASS', run)
+                self.assertEqual(results['control.help_later_parts_dropped'][run], 'receiver-mismatch', run)
+        self.assertEqual(len(results['control.help_forced_multipart']), 18)
+        self.assertEqual(len(results['control.help_later_parts_dropped']), 18)
 
 
 if __name__ == '__main__':
