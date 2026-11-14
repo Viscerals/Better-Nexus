@@ -577,6 +577,103 @@ local function NewPart(i)
     frame.parts[i]=fs
     return fs
 end
+-- v29 document height (native test.163034-8b3a5409: HG allocated/native
+-- 1480/727, 1600/775, 640/290; blank views inside the page and at its
+-- bottom). A part keeps the conservative text model only until the client's
+-- own wrapped height is known: refresh() sets each shown part to the larger
+-- of its first reading and the model (nothing is clipped while that first
+-- reading may not be wrapped yet), then one bounded settle pass on the
+-- window's next frames re-reads each part. A reading that is valid and the
+-- same on two consecutive frames becomes the part's height, plus PART_PAD. A
+-- part without one keeps the model (no method, an error, no number, NaN, not
+-- above 0, infinite, or fewer rows than its own line breaks). The pass ends
+-- after SETTLE_FRAMES frames at most, then lays the document out once and
+-- removes itself; a page change or hiding the window cancels it. The
+-- document is the parts plus DOCUMENT_PAD, and at least the viewport; the
+-- scroll offset is kept within the new range. The text is never changed.
+local PART_PAD,DOCUMENT_PAD,SETTLE_FRAMES=2,24,10
+local function TextModel()
+    local metrics=Nexus.LayoutMetrics
+    if metrics and metrics.TextRows and metrics.ConservativeText then
+        local scale=metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
+        local _,line=metrics.ConservativeText(scale)
+        return metrics,scale,line
+    end
+end
+-- A part's wrapped height as a finite number above 0, else nil.
+local function ReadHeight(fs)
+    local ok,v=pcall(fs.GetStringHeight,fs)
+    v=ok and tonumber(v) or nil
+    if not v or v~=v or v<=0 or v==math.huge then return nil end
+    return v
+end
+-- The reading is a wrapped height: at least one short row per stored line.
+local function Wrapped(v,breaks,line)
+    return v and v>=(breaks+1)*math.max(1,(line or 17)*0.4) and v or nil
+end
+local function PlaceDocument(heights,count)
+    local total=0
+    for i=1,count do frame.parts[i]:SetHeight(heights[i]);total=total+heights[i] end
+    local view=tonumber(frame.scroll:GetHeight()) or 0
+    local height=math.max(view,total+DOCUMENT_PAD)
+    frame.content:SetHeight(height)
+    local at=tonumber(frame.scroll:GetVerticalScroll()) or 0
+    local range=math.max(0,height-view)
+    if at>range then frame.scroll:SetVerticalScroll(range) end
+end
+local SettleStep
+local function StopSettle()
+    local s=frame and frame.settle
+    if not s then return end
+    frame.settle=nil
+    if frame:GetScript("OnUpdate")==SettleStep then frame:SetScript("OnUpdate",s.prior) end
+end
+SettleStep=function(self,elapsed)
+    local s=frame.settle
+    if s and s.prior then s.prior(self,elapsed) end
+    if not s or frame.settle~=s then return end
+    s.frames=s.frames+1
+    local pending=0
+    for i=1,s.count do
+        if not s.done[i] then
+            local v=Wrapped(ReadHeight(frame.parts[i]),s.breaks[i],s.line)
+            if v and s.last[i] and math.abs(v-s.last[i])<0.5 then
+                s.done[i]=true;s.heights[i]=math.ceil(v)+PART_PAD
+            else
+                s.last[i]=v;pending=pending+1
+            end
+        end
+    end
+    if pending==0 or s.frames>=SETTLE_FRAMES then
+        PlaceDocument(s.heights,s.count)
+        StopSettle()
+    end
+end
+-- Lays out the shown parts now (each at least its text model) and starts the
+-- settle pass for them.
+local function LayoutDocument(shownParts)
+    StopSettle()
+    local metrics,scale,line=TextModel()
+    local s={count=shownParts,heights={},last={},done={},breaks={},line=line,frames=0}
+    for i=1,shownParts do
+        local fs=frame.parts[i]
+        fs:SetHeight(0)
+        local text=fs:GetText() or ""
+        local _,breaks=text:gsub("\n","")
+        s.breaks[i]=breaks
+        -- This first reading only raises the provisional height; agreement
+        -- is taken from two later frames, after the client has drawn the text.
+        local v=ReadHeight(fs)
+        local model=metrics and metrics.TextRows(text,tonumber(fs:GetWidth()) or 585,scale)*line or (breaks+1)*17
+        s.heights[i]=math.ceil(math.max(v or 0,model))
+    end
+    PlaceDocument(s.heights,shownParts)
+    if shownParts>0 then
+        s.prior=frame:GetScript("OnUpdate")
+        frame.settle=s
+        frame:SetScript("OnUpdate",SettleStep)
+    end
+end
 -- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
 -- Saved Builds, Auto, Sync, Orbs, Support), one per page: a few lines and one
 -- Open action to the real screen (H.OpenTopic). Each page's text stays below
@@ -735,37 +832,9 @@ local function refresh()
         if theme and theme.SetSelected then theme.SetSelected(t,i==index) end
     end
     if frame.note and frame.noteIndex~=index then frame.note:SetText("");frame.noteIndex=nil end
-    if frame.content then
-        -- v28: a design caution kept from the topic card (topicHeight), not
-        -- the remedy for the stored-text loss above: one reading of
-        -- GetStringHeight is not trusted to have wrapped yet, so each shown
-        -- part is never below the conservative text model of the text it
-        -- stores, at its width. The text is unchanged; a larger model only
-        -- adds space below it. The parts stack; the document is at least 414.
-        local metrics=Nexus.LayoutMetrics
-        local scale,rowLine=1,nil
-        if metrics and metrics.TextRows and metrics.ConservativeText then
-            scale=metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
-            local _,l=metrics.ConservativeText(scale)
-            rowLine=l
-        end
-        local total,last=0,nil
-        for i=1,shownParts do
-            local fs=frame.parts[i]
-            fs:SetHeight(0)
-            local ok,measured=pcall(fs.GetStringHeight,fs)
-            measured=ok and tonumber(measured) or 0
-            if measured~=measured or measured<0 or measured==math.huge then measured=0 end
-            if rowLine then
-                local width=tonumber(fs:GetWidth()) or 585
-                measured=math.max(measured,metrics.TextRows(fs:GetText() or "",width,scale)*rowLine)
-            end
-            local h=math.ceil(measured)
-            fs:SetHeight(h);total=total+h;last=fs
-        end
-        if last and total<414 then last:SetHeight(last:GetHeight()+414-total);total=414 end
-        frame.content:SetHeight(math.max(414,total)+24)
-    end
+    -- v29: the shown parts' heights (LayoutDocument above): the text model
+    -- until the client's wrapped heights settle, then those heights.
+    if frame.content then LayoutDocument(shownParts) end
     -- v26 (native X1): while the game's "Select an Echo" control is shown in
     -- this strata above the Reference, its own frames are laid out over it
     -- (LayoutMetrics.LiftOwned; levels only, read again on each page).
@@ -864,6 +933,8 @@ local function ensure()
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame,0.94) end
     if Nexus.Theme and Nexus.Theme.StyleTree then Nexus.Theme.StyleTree(frame) end
     frame:HookScript("OnHide",function()
+        -- v29: a hidden Reference does no pending height work.
+        StopSettle()
         -- v26: a lifted Reference takes its own default levels back first.
         local metrics=Nexus.LayoutMetrics
         if metrics and type(metrics.RestoreOwned)=="function" then pcall(metrics.RestoreOwned,frame) end

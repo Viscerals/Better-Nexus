@@ -698,4 +698,230 @@ do
   error('v28 r4 Auto addition and document bounds: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0)
  end
 end
+-- v29 F (native test.163034-8b3a5409, recorded 2026-11-14T14:09:51Z): the
+-- stored Orbs document was complete (HD 3 parts, 8484 bytes, final sentence),
+-- but the parts' allocated heights were about twice the client's own wrapped
+-- heights (HG floored allocated/native 1480/727, 1600/775, 640/290). Dragging
+-- the scrollbar to an inner point and to the bottom showed an entirely blank
+-- viewport, so the final sentence could not be seen. Manual readability FAILS
+-- natively.
+-- Contract (product intent: complete, readable, scrollable text without
+-- clipping; not a permanent conservative maximum):
+--  F stable: when the client's wrapped height is valid and stable, no part is
+--    shorter than its wrapped text, no part reserves more than one row of
+--    empty space below its text inside the document, and at the scroll bottom
+--    the last line is in view. The content is either no taller than the
+--    viewport, or at most the text plus small padding; it never leaves a
+--    blank bottom view. Every page is checked.
+--  F stale: when the FIRST read after SetText is not yet wrapped (one row; a
+--    caveat Help.lua already records for the client), nothing is clipped right
+--    after showing; once the layout settles (within 0.5 s of frames) the same
+--    no-gap and visible-ending contract holds; after that, further frames do
+--    only bounded height work (no per-frame re-measuring).
+--  F invalid: with no valid wrapped height at all (no method, no value, 0,
+--    an error, NaN or infinite), every part keeps at least the conservative
+--    LayoutMetrics model height and the content holds the parts: no clipping
+--    or collapse.
+--  F text and reuse: the stored document (under C's 8189-byte storage model)
+--    is the complete formatted Orbs page, unchanged by any of this; the
+--    height work adds no FontString or frame, saves nothing and acts on
+--    nothing.
+-- Mapping to v28 B (kept unchanged): B's settled reads ARE the conservative
+-- model, so its 'each part >= model' is a no-clipping check for that
+-- fixture, not a required maximum. F adds the stronger behaviour: >= the
+-- settled wrapped text and <= it plus one row, for stable and stale-first
+-- reads, with the conservative model required only while no valid read
+-- exists (F invalid; F stale before settling).
+-- Fixture (stated; a model, not a native contract): a queued-layout stand-in
+-- on every document FontString, removed at the end. Its settled wrapped
+-- height uses a narrower glyph (3.5 units a character, 14 a row) than the
+-- conservative model (LayoutMetrics.ConservativeText: 7 and 17). That ratio,
+-- about one half, is the one HG showed natively. In the stale mode a read at
+-- the same harness time as the part's last SetText answers one row; a later
+-- read answers the settled height. GetText is never replaced. Frames advance
+-- only through the harness (H.Advance runs visible frames' OnUpdate).
+-- Expected on the unchanged runtime (each part = max(read, model)): F stable
+-- and F stale-settled miss (internal gaps of hundreds of units, a blank bottom
+-- view). F stale-immediate, F stale bounded work, F invalid, F text, F reuse
+-- and no-action are expected to hold (safety guards a correction must keep).
+-- The 414 floor: the viewport is at most 295 (Help.lua 683), so on a page
+-- whose text is short the fixed 414+24 content can also leave a blank bottom
+-- view; a floor at the viewport height satisfies F.
+do
+ local Help=assert(Nexus.Help,'SETUP: the Help module')
+ local LM=assert(Nexus.LayoutMetrics,'SETUP: LayoutMetrics')
+ local L=Nexus.Localization
+ local misses={}
+ local function expect(v,m) if not v then misses[#misses+1]=m end end
+ local f=assert(NexusHelpWindow,'v29 SETUP: the Help window')
+ local content,scroll=assert(f.content,'v29 SETUP: the document frame'),assert(f.scroll,'v29 SETUP: the scroll frame')
+ local function Visible(s)
+  s=tostring(s or ''):gsub('||','\1'):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
+  return (s:gsub('\1','|'))
+ end
+ local CHAR,ONE=3.5,14
+ local function Native(text,width)
+  local per=math.max(1,math.floor((tonumber(width) or 585)/CHAR))
+  local rows=0
+  for line in (Visible(text)..'\n'):gmatch('(.-)\n') do rows=rows+math.max(1,math.ceil(#line/per)) end
+  return rows*ONE
+ end
+ local scale=LM.RuntimeMetrics and LM.RuntimeMetrics() or 1
+ local _,ROW=LM.ConservativeText(scale)
+ local PAD=ROW+1
+ local function Model(text,width) return LM.TextRows(Visible(text),tonumber(width) or 585,scale)*ROW end
+ local byId={}
+ for _,p in ipairs(Help.Pages) do byId[p.id]=p end
+ assert(byId.orbs and byId.faq,'v29 SETUP: the Orbs and Questions pages')
+ -- r1 timing isolation (ACTUAL_RED 2026-11-14T14:18:20Z): the frame baseline
+ -- went 26 to 31 while H.Advance ran unrelated start-up callbacks (the
+ -- unchanged 34 height code has no OnUpdate and makes no frame). That work is
+ -- given time to finish, with the Reference hidden, BEFORE the baselines are
+ -- taken; every no-growth and no-action assertion below is kept unchanged.
+ -- Two attributed checks are added beside the global one: no frame appears
+ -- during any Help.Show call (synchronous, so it can only be Help's), and no
+ -- frame appears under the Reference window at all.
+ Help.Hide();H.Advance(60)
+ local before=#DocumentParts(true)
+ local framesBefore,acts,sent=#H.frames,#H.actions,#H.sent
+ local function HelpFrames()
+  local n=0
+  for _,fr in ipairs(H.frames) do
+   local o,guard=fr,0
+   while o and guard<64 do
+    if o==f then n=n+1;break end
+    local ok,p=pcall(function() return o:GetParent() end)
+    o=ok and p or nil;guard=guard+1
+   end
+  end
+  return n
+ end
+ local helpFramesBefore=HelpFrames()
+ -- Every Help.Show in F goes through this counter (other fields: the module).
+ local Module,showGrowth=Help,0
+ Help=setmetatable({Show=function(id)
+  local n=#H.frames;Module.Show(id);showGrowth=showGrowth+(#H.frames-n)
+ end},{__index=Module})
+ -- The queued-layout stand-in. SetText also keeps C's modelled storage (at
+ -- most 8189 bytes stored per FontString), so F text checks the stored
+ -- document under the same model; GetText reads what is stored.
+ local LIMIT=8189
+ local mode,reads,setAt,saved,stand='stable',0,{},{},{}
+ for _,fs in ipairs(DocumentParts(true)) do
+  saved[#saved+1]={fs=fs,height=rawget(fs,'GetStringHeight'),set=rawget(fs,'SetText')}
+  local set=fs.SetText
+  rawset(fs,'SetText',function(self,v,...)
+   setAt[self]=H.now
+   if type(v)=='string' and #v>LIMIT then v=v:sub(1,LIMIT) end
+   return set(self,v,...)
+  end)
+  stand[fs]=function(self)
+   reads=reads+1
+   if mode=='absent' then return nil end
+   if mode=='zero' then return 0 end
+   if mode=='error' then error('synthetic GetStringHeight failure') end
+   if mode=='nan' then return 0/0 end
+   if mode=='huge' then return math.huge end
+   if mode=='stale' and setAt[self]==H.now then return ONE end
+   return Native(self:GetText() or '',self:GetWidth())
+  end
+  rawset(fs,'GetStringHeight',stand[fs])
+ end
+ -- The shown layout: each visible part's height, its settled wrapped text
+ -- height and its top in the content (parts stand one under the other).
+ local function Layout()
+  local rows,y={},0
+  for i,fs in ipairs(DocumentParts()) do
+   local h=tonumber(fs:GetHeight()) or 0
+   rows[i]={h=h,native=Native(fs:GetText() or '',fs:GetWidth()),top=y}
+   y=y+h
+  end
+  return rows
+ end
+ local function Settled(tag)
+  local rows=Layout()
+  local viewH=tonumber(scroll:GetHeight()) or 0
+  local contentH=tonumber(content:GetHeight()) or 0
+  local clipped,gaps,worst=0,0,0
+  for i,r in ipairs(rows) do
+   if r.h<r.native then clipped=clipped+1 end
+   if i<#rows then
+    local gap=r.h-r.native
+    if gap>worst then worst=gap end
+    if gap>PAD then gaps=gaps+1 end
+   end
+  end
+  local last=rows[#rows]
+  local textEnd=last and (last.top+last.native) or 0
+  local trailing=contentH-textEnd
+  expect(#rows>0 and clipped==0 and contentH>=textEnd,
+   tag..': no part is shorter than its wrapped text ('..clipped..' of '..#rows..'; content '..contentH..', text ends at '..textEnd..')')
+  expect(gaps==0,tag..': no part reserves empty rows inside the document (worst inner gap '..worst..', allowed '..PAD..')')
+  expect(contentH<=viewH or trailing<=viewH-ROW,
+   tag..': at the scroll bottom the last line is in view (blank after the text '..trailing..', viewport '..viewH..', content '..contentH..')')
+  expect(contentH<=math.max(viewH,textEnd+PAD+24),
+   tag..': the content is the text plus small padding (content '..contentH..', text '..textEnd..', viewport '..viewH..')')
+ end
+ local orbsTitle=byId.orbs.title
+ if type(L)=='table' and type(byId.orbs.titleKey)=='string' then
+  local text,source=L.Text(byId.orbs.titleKey);if type(text)=='string' and source~='unavailable' then orbsTitle=text end
+ end
+ local orbsDoc=Help.FormatReference(orbsTitle,Help.PageText(byId.orbs))
+ -- F stable: every page, once its frames have run.
+ mode='stable'
+ for _,p in ipairs(Help.Pages) do
+  Help.Show(p.id);H.Advance(0.5)
+  Settled('F stable '..p.id)
+ end
+ -- F stale: first read unwrapped; immediate safety, then settlement, then bounded work.
+ mode='stale'
+ Help.Show('faq');Help.Show('orbs')
+ local clippedNow=0
+ for _,r in ipairs(Layout()) do if r.h<r.native then clippedNow=clippedNow+1 end end
+ expect(clippedNow==0,'F stale: right after showing, before any frame, no part is shorter than its settled wrapped text ('..clippedNow..')')
+ H.Advance(0.5)
+ Settled('F stale orbs, after the layout settles')
+ reads=0
+ H.Advance(2)
+ local shown=#DocumentParts()
+ expect(reads<=2*shown,'F stale: once settled, two seconds of frames do bounded height work ('..reads..' reads for '..shown..' parts)')
+ Help.Show('faq');H.Advance(0.5)
+ Settled('F stale faq, after a page switch settles')
+ Help.Show('orbs');H.Advance(0.5)
+ Settled('F stale orbs again')
+ -- F invalid: no valid wrapped height at all. 'nomethod' removes the method
+ -- itself (an absent GetStringHeight); 'absent' returns no value.
+ for _,m in ipairs({'nomethod','absent','zero','error','nan','huge'}) do
+  mode=m
+  if m=='nomethod' then for fs in pairs(stand) do rawset(fs,'GetStringHeight',false) end end
+  Help.Show('faq');Help.Show('orbs');H.Advance(0.5)
+  if m=='nomethod' then for fs,fn in pairs(stand) do rawset(fs,'GetStringHeight',fn) end end
+  local short,sum=0,0
+  for _,fs in ipairs(DocumentParts()) do
+   local h=tonumber(fs:GetHeight()) or 0
+   sum=sum+h
+   if h<Model(fs:GetText(),fs:GetWidth()) then short=short+1 end
+  end
+  expect(short==0 and (tonumber(content:GetHeight()) or 0)>=sum,
+   'F '..m..': with no valid wrapped height every part keeps the conservative model height ('..short..' short; content '
+   ..tostring(content:GetHeight())..', parts '..sum..')')
+ end
+ -- F text: the stored document is unchanged.
+ mode='stable'
+ Help.Show('faq');Help.Show('orbs');H.Advance(0.5)
+ local stored=DocumentText()
+ expect(stored==orbsDoc,'F text: the stored Orbs document is the complete formatted page (UTF-8, escaped pipes, order), unchanged by the height work ('
+  ..#stored..' of '..#orbsDoc..' bytes)')
+ expect(#DocumentParts(true)==before and #H.frames==framesBefore,
+  'F reuse: the height work adds no FontString or frame ('..before..' to '..#DocumentParts(true)..' parts, '..framesBefore..' to '..#H.frames..' frames)')
+ expect(showGrowth==0,'F reuse: no frame is made while Help shows a page ('..showGrowth..')')
+ expect(HelpFrames()==helpFramesBefore,'F reuse: no frame is added under the Reference window ('..helpFramesBefore..' to '..HelpFrames()..')')
+ -- Restore every stand-in.
+ for _,m in ipairs(saved) do rawset(m.fs,'GetStringHeight',m.height);rawset(m.fs,'SetText',m.set) end
+ Help.Hide()
+ expect(#H.actions==acts and #H.sent==sent,'F: reading the Reference takes no game action and sends nothing')
+ if #misses>0 then
+  error('v29 Reference spacing: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0)
+ end
+end
 print('PASS explicit Help layering, anchors, text dimensions, seven-page navigation and passive reopen')
