@@ -1020,10 +1020,12 @@ do
   for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
   local ids={}
   for _,language in ipairs(L.Languages())do ids[#ids+1]=language.id..'='..language.name end
-  -- The English catalog is asked strictly, as before: 4096 keys, every one
-  -- of them admitted English.
+  -- The English catalog is asked strictly, as before: 4116 keys, every one
+  -- of them admitted English. (v45: 4116 is the accepted catalog since the
+  -- 4 opacity and 16 FAQ meanings joined the earlier 4096; it stays an
+  -- independent literal, never read from the loader or the table.)
   local keys=#L.Keys()
-  check(keys==4096 and L.Diagnostics().base.accepted==keys,tag..': the English base holds the 4096-key catalog ('..keys..')')
+  check(keys==4116 and L.Diagnostics().base.accepted==keys,tag..': the English base holds the 4116-key catalog ('..keys..')')
   -- v11 (Root's disposition, required 2 and 3): the loader's frFR row is
   -- asked for the hook's own count of the entries it handed over
   -- (shippedFacts.supplied, counted before the loader ran): every one of
@@ -1224,7 +1226,8 @@ do
   check(type(supplied)=='number' and supplied==shippedFacts.count,
    'SETUP '..tag..': the hook handed the loader as many entries as the shipped frFR holds, the bad candidate in place of its Options entry ('
     ..tostring(supplied)..' of '..tostring(shippedFacts and shippedFacts.count)..')')
-  check(keys==4096 and text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==supplied-1 and row.rejected==1,
+  -- (v45: the same independent literal as above, 4116 English keys.)
+  check(keys==4116 and text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==supplied-1 and row.rejected==1,
    tag..': the loader refused the one overwritten entry, kept the other '..(supplied-1)..' and Options falls back to English ('
     ..tostring(reason)..', accepted '..tostring(row and row.accepted)..', rejected '..tostring(row and row.rejected)..')')
   check(shipped.frFR.entries[KEY]=='Options' and shipped.frFR.entries[KEY]==shippedFacts.options,

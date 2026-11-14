@@ -770,37 +770,72 @@ DISCARD_CONTROLS = (
      'slots': {'policy_command': '/nexus policy adaptive|released'},
      'receiver': 'test-only: another Help page',
      'code': "local f = Nexus.Help.Show('about'); local text = f.body:GetText(); f:Hide(); return text"},
-    # The forced multipart pair (v39 fix): see FORCED_HELP below. The positive control reads every
-    # shown part of the forced page exactly as the real receiver does and must PASS in all 18 runs;
-    # the negative control reads the same forced page but discards every part after the first and
-    # must be receiver-mismatch in all 18 runs. Both raise if the forced page fits one part.
+    # The forced multipart pair (v39 fix, v43 review S1): see FORCED_HELP below. Both controls run
+    # the production Help receiver code itself (G.RECEIVER_PROBES), never a copy of it, on the
+    # forced page. The positive control is that code unchanged and must PASS in all 18 runs; the
+    # negative control is that code with one mutation (every part after the first is not read)
+    # and must be receiver-mismatch in all 18 runs. Both raise if the forced page fits one part.
     {'id': 'control.help_forced_multipart', 'key': HELP_KEY, 'match': 'segment',
      'slots': {'policy_command': '/nexus policy adaptive|released'},
-     'receiver': 'test-only: every shown part of the Troubleshooting page under a 1024-byte Help part budget',
+     'receiver': 'test-only: the production Help receiver code on the Troubleshooting page under a '
+                 '1024-byte Help part budget',
      'code': None},
     {'id': 'control.help_later_parts_dropped', 'key': HELP_KEY, 'match': 'segment',
      'slots': {'policy_command': '/nexus policy adaptive|released'},
-     'receiver': 'test-only: the same forced page with every part after the first discarded',
+     'receiver': 'test-only: the production Help receiver code, mutated to read part 1 only, on the '
+                 'same forced page',
      'code': None},
 )
+# The production Help receiver code under test: the 'code' of the gate's own Help probe. Every
+# forced control below is derived from this string, so a change to the shipped receiver (its
+# prefix rule, anchor check, boundary line feed or '||' decoding) is what these controls run.
+HELP_RECEIVER_CODE = next(probe for probe in G.RECEIVER_PROBES if probe['id'] == HELP_PROBE)['code']
+# Its first statement, the only one a forced control replaces.
+HELP_SHOW_STATEMENT = "local frame = Nexus.Help.Show('troubleshooting')\n"
+# The two production statements the targeted mutations change (each occurs exactly once).
+HELP_READ_PART = "out[#out + 1] = fs:GetText() or ''"
+HELP_JOIN = "table.concat(out, '\\n')"
+
+
+def _mutated(code, old, new):
+    """code with its single occurrence of old replaced by new: one targeted mutation. It raises
+    when the production code no longer holds old exactly once, so a mutant can never silently
+    become the unmutated code."""
+    if code.count(old) != 1:
+        raise AssertionError('the Help receiver code holds %d of %r' % (code.count(old), old))
+    if new in code:
+        raise AssertionError('the Help receiver code already holds the mutation %r' % new)
+    return code.replace(old, new)
+
+
 # The forced multipart fixture, test-local and synthetic only. The real ui/Help.lua bytes are
 # loaded once more inside the probe with only their part budget line lowered from 4096 to 1024
 # bytes in memory, so the Troubleshooting page is split across several actual FontStrings by
 # Help's own formatter and part pool (a split-boundary test input; the shipped Help.lua, its
-# 4096 budget and the catalog cap MAX_BASE_ENTRIES 5120 are unchanged). The page is shown by that
-# Help.Show and read from its actual shown FontStrings; Nexus.Help and the window globals are
-# restored afterwards, whatever happens.
-def _forced_help_probe(body):
+# 4096 budget and the catalog cap MAX_BASE_ENTRIES 5120 are unchanged). Only the receiver's first
+# statement (HELP_SHOW_STATEMENT) is replaced: by this loader prelude, the same Help.Show call on
+# the patched Help, and the requirement that more than one part is shown. Every later statement
+# of receiver_code runs verbatim against those actual shown FontStrings. Nexus.Help and the
+# window globals are restored afterwards, whatever happens.
+def _forced_help_probe(receiver_code):
+    if not receiver_code.startswith(HELP_SHOW_STATEMENT) or receiver_code.count('Help.Show(') != 1:
+        raise AssertionError('the Help receiver code starts with its one Help.Show statement')
     return ("local f = assert(io.open('ui/Help.lua', 'rb'))\n"
             "local src = f:read('*a'); f:close()\n"
             "local patched, n = src:gsub('local PART_BUDGET=4096', 'local PART_BUDGET=1024')\n"
             "assert(n == 1, 'exactly one Help part budget line')\n"
             "local saved = {Nexus.Help, _G.NexusHelpWindow, _G.NexusHelpScroll}\n"
             "local ok, result = pcall(function()\n"
-            " assert(loadstring(patched, '=ui/Help.lua (test-local part budget 1024)'))()\n"
-            " local frame = Nexus.Help.Show('troubleshooting')\n"
-            " local pool = frame.parts or {frame.body}\n"
-            + body +
+            "assert(loadstring(patched, '=ui/Help.lua (test-local part budget 1024)'))()\n"
+            + HELP_SHOW_STATEMENT +
+            "do\n"
+            " local shown = 0\n"
+            " for _, part in ipairs(frame.parts or {frame.body}) do\n"
+            "  if part:IsShown() then shown = shown + 1 end\n"
+            " end\n"
+            " assert(shown > 1, 'the forced Troubleshooting page spans more than one part')\n"
+            "end\n"
+            + receiver_code[len(HELP_SHOW_STATEMENT):] + "\n"
             "end)\n"
             "if _G.NexusHelpWindow and _G.NexusHelpWindow ~= saved[2] then _G.NexusHelpWindow:Hide() end\n"
             "Nexus.Help, _G.NexusHelpWindow, _G.NexusHelpScroll = saved[1], saved[2], saved[3]\n"
@@ -809,45 +844,67 @@ def _forced_help_probe(body):
 
 
 FORCED_HELP = {
-    'control.help_forced_multipart': _forced_help_probe(
-        " local out, hidden = {}, nil\n"
-        " for i, fs in ipairs(pool) do\n"
-        "  if fs:IsShown() then\n"
-        "   if hidden then error('shown part ' .. i .. ' after hidden part ' .. hidden) end\n"
-        "   if i > 1 then\n"
-        "    local point, rel, relPoint = fs:GetPoint(1)\n"
-        "    if point ~= 'TOPLEFT' or rel ~= pool[i - 1] or relPoint ~= 'BOTTOMLEFT' then\n"
-        "     error('part ' .. i .. ' is not anchored under part ' .. (i - 1))\n"
-        "    end\n"
-        "   end\n"
-        "   out[#out + 1] = fs:GetText() or ''\n"
-        "  else\n"
-        "   hidden = hidden or i\n"
-        "  end\n"
-        " end\n"
-        " assert(#out > 1, 'the forced Troubleshooting page spans more than one part')\n"
-        " return (table.concat(out, '\\n'):gsub('||', '|'))\n"),
-    'control.help_later_parts_dropped': _forced_help_probe(
-        " local shown = 0\n"
-        " for _, fs in ipairs(pool) do if fs:IsShown() then shown = shown + 1 end end\n"
-        " assert(shown > 1, 'the forced Troubleshooting page spans more than one part')\n"
-        " return ((pool[1]:GetText() or ''):gsub('||', '|'))\n"),
+    # The production receiver code, unchanged after its first statement.
+    'control.help_forced_multipart': _forced_help_probe(HELP_RECEIVER_CODE),
+    # One mutation of the same code: only pool part 1 is read, every later shown part is dropped.
+    'control.help_later_parts_dropped': _forced_help_probe(_mutated(
+        HELP_RECEIVER_CODE, HELP_READ_PART, 'if i == 1 then ' + HELP_READ_PART + ' end')),
 }
 for _control in DISCARD_CONTROLS:
     if _control['id'] in FORCED_HELP:
         _control['code'] = FORCED_HELP[_control['id']]
+
+
+# The boundary line feed (v43 review S1). The segment match above proves the join only when a
+# part boundary happens to fall inside the probed block, which this test cannot state without
+# running. So the join is proved against an independent reading instead: the production receiver
+# code reading the shipped page (4096-byte budget) and the same code reading the forced page
+# (1024-byte budget, more boundaries) must return the same text. The first control is that
+# comparison with the production code on both sides and must PASS in all 18 runs. The second is
+# the same comparison with one mutation of the forced side (the parts joined without the boundary
+# line feed): its text is shorter than the shipped reading, so it must be receiver-error in all
+# 18 runs. Neither changes the gate, its receiver or its match rule.
+def _equal_to_shipped_reading(forced_code):
+    return ("local function shipped()\n" + HELP_RECEIVER_CODE + "\nend\n"
+            "local function forced()\n" + forced_code + "\nend\n"
+            "local whole = shipped()\n"
+            "local parts = forced()\n"
+            "if type(whole) ~= 'string' or type(parts) ~= 'string' then error('a reading is not text', 0) end\n"
+            "if parts ~= whole then\n"
+            " error('the forced multipart reading (' .. #parts .. ' bytes) is not the shipped page '\n"
+            "  .. 'reading (' .. #whole .. ' bytes)', 0)\n"
+            "end\n"
+            "return parts")
+
+
+JOIN_CONTROLS = (
+    {'id': 'control.help_forced_equals_shipped', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: the production Help receiver code on the forced page, required to equal '
+                 'its own reading of the shipped page',
+     'code': _equal_to_shipped_reading(FORCED_HELP['control.help_forced_multipart'])},
+    {'id': 'control.help_join_without_newline', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: the same comparison with the forced parts joined without the boundary '
+                 'line feed',
+     'code': _equal_to_shipped_reading(_forced_help_probe(_mutated(
+         HELP_RECEIVER_CODE, HELP_JOIN, "table.concat(out, '')")))},
+)
 ORPHAN_IDS = {probe['id'] for probe in ORPHAN_CONTROLS}
 DISCARD_IDS = {probe['id'] for probe in DISCARD_CONTROLS}
+JOIN_IDS = {probe['id'] for probe in JOIN_CONTROLS}
 
 
 def controls_gate():
-    """The full synthetic composition through G.gate with the real receivers and both control sets:
-    one run serves the orphan and the discarded-localization tests, which share these inputs."""
+    """The full synthetic composition through G.gate with the real receivers and the control sets:
+    one run serves the orphan, the discarded-localization and the Help join tests, which share
+    these inputs."""
     if 'controlsGate' not in FULL:
         sources, _ = full_composition()
         with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
             FULL['controlsGate'] = G.gate(ROOT, sources=sources, paths=synthetic_paths(scratch, sources),
-                                          probes=G.RECEIVER_PROBES + ORPHAN_CONTROLS + DISCARD_CONTROLS)
+                                          probes=(G.RECEIVER_PROBES + ORPHAN_CONTROLS + DISCARD_CONTROLS
+                                                  + JOIN_CONTROLS))
     return FULL['controlsGate']
 
 
@@ -1108,16 +1165,92 @@ class RealReceivers(unittest.TestCase):
             for condition in ('missing', 'invalid'):
                 self.assertEqual(results['control.discarded_panel']['%s:%s' % (condition, product)], 'PASS')
                 self.assertEqual(results['control.discarded_help']['%s:%s' % (condition, product)], 'PASS')
-            # Forced multipart pair (test-local 1024-byte Help part budget): read whole, the page
-            # holds the target in every condition (positive proof); with every part after the
-            # first discarded it does not (the target lies in a later actual FontString), so a
-            # part-1-only receiver cannot pass.
+            # Forced multipart pair (test-local 1024-byte Help part budget), both the production
+            # receiver code (v43 review S1): unchanged, it reads the page whole and the page holds
+            # the target in every condition (positive proof); with its one mutation (part 1 only)
+            # it does not (the target lies in a later actual FontString), so a part-1-only
+            # receiver cannot pass.
             for condition in ('complete', 'missing', 'invalid'):
                 run = '%s:%s' % (condition, product)
                 self.assertEqual(results['control.help_forced_multipart'][run], 'PASS', run)
                 self.assertEqual(results['control.help_later_parts_dropped'][run], 'receiver-mismatch', run)
         self.assertEqual(len(results['control.help_forced_multipart']), 18)
         self.assertEqual(len(results['control.help_later_parts_dropped']), 18)
+
+    def test_forced_help_controls_are_the_production_receiver_code_with_one_change_each(self):
+        # Review S1: no forced control restates the receiver. Each is built from the gate's own
+        # Help probe code; this checks the derivation itself (no run needed).
+        probe = next(p for p in G.RECEIVER_PROBES if p['id'] == HELP_PROBE)
+        self.assertIs(HELP_RECEIVER_CODE, probe['code'])
+        self.assertTrue(HELP_RECEIVER_CODE.startswith(HELP_SHOW_STATEMENT))
+        rest = HELP_RECEIVER_CODE[len(HELP_SHOW_STATEMENT):]
+        for statement in ("local pool = frame.parts or {frame.body}", "if hidden then error(",
+                          "rel ~= pool[i - 1] or relPoint ~= 'BOTTOMLEFT'", HELP_READ_PART, HELP_JOIN,
+                          ":gsub('||', '|')"):
+            self.assertEqual(rest.count(statement), 1, statement)
+        positive = FORCED_HELP['control.help_forced_multipart']
+        negative = FORCED_HELP['control.help_later_parts_dropped']
+        controls = {control['id']: control['code'] for control in DISCARD_CONTROLS + JOIN_CONTROLS}
+        self.assertEqual(controls['control.help_forced_multipart'], positive)
+        self.assertEqual(controls['control.help_later_parts_dropped'], negative)
+        # Positive: every production statement after the first, verbatim and once, behind the
+        # 1024-byte prelude and the more-than-one-part requirement.
+        self.assertEqual(positive.count(rest), 1)
+        self.assertEqual(positive.count(HELP_SHOW_STATEMENT), 1)
+        self.assertLess(positive.index("'local PART_BUDGET=1024'"), positive.index(HELP_SHOW_STATEMENT))
+        self.assertLess(positive.index(HELP_SHOW_STATEMENT), positive.index('assert(shown > 1,'))
+        self.assertLess(positive.index('assert(shown > 1,'), positive.index(rest))
+        # Negative: the positive with exactly one statement changed, so later parts are not read.
+        dropped = 'if i == 1 then ' + HELP_READ_PART + ' end'
+        self.assertNotIn(rest, negative)
+        self.assertEqual(negative, positive.replace(HELP_READ_PART, dropped))
+        self.assertEqual(negative.count(HELP_JOIN), 1)
+        # Join pair: the production code on the shipped page, then a forced reading compared with
+        # it; the mutant differs from its twin only by the forced side's join.
+        shipped = 'local function shipped()\n' + HELP_RECEIVER_CODE + '\nend\n'
+        twin = controls['control.help_forced_equals_shipped']
+        mutant = controls['control.help_join_without_newline']
+        self.assertTrue(twin.startswith(shipped) and mutant.startswith(shipped))
+        self.assertEqual(twin[len(shipped):].count(positive), 1)
+        self.assertEqual((twin.count(HELP_JOIN), mutant.count(HELP_JOIN)), (2, 1))
+        self.assertEqual(mutant[len(shipped):], twin[len(shipped):].replace(HELP_JOIN, "table.concat(out, '')"))
+        self.assertNotEqual(mutant, twin)
+        # A mutation that no longer applies raises; it never yields the unmutated code.
+        with self.assertRaises(AssertionError):
+            _mutated(HELP_RECEIVER_CODE, 'no such production statement', 'x')
+        with self.assertRaises(AssertionError):
+            _mutated(HELP_RECEIVER_CODE, 'fs:IsShown()', 'fs:GetText()')
+        with self.assertRaises(AssertionError):
+            _forced_help_probe('return 1')
+
+    def test_forced_multipart_reading_equals_the_shipped_reading_and_a_join_without_line_feed_fails(self):
+        # Review S1, the boundary line feed. The production receiver code reads the shipped page
+        # and the forced page (more part boundaries): the two readings are the same text in every
+        # run, so the join restores exactly the line feeds the split removed. The same comparison
+        # with the forced parts joined without a line feed fails in every run, for that reason.
+        report = controls_gate()
+        results = {}
+        for row in report['runtime']['probes']:
+            if row['probe'] in JOIN_IDS:
+                results.setdefault(row['probe'], {})[row['run']] = row['result']
+        runs = sorted('%s:%s' % (condition, product) for condition in ('complete', 'missing', 'invalid')
+                      for product in MODEL['optionalIds'])
+        self.assertEqual(len(runs), 18)
+        self.assertEqual(sorted(results), sorted(JOIN_IDS))
+        for control in sorted(JOIN_IDS):
+            self.assertEqual(sorted(results[control]), runs, control)
+        for run in runs:
+            self.assertEqual(results['control.help_forced_equals_shipped'][run], 'PASS', run)
+            self.assertEqual(results['control.help_join_without_newline'][run], 'receiver-error', run)
+        details = [problem.get('detail', '') for problem in report['problems']
+                   if problem['code'] == 'receiver-error'
+                   and 'probe control.help_join_without_newline ' in problem.get('detail', '')]
+        self.assertEqual(len(details), 18)
+        for detail in details:
+            self.assertIn('is not the shipped page reading', detail)
+        # The join controls add no other problem code to the shared controls run.
+        self.assertEqual(codes(report), ['receiver-error', 'receiver-mismatch', 'receiver-not-localized',
+                                         'receiver-wrong-key'])
 
 
 if __name__ == '__main__':

@@ -406,9 +406,9 @@ CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "P
                              "nativeAcceptance": "NOT_RUN"}
 
 
-# Full visible-UI scope (#143-#148): the reviewed catalog holds 4096 English
-# meanings (v33 slice A: the bounded runtime limit is 5120, SCHEMA_MAX_ENTRIES
-# below). The dated 28 above stay first and unchanged; the generated rows that
+# Full visible-UI scope (#143-#148): the reviewed catalog holds 4116 English
+# meanings (4096 before v33 B/C; the bounded runtime limit is 5120 since v33
+# slice A, SCHEMA_MAX_ENTRIES below). The dated 28 above stay first and unchanged; the generated rows that
 # follow them are read from KEY_CONTEXT.json with the json module, apart from
 # the tool under test, so the English file and the context rows are compared,
 # not the tool with itself. Each complete current pack holds an entry for
@@ -422,8 +422,8 @@ CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "P
 # v39 (B/C RED): the 20 accepted new meanings (v33 PLAN newKeys20: 4 opacity,
 # 16 FAQ; SLICE_BC_NEW_KEYS below) are appended after the 4096 in English,
 # declaration and context order, so the reviewed catalog holds 4116; the
-# bounded runtime limit stays 5120. Until B/C every test that reads
-# full_english_oracle() reports the 20 missing rows.
+# bounded runtime limit stays 5120. The v40 B/C sources hold those 20, so
+# full_english_oracle() and the sources agree at 4116.
 CURRENT_FULL_UI_KEYS = 4116
 
 
@@ -457,7 +457,8 @@ def full_english_oracle():
     return table
 
 
-# v33 slice A: the English count (CURRENT_FULL_UI_KEYS, 4096) is kept apart
+# v33 slice A: the English count (CURRENT_FULL_UI_KEYS; 4096 then, 4116 since
+# B/C) is kept apart
 # from the protected pack cohort. Root's mechanical key-set measurement of
 # exact 35 (PACK_KEY_SHAPE: counts and key sets only, no translated value read)
 # shows each of the six current packs holding 4078 entries, the historical
@@ -514,6 +515,299 @@ def current_pack_cohort(oracle):
     if len(cohort) != CURRENT_PACK_COHORT_KEYS:
         raise AssertionError("the protected pack cohort holds %d keys" % len(cohort))
     return cohort
+
+
+# v43 (review S2): the Main panel (HUD) family adoption, restated here as
+# literals, apart from KEY_CONTEXT.json and from the tool under test. Before
+# v43 the family adopted 569 keys, in this order: the dated 23
+# (CURRENT_HUD_ADOPTED_KEYS), the 166 generated HUD keys below (sorted), then
+# the 380 generated panel keys below. The accepted v33 PLAN adds the 4 opacity
+# meanings of ui/Theme.lua (a path of this family) next to their theme.*
+# siblings, in the sorted position of the 166 (HUD_OPACITY_PLACEMENT), so the
+# family adopts 573. No earlier key moves or leaves; the Help family stays [],
+# so the 16 FAQ meanings belong to no family. Adoption is not coverage: the 4
+# have no pack entry, and every family status stays PENDING.
+HUD_FULL_UI_ADOPTED_KEYS = [
+    "callboard.heading.rewards_by_difficulty", "callboard.label.difficulty_hc1",
+    "callboard.label.difficulty_hc2", "callboard.label.difficulty_hc3",
+    "callboard.label.difficulty_hc4", "callboard.label.difficulty_hc5",
+    "callboard.label.difficulty_normal", "callboard.status.failed",
+    "callboard.status.ready_turn_in", "callboard.tooltip.higher_difficulty_rewards",
+    "callboard.tooltip.rewards_unavailable", "callboard.value.reward_ash",
+    "callboard.value.reward_xp", "layout.button.orb_mini_panel", "layout.button.orb_mini_short",
+    "readout.body.recommendation_target", "readout.body.scope_activate",
+    "readout.body.scope_auto_off", "readout.body.scope_auto_on", "readout.body.scope_banish",
+    "readout.body.scope_freeze", "readout.body.scope_intro", "readout.body.scope_lock",
+    "readout.body.scope_orbs", "readout.body.scope_paused_because",
+    "readout.body.scope_read_only", "readout.body.scope_reroll", "readout.body.scope_save",
+    "readout.body.scope_take", "readout.body.scope_tomes", "readout.body.take_target",
+    "readout.body.tome_permission", "readout.heading.auto_on", "readout.heading.offer",
+    "readout.heading.offer_auto_on", "readout.heading.offer_auto_on_short",
+    "readout.heading.offer_short", "readout.heading.offer_you_choose",
+    "readout.heading.offer_you_choose_short", "readout.heading.waiting_offer_data",
+    "readout.heading.you_choose", "readout.label.guaranteed_offer", "readout.label.offer_freeze",
+    "readout.label.offer_pick", "readout.label.offer_recommended", "readout.menu.activate_never",
+    "readout.menu.allow_freeze", "readout.menu.allow_reroll", "readout.menu.auto_reference",
+    "readout.menu.auto_selected_off", "readout.menu.auto_selected_on",
+    "readout.menu.auto_settings_title", "readout.menu.banish", "readout.menu.lock_echoes",
+    "readout.menu.orb_never", "readout.menu.read_only", "readout.menu.save_run",
+    "readout.menu.take_needed", "readout.menu.tomes", "readout.note.auto_on_scope",
+    "readout.note.waiting_offer_data", "readout.status.auto_refused",
+    "readout.status.auto_refused_orb", "readout.status.auto_refused_status",
+    "readout.status.auto_refused_warning", "readout.status.charges_estimated",
+    "readout.status.charges_full", "readout.status.help_client_auto_accept",
+    "readout.status.help_continues", "readout.status.help_disable_addon",
+    "readout.status.help_orb", "readout.status.help_point_auto",
+    "readout.status.help_wait_without_choosing", "readout.status.hold_client_auto_accept",
+    "readout.status.hold_loading_screen", "readout.status.hold_manual",
+    "readout.status.hold_other_addon", "readout.status.hold_settling",
+    "readout.status.hold_user_acting", "readout.status.idle", "readout.status.level_prefixed",
+    "readout.status.no_wishlist_advisor", "readout.status.paused_reason",
+    "readout.status.paused_with_hint", "readout.status.state_awaiting",
+    "readout.status.state_choice", "readout.status.state_confirmed",
+    "readout.status.state_estimated", "readout.status.state_loading",
+    "readout.status.state_not_sent", "readout.status.state_offer", "readout.status.state_paused",
+    "readout.status.state_ready", "readout.status.state_refused",
+    "readout.status.state_requested", "readout.status.state_sent",
+    "readout.status.state_spend_unconfirmed", "readout.status.state_stale",
+    "readout.status.state_stored", "readout.status.state_unavailable",
+    "readout.status.state_unconfirmed", "readout.status.state_unknown",
+    "readout.status.state_with_detail", "readout.status.waiting_echo_data",
+    "readout.tooltip.charges_legend_auto", "readout.tooltip.charges_legend_estimated",
+    "readout.tooltip.charges_legend_letters", "readout.tooltip.charges_legend_unknown",
+    "readout.value.echo_with_quality", "readout.value.quality_common",
+    "readout.value.quality_epic", "readout.value.quality_guaranteed",
+    "readout.value.quality_legendary", "readout.value.quality_rare",
+    "readout.value.quality_uncommon", "readout.value.quality_unknown",
+    "readout.value.queue_entry", "readout.value.queue_wanted", "readout.value.setting_not_set",
+    "readout.value.setting_off", "readout.value.setting_on",
+    "readout.value.setting_unset_acts_off", "readout.value.setting_unset_acts_on",
+    "server.chat.hardcore_menu_unavailable", "theme.chat.appearance_applied",
+    "theme.chat.colour_unavailable", "theme.chat.style_unavailable",
+    "theme.label.palette_amethyst", "theme.label.palette_auric", "theme.label.palette_ember",
+    "theme.label.palette_emerald", "theme.label.palette_graphite",
+    "theme.label.palette_sapphire", "theme.label.style_slate", "theme.label.style_vista",
+    "theme.menu.colour_choice", "theme.menu.colour_default", "theme.menu.colour_title",
+    "theme.menu.style_default", "theme.menu.style_title", "theme.menu.unknown_colour",
+    "theme.menu.unknown_style", "theme.status.outcome_database_loading",
+    "theme.status.outcome_owner_unavailable", "theme.status.outcome_saved",
+    "theme.status.outcome_session_read_only", "theme.tooltip.appearance_help",
+    "theme.tooltip.style_slate", "theme.tooltip.style_vista", "theme.value.hue_blue",
+    "theme.value.hue_gold", "theme.value.hue_gray", "theme.value.hue_green",
+    "theme.value.hue_orange", "theme.value.hue_purple", "theme.value.summary",
+    "unit_tooltip.label.build_author", "unit_tooltip.label.leaderboard_rank",
+    "unit_tooltip.label.network_peer", "unit_tooltip.label.nexus_user",
+    "unit_tooltip.value.category_dummy", "unit_tooltip.value.category_lk",
+    "unit_tooltip.value.rank_nd", "unit_tooltip.value.rank_rd", "unit_tooltip.value.rank_st",
+    "unit_tooltip.value.rank_th",
+]
+HUD_PANEL_ADOPTED_KEYS = [
+    "panel.body.auto_detail_heading", "panel.body.auto_detail_off",
+    "panel.body.auto_detail_off_wishlist", "panel.body.auto_detail_paused_because",
+    "panel.body.auto_detail_separate", "panel.body.auto_detail_when_on",
+    "panel.body.complete_named", "panel.body.complete_unnamed", "panel.body.extra_list_none",
+    "panel.body.extra_list_not_known", "panel.body.extra_list_note",
+    "panel.body.setup_assign_or_create", "panel.body.setup_waiting", "panel.button.auto_off",
+    "panel.button.auto_on", "panel.button.auto_unknown", "panel.button.change_wishlist",
+    "panel.button.close_extra_list", "panel.button.details_hide", "panel.button.details_show",
+    "panel.button.explore", "panel.button.open_orbs", "panel.button.orb_mini",
+    "panel.button.orb_mini_short", "panel.button.orb_open", "panel.button.orbs",
+    "panel.button.plan", "panel.button.resume", "panel.chat.assignment_button_missing",
+    "panel.chat.language_already_active", "panel.chat.language_already_session",
+    "panel.chat.language_refused", "panel.chat.language_saved",
+    "panel.chat.language_saved_next_reload", "panel.chat.language_session_only",
+    "panel.chat.language_unchanged", "panel.chat.language_unconfirmed",
+    "panel.chat.my_builds_button_missing", "panel.chat.panel_hidden",
+    "panel.chat.panel_hidden_restore", "panel.chat.pause_failed",
+    "panel.chat.pause_reason_error", "panel.chat.pause_reason_unavailable",
+    "panel.chat.pause_reason_unconfirmed", "panel.chat.plan_action_open",
+    "panel.chat.plan_not_reopened", "panel.chat.plan_protection_unavailable",
+    "panel.chat.plan_resume_draft", "panel.chat.resume_failed",
+    "panel.chat.setup_information_unavailable", "panel.chat.setup_information_warning_open",
+    "panel.chat.setup_welcome_unavailable", "panel.chat.setup_welcome_warning_open",
+    "panel.chat.support_report_not_loaded", "panel.heading.callboard",
+    "panel.heading.dps_records", "panel.heading.lich_king", "panel.heading.missing_tomes",
+    "panel.heading.missing_tomes_stacked", "panel.heading.training_dummy",
+    "panel.label.active_prefix", "panel.label.ash_short", "panel.label.auto_state_off",
+    "panel.label.auto_state_on", "panel.label.auto_state_unknown", "panel.label.best_dps_dummy",
+    "panel.label.best_dps_lk", "panel.label.best_dps_none", "panel.label.best_known",
+    "panel.label.best_known_same_build", "panel.label.callboard_no_details",
+    "panel.label.callboard_objective", "panel.label.context_build",
+    "panel.label.context_wishlist", "panel.label.cue_empty", "panel.label.cue_not_known",
+    "panel.label.cue_preview", "panel.label.cue_unconfirmed", "panel.label.difficulty_fallback",
+    "panel.label.dummy_best", "panel.label.extra_list_not_current", "panel.label.freeze_tag",
+    "panel.label.lich_king_best", "panel.label.more_count", "panel.label.more_count_show_all",
+    "panel.label.no_extra_copies", "panel.label.no_remaining_demand",
+    "panel.label.play_extra_copies", "panel.label.play_locked_targets",
+    "panel.label.play_missing_tomes", "panel.label.play_still_needed", "panel.label.preview_tag",
+    "panel.label.slot_number", "panel.label.soul_ash", "panel.label.target_build_copies",
+    "panel.label.title_paused", "panel.label.your_best", "panel.label.your_best_dps",
+    "panel.label.your_dummy", "panel.label.your_lich_king", "panel.label.yours",
+    "panel.label.yours_training_dummy", "panel.menu.appearance", "panel.menu.assign_wishlist",
+    "panel.menu.auto_explained", "panel.menu.automation_settings",
+    "panel.menu.automation_unavailable", "panel.menu.build_library",
+    "panel.menu.dps_records_hide", "panel.menu.dps_records_show", "panel.menu.explore_title",
+    "panel.menu.faq", "panel.menu.hud_not_known", "panel.menu.hud_use_nexus_now_server",
+    "panel.menu.hud_use_nexus_undetected", "panel.menu.hud_use_server_now_nexus",
+    "panel.menu.hud_use_server_undetected", "panel.menu.language", "panel.menu.language_active",
+    "panel.menu.language_automatic", "panel.menu.language_in_use", "panel.menu.language_row",
+    "panel.menu.language_row_pending", "panel.menu.language_saved_after_reload",
+    "panel.menu.language_title", "panel.menu.leaderboard", "panel.menu.log_viewer",
+    "panel.menu.more_windows", "panel.menu.my_builds_game_page", "panel.menu.notices_announce",
+    "panel.menu.notices_announce_when_on", "panel.menu.notices_off", "panel.menu.notices_on",
+    "panel.menu.notices_row_off", "panel.menu.notices_row_on_stable",
+    "panel.menu.notices_row_on_test", "panel.menu.notices_stable_and_test",
+    "panel.menu.notices_stable_only", "panel.menu.notices_title",
+    "panel.menu.notices_unavailable", "panel.menu.open_releases", "panel.menu.open_settings",
+    "panel.menu.orbs", "panel.menu.pause_not_available", "panel.menu.pause_session",
+    "panel.menu.plan_title", "panel.menu.reference", "panel.menu.reset_position",
+    "panel.menu.resume_nexus", "panel.menu.section_help", "panel.menu.section_notices",
+    "panel.menu.section_panel", "panel.menu.section_session", "panel.menu.section_settings",
+    "panel.menu.session_pause_unreadable", "panel.menu.setup_checklist",
+    "panel.menu.setup_information", "panel.menu.setup_welcome", "panel.menu.size_larger",
+    "panel.menu.size_reduced", "panel.menu.size_reset", "panel.menu.size_row",
+    "panel.menu.size_smaller", "panel.menu.support_report", "panel.menu.wishlist_editor",
+    "panel.note.best_known_scope", "panel.note.language_automatic",
+    "panel.note.language_changes_unavailable", "panel.note.language_reload",
+    "panel.note.language_saved_unsupported", "panel.note.language_scope",
+    "panel.note.language_session_only", "panel.note.pause_scope",
+    "panel.note.pause_sent_may_finish", "panel.note.plan_opens_only",
+    "panel.note.resume_auto_continues", "panel.note.resume_orb_stays_paused",
+    "panel.note.shared_records_scope", "panel.popup.close", "panel.popup.releases_copy_address",
+    "panel.status.auto_stayed_off", "panel.status.extra_list_stale",
+    "panel.status.language_reason_authority", "panel.status.language_reason_capacity",
+    "panel.status.language_reason_drift", "panel.status.language_reason_failed",
+    "panel.status.language_reason_invalid", "panel.status.language_reason_read_only",
+    "panel.status.language_reason_refused", "panel.status.language_reason_startup",
+    "panel.status.orb_action_before_reload", "panel.status.orb_action_may_settle",
+    "panel.status.orb_earlier_unresolved", "panel.status.orb_none_approved",
+    "panel.status.orb_not_read_session", "panel.status.orb_not_read_yet",
+    "panel.status.orb_run", "panel.status.orb_state_not_recorded",
+    "panel.status.orb_state_undescribed", "panel.status.orb_unreadable",
+    "panel.status.pause_unknown", "panel.status.pause_unreadable_banner",
+    "panel.status.pause_unreadable_note", "panel.status.paused_banner",
+    "panel.status.paused_banner_note", "panel.status.roll_auto_off_you_choose",
+    "panel.status.roll_auto_rechecking", "panel.status.roll_auto_waiting",
+    "panel.status.roll_nexus_paused", "panel.status.roll_recommendation_preview",
+    "panel.status.roll_recommendations_active", "panel.status.roll_status",
+    "panel.status.roll_you_choose", "panel.status.setup_assign", "panel.status.setup_restoring",
+    "panel.status.setup_unavailable", "panel.status.shared_data",
+    "panel.status.shared_data_failed", "panel.status.shared_data_local_ready",
+    "panel.status.shared_data_local_wait", "panel.status.shared_data_short",
+    "panel.status.wishlist_complete", "panel.title.extra_list_count",
+    "panel.title.extra_list_none", "panel.title.extra_list_not_known",
+    "panel.tooltip.appearance_title", "panel.tooltip.auto_consequence",
+    "panel.tooltip.auto_explained_body", "panel.tooltip.auto_explained_title",
+    "panel.tooltip.auto_full_details", "panel.tooltip.auto_now",
+    "panel.tooltip.auto_now_pause_unknown", "panel.tooltip.auto_now_reason",
+    "panel.tooltip.auto_now_session_paused", "panel.tooltip.auto_off_action",
+    "panel.tooltip.auto_off_state", "panel.tooltip.auto_on_action",
+    "panel.tooltip.auto_on_held", "panel.tooltip.auto_on_held_action",
+    "panel.tooltip.auto_on_state", "panel.tooltip.auto_paused_continue",
+    "panel.tooltip.auto_paused_session", "panel.tooltip.auto_refused_action",
+    "panel.tooltip.auto_refused_last_click", "panel.tooltip.auto_title",
+    "panel.tooltip.auto_unknown_action", "panel.tooltip.auto_unknown_state",
+    "panel.tooltip.best_dps_heading", "panel.tooltip.best_dps_how",
+    "panel.tooltip.best_dps_none", "panel.tooltip.best_dps_record",
+    "panel.tooltip.best_known_same_echoes", "panel.tooltip.best_known_target_dps",
+    "panel.tooltip.best_known_target_none", "panel.tooltip.build_library_body",
+    "panel.tooltip.build_library_title", "panel.tooltip.change_wishlist_heading",
+    "panel.tooltip.change_wishlist_plan", "panel.tooltip.charges_heading",
+    "panel.tooltip.close_panel", "panel.tooltip.context_unavailable",
+    "panel.tooltip.details_body", "panel.tooltip.difficulty_click",
+    "panel.tooltip.difficulty_fallback", "panel.tooltip.dps_best_shared",
+    "panel.tooltip.dps_duration", "panel.tooltip.dps_exact_match", "panel.tooltip.dps_held_by",
+    "panel.tooltip.dps_no_personal", "panel.tooltip.dps_no_shared",
+    "panel.tooltip.dps_records_body", "panel.tooltip.dps_records_title",
+    "panel.tooltip.dps_your_best", "panel.tooltip.drag_explained", "panel.tooltip.drag_title",
+    "panel.tooltip.explore_build_library", "panel.tooltip.explore_leaderboard",
+    "panel.tooltip.explore_title", "panel.tooltip.extra_above_targets",
+    "panel.tooltip.extra_heading", "panel.tooltip.extra_locked_protected",
+    "panel.tooltip.extra_not_delete", "panel.tooltip.extra_show_all_where",
+    "panel.tooltip.faq_opening", "panel.tooltip.faq_reading", "panel.tooltip.faq_title",
+    "panel.tooltip.hide_note", "panel.tooltip.hide_panel", "panel.tooltip.hide_panel_title",
+    "panel.tooltip.intensity", "panel.tooltip.intensity_level", "panel.tooltip.intensity_of_max",
+    "panel.tooltip.leaderboard_body", "panel.tooltip.leaderboard_title",
+    "panel.tooltip.minimap_drag", "panel.tooltip.minimap_left_click",
+    "panel.tooltip.minimap_right_click", "panel.tooltip.minimap_summary",
+    "panel.tooltip.missing_tomes_check", "panel.tooltip.missing_tomes_heading",
+    "panel.tooltip.missing_tomes_list", "panel.tooltip.missing_tomes_no_source",
+    "panel.tooltip.missing_tomes_separate", "panel.tooltip.missing_tomes_undiscovered",
+    "panel.tooltip.missing_tomes_where", "panel.tooltip.more_count",
+    "panel.tooltip.more_windows_body", "panel.tooltip.more_windows_title",
+    "panel.tooltip.notices_body", "panel.tooltip.notices_title", "panel.tooltip.numbers_hint",
+    "panel.tooltip.offer_card_passive", "panel.tooltip.options_contents",
+    "panel.tooltip.orb_line_open", "panel.tooltip.orb_mini_heading",
+    "panel.tooltip.orb_mini_status", "panel.tooltip.orbs_also_footer",
+    "panel.tooltip.orbs_closing_continues", "panel.tooltip.orbs_heading",
+    "panel.tooltip.orbs_open_inspect", "panel.tooltip.pause_no_control",
+    "panel.tooltip.pause_session_title", "panel.tooltip.paused_reload_ends",
+    "panel.tooltip.paused_resume_how", "panel.tooltip.paused_title",
+    "panel.tooltip.plan_contents", "panel.tooltip.plan_opens_only", "panel.tooltip.plan_title",
+    "panel.tooltip.reference_body", "panel.tooltip.reference_title",
+    "panel.tooltip.resume_nexus_title", "panel.tooltip.session_pause_title",
+    "panel.tooltip.settings_body", "panel.tooltip.settings_title",
+    "panel.tooltip.setup_information_body", "panel.tooltip.setup_information_title",
+    "panel.tooltip.setup_welcome_explained", "panel.tooltip.setup_welcome_title",
+    "panel.tooltip.show_all_extra_body", "panel.tooltip.show_all_extra_title",
+    "panel.tooltip.size_explained", "panel.tooltip.size_title", "panel.tooltip.soul_ash",
+    "panel.tooltip.soul_ash_multiplier", "panel.tooltip.still_needed_heading",
+    "panel.tooltip.still_needed_list", "panel.tooltip.still_needed_not_obtained",
+    "panel.tooltip.still_needed_off_wishlist", "panel.tooltip.update_available",
+    "panel.tooltip.update_releases_link", "panel.tooltip.wishlist_editor_also_plan",
+    "panel.tooltip.wishlist_editor_title", "panel.value.appearance_default",
+    "panel.value.auto_now_off", "panel.value.auto_now_paused", "panel.value.auto_now_ready",
+    "panel.value.auto_now_rechecking", "panel.value.auto_now_waiting",
+    "panel.value.build_none_captured", "panel.value.count_copies", "panel.value.count_copy",
+    "panel.value.count_echo", "panel.value.count_echoes", "panel.value.count_listed",
+    "panel.value.count_none", "panel.value.count_to_lock",
+    "panel.value.intensity_level_unknown", "panel.value.invalid_title",
+    "panel.value.no_record_yet", "panel.value.none_received_yet", "panel.value.none_to_lock",
+    "panel.value.records_dps", "panel.value.records_dummy_and_lk", "panel.value.records_lk",
+    "panel.value.run_progress", "panel.value.run_progress_unavailable",
+    "panel.value.shared_data_loading", "panel.value.target_lich_king",
+    "panel.value.target_training_dummy", "panel.value.unknown_player",
+]
+# The 4 opacity meanings (the first four of SLICE_BC_NEW_KEYS), each placed
+# right after the named earlier sibling: (sibling, keys that follow it).
+HUD_OPACITY_PLACEMENT = (
+    ("theme.menu.colour_title", ("theme.menu.opacity_choice", "theme.menu.opacity_default")),
+    ("theme.menu.unknown_colour", ("theme.menu.unknown_opacity",)),
+    ("theme.tooltip.appearance_help", ("theme.tooltip.opacity",)),
+)
+HUD_ADOPTED_BEFORE_OPACITY = 569
+HUD_ADOPTED_KEYS_NOW = 573
+
+
+def hud_adoption_before_opacity():
+    """The 569 keys the HUD family adopted before v43, in order, from the
+    independent literals: the dated 23, the 166 generated HUD keys, the 380
+    generated panel keys."""
+    earlier = CURRENT_HUD_ADOPTED_KEYS + HUD_FULL_UI_ADOPTED_KEYS + HUD_PANEL_ADOPTED_KEYS
+    if ((len(CURRENT_HUD_ADOPTED_KEYS), len(HUD_FULL_UI_ADOPTED_KEYS), len(HUD_PANEL_ADOPTED_KEYS))
+            != (23, 166, 380) or len(earlier) != HUD_ADOPTED_BEFORE_OPACITY
+            or len(set(earlier)) != len(earlier)):
+        raise AssertionError("the earlier HUD adoption oracle holds %d keys, %d distinct"
+                             % (len(earlier), len(set(earlier))))
+    return earlier
+
+
+def current_hud_adoption_oracle():
+    """The HUD family's adopted keys now: exactly the earlier 569, unmoved,
+    plus the 4 opacity keys, each right after its sibling."""
+    earlier = hud_adoption_before_opacity()
+    follows = dict(HUD_OPACITY_PLACEMENT)
+    opacity = [key for _, keys in HUD_OPACITY_PLACEMENT for key in keys]
+    if (opacity != list(SLICE_BC_NEW_KEYS[:4]) or set(opacity) & set(earlier)
+            or not set(follows) <= set(HUD_FULL_UI_ADOPTED_KEYS)):
+        raise AssertionError("the opacity placement is the 4 new opacity keys after HUD siblings")
+    adopted = []
+    for key in earlier:
+        adopted.append(key)
+        adopted.extend(follows.get(key, ()))
+    if len(adopted) != HUD_ADOPTED_KEYS_NOW or len(set(adopted)) != len(adopted):
+        raise AssertionError("the HUD adoption oracle holds %d keys" % len(adopted))
+    return adopted
 
 
 def pack_value_map_sha256(entries):
@@ -1164,6 +1458,51 @@ class KeyContextContract(unittest.TestCase):
                 self.assertIn(path.replace("/", chr(92)), toc)
         adopted = {key for family in families for key in family["adoptedKeys"]}
         self.assertLessEqual(adopted, set(self.keys))
+
+    def test_hud_adopts_exactly_its_earlier_keys_and_the_four_opacity_keys(self):
+        # v43 (review S2, v33 PLAN): the HUD family is exactly the earlier 569
+        # keys, unmoved, plus the 4 opacity meanings next to their theme.*
+        # siblings. Both sides are independent: the literals above against the
+        # document read with the json module; no tool is involved.
+        families = {family["name"]: family["adoptedKeys"] for family in self.doc["windowFamilies"]}
+        self.assertEqual(len(families), len(self.doc["windowFamilies"]))
+        hud = families["Main panel (HUD)"]
+        opacity = list(SLICE_BC_NEW_KEYS[:4])
+        self.assertEqual(opacity, ["theme.menu.opacity_choice", "theme.menu.opacity_default",
+                                   "theme.menu.unknown_opacity", "theme.tooltip.opacity"])
+        self.assertEqual(hud, current_hud_adoption_oracle())
+        self.assertEqual((len(hud), len(set(hud))), (HUD_ADOPTED_KEYS_NOW, HUD_ADOPTED_KEYS_NOW))
+        # Every earlier key is kept, in its earlier order; only the 4 are new.
+        self.assertEqual([key for key in hud if key not in opacity], hud_adoption_before_opacity())
+        self.assertEqual(sorted(set(hud) - set(hud_adoption_before_opacity())), sorted(opacity))
+        self.assertEqual(hud[:len(CURRENT_HUD_ADOPTED_KEYS)], CURRENT_HUD_ADOPTED_KEYS)
+        # Sorted position: the generated HUD segment (the 166, now 170) stays
+        # sorted, and each new key directly follows its named sibling.
+        start = len(CURRENT_HUD_ADOPTED_KEYS)
+        segment = hud[start:start + len(HUD_FULL_UI_ADOPTED_KEYS) + len(opacity)]
+        self.assertEqual(segment, sorted(HUD_FULL_UI_ADOPTED_KEYS + opacity))
+        self.assertEqual(hud[start + len(segment):], HUD_PANEL_ADOPTED_KEYS)
+        for sibling, placed in HUD_OPACITY_PLACEMENT:
+            index = hud.index(sibling)
+            self.assertEqual(hud[index + 1:index + 1 + len(placed)], list(placed), sibling)
+        # The 4 are context rows of the Appearance producer, a path of this family.
+        self.assertIn("ui/Theme.lua", EXPECTED_FAMILIES[0][3])
+        for key in opacity:
+            self.assertEqual((self.keys[key]["group"], self.keys[key]["cohort"]),
+                             ("theme", "fullui:v33_opacity"), key)
+        # No other family adopts one of them; the Help family stays [], so the
+        # 16 FAQ meanings are in no family (the accepted plan), not silently.
+        for name, adopted in families.items():
+            if name != "Main panel (HUD)":
+                self.assertEqual(set(adopted) & set(opacity), set(), name)
+        self.assertEqual(families["Help"], [])
+        everywhere = [key for adopted in families.values() for key in adopted]
+        self.assertEqual(set(everywhere) & set(SLICE_BC_NEW_KEYS[4:]), set())
+        self.assertEqual([everywhere.count(key) for key in opacity], [1, 1, 1, 1])
+        # Adoption is not coverage: the family's statuses stay PENDING.
+        family = self.doc["windowFamilies"][0]
+        self.assertEqual((family["name"], family["semanticStatus"], family["coverageStatus"]),
+                         ("Main panel (HUD)", "PENDING", "PENDING"))
 
     def test_other_copy_and_historical_leads_are_not_a_denominator(self):
         for item in self.doc["otherVisibleCopy"]:
@@ -1956,7 +2295,8 @@ class CatalogSchemaApi(unittest.TestCase):
         cohort = current_pack_cohort(list(oracle))
         for pack_id, pack in current["packs"].items():
             with self.subTest(pack_id):
-                # v33 slice A: the protected cohort, lacking exactly the 18.
+                # The protected cohort, lacking exactly the 38 of
+                # PACK_MISSING_KEYS (18 of v33 slice A, 20 of B/C).
                 self.assertEqual(list(pack["entries"]), cohort)
                 self.assertEqual(sorted(set(oracle) - set(pack["entries"])),
                                  sorted(PACK_MISSING_KEYS))
@@ -3716,10 +4056,11 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual(list(result["packs"]), PACK_IDS)
         # Independent of the report: declared and placeholder entries are
         # byte-identical to their English, every draft entry differs from it.
-        # v33 slice A: each pack is the protected cohort (every English key
-        # but the 18 measured missing ones); the 18 are reported as missing,
-        # every English key is still reported (denominator), and none of the
-        # 18 is counted as translated.
+        # v33 slice A and B/C: each pack is the protected cohort (every
+        # English key but the 38 of PACK_MISSING_KEYS: the 18 measured ones
+        # and the 20 new ones); the 38 are reported as missing, every English
+        # key is still reported (denominator), and none of the 38 is counted
+        # as translated.
         cohort = current_pack_cohort(list(oracle))
         present = sorted(cohort)
         missing = sorted(PACK_MISSING_KEYS)
@@ -3784,8 +4125,14 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual({pack_id: len(keys) for pack_id, keys in reviewed_by_pack.items()},
                          CURRENT_DECLARED_COUNTS)
         self.assertEqual(hud["adoptedKeys"][:len(CURRENT_HUD_ADOPTED_KEYS)], CURRENT_HUD_ADOPTED_KEYS)
+        # v43 (review S2): the report's HUD row is the independent literal
+        # oracle (the earlier 569 keys plus the 4 opacity keys), not only what
+        # the context declares.
+        self.assertEqual((hud["name"], hud["adoptedKeys"], hud["adoptedKeyCount"]),
+                         ("Main panel (HUD)", current_hud_adoption_oracle(), HUD_ADOPTED_KEYS_NOW))
         self.assertEqual((hud["adoptedKeys"], hud["adoptedKeyCount"]),
                          (declared[hud["name"]], len(declared[hud["name"]])))
+        opacity = sorted(SLICE_BC_NEW_KEYS[:4])
         for family in families:
             with self.subTest(family["name"]):
                 self.assertEqual((family["semanticStatus"], family["coverageStatus"],
@@ -3797,18 +4144,28 @@ class CatalogCurrentSource(unittest.TestCase):
                 # Each pack's family row splits the adopted keys by the actual
                 # entry-review declarations: a declared key is reviewed and
                 # legitimately identical, a held identical key stays a
-                # placeholder, every other adopted key stays draft; none is missing.
+                # placeholder, an adopted key no pack holds (PACK_MISSING_KEYS)
+                # is missing, and every other adopted key stays draft.
+                # v43 (review S2): the 4 opacity keys are adopted by the HUD
+                # and held by no pack, so they are that family's missing keys
+                # for every pack; no other family adopts a missing key. They
+                # are never counted as draft, reviewed or translated.
                 self.assertEqual([row["productId"] for row in family["products"]], PACK_IDS)
                 adopted_set = set(family["adoptedKeys"])
+                missing = sorted(adopted_set & set(PACK_MISSING_KEYS))
+                self.assertEqual(missing, opacity if family is hud else [])
                 for row in family["products"]:
                     reviewed = sorted(adopted_set & reviewed_by_pack[row["productId"]])
                     placeholder = sorted(adopted_set
                                          & set(CURRENT_ENGLISH_PLACEHOLDER_KEYS[row["productId"]]))
+                    self.assertEqual(set(missing) & (set(reviewed) | set(placeholder)), set())
                     self.assertEqual(row["keys"]["reviewed_legitimately_identical"], reviewed)
                     self.assertEqual(row["keys"]["deliberate_english_placeholder"], placeholder)
+                    self.assertEqual(row["keys"]["missing"], missing)
                     self.assertEqual(row["keys"]["draft_unreviewed"],
-                                     sorted(adopted_set - set(reviewed) - set(placeholder)))
-                    for category in ("translated_and_reviewed", "missing", "invalid", "obsolete"):
+                                     sorted(adopted_set - set(reviewed) - set(placeholder)
+                                            - set(missing)))
+                    for category in ("translated_and_reviewed", "invalid", "obsolete"):
                         self.assertEqual(row["keys"][category], [], category)
         # Full visible-UI scope: a key with a qualified entry-review declaration
         # is reviewed, so a family's pending set for a pack is its adopted keys
@@ -4019,8 +4376,9 @@ class CatalogCurrentSource(unittest.TestCase):
             with self.subTest(row["productId"]):
                 self.assertEqual((row["denominator"], row["reconciliation"]["inDenominatorTotal"]),
                                  (len(keys), len(keys)))
-                # v33 slice A: the actual packs are the protected cohort; the
-                # 18 measured English keys stay missing in every pack.
+                # The actual packs are the protected cohort; the 38 English
+                # keys of PACK_MISSING_KEYS (18 of v33 slice A, 20 of B/C)
+                # stay missing in every pack.
                 present = sorted(current_pack_cohort(full_english_oracle()))
                 draft, declared, placeholder = current_categories(self.release, row["productId"], present)
                 if row["productId"] == "frFR":
@@ -4070,8 +4428,9 @@ class CatalogCurrentSource(unittest.TestCase):
                 self.assertEqual([row["sha256"] for row in record["report"]["inputs"]],
                                  [hashlib.sha256(data).hexdigest() for data in before[:4]])
                 technical = record["technicalCatalog"]
-                # v33 slice A: valid partial packs. Each lacks exactly the 18
-                # measured keys; no translation is claimed for them.
+                # Valid partial packs. Each lacks exactly the 38 keys of
+                # PACK_MISSING_KEYS (18 of v33 slice A, 20 of B/C); no
+                # translation is claimed for them.
                 missing = len(PACK_MISSING_KEYS)
                 self.assertEqual((technical["validity"], technical["englishKeys"],
                                   technical["missingEntries"], technical["entryPresence"]),
@@ -4087,7 +4446,7 @@ class CatalogCurrentSource(unittest.TestCase):
 
 # Full visible-UI scope (Refs #143-#148): the input memo of the tool
 # (_memoized) keeps a successful parse or strict verdict of exact input bytes,
-# because every seam re-parses the 4096-key catalog. These controls are
+# because every seam re-parses the 4116-key catalog. These controls are
 # causal: any changed byte is a new key (changed file), a kept result is never
 # served for other bytes nor changed by a caller (stale cache), a failure is
 # never kept, the memo stays bounded (least recently used first out), a kept

@@ -238,6 +238,11 @@ local function HudSession()
   if item.tooltipTitle then out.themeMenu[#out.themeMenu+1]=item.tooltipTitle end
   if item.tooltipText then out.themeMenu[#out.themeMenu+1]=item.tooltipText end
  end
+ -- v45: the menu's title rows, found by their own flag (isTitle) and kept in
+ -- menu order, never by row position: the background opacity rows come first
+ -- now, so row 1 is an opacity row. The menu has two titles (style, colour).
+ out.themeTitles={}
+ for _,item in ipairs(themeItems) do if item.isTitle then out.themeTitles[#out.themeTitles+1]=item.text end end
  out.detail=Pn.AutoDetailLines()
  out.scopeLines=R.AutomationScopeLines({selected=true,held='user acting',readOnly=true,settings={autoPick=true}})
  out.settingsRows=R.AutomationSettingsRows({selected=false,readOnly=true,settings={autoReroll=false}})
@@ -269,9 +274,25 @@ local function HudSession()
 
  out.passive={saved=Saved()==savedBefore,sent=#H.sent-sentBefore,actions=#H.actions-actionsBefore}
  -- Outside the passivity window: an explicit colour choice notifies in chat.
- local chosen
- for _,item in ipairs(themeItems) do if not chosen and item.func and item.checked~=true and not item.disabled and item.text~=themeItems[1].text then chosen=item end end
+ -- v45: the rows are chosen by kind, not by position or text. A style or
+ -- colour row has no item.opacity; an opacity row carries it. Title and
+ -- "stays saved" rows have no func, so they are never chosen. The first
+ -- unchecked, enabled row of each kind is clicked, the style/colour row
+ -- first (as before the opacity rows existed), then the opacity row, and
+ -- each notice is captured apart. The opacity read after each click shows
+ -- which setter ran.
+ local chosen,opacityRow
+ for _,item in ipairs(themeItems) do
+  if item.func and item.checked~=true and not item.disabled then
+   if item.opacity==nil then chosen=chosen or item else opacityRow=opacityRow or item end
+  end
+ end
  out.themeChoice=chosen and S.CaptureChat(chosen.func) or {}
+ out.themeChoiceRow=chosen and {text=chosen.text,opacity=chosen.opacity} or nil
+ out.opacityAfterStyleChoice=Nexus.Theme.Current().backgroundOpacity
+ out.opacityChoice=opacityRow and S.CaptureChat(opacityRow.func) or {}
+ out.opacityRow=opacityRow and {text=opacityRow.text,opacity=opacityRow.opacity} or nil
+ out.opacityAfterChoice=Nexus.Theme.Current().backgroundOpacity
  return out
 end
 
@@ -389,7 +410,20 @@ check(hud.appearance and hud.appearance.tooltipText==P(
  'Options > Appearance hover is the shown Theme.HELP',hud.appearance and hud.appearance.tooltipText)
 check(hud.appearance and hud.appearance.text:find(P(P('Nexus Vista')..', '..P('Nexus Amethyst')),1,true)~=nil,
  'Options > Appearance row carries the shown Theme.Summary',hud.appearance and hud.appearance.text)
-check(hud.appearance and hud.appearance.menuList and hud.appearance.menuList[1].text==P('Appearance: style'),'Appearance submenu title')
+-- v45: the submenu's title rows are read by their own flag (isTitle), in menu
+-- order, not as row 1: the background opacity rows come first now. Both
+-- titles must be there, exactly two, style then colour; a missing submenu or
+-- title leaves the list short and fails. The same for Theme.MenuItems itself.
+do
+ local appearanceTitles={}
+ for _,item in ipairs(hud.appearance and hud.appearance.menuList or {}) do
+  if item.isTitle then appearanceTitles[#appearanceTitles+1]=item.text end
+ end
+ check(#appearanceTitles==2 and appearanceTitles[1]==P('Appearance: style'),'Appearance submenu title',table.concat(appearanceTitles,' || '))
+ check(#appearanceTitles==2 and appearanceTitles[2]==P('Appearance: colour'),'Appearance submenu colour title',table.concat(appearanceTitles,' || '))
+end
+check(#hud.themeTitles==2 and hud.themeTitles[1]==P('Appearance: style') and hud.themeTitles[2]==P('Appearance: colour'),
+ 'Theme.MenuItems has its two titles (style, colour), found by isTitle',table.concat(hud.themeTitles,' || '))
 local scopeShown=false
 for _,line in ipairs(hud.detail) do if line==P('With Auto ON, Nexus may only do what these permissions allow:') then scopeShown=true end end
 check(scopeShown,'Auto explained lines include the shown scope intro')
@@ -411,6 +445,22 @@ check(#hud.themeChat==1 and hud.themeChat[1]=='Nexus: '..P('That style is not av
  'Theme notice reaches chat with its code-owned prefix',hud.themeChat[1])
 Strict('Theme choice chat',hud.themeChoice)
 check(#hud.themeChoice==1 and hud.themeChoice[1]:find('Nexus: '..OPEN..'Appearance: ',1,true)==1,'explicit colour choice notice',hud.themeChoice[1])
+-- v45: that notice came from a style or colour row (no item.opacity), and the
+-- click left the background opacity at its default: the style/colour setter
+-- ran, not the opacity setter.
+check(hud.themeChoiceRow~=nil and hud.themeChoiceRow.opacity==nil and hud.opacityAfterStyleChoice==100,
+ 'the style/colour notice comes from a style or colour row; the opacity stays 100',
+ tostring(hud.themeChoiceRow and hud.themeChoiceRow.text)..' / '..tostring(hud.opacityAfterStyleChoice))
+-- v45: the opacity notice is covered on purpose, by its own row: the first
+-- unchecked opacity row (item.opacity set), its shown label, the chat notice
+-- through the seam with the code-owned prefix, and the opacity it applied.
+Strict('Theme opacity choice chat',hud.opacityChoice)
+check(#hud.opacityChoice==1 and hud.opacityChoice[1]:find('Nexus: '..OPEN..'Appearance: ',1,true)==1,'explicit opacity choice notice',hud.opacityChoice[1])
+check(hud.opacityRow~=nil and type(hud.opacityRow.opacity)=='number' and hud.opacityRow.opacity~=100
+ and hud.opacityRow.text==P('Background opacity: '..tostring(hud.opacityRow.opacity)..'%')
+ and hud.opacityAfterChoice==hud.opacityRow.opacity,
+ 'the opacity notice comes from an unchecked opacity row, shown translated, and its value is applied',
+ tostring(hud.opacityRow and hud.opacityRow.text)..' / '..tostring(hud.opacityAfterChoice))
 Strict('Callboard progress line',hud.callboardLines)
 check(hud.callboardLines[1]=='|cff66d966'..P('Ready for turn-in')..'|r','completed objective line',hud.callboardLines[1])
 check(type(hud.callboardRow)=='string' and hud.callboardRow:find(P('Ready for turn-in'),1,true)~=nil,'the panel Callboard row shows it',hud.callboardRow)
@@ -509,7 +559,11 @@ check(partial.cards[1] and partial.cards[1].tag=='Wishlist pick' and partial.car
  and partial.cards[1].hoverTag=='> Wishlist pick' and partial.cards[1].quality=='Epic',
  'missing entries: pick tag and quality show exact English',partial.cards[1] and partial.cards[1].tag)
 check(partial.legend[4]=='?: the game has not reported that count yet. It is unknown, not zero.','missing legend entry is English',partial.legend[4])
-check(partial.themeMenu[1]=='Appearance: style','missing menu title is English',partial.themeMenu[1])
+-- v45: the titles by isTitle, not row 1 (an opacity row now). The removed
+-- style title is exact English; the colour title beside it stays translated,
+-- so only the removed key fell back.
+check(#partial.themeTitles==2 and partial.themeTitles[1]=='Appearance: style','missing menu title is English',table.concat(partial.themeTitles,' || '))
+check(#partial.themeTitles==2 and partial.themeTitles[2]==P('Appearance: colour'),'the colour title beside the missing one stays translated',table.concat(partial.themeTitles,' || '))
 check(partial.rewards[1]=='Rewards by Difficulty','missing hover title is English',partial.rewards[1])
 check(not S.IsPseudo(partial.headingOff) or partial.headingOff:find(P('Current offer - you choose'),1,true)==nil,
  'the removed long heading is never shown as pseudo',partial.headingOff)
@@ -543,7 +597,9 @@ check(#en.wholeOff==1 and en.wholeOff[1]:find('Cinder Lattice (Epic)',1,true)~=n
  and en.headingOff:find('Your offers',1,true)~=nil and en.slotOff=='Preview'
  and en.scope=='Auto may choose offers and, if its save permission is on, save a better finished run over this Saved Build. It never loads a build or starts Orbs.',
  'English heading, target and Auto scope row')
-check(en.themeMenu[1]=='Appearance: style' and en.appearance.text:find('Nexus Vista, Nexus Amethyst',1,true)~=nil,'English Appearance menu')
+-- (v45: the two titles by isTitle, style then colour, not row 1.)
+check(#en.themeTitles==2 and en.themeTitles[1]=='Appearance: style' and en.themeTitles[2]=='Appearance: colour'
+ and en.appearance.text:find('Nexus Vista, Nexus Amethyst',1,true)~=nil,'English Appearance menu',table.concat(en.themeTitles,' || '))
 check(en.rewards[1]=='Rewards by Difficulty' and en.serverChat[1]=="|cff7fd5ffNexus:|r The Hardcore menu is not available yet. Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu and open it from the server HUD.",
  'English Callboard hover and Hardcore notice',en.serverChat[1])
 check(en.miniWide=='Orb mini panel' and en.miniNarrow=='Mini','English mini-panel labels')
