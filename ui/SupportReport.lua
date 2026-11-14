@@ -287,6 +287,12 @@ local function ensure()
     button(frame, 500, -520, 100, T("support.button.clear_focus"), function() frame.copyBox:ClearFocus() end)
     button(frame, 605, -520, 85, T("support.button.close"), function() frame:Hide() end)
     frame:SetScript("OnShow", function() refresh() end)
+    -- v26: a page lifted over the game's "Select an Echo" control takes its
+    -- own default levels back when it hides (Close, Escape or the handoff).
+    frame:SetScript("OnHide", function()
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.RestoreOwned) == "function" then pcall(metrics.RestoreOwned, frame) end
+    end)
     UISpecialFrames = UISpecialFrames or {}
     UISpecialFrames[#UISpecialFrames + 1] = "NexusSupportReport"
 end
@@ -386,6 +392,10 @@ function UI.Show()
     HideLibrary()
     frame:Show()
     refresh()
+    -- v26 (native X1): over the game's shown "Select an Echo" control in this
+    -- strata, the page's own frames are laid out above it (levels only).
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.LiftOwned) == "function" then pcall(metrics.LiftOwned, frame) end
     return frame
 end
 

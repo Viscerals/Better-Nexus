@@ -576,6 +576,11 @@ local function refresh()
         local height=math.max(414,tonumber(measured) or 0)
         frame.body:SetHeight(height);frame.content:SetHeight(height+24)
     end
+    -- v26 (native X1): while the game's "Select an Echo" control is shown in
+    -- this strata above the Reference, its own frames are laid out over it
+    -- (LayoutMetrics.LiftOwned; levels only, read again on each page).
+    local metrics=Nexus.LayoutMetrics
+    if frame:IsShown() and metrics and type(metrics.LiftOwned)=="function" then pcall(metrics.LiftOwned,frame) end
 end
 local function ensure()
     if frame then return end
@@ -665,6 +670,9 @@ local function ensure()
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame,0.94) end
     if Nexus.Theme and Nexus.Theme.StyleTree then Nexus.Theme.StyleTree(frame) end
     frame:HookScript("OnHide",function()
+        -- v26: a lifted Reference takes its own default levels back first.
+        local metrics=Nexus.LayoutMetrics
+        if metrics and type(metrics.RestoreOwned)=="function" then pcall(metrics.RestoreOwned,frame) end
         local back=returnTo;returnTo=nil
         if back then pcall(back) end
     end)

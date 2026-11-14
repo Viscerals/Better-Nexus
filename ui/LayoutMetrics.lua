@@ -1603,4 +1603,360 @@ function M.Stats()
         communityEntries=#communityOrder}
 end
 
+-- v26 (native X1, test.163031): owned dialog levels over one known game
+-- control. The client's "Select an Echo" control, PerkChooseButton, was read
+-- (read only) on 3.3.5 / 12340 as DIALOG strata, level 110, parent UIParent,
+-- shown; at that level it draws over the Reference (DIALOG 40), the Support
+-- page and the Build Library (DIALOG 50). While it is a shown DIALOG frame
+-- whose level is a whole number from 1 to 126, a shown owned window's own
+-- DIALOG frames are given levels above it and no higher than 127: the band
+-- below the native failure where a parent at 129 drew over children at 128
+-- (Help). The window's own default levels are recorded and their distinct
+-- values are mapped in order onto level+1 .. 127, so every parent/child and
+-- sibling relation (equal, above or below; the Theme base under its window)
+-- keeps its sense. Parents are set before their children, so a client that
+-- moves children with a parent cannot leave a child at another level. Hiding
+-- the window, or the control going away, sets the recorded defaults back.
+-- Bounds: only the control named here is read (shown, strata, level; each
+-- read protected) and never changed, clicked or hooked; only the window's own
+-- children are walked (GetChildren from the window, at most LIFT_MAX_NODES
+-- frames LIFT_MAX_DEPTH deep), never every frame; no frame, timer, hook or
+-- strata is added or changed. Any failed or out-of-range read, a tree that is
+-- too large, or more distinct levels than the band holds writes nothing (a
+-- lifted window is then set back to its defaults whole). A child created
+-- while its window is lifted gets its default from its parent's default and
+-- its own offset to that parent, never from the lifted level.
+do
+    local FOREIGN = "PerkChooseButton"
+    local CEILING = 127
+    local LIFT_MAX_NODES, LIFT_MAX_DEPTH = 1024, 32
+    local SKIP = {Texture=true, FontString=true, Font=true}
+
+    -- One protected method call on an object; false when it cannot be made.
+    local function Call(object, name)
+        local okIndex, method = pcall(function() return object[name] end)
+        if not okIndex or type(method) ~= "function" then return false end
+        local ok, value = pcall(method, object)
+        if not ok then return false end
+        return true, value
+    end
+    local function WholeLevel(value)
+        value = tonumber(value)
+        if not value or value ~= value or value < 0 or value > 65535
+            or value ~= math.floor(value) then return nil end
+        return value
+    end
+
+    -- The known control's level while it is a shown DIALOG frame with a
+    -- level that leaves room above it, else nil (keep the defaults).
+    function M.ForeignDialogLevel()
+        local control = _G[FOREIGN]
+        local kind = type(control)
+        if kind ~= "table" and kind ~= "userdata" then return nil end
+        local ok, shown = Call(control, "IsShown")
+        if not ok or not (shown == true or shown == 1) then return nil end
+        local okStrata, strata = Call(control, "GetFrameStrata")
+        if not okStrata or strata ~= "DIALOG" then return nil end
+        local okLevel, level = Call(control, "GetFrameLevel")
+        level = okLevel and WholeLevel(level) or nil
+        if not level or level < 1 or level > CEILING - 1 then return nil end
+        return level
+    end
+
+    -- The window and its own descendant frames, parents before children,
+    -- with each one's parent in the walk, level, strata and actual parent
+    -- (GetParent; r2: late frames are matched with their real siblings by
+    -- it); nil when any read fails or the tree is larger than the bound.
+    local function Tree(window)
+        local nodes, parent, level, strata, actual = {}, {}, {}, {}, {}
+        local queue, depth, head = {window}, {[window]=0}, 1
+        while queue[head] do
+            local node = queue[head];head = head + 1
+            local okLevel, value = Call(node, "GetFrameLevel")
+            value = okLevel and WholeLevel(value) or nil
+            local okStrata, layer = Call(node, "GetFrameStrata")
+            local okParent, owner = Call(node, "GetParent")
+            if not value or not okStrata or type(layer) ~= "string" or not okParent then return nil end
+            nodes[#nodes + 1] = node;level[node] = value;strata[node] = layer;actual[node] = owner
+            if #nodes > LIFT_MAX_NODES then return nil end
+            local okChildren, children = pcall(function() return {node:GetChildren()} end)
+            if not okChildren then return nil end
+            for _, child in ipairs(children) do
+                -- r1 (A4): a child whose type cannot be read is not skipped;
+                -- the whole walk is refused (it could be an owned frame).
+                local okType, objectType = Call(child, "GetObjectType")
+                if not okType or type(objectType) ~= "string" then return nil end
+                if not SKIP[objectType] and depth[child] == nil then
+                    if depth[node] + 1 > LIFT_MAX_DEPTH then return nil end
+                    depth[child] = depth[node] + 1;parent[child] = node
+                    queue[#queue + 1] = child
+                end
+            end
+        end
+        return nodes, parent, level, strata, actual
+    end
+
+    -- r1 (R1, both original reviews): the owned windows that take part (Help,
+    -- the Library, Support) are one family. They are lifted together with
+    -- one rank map over the union of their DIALOG DEFAULT levels, so at the
+    -- lifted levels every window keeps its default place among the others
+    -- (Help 39-42 under the Library and Support 49-70) as well as its own
+    -- order. A window joins the family the first time it asks for a lift;
+    -- the registry holds windows weakly and is never walked beyond its
+    -- members. Only shown members are lifted; a hidden member is restored.
+    local family = {members=setmetatable({}, {__mode="k"}), level=nil, tried=nil}
+
+    local function State(window)
+        local state = rawget(window, "_nexusOwnedLift")
+        if not state then
+            state = {record=setmetatable({}, {__mode="k"}),
+                changed=setmetatable({}, {__mode="k"}), lifted=false, pending=false}
+            rawset(window, "_nexusOwnedLift", state)
+        end
+        return state
+    end
+    local function IsShown(window)
+        local ok, shown = Call(window, "IsShown")
+        return ok and (shown == true or shown == 1)
+    end
+    local function SetLevel(node, value)
+        return (pcall(function() node:SetFrameLevel(value) end))
+    end
+
+    -- The defaults a walk proposes, without writing them. A window that is
+    -- neither lifted nor waiting for a restore reports its defaults now. A
+    -- lifted or waiting one keeps its records (never what it shows). A frame
+    -- first seen since gets a default without ever using a lifted level:
+    --  * one row above its parent (the client's own child level): its
+    --    parent's default plus one;
+    --  * otherwise, at the current level of a recorded sibling (same actual
+    --    parent): that sibling's exact default, so a level copied from a
+    --    sibling (the Library's detail status frame takes the detail panel's
+    --    level) keeps the tie it was made with (r2, Standards R1);
+    --  * otherwise: its parent's default plus its offset to that parent.
+    -- nil when that cannot be decided safely: a parent's default unknown, or
+    -- recorded siblings at that level with different defaults (ambiguous).
+    -- One pass builds the sibling table and one pass proposes, so a walk is
+    -- linear in its frames.
+    local AMBIGUOUS = {}
+    local function Proposed(state, nodes, parent, level, actual)
+        local out = {}
+        if not (state.lifted or state.pending) then
+            for _, node in ipairs(nodes) do out[node] = level[node] end
+            return out
+        end
+        local copies = {}
+        for _, node in ipairs(nodes) do
+            local value, owner = state.record[node], actual and actual[node]
+            if value ~= nil and owner ~= nil then
+                local slots = copies[owner]
+                if not slots then slots = {};copies[owner] = slots end
+                local seen = slots[level[node]]
+                if seen == nil then slots[level[node]] = value
+                elseif seen ~= value then slots[level[node]] = AMBIGUOUS end
+            end
+        end
+        for _, node in ipairs(nodes) do
+            local value = state.record[node]
+            if value == nil then
+                local up = parent[node]
+                local upValue = up and (out[up] or state.record[up])
+                if not upValue then return nil end
+                if level[node] == level[up] + 1 then
+                    value = upValue + 1
+                else
+                    local owner = actual and actual[node]
+                    local slots = owner ~= nil and copies[owner] or nil
+                    local copied = slots and slots[level[node]]
+                    if copied == AMBIGUOUS then return nil end
+                    value = copied or (upValue + (level[node] - level[up]))
+                end
+            end
+            out[node] = value
+        end
+        return out
+    end
+
+    -- Sets a window's recorded defaults back, parents first: every walked
+    -- DIALOG frame, and every frame the lift raised that has left the tree
+    -- (a released pool card). A write that fails does not stop the others;
+    -- the window then stays waiting (pending) with its records and the
+    -- frames it raised, and the restore is tried again before any later
+    -- lift or re-record, so a level left raised never becomes a default.
+    local function RestoreWindow(window)
+        local state = State(window)
+        if not (state.lifted or state.pending) then return true end
+        local nodes, parent, level, strata, actual = Tree(window)
+        local ok, walked = true, {}
+        -- r2: a walk that fails, or a late frame whose default cannot be
+        -- decided, keeps the window waiting (pending) so the restore is tried
+        -- again; it is never reported as complete.
+        if not nodes then ok = false end
+        if nodes then
+            local proposed = Proposed(state, nodes, parent, level, actual)
+            if proposed then
+                for node, value in pairs(proposed) do
+                    if state.record[node] == nil then state.record[node] = value end
+                end
+            else
+                ok = false
+            end
+            for _, node in ipairs(nodes) do
+                walked[node] = true
+                local value = strata[node] == "DIALOG" and state.record[node] or nil
+                if value and not SetLevel(node, value) then ok = false end
+            end
+        end
+        for node in pairs(state.changed) do
+            local value = state.record[node]
+            if not walked[node] and value and not SetLevel(node, value) then ok = false end
+        end
+        state.lifted, state.level = false, nil
+        if ok then
+            state.pending = false
+            state.changed = setmetatable({}, {__mode="k"})
+        else
+            state.pending = true
+        end
+        return ok
+    end
+
+    -- Restores every member that is lifted or waiting. True when all are.
+    local function RestoreAll()
+        local ok = true
+        for window in pairs(family.members) do
+            if not RestoreWindow(window) then ok = false end
+        end
+        family.level = nil
+        return ok
+    end
+
+    -- A lift that cannot be made restores the whole family and is
+    -- remembered for that control level, so a periodic check does not walk
+    -- again until it changes.
+    local function Refuse(over)
+        RestoreAll()
+        family.tried = over
+        return false
+    end
+
+    -- Lays the family out for the control as it reads now. Preflight first:
+    -- every shown member is walked (any failed read refuses), any member
+    -- waiting for a restore is restored first (a failure refuses), the
+    -- defaults of all shown members are proposed and the union fit is
+    -- checked; only then are records kept and levels written, each window
+    -- parents first. A write that fails restores the whole family.
+    local function LiftFamily()
+        local over = M.ForeignDialogLevel()
+        local shown = {}
+        for window in pairs(family.members) do
+            if IsShown(window) then
+                shown[#shown + 1] = window
+            else
+                local state = State(window)
+                if state.lifted or state.pending then RestoreWindow(window) end
+            end
+        end
+        if not over or #shown == 0 then
+            RestoreAll()
+            family.tried = nil
+            return false
+        end
+        local walks = {}
+        for _, window in ipairs(shown) do
+            local state = State(window)
+            if state.pending and not RestoreWindow(window) then return Refuse(over) end
+            local nodes, parent, level, strata, actual = Tree(window)
+            if not nodes then return Refuse(over) end
+            local proposed = Proposed(state, nodes, parent, level, actual)
+            if not proposed then return Refuse(over) end
+            walks[#walks + 1] = {window=window, state=state, nodes=nodes, strata=strata, proposed=proposed}
+        end
+        local distinct, seen = {}, {}
+        for _, walk in ipairs(walks) do
+            for _, node in ipairs(walk.nodes) do
+                local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
+                if value and not seen[value] then seen[value] = true;distinct[#distinct + 1] = value end
+            end
+        end
+        table.sort(distinct)
+        if #distinct == 0 or over + #distinct > CEILING then return Refuse(over) end
+        local rank = {}
+        for i, value in ipairs(distinct) do rank[value] = over + i end
+        for _, walk in ipairs(walks) do
+            local state = walk.state
+            if not state.lifted then
+                state.record = setmetatable({}, {__mode="k"})
+            end
+            for node, value in pairs(walk.proposed) do state.record[node] = value end
+            state.lifted, state.level = true, over
+        end
+        for _, walk in ipairs(walks) do
+            for _, node in ipairs(walk.nodes) do
+                if walk.strata[node] == "DIALOG" then
+                    walk.state.changed[node] = true
+                    if not SetLevel(node, rank[walk.proposed[node]]) then return Refuse(over) end
+                end
+            end
+        end
+        family.level, family.tried = over, nil
+        return true
+    end
+
+    -- A shown window asks for its family's lift (on its show, a page change
+    -- or its own render); it joins the family the first time.
+    function M.LiftOwned(window)
+        if type(window) ~= "table" then return false end
+        State(window)
+        family.members[window] = true
+        return LiftFamily()
+    end
+
+    -- A member that hides takes its defaults back (when lifted or waiting),
+    -- and the family is decided again without it. r2 (Spec R2): this runs
+    -- whether or not any member is lifted, so after a whole-family refusal
+    -- the members still shown are laid out again when one hides: the refusal
+    -- memo (made for the family that was shown) is cleared first, and
+    -- LiftFamily lifts the remaining shown members if they fit, or refuses
+    -- them as a whole again. Only on a hide event; the periodic check is
+    -- unchanged. A window that never joined the family does nothing.
+    function M.RestoreOwned(window)
+        if type(window) ~= "table" or not family.members[window] then return false end
+        local state = rawget(window, "_nexusOwnedLift")
+        local ok = true
+        if state and (state.lifted or state.pending) then ok = RestoreWindow(window) end
+        family.tried = nil
+        local others = false
+        for member in pairs(family.members) do
+            if member ~= window and IsShown(member) then others = true end
+        end
+        if others then LiftFamily() else family.level = nil end
+        return ok
+    end
+
+    -- A cheap check for a periodic caller: reads only the control, and walks
+    -- the family only when the control's state differs from the one the
+    -- family was laid out (or last refused) for.
+    function M.RecheckOwned(window)
+        if type(window) ~= "table" then return false end
+        local over = M.ForeignDialogLevel()
+        local lifted = family.level ~= nil
+        if not lifted and not over then return false end
+        if lifted and family.level == over then return false end
+        if not lifted and family.tried == over then return false end
+        family.members[window] = true
+        State(window)
+        return LiftFamily()
+    end
+
+    -- After an owned re-layout or render set levels from the window's
+    -- current (lifted) ones: the family is laid out again from its records.
+    function M.ReapplyOwned(window)
+        if type(window) ~= "table" then return false end
+        local state = rawget(window, "_nexusOwnedLift")
+        if not (state and state.lifted) then return false end
+        return LiftFamily()
+    end
+end
+
 Nexus.LayoutMetrics = M

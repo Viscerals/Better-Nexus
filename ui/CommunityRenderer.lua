@@ -1333,7 +1333,21 @@ function Renderer.New(options)
             })
         end
         if frame._nexusNormalizeFonts then frame._nexusNormalizeFonts() end
+        -- r3 (Spec R3): on a lifted Library, walk the owned family once BEFORE
+        -- the detail panel is rewritten, so a frame made since the last walk
+        -- (the detail status frame made on a pending render, at the panel's
+        -- level) is recorded while the panel still holds its laid-out rank.
+        -- Nothing happens when the Library is not lifted.
+        local liftMetrics = Nexus.LayoutMetrics
+        if liftMetrics and type(liftMetrics.ReapplyOwned) == "function" then pcall(liftMetrics.ReapplyOwned, frame) end
         if detailPanel then detailPanel:SetFrameLevel(frame:GetFrameLevel() + 10) end
+        -- v26: on a lifted Library that line used the lifted level; the
+        -- owned family is laid out again from its recorded defaults (nothing
+        -- happens otherwise). r1: this function has no local 'owner' (that
+        -- is ApplyResponsiveLayout's); the helper is reached through Nexus,
+        -- so this line no longer raises and cuts the layout short.
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.ReapplyOwned) == "function" then pcall(metrics.ReapplyOwned, frame) end
         local contentBar = frame._contentBar
         if contentBar then
             -- The bar spans the body viewport, beside the content it moves.
@@ -3250,6 +3264,11 @@ local function EnsureFrame()
             -- is status work and must not rebuild the catalog.
             receiveEnded = lastReceiving and not receivingNow
             lastReceiving = receivingNow
+            -- v26: the game's "Select an Echo" control shown or gone while the
+            -- Library is open. Reads only that control; walks the Library's
+            -- own frames only when its state changed.
+            local metrics = Nexus.LayoutMetrics
+            if metrics and type(metrics.RecheckOwned) == "function" then pcall(metrics.RecheckOwned, self) end
         end
 
         local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
@@ -3396,6 +3415,9 @@ local function EnsureFrame()
         if sortPanel then sortPanel:Hide() end
         if dropdownShield then dropdownShield:Hide() end
         HidePostMenus()
+        -- v26: a lifted Library takes its own default levels back.
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.RestoreOwned) == "function" then pcall(metrics.RestoreOwned, frame) end
     end
     local function ResumeFrameUpdates()
         frame:SetScript("OnUpdate", OnFrameUpdate)
@@ -4857,6 +4879,11 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     viewDiagnostic.projectionCurrent = true
     virtualStats.lastDataError = nil
     refreshDirty = false
+    -- v26: cards and headers this render made or reused on a lifted Library
+    -- are recorded (from their parent's default) and laid out with it now,
+    -- so a pooled frame never carries a lifted level as its default.
+    local metrics = Nexus.LayoutMetrics
+    if frame and metrics and type(metrics.ReapplyOwned) == "function" then pcall(metrics.ReapplyOwned, frame) end
     return true
 end
 
@@ -4891,6 +4918,11 @@ end
         if support and type(support.Hide) == "function" then pcall(support.Hide) end
         frame:Show()
         M.Refresh()
+        -- v26 (native X1): over the game's shown "Select an Echo" control in
+        -- this strata, the Library's own frames are laid out above it
+        -- (levels only; its FULLSCREEN_DIALOG forms and TOOLTIP menus stay).
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.LiftOwned) == "function" then pcall(metrics.LiftOwned, frame) end
     end
 
     function M.Hide()
