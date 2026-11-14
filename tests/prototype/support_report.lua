@@ -2223,4 +2223,724 @@ do
  if #misses>0 then error('r3 pending detail status re-laid out over PerkChooseButton: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0) end
 end
 
+-- 38. r4 (dialog-top-fit v27, TEST ONLY: Root's selection of the author's
+-- Plan B; no runtime change yet). An overfull family over the shown
+-- PerkChooseButton. Native metadata (sanitized, source 0c5527d4): the control
+-- at DIALOG 110 leaves 17 ranks (111-127); the Build Library alone has 16
+-- distinct DIALOG levels and Help plus the Library 21, so LiftFamily's fit
+-- guard (over + #distinct > CEILING) refuses the whole family and the Library
+-- the player just opened stays under the control, with Help. Which branch
+-- refused at the first native PENDING capture is NOT established here; this
+-- section reproduces only the source-certain shape offline.
+-- Contract (Plan B): when the shown family does not fit but its top window(s)
+-- do, and every lower window's DIALOG defaults lie strictly below every top
+-- window's, the top window(s) are lifted in their own order (above the
+-- control, at most 127) and every lower window keeps its exact defaults. No
+-- window is hidden or shown by this; Help's return callback and the Share
+-- draft are kept. The WHOLE family is still refused (every owned level at its
+-- default) when the top window alone does not fit, when the defaults
+-- interleave or tie at the split, when a walk cannot read a child, when a
+-- lifted window's defaults cannot be decided, and when a restore or a write
+-- fails.
+-- Fixture: a fresh real session isolated as sections 36-37 (no
+-- PerkChooseButton or anchor carried in or left behind), the same creation
+-- semantics, and section 37's projection fixture ('pending' answers the
+-- render's pending path). Counts come from the ACTUAL trees, walked as the
+-- source walks them (GetChildren from the window; Texture, FontString and
+-- Font skipped; DIALOG levels). The control is then placed so that the
+-- Library alone fits with one spare rank and Help plus the Library does not:
+-- the native 16-of-17 / 21 shape, computed rather than hard-coded. No frame
+-- is faked away and no shown state is changed to make anything fit. The
+-- guard cases use bounded instance mocks (each removed after its case), and
+-- small synthetic DIALOG windows passed to the public
+-- LayoutMetrics.LiftOwned/RestoreOwned, as a window's own show and hide do.
+-- A distinct-level count is the same before and after a lift (the rank map
+-- is one-to-one), so shape checks read the current trees.
+-- SETUP checks stop the run. Contract misses are collected, then raised
+-- together. On the 0c5527d4 runtime the split expectations are expected to
+-- miss (behavioural RED) and every guard expectation to hold.
+-- r2 (SETUP correction, test only): the first candidate did not compile
+-- ("main function has more than 200 local variables" at the j4 locals),
+-- because this section's locals were counted with the file's own top-level
+-- locals in the main chunk. The section therefore runs as one local
+-- function (its own local-variable count), and the locals that only one case
+-- uses are scoped to that case's do-block. The statements, their order and
+-- every assertion are unchanged.
+do
+ local function Section38()
+ local misses={}
+ local function expect(v,m) if not v then misses[#misses+1]=m end end
+ local CEILING=127
+ local RANK={BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,FULLSCREEN=6,FULLSCREEN_DIALOG=7,TOOLTIP=8}
+ -- Session isolation, as sections 36-37.
+ _G.PerkChooseButton=nil
+ _G.ProjectEbonholdPerkFrame=nil
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ NexusSupportDB=nil;NexusSupportStorage=nil
+ local H5=dofile('tests/prototype/harness.lua')
+ check(_G.PerkChooseButton==nil and _G.ProjectEbonholdPerkFrame==nil,
+  'r4 SETUP: no PerkChooseButton or anchor is left from an earlier section when this session starts')
+ local create=CreateFrame
+ CreateFrame=function(kind,name,parent,template,...)
+  local f=create(kind,name,parent,template,...)
+  local p=parent;if type(p)=='string' then p=_G[p] end
+  if type(p)=='table' and p~=UIParent and kind~='Font' then
+   rawset(f,'frameLevel',(tonumber(p:GetFrameLevel()) or 0)+1)
+   rawset(f,'GetFrameStrata',function(self)
+    local own=rawget(self,'strata');if own then return own end
+    local q=self:GetParent();return q and q:GetFrameStrata() or 'MEDIUM'
+   end)
+  end
+  return f
+ end
+ local enumerations,hadEnumerate=0,EnumerateFrames
+ EnumerateFrames=function(...) enumerations=enumerations+1;if hadEnumerate then return hadEnumerate(...) end end
+ NexusDB=T.Profile(0,0)
+ T.Load()
+ -- The projection read (section 37's fixture): 'pending' answers nil, nil,
+ -- "pending"; nil reads the real projection.
+ local factory=Nexus.CommunityInternals and Nexus.CommunityInternals.Projection
+ check(type(factory)=='table' and type(factory.New)=='function','r4 SETUP: the Library projection factory is loaded')
+ local realNew,mode,wrapped=factory.New,nil,0
+ factory.New=function(...)
+  local object=realNew(...)
+  if type(object)=='table' and type(object.List)=='function' then
+   local list=object.List
+   object.List=function(...)
+    if mode=='pending' then return nil,nil,'pending' end
+    return list(...)
+   end
+   wrapped=wrapped+1
+  end
+  return object
+ end
+ H5.Fire('ADDON_LOADED','Nexus');H5.Fire('PLAYER_ENTERING_WORLD')
+ T.Until(H5,function()return Nexus.StartupStatus().state=='ready' end)
+ local function Serialize(v,seen)
+  if type(v)~='table' then return type(v)..':'..tostring(v) end
+  seen=seen or {};if seen[v] then return '<cycle>' end;seen[v]=true
+  local keys={};for k in pairs(v) do keys[#keys+1]=k end
+  table.sort(keys,function(a,b) return type(a)..tostring(a)<type(b)..tostring(b) end)
+  local out={'{'};for _,k in ipairs(keys) do out[#out+1]=tostring(k)..'='..Serialize(v[k],seen)..',' end
+  seen[v]=nil;return table.concat(out)..'}'
+ end
+ local Help,CB,UI,LM=Nexus.Help,Nexus.CommunityBuilds,Nexus.SupportReportUI,Nexus.LayoutMetrics
+ check(type(LM)=='table' and type(LM.LiftOwned)=='function' and type(LM.RestoreOwned)=='function'
+  and type(LM.RecheckOwned)=='function','r4 SETUP: the LayoutMetrics lift entries are loaded')
+ local acts,sent,settings=#H5.actions,#H5.sent,Serialize(NexusDB.settings)
+
+ -- The walk the source makes (LayoutMetrics Tree): the window, then its
+ -- children breadth first, skipping Texture, FontString and Font.
+ local SKIP={Texture=true,FontString=true,Font=true}
+ local function Walk(win)
+  local out,seen,queue,head={}, {[win]=true},{win},1
+  while queue[head] do
+   local node=queue[head];head=head+1
+   out[#out+1]=node
+   local ok,children=pcall(function() return {node:GetChildren()} end)
+   check(ok and type(children)=='table','r4 SETUP: the test walk reads GetChildren')
+   for _,child in ipairs(children) do
+    local okType,kind=pcall(function() return child:GetObjectType() end)
+    if not (okType and SKIP[kind]) and not seen[child] then seen[child]=true;queue[#queue+1]=child end
+   end
+  end
+  return out
+ end
+ -- Distinct DIALOG levels of a window's walked tree, and their range.
+ local function Count(win)
+  local seen,n,lo,hi={},0,math.huge,-math.huge
+  for _,f in ipairs(Walk(win)) do
+   if f:GetFrameStrata()=='DIALOG' then
+    local L=tonumber(f:GetFrameLevel()) or 0
+    if not seen[L] then seen[L]=true;n=n+1 end
+    if L<lo then lo=L end;if L>hi then hi=L end
+   end
+  end
+  return n,lo,hi
+ end
+ local function Bottom(win) local _,lo=Count(win);return lo end
+ local function Top(win) local _,_,hi=Count(win);return hi end
+ local function Levels(win)
+  local t={}
+  for _,f in ipairs(Walk(win)) do t[f]={level=f:GetFrameLevel(),strata=f:GetFrameStrata()} end
+  return t
+ end
+ local function Btn(win,label)
+  for _,b in ipairs(H5.frames) do if b.kind=='Button' and b:GetParent()==win and b:GetText()==label then return b end end
+ end
+ -- GUARD form: every recorded frame keeps its default level and strata.
+ local function Same(tag,win,base)
+  local changed,n=0,0
+  for f,b in pairs(base) do
+   n=n+1
+   if f:GetFrameLevel()~=b.level or f:GetFrameStrata()~=b.strata then changed=changed+1 end
+  end
+  expect(n>0 and changed==0,tag..': every owned frame keeps its default level and strata ('..changed..' of '..n..' changed)')
+ end
+ local function sign(x) return x>0 and 1 or x<0 and -1 or 0 end
+ -- EXPECT form: above the control at P, within the band, order and strata kept.
+ local function Raised(tag,win,base,P)
+  local inTree,byParent={},{}
+  local n,below,over,strata,lo,hi=0,0,0,0,math.huge,-math.huge
+  for _,f in ipairs(Walk(win)) do
+   inTree[f]=true
+   local b=base[f]
+   if b and f:GetFrameStrata()~=b.strata then strata=strata+1 end
+   if f:GetFrameStrata()=='DIALOG' then
+    local L=tonumber(f:GetFrameLevel()) or 0
+    n=n+1;lo=math.min(lo,L);hi=math.max(hi,L)
+    if L<=P then below=below+1 end
+    if L>CEILING then over=over+1 end
+   end
+   if f~=win then local p=f:GetParent();byParent[p]=byParent[p] or {};table.insert(byParent[p],f) end
+  end
+  local flipped=0
+  local function pair(a,c)
+   local ba,bc=base[a],base[c]
+   if ba and bc and sign(ba.level-bc.level)~=sign(a:GetFrameLevel()-c:GetFrameLevel()) then flipped=flipped+1 end
+  end
+  for p,kids in pairs(byParent) do
+   for i,c in ipairs(kids) do
+    if inTree[p] then pair(p,c) end
+    for j=i+1,#kids do pair(c,kids[j]) end
+   end
+  end
+  expect(n>0 and below==0,tag..': every owned DIALOG frame stands above the shown control at '..P
+   ..' ('..below..' of '..n..' at or below it; owned levels '..tostring(lo)..'-'..tostring(hi)..')')
+  expect(over==0,tag..': no owned frame goes past '..CEILING..' ('..over..' over)')
+  expect(flipped==0,tag..': the window keeps its parent/child and sibling order ('..flipped..' pairs reversed)')
+  expect(strata==0,tag..': no owned frame changes strata ('..strata..' changed)')
+ end
+ local function NoDrift(tag,ref)
+  local changed,n=0,0
+  for f,r in pairs(ref) do n=n+1;if f:GetFrameLevel()~=r.level then changed=changed+1 end end
+  expect(changed==0,tag..': the same split gives the same levels ('..changed..' of '..n..' moved)')
+ end
+ local function Below(tag,low,high,name)
+  local a,b=Top(low),Bottom(high)
+  expect(a<b,tag..': the lower window\'s highest DIALOG level ('..tostring(a)..') stays below the '
+   ..name..'\'s lowest ('..tostring(b)..'), as at the defaults')
+ end
+
+ -- 0. Control absent. Real opens record every default and warm every lazy
+ -- frame: a completed render, a pending render, the Support page. So the
+ -- trees counted here are the trees the later opens lift.
+ check(_G.PerkChooseButton==nil,'r4 SETUP: the control is absent before the first opens')
+ Help.Show('start')
+ local help=assert(NexusHelpWindow,'r4 SETUP: the Help window')
+ local helpClose=assert(Btn(help,'Close'),'r4 SETUP: Help Close')
+ local nextPage=assert(Btn(help,'Next'),'r4 SETUP: Help Next, an owned child')
+ check(help:GetFrameStrata()=='DIALOG' and help:GetFrameLevel()==40,'r4 SETUP: Help is DIALOG 40 by default')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Build Library opens through Nexus.CommunityBuilds.Show')
+ local lib=assert(NexusCommunityBuildsFrame,'r4 SETUP: the Library window')
+ check(wrapped>=1,'r4 SETUP: the Library projection was made after the fixture was in place')
+ check(lib:GetFrameStrata()=='DIALOG' and lib:GetFrameLevel()==50,'r4 SETUP: the Library is DIALOG 50 by default')
+ check(help:IsShown() and lib:IsShown(),'r4 SETUP: the Library route keeps Help shown (section 35f)')
+ pcall(CB.Refresh)
+ mode='pending'
+ local okP,resP,whyP=pcall(CB.Refresh)
+ check(okP and resP==false and whyP=='pending',
+  'r4 SETUP: the projection fixture takes the render\'s pending path ('..tostring(resP)..', '..tostring(whyP)..')')
+ mode=nil
+ pcall(CB.Refresh)
+ CB.Hide()
+ UI.Show()
+ local sup=assert(NexusSupportReport,'r4 SETUP: the Support page')
+ local supClose=assert(Btn(sup,'Close'),'r4 SETUP: Support Close')
+ check(sup:GetFrameStrata()=='DIALOG' and sup:GetFrameLevel()==50,'r4 SETUP: Support is DIALOG 50 by default')
+ supClose:Click()
+ helpClose:Click()
+ check(not help:IsShown() and not lib:IsShown() and not sup:IsShown(),'r4 SETUP: all three windows are closed after the warm-up')
+ -- The pending Library once more (control absent): an ordinary open while its
+ -- projection is pending, counted while it is shown. Every count below is
+ -- taken after this last warm-up open.
+ mode='pending'
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Library opens while its projection is pending (control absent)')
+ check(lib:GetFrameLevel()==50,'r4 SETUP: the pending Library opens at its default level 50 with the control absent')
+ local dLp=Count(lib)
+ CB.Hide()
+ mode=nil
+ local baseHelp,baseLib,baseSup=Levels(help),Levels(lib),Levels(sup)
+ local dH,hLo,hHi=Count(help)
+ local dL,lLo,lHi=Count(lib)
+ local dS,sLo,sHi=Count(sup)
+ check(dLp==dL,'r4 SETUP: the pending Library tree is the counted tree (pending '..dLp..', closed '..dL..')')
+ check(hHi<lLo and hHi<sLo,'r4 SETUP: Help\'s DIALOG defaults ('..hLo..'-'..hHi..') lie strictly below the Library\'s ('
+  ..lLo..'-'..lHi..') and Support\'s ('..sLo..'-'..sHi..')')
+ -- The control levels. One spare rank as natively (110 + 16 = 126) whenever
+ -- Help has 2 or more distinct levels; otherwise none, so the union still
+ -- overflows.
+ local spare=(dH>=2) and 1 or 0
+ local function Place(d) return CEILING-d-spare end
+ local P,Pp,Ps=Place(dL),Place(dLp),Place(dS)
+ local function Shaped(tag,Pc,dTop)
+  check(Pc>=1 and Pc<=CEILING-1,'r4 SETUP: '..tag..': the control level '..Pc..' is a level the source reads (1-126)')
+  check(Pc+dTop<=CEILING,'r4 SETUP: '..tag..': the top window alone fits ('..Pc..' + '..dTop..' <= '..CEILING..')')
+  check(Pc+dTop+dH>CEILING,'r4 SETUP: '..tag..': Help plus the top window does not fit ('..Pc..' + '..dTop..' + '..dH..' > '..CEILING..')')
+  check(Pc+dH<=CEILING,'r4 SETUP: '..tag..': Help alone fits ('..Pc..' + '..dH..' <= '..CEILING..')')
+ end
+ Shaped('Library (populated)',P,dL)
+ Shaped('Library (pending)',Pp,dLp)
+ Shaped('Support',Ps,dS)
+ local function Shape(tag)
+  check(Count(help)==dH and Count(lib)==dL and Count(sup)==dS,
+   'r4 SETUP: '..tag..': the trees keep the counted shape (Help '..dH..', Library '..dL..', Support '..dS..')')
+ end
+
+ -- The known control, shown, with its mutators counted (as sections 35-37).
+ -- Only the test moves it, through the real methods kept here.
+ local anchor=_G.ProjectEbonholdPerkFrame or CreateFrame('Frame','ProjectEbonholdPerkFrame',UIParent)
+ local perk=CreateFrame('Button','PerkChooseButton',UIParent)
+ perk:SetFrameStrata('DIALOG');perk:SetFrameLevel(P);perk:SetPoint('TOP',anchor,'BOTTOM',0,-50)
+ perk:SetText('Select an Echo')
+ local clicks=0;local onClick=function() clicks=clicks+1 end
+ perk:SetScript('OnClick',onClick);perk:Show()
+ local real={Show=perk.Show,Hide=perk.Hide,SetFrameLevel=perk.SetFrameLevel}
+ local touched,touchedNames=0,{}
+ for _,m in ipairs({'SetFrameLevel','SetFrameStrata','SetPoint','ClearAllPoints','SetAllPoints','SetParent','Show','Hide',
+  'SetShown','Click','SetScript','HookScript','EnableMouse','SetAlpha','Raise','Lower','SetToplevel','Enable','Disable',
+  'SetSize','SetWidth','SetHeight','SetText'}) do
+  local orig=perk[m]
+  rawset(perk,m,function(self,...)
+   touched=touched+1;touchedNames[#touchedNames+1]=m
+   if type(orig)=='function' then return orig(self,...) end
+  end)
+ end
+ local function Snapshot()
+  local a=perk.points[1] or {}
+  return table.concat({tostring(rawget(perk,'strata')),tostring(rawget(perk,'frameLevel')),tostring(rawget(perk,'shown')),
+   tostring(perk:GetParent()==UIParent),tostring(#perk.points),tostring(a[1]),tostring(a[2]==anchor),tostring(a[3]),
+   tostring(a[4]),tostring(a[5]),tostring(perk.scripts.OnClick==onClick),tostring(perk:GetText())},'|')
+ end
+ local perkBefore=Snapshot()
+ local function Control(level) real.SetFrameLevel(perk,level) end
+ local hookHelpShow,hookHelpHide=help.scripts.OnShow,help.scripts.OnHide
+ local hookLibHide,hookSupHide=lib.scripts.OnHide,sup.scripts.OnHide
+
+ -- a. The native cold order: Help shown and lifted, then the Library opens.
+ -- Help then the Library (RED on 0c5527d4: the whole family is refused).
+ Shape('a')
+ Help.Show('start')
+ check(help:IsShown() and Bottom(help)>P,'r4 SETUP: Help alone is lifted over the control before the Library opens')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Library opens over Help')
+ check(help:IsShown() and lib:IsShown(),'r4 SETUP: the Library route keeps Help shown')
+ Raised('a: Help, then the Library: the Library (the top window, which fits alone)',lib,baseLib,P)
+ Same('a: Help, then the Library: Help (the lower window) keeps its exact defaults',help,baseHelp)
+ Below('a: Help, then the Library',help,lib,'Library')
+ local libSplit=Levels(lib)
+
+ -- b. A Help page change asks for the lift again: the same split, no drift.
+ nextPage:Click()
+ Raised('b: after a Help page change: the Library',lib,baseLib,P)
+ NoDrift('b: the Library after a Help page change',libSplit)
+ Same('b: after a Help page change: Help',help,baseHelp)
+
+ -- e. Hide paths. Help closes over the Library: the Library stays lifted.
+ helpClose:Click()
+ expect(lib:IsShown() and not help:IsShown(),'e: Help closed and the Library is still shown')
+ Raised('e: Help closed: the Library alone',lib,baseLib,P)
+ Same('e: Help closed',help,baseHelp)
+ CB.Hide()
+ Same('e: the Library closed',lib,baseLib)
+
+ -- b. The other order: the Library, then Help.
+ Shape('b')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Library opens alone')
+ check(Bottom(lib)>P,'r4 SETUP: the Library alone is lifted over the control before Help opens')
+ Help.Show('start')
+ check(help:IsShown() and lib:IsShown(),'r4 SETUP: Help opens over a shown Library without hiding it')
+ Raised('b: the Library, then Help: the Library',lib,baseLib,P)
+ NoDrift('b: the Library, then Help: the Library',libSplit)
+ Same('b: the Library, then Help: Help',help,baseHelp)
+ Below('b: the Library, then Help',help,lib,'Library')
+ -- e. The Library closes while Help stays: that hide lifts Help alone.
+ CB.Hide()
+ Same('e: the Library closed over Help',lib,baseLib)
+ expect(help:IsShown(),'e: Help stays shown when the Library hides')
+ Raised('e: Help alone again, through the hide (no tick, no reopen)',help,baseHelp,P)
+ helpClose:Click()
+ Same('e: Help closed',help,baseHelp)
+
+ -- d. A completed render (ReapplyOwned) and the Share form keep the split;
+ -- the Share draft is kept.
+ do
+ Shape('d')
+ Help.Show('start')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Library opens over Help (d)')
+ pcall(CB.Refresh)
+ Raised('d: after a completed render: the Library',lib,baseLib,P)
+ NoDrift('d: the Library after a completed render',libSplit)
+ Same('d: after a completed render: Help',help,baseHelp)
+ pcall(CB.ShowPostBuild)
+ local popup=_G.NexusPostPopup
+ check(popup~=nil and popup:IsShown() and popup._postTitleBox~=nil,'r4 SETUP: the Share form is open over the Library')
+ popup._postTitleBox:SetText('');popup._postTitleBox:Insert('r4 kept draft')
+ local function Draft() return popup._postTitleBox:_NexusRawText() end
+ local function PopupAbove(tag)
+  expect(popup:IsShown() and (RANK[popup:GetFrameStrata()] or 0)>(RANK[lib:GetFrameStrata()] or 0),
+   tag..': the Share form still stands above its Library ('..popup:GetFrameStrata()..' over '..lib:GetFrameStrata()..')')
+  local shield=_G.NexusBuildDropdownShield
+  expect(shield==nil or (shield:GetFrameStrata()=='DIALOG' and shield:GetFrameLevel()<lib:GetFrameLevel()),
+   tag..': the dropdown shield stays in DIALOG below the Library')
+ end
+ PopupAbove('d: the Share form over the split')
+ pcall(CB.Refresh)
+ Raised('d: with the Share form open, after a render: the Library',lib,baseLib,P)
+ Same('d: with the Share form open, after a render: Help',help,baseHelp)
+ expect(popup:IsShown() and Draft()=='r4 kept draft','d: the Share form and its draft are kept')
+ CB.Hide()
+ Same('d: the Library closed',lib,baseLib)
+ expect(Draft()=='r4 kept draft','d: the draft is kept when the Library closes')
+ popup:Hide()
+ helpClose:Click()
+ Same('d: Help closed',help,baseHelp)
+ end
+
+ -- g. Help's return callback is preserved: opening or closing the Library
+ -- runs it never; closing Help runs it exactly once (existing semantics).
+ do
+ Shape('g')
+ local returned=0
+ Help.Show('start',function() returned=returned+1 end)
+ check(select(1,pcall(CB.Show)),'r4 SETUP: the Library opens over Help (g)')
+ expect(returned==0 and help:IsShown(),'g: opening the Library hides no Help and runs no Help return callback')
+ Raised('g: the Library',lib,baseLib,P)
+ Same('g: Help',help,baseHelp)
+ CB.Hide()
+ expect(returned==0 and help:IsShown(),'g: closing the Library runs no Help return callback ('..returned..')')
+ helpClose:Click()
+ expect(returned==1,'g: closing Help tells the window it stepped aside for, exactly once ('..returned..')')
+ Same('g: Help closed',help,baseHelp)
+ end
+
+ -- c. The native cold-PENDING route: Help shown, then an ordinary
+ -- CommunityBuilds.Show while the Library projection is pending ('Updating
+ -- results...'), then the data arrive (a completed render).
+ do
+ check(Count(help)==dH and Count(lib)==dLp,'r4 SETUP: c: the trees keep the pending shape')
+ Control(Pp)
+ Help.Show('start')
+ check(help:IsShown() and Bottom(help)>Pp,'r4 SETUP: c: Help alone is lifted before the pending Library opens')
+ mode='pending'
+ check(select(1,pcall(CB.Show)),'r4 SETUP: c: the Library opens while its projection is pending')
+ local okC,resC,whyC=pcall(CB.Refresh)
+ check(okC and resC==false and whyC=='pending',
+  'r4 SETUP: c: the open Library is on the pending path ('..tostring(resC)..', '..tostring(whyC)..')')
+ check(help:IsShown() and lib:IsShown(),'r4 SETUP: c: both windows are shown')
+ Raised('c: pending: the Library',lib,baseLib,Pp)
+ Same('c: pending: Help',help,baseHelp)
+ Below('c: pending',help,lib,'Library')
+ mode=nil
+ pcall(CB.Refresh)
+ Raised('c: after the data arrive (a completed render): the Library',lib,baseLib,Pp)
+ Same('c: after the data arrive: Help',help,baseHelp)
+ CB.Hide();helpClose:Click()
+ Same('c: the Library closed',lib,baseLib)
+ Same('c: Help closed',help,baseHelp)
+ Control(P)
+ end
+
+ -- f. Help, then Support, at Support's own shape; then the Library/Support
+ -- handoff, which stays as it is (it hides the Library only).
+ Shape('f')
+ Control(Ps)
+ Help.Show('start')
+ check(help:IsShown() and Bottom(help)>Ps,'r4 SETUP: f: Help alone is lifted before Support opens')
+ UI.Show()
+ check(help:IsShown() and sup:IsShown(),'r4 SETUP: f: the Support route keeps Help shown (section 35f)')
+ Raised('f: Help, then Support: Support (the top window)',sup,baseSup,Ps)
+ Same('f: Help, then Support: Help',help,baseHelp)
+ Below('f: Help, then Support',help,sup,'Support page')
+ supClose:Click()
+ Same('f: Support closed',sup,baseSup)
+ Raised('f: Help alone again after Support closes',help,baseHelp,Ps)
+ check(select(1,pcall(CB.Show)),'r4 SETUP: f: the Library opens over Help')
+ UI.Show()
+ expect(not lib:IsShown() and sup:IsShown() and help:IsShown(),'f: the Library/Support handoff still hides the Library only')
+ Same('f: the Library handed off',lib,baseLib)
+ Raised('f: Support after the handoff',sup,baseSup,Ps)
+ Same('f: Help after the handoff',help,baseHelp)
+ supClose:Click();helpClose:Click()
+ Same('f: Support closed',sup,baseSup)
+ Same('f: Help closed',help,baseHelp)
+ Control(P)
+
+ -- h. The control's level changes while both are shown (as 110 -> 57
+ -- natively; cause unknown). Driven through the Library's own recheck entry,
+ -- LayoutMetrics.RecheckOwned, which its periodic check calls.
+ do
+ Shape('h')
+ local Pfit=CEILING-dL-dH-1
+ check(Pfit>=1,'r4 SETUP: h: a control level at which the whole family fits exists ('..Pfit..')')
+ Help.Show('start')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: h: the Library opens over Help')
+ Control(Pfit)
+ pcall(LM.RecheckOwned,lib)
+ Raised('h: the control lower, the whole family fits: Help',help,baseHelp,Pfit)
+ Raised('h: the control lower, the whole family fits: the Library',lib,baseLib,Pfit)
+ Below('h: the whole family lifted',help,lib,'Library')
+ Control(P)
+ pcall(LM.RecheckOwned,lib)
+ Raised('h: the control back: the Library',lib,baseLib,P)
+ NoDrift('h: the Library back at the split',libSplit)
+ Same('h: the control back: Help at its exact defaults',help,baseHelp)
+ CB.Hide();helpClose:Click()
+ Same('h: the Library closed',lib,baseLib)
+ Same('h: Help closed',help,baseHelp)
+ end
+
+ -- i. GUARD, the top window alone does not fit: the whole family is refused.
+ do
+ Shape('i')
+ local Pi=CEILING-dL+1
+ check(Pi<=CEILING-1 and Pi+dH<=CEILING,'r4 SETUP: i: a control level '..Pi..' where the Library alone overflows and Help alone fits')
+ Control(Pi)
+ Help.Show('start')
+ check(help:IsShown() and Bottom(help)>Pi,'r4 SETUP: i: Help alone is lifted before the Library opens')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: i: the Library opens over Help')
+ Same('i: the top window alone does not fit: the whole family is refused: the Library',lib,baseLib)
+ Same('i: the top window alone does not fit: the whole family is refused: Help',help,baseHelp)
+ helpClose:Click()
+ Same('i: Help closed: the Library alone still does not fit',lib,baseLib)
+ CB.Hide()
+ Same('i: the Library closed',lib,baseLib)
+ Control(P)
+ end
+
+ -- Tree GUARD (as section 35g/i, now in the overfull shape): an owned Help
+ -- child whose type cannot be read refuses the whole family. A bounded
+ -- instance mock on the real Next button, removed after the case.
+ do
+ Shape('tree')
+ check(select(1,pcall(CB.Show)),'r4 SETUP: tree: the Library opens alone')
+ check(Bottom(lib)>P,'r4 SETUP: tree: the Library alone is lifted before Help opens')
+ rawset(nextPage,'GetObjectType',function() error('synthetic object type read failure') end)
+ local okT=pcall(Help.Show,'start')
+ expect(okT and help:IsShown() and lib:IsShown(),'tree: Help opens without an error and the Library stays shown')
+ Same('tree: an unreadable owned child refuses the whole family: Help',help,baseHelp)
+ Same('tree: an unreadable owned child refuses the whole family: the Library',lib,baseLib)
+ helpClose:Click()
+ rawset(nextPage,'GetObjectType',nil)
+ Raised('tree: once Help hides, the Library alone is lifted again',lib,baseLib,P)
+ CB.Hide()
+ Same('tree: the Library closed',lib,baseLib)
+ Same('tree: Help at its defaults',help,baseHelp)
+ end
+
+ -- k. GUARD, a failed restore of the lower window: section 35h's bounded
+ -- mock on Help's real scroll frame, armed only while the Library opens.
+ -- The whole family is refused; once disarmed, Help's own hide restores it
+ -- and lifts the Library alone.
+ do
+ Shape('k')
+ local scrollFrame=assert(_G.NexusHelpScroll,'r4 SETUP: k: Help\'s scroll frame')
+ local regionSet=scrollFrame.SetFrameLevel
+ local armed=false
+ rawset(scrollFrame,'SetFrameLevel',function(self,value)
+  if armed then error('synthetic transient level write failure') end
+  return regionSet(self,value)
+ end)
+ Help.Show('start')
+ check(help:IsShown() and Bottom(help)>P,'r4 SETUP: k: Help alone is lifted before the Library opens')
+ armed=true
+ local okK=pcall(CB.Show)
+ armed=false
+ expect(okK and help:IsShown() and lib:IsShown(),'k: the Library opens without an error and Help stays shown')
+ Same('k: a failed restore of the lower window refuses the whole family: the Library',lib,baseLib)
+ expect(help:GetFrameLevel()==baseHelp[help].level,
+  'k: Help\'s own root is back at its default '..tostring(baseHelp[help].level)..' ('..tostring(help:GetFrameLevel())..')')
+ helpClose:Click()
+ rawset(scrollFrame,'SetFrameLevel',nil)
+ Same('k: Help closed after the failed restore: its exact defaults',help,baseHelp)
+ Raised('k: once Help hides, the Library alone is lifted',lib,baseLib,P)
+ CB.Hide()
+ Same('k: the Library closed',lib,baseLib)
+ end
+
+ -- l. Repeated cycles: the same split each time, no frame and no hook added
+ -- after the first.
+ do
+ local frames
+ for cycle=1,3 do
+  Shape('l cycle '..cycle)
+  Help.Show('start')
+  check(select(1,pcall(CB.Show)),'r4 SETUP: l: the Library opens over Help in cycle '..cycle)
+  pcall(CB.Refresh)
+  Raised('l cycle '..cycle..': the Library',lib,baseLib,P)
+  NoDrift('l cycle '..cycle..': the Library',libSplit)
+  Same('l cycle '..cycle..': Help',help,baseHelp)
+  CB.Hide();helpClose:Click()
+  Same('l cycle '..cycle..': the Library closed',lib,baseLib)
+  Same('l cycle '..cycle..': Help closed',help,baseHelp)
+  if cycle==1 then frames=#H5.frames end
+ end
+ expect(#H5.frames==frames,'l: cycles 2 and 3 make no frame ('..tostring(frames)..' -> '..#H5.frames..')')
+ expect(help.scripts.OnShow==hookHelpShow and help.scripts.OnHide==hookHelpHide
+  and lib.scripts.OnHide==hookLibHide and sup.scripts.OnHide==hookSupHide,'l: no hook is added')
+ end
+
+ -- j. Small synthetic DIALOG windows (UIParent children, never named, so no
+ -- global), shown and hidden by the test and passed to the public
+ -- LiftOwned/RestoreOwned exactly as a window's own show and hide do. The
+ -- three real windows are closed, so the shown family is only these.
+ do
+ check(not help:IsShown() and not lib:IsShown() and not sup:IsShown(),'r4 SETUP: j: no owned window is shown before the synthetic cases')
+ local function Synthetic(tag,levels)
+  local w=CreateFrame('Frame',nil,UIParent)
+  w:SetFrameStrata('DIALOG');w:SetFrameLevel(levels[1])
+  local kids={}
+  for i=2,#levels do local c=CreateFrame('Frame',nil,w);c:SetFrameLevel(levels[i]);kids[#kids+1]=c end
+  w:Hide()
+  local seen,n={},0
+  for _,v in ipairs(levels) do if not seen[v] then seen[v]=true;n=n+1 end end
+  check(#Walk(w)==#levels and Count(w)==n,'r4 SETUP: j: the synthetic '..tag..' window is walked whole ('..#levels..' frames, '..n..' DIALOG levels)')
+  return w,kids
+ end
+ local function Open(w) w:Show();return LM.LiftOwned(w) end
+ local function Close(w) w:Hide();return LM.RestoreOwned(w) end
+ local Pj=CEILING-3-1
+ -- j1. The split itself, in both orders (RED on 0c5527d4): top 90-92 and
+ -- lower 20-22 at 123, so the top fits alone (126) and both do not (129).
+ local top,topKids=Synthetic('top',{90,91,92})
+ local low,lowKids=Synthetic('lower',{20,21,22})
+ local baseTop,baseLow=Levels(top),Levels(low)
+ Control(Pj)
+ Open(low)
+ check(Bottom(low)>Pj,'r4 SETUP: j1: the lower window alone is lifted')
+ Open(top)
+ Raised('j1: lower, then top: the top window',top,baseTop,Pj)
+ Same('j1: lower, then top: the lower window',low,baseLow)
+ Close(top)
+ Same('j1: the top window closed',top,baseTop)
+ Raised('j1: the lower window alone again',low,baseLow,Pj)
+ Close(low)
+ Same('j1: the lower window closed',low,baseLow)
+ Open(top)
+ check(Bottom(top)>Pj,'r4 SETUP: j1: the top window alone is lifted')
+ Open(low)
+ Raised('j1: top, then lower: the top window',top,baseTop,Pj)
+ Same('j1: top, then lower: the lower window',low,baseLow)
+ Close(low);Close(top)
+ Same('j1: both closed: the top window',top,baseTop)
+ Same('j1: both closed: the lower window',low,baseLow)
+ -- j2. GUARD, interleaved defaults: the lower window's 62 lies inside the
+ -- top window's 60-66. The union (5 levels) overflows at 123 and no strict
+ -- split exists, so the whole family is refused.
+ local il=Synthetic('interleaved top',{60,64,66})
+ local ilow=Synthetic('interleaved lower',{50,62})
+ local baseIl,baseIlow=Levels(il),Levels(ilow)
+ Open(ilow)
+ check(Bottom(ilow)>Pj,'r4 SETUP: j2: the interleaved lower window alone is lifted')
+ Open(il)
+ Same('j2: interleaved defaults refuse the whole family: the top window',il,baseIl)
+ Same('j2: interleaved defaults refuse the whole family: the lower window',ilow,baseIlow)
+ Close(il);Close(ilow)
+ Same('j2: both closed: the top window',il,baseIl)
+ Same('j2: both closed: the lower window',ilow,baseIlow)
+ -- j3. GUARD, a tie at the split: the lower window's highest default (60)
+ -- equals the top window's lowest. Not strictly below, so refused.
+ local tt=Synthetic('tied top',{60,64,66})
+ local tlow=Synthetic('tied lower',{50,55,60})
+ local baseTt,baseTlow=Levels(tt),Levels(tlow)
+ Open(tlow)
+ check(Bottom(tlow)>Pj,'r4 SETUP: j3: the tied lower window alone is lifted')
+ Open(tt)
+ Same('j3: a tie at the split refuses the whole family: the top window',tt,baseTt)
+ Same('j3: a tie at the split refuses the whole family: the lower window',tlow,baseTlow)
+ Close(tt);Close(tlow)
+ Same('j3: both closed: the top window',tt,baseTt)
+ Same('j3: both closed: the lower window',tlow,baseTlow)
+ -- j4. GUARD, a lifted window whose defaults cannot be decided (Proposed
+ -- nil). The top window (60, 61, 63, 64) is lifted alone at 122. Then, as a
+ -- window's own re-layout may, one child takes its sibling's lifted level,
+ -- and a late child is made at that same level (not one row above its
+ -- parent). Two recorded siblings now share that level with different
+ -- defaults, so the late child's default is ambiguous. The lower window's
+ -- open then asks for the lift, and the whole family is refused.
+ local Pq=CEILING-4-1
+ local w,wk=Synthetic('undecidable top',{60,61,63,64})
+ local wl=Synthetic('undecidable lower',{20,21})
+ local baseW,baseWl=Levels(w),Levels(wl)
+ Control(Pq)
+ Open(w)
+ check(Bottom(w)>Pq,'r4 SETUP: j4: the top window alone is lifted')
+ local A,B=wk[2],wk[3]
+ B:SetFrameLevel(A:GetFrameLevel())
+ local late=CreateFrame('Frame',nil,w)
+ late:SetFrameLevel(A:GetFrameLevel())
+ check(late:GetFrameLevel()~=w:GetFrameLevel()+1 and B:GetFrameLevel()==A:GetFrameLevel(),
+  'r4 SETUP: j4: the late child shares two recorded siblings\' level and is not one row above its parent')
+ Open(wl)
+ Same('j4: an undecidable default refuses the whole family: the top window\'s recorded frames',w,baseW)
+ Same('j4: an undecidable default refuses the whole family: the lower window',wl,baseWl)
+ Close(wl);Close(w)
+ Same('j4: both closed: the lower window',wl,baseWl)
+ Control(Pj)
+ -- j5. GUARD, a failed write while the split is made: a bounded mock on one
+ -- top-window child fails its level write while armed. The whole family is
+ -- refused; once disarmed, the hides restore everything.
+ local t1=topKids[1]
+ local t1Set=t1.SetFrameLevel
+ local armedW=false
+ rawset(t1,'SetFrameLevel',function(self,value)
+  if armedW then error('synthetic level write failure') end
+  return t1Set(self,value)
+ end)
+ Open(low)
+ check(Bottom(low)>Pj,'r4 SETUP: j5: the lower window alone is lifted')
+ armedW=true
+ local okW=pcall(Open,top)
+ armedW=false
+ expect(okW,'j5: the open makes no error when a level write fails')
+ Same('j5: a failed write refuses the whole family: the top window',top,baseTop)
+ Same('j5: a failed write refuses the whole family: the lower window',low,baseLow)
+ Close(top)
+ rawset(t1,'SetFrameLevel',nil)
+ Close(low)
+ Same('j5: both closed: the top window',top,baseTop)
+ Same('j5: both closed: the lower window',low,baseLow)
+ -- j6. GUARD, a failed restore of the lifted lower window when the top
+ -- window opens: a bounded mock on one lower-window child, armed only for
+ -- that open. The whole family is refused; the top window is never lifted.
+ local l1=lowKids[1]
+ local l1Set=l1.SetFrameLevel
+ local armedR=false
+ rawset(l1,'SetFrameLevel',function(self,value)
+  if armedR then error('synthetic level write failure') end
+  return l1Set(self,value)
+ end)
+ Open(low)
+ check(Bottom(low)>Pj,'r4 SETUP: j6: the lower window alone is lifted')
+ armedR=true
+ local okR=pcall(Open,top)
+ armedR=false
+ expect(okR,'j6: the open makes no error when a restore fails')
+ Same('j6: a failed restore refuses the whole family: the top window',top,baseTop)
+ expect(low:GetFrameLevel()==baseLow[low].level,
+  'j6: the lower window\'s own root is back at its default '..tostring(baseLow[low].level)..' ('..tostring(low:GetFrameLevel())..')')
+ Close(top)
+ rawset(l1,'SetFrameLevel',nil)
+ Close(low)
+ Same('j6: both closed: the top window',top,baseTop)
+ Same('j6: both closed: the lower window keeps its exact defaults',low,baseLow)
+ end
+
+ -- m. Nothing else happened; the control is untouched; fixtures restored.
+ Control(P)
+ factory.New=realNew
+ mode=nil
+ expect(touched==0,'r4: the PerkChooseButton is never changed by the addon ('..touched..' calls: '..table.concat(touchedNames,',')..')')
+ expect(clicks==0,'r4: the PerkChooseButton is never clicked ('..clicks..')')
+ expect(Snapshot()==perkBefore,'r4: the PerkChooseButton keeps its strata, level, shown state, parent, anchor, OnClick and label')
+ expect(enumerations==0,'r4: no frame is enumerated ('..enumerations..')')
+ expect(#H5.actions==acts and #H5.sent==sent and Serialize(NexusDB.settings)==settings and NexusSupportDB==nil,
+  'r4: no game action, send, settings write or support storage write')
+ EnumerateFrames=hadEnumerate
+ _G.PerkChooseButton=nil
+ _G.ProjectEbonholdPerkFrame=nil
+ if #misses>0 then error('r4 overfull family over PerkChooseButton: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0) end
+ end
+ Section38()
+end
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

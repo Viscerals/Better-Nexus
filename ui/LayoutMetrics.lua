@@ -1704,6 +1704,9 @@ do
     -- order. A window joins the family the first time it asks for a lift;
     -- the registry holds windows weakly and is never walked beyond its
     -- members. Only shown members are lifted; a hidden member is restored.
+    -- r4: when the shown members' union does not fit, the top windows that
+    -- fit are lifted and the windows strictly below them keep their exact
+    -- defaults (Help under the Library, as at the defaults; LiftFamily).
     local family = {members=setmetatable({}, {__mode="k"}), level=nil, tried=nil}
 
     local function State(window)
@@ -1845,7 +1848,10 @@ do
     -- waiting for a restore is restored first (a failure refuses), the
     -- defaults of all shown members are proposed and the union fit is
     -- checked; only then are records kept and levels written, each window
-    -- parents first. A write that fails restores the whole family.
+    -- parents first. A write that fails restores the whole family. r4: a
+    -- union that does not fit lifts only its top windows when they fit and
+    -- are strictly separated from the windows left at their defaults (see
+    -- below); otherwise the whole family is refused as before.
     local function LiftFamily()
         local over = M.ForeignDialogLevel()
         local shown = {}
@@ -1872,15 +1878,65 @@ do
             if not proposed then return Refuse(over) end
             walks[#walks + 1] = {window=window, state=state, nodes=nodes, strata=strata, proposed=proposed}
         end
-        local distinct, seen = {}, {}
-        for _, walk in ipairs(walks) do
-            for _, node in ipairs(walk.nodes) do
-                local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
-                if value and not seen[value] then seen[value] = true;distinct[#distinct + 1] = value end
+        -- The distinct DIALOG proposed defaults of a list of walks, sorted.
+        local function Distinct(list)
+            local out, seen = {}, {}
+            for _, walk in ipairs(list) do
+                for _, node in ipairs(walk.nodes) do
+                    local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
+                    if value and not seen[value] then seen[value] = true;out[#out + 1] = value end
+                end
             end
+            table.sort(out)
+            return out
         end
-        table.sort(distinct)
-        if #distinct == 0 or over + #distinct > CEILING then return Refuse(over) end
+        local distinct = Distinct(walks)
+        if #distinct == 0 then return Refuse(over) end
+        if over + #distinct > CEILING then
+            -- r4 (Plan B; native pending probe 2026-11-14: the control at 110,
+            -- Help 39-43 and the Library 49-70, union 18 > 17 ranks, Library
+            -- alone 13). The shown family does not fit, so its top windows
+            -- may be lifted alone: windows are taken from the highest DIALOG
+            -- default down while the union still fits, and every window left
+            -- out keeps its exact defaults. Only a strict split is allowed:
+            -- each window kept lies wholly above every window below it, and
+            -- every window left out lies wholly below every window kept (a
+            -- tie or an overlap refuses the whole family, as before), so no
+            -- cross-window order changes its sense. A window left out that is
+            -- lifted is restored first; a failed restore refuses the whole
+            -- family. A top window that does not fit alone refuses as before.
+            for _, walk in ipairs(walks) do
+                local lo, hi = nil, nil
+                for _, node in ipairs(walk.nodes) do
+                    local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
+                    if value then
+                        if lo == nil or value < lo then lo = value end
+                        if hi == nil or value > hi then hi = value end
+                    end
+                end
+                walk.lo, walk.hi = lo, hi
+            end
+            table.sort(walks, function(a, b) return (a.lo or -1) > (b.lo or -1) end)
+            local kept, count, keptLo = {}, 0, nil
+            for _, walk in ipairs(walks) do
+                if walk.hi == nil or (keptLo and walk.hi >= keptLo) then break end
+                local own = #Distinct({walk})
+                if over + count + own > CEILING then break end
+                kept[#kept + 1], count = walk, count + own
+                keptLo = keptLo and math.min(keptLo, walk.lo) or walk.lo
+            end
+            if #kept == 0 then return Refuse(over) end
+            for i = #kept + 1, #walks do
+                local walk = walks[i]
+                if walk.hi ~= nil and walk.hi >= keptLo then return Refuse(over) end
+            end
+            for i = #kept + 1, #walks do
+                local walk = walks[i]
+                if (walk.state.lifted or walk.state.pending)
+                    and not RestoreWindow(walk.window) then return Refuse(over) end
+            end
+            walks, distinct = kept, Distinct(kept)
+        end
         local rank = {}
         for i, value in ipairs(distinct) do rank[value] = over + i end
         for _, walk in ipairs(walks) do
