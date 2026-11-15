@@ -2947,7 +2947,10 @@ def _cli_provenance(receipt, toc, require_complete):
 #
 # - direct-call: a consumer method called on a receiver with a literal key;
 # - wrapper-call: a literal key passed to a local function whose parameter
-#   goes unchanged into a consumer method call on a receiver;
+#   goes unchanged into a consumer method call on a receiver, or to a local
+#   function that hands its own parameter unchanged to such a wrapper as its
+#   key (a forwarding wrapper: one level only, never a chain, the same
+#   parameter and kind in every such call, nothing of it assigned again);
 # - map-value: a value of a read-only local table of literal string pairs,
 #   dispatched as wrapper(MAP[v], ...) by the sole return of
 #   "if MAP[v] then ... end" in the body of an exported module function
@@ -2961,7 +2964,8 @@ def _cli_provenance(receipt, toc, require_complete):
 # carries the same proof, function returns into their resolved calls, field
 # channels and parameters, ends at argument 1 of SetText, AddLine or
 # AddMessage or an argument of print. A wrapper must return its own
-# consumer-method result. A discarded, overwritten or merely compared result,
+# consumer-method result, and a forwarding wrapper the result of a wrapper
+# that does. A discarded, overwritten or merely compared result,
 # or one reaching only an unused helper or a stock widget outside the loaded
 # source, is listed in unprovenSites and never counted. A module table is
 # one identity with its local aliases (review fix 2): a field written through
@@ -3887,6 +3891,7 @@ class _UnitScan:
             and stmt.exprs[0].func.value == 'pairs' and len(stmt.exprs[0].args) == 1
             and stmt.exprs[0].args[0].kind == 'name')
         self.find_wrappers(localfunctions)
+        self.find_forwarders(localfunctions)
         self.block(body, (None, ('function', None, None)))
 
     # -- recording ---------------------------------------------------------
@@ -3932,6 +3937,57 @@ class _UnitScan:
                     'name': binding.node.value, 'line': binding.node.line, 'parameter': index,
                     'kind': kind, 'method': found[0][2], 'internal': [node for node, _, _ in found]}
                 self.internal.update(id(node) for node, _, _ in found)
+
+    def find_forwarders(self, localfunctions):
+        """A local function that is no wrapper itself is a forwarding wrapper
+        when a call in its own body (not in a nested function) hands one of
+        its own parameters, never assigned, to a direct wrapper
+        (find_wrappers) as that wrapper's key. Exactly one forwarding level
+        is admitted: the callee must be a direct wrapper, never another
+        forwarding wrapper, so no chain and no cycle is followed. Every such
+        call must agree on the parameter and the kind, and neither the
+        function nor a direct wrapper it calls may be assigned again.
+        Otherwise the function is no wrapper and everything stays as it was:
+        its inner calls are listed as dynamic-wrapper-argument (or carry the
+        direct wrapper's own reassignment problem) and a literal passed to it
+        is no site. Only a literal key at a call of the forwarding wrapper is
+        a site (wrapper_call); a map dispatch through it is not admitted.
+        Passing the key on proves no output: whether the forwarding wrapper
+        returns the direct wrapper's result, and that wrapper its own
+        consumer-method result, is proved when a receipt links the units
+        (_Linker.wrapper_returns), and the site then needs its own output."""
+        direct = dict(self.wrappers)
+        for binding in localfunctions:
+            if binding in direct or binding.assigned:
+                continue
+            func = binding.value
+            found = []
+            for node in _descendants(func.body):
+                if node.kind != 'call' or node.func.kind != 'name':
+                    continue
+                target = node.func.binding
+                wrapper = direct.get(target) if target is not None else None
+                if wrapper is None or target.assigned:
+                    continue
+                index = wrapper['parameter']
+                arg = node.args[index] if index < len(node.args) else None
+                if arg is None or arg.kind != 'name':
+                    continue
+                param = arg.binding
+                if param is None or param.kind != 'param' or param.owner is not func \
+                        or param.index is None or param.assigned:
+                    continue
+                found.append((node, target, param.index, wrapper['kind']))
+            kinds = {(index, kind) for _, _, index, kind in found}
+            if len(kinds) != 1:
+                continue
+            index, kind = kinds.pop()
+            self.wrappers[binding] = {
+                'name': binding.node.value, 'line': binding.node.line, 'parameter': index,
+                'kind': kind, 'method': direct[found[0][1]]['method'],
+                'internal': [node for node, _, _, _ in found],
+                'forwards': [(node, target) for node, target, _, _ in found]}
+            self.internal.update(id(node) for node, _, _, _ in found)
 
     # -- the walk ----------------------------------------------------------
 
@@ -4095,14 +4151,18 @@ class _UnitScan:
             self.literals.append((arg, wrapper['method'], wrapper['kind'], node, {
                 'site': 'wrapper-call', 'method': wrapper['method'],
                 'wrapper': {'name': wrapper['name'], 'line': wrapper['line']}}, binding))
-        elif arg is not None and arg.kind == 'index' and arg.obj.kind == 'name' \
+        elif 'forwards' not in wrapper and arg is not None and arg.kind == 'index' \
+                and arg.obj.kind == 'name' \
                 and arg.key.kind == 'name' and arg.obj.binding is not None \
                 and arg.obj.binding.kind == 'local' and arg.obj.binding.value is not None \
                 and arg.obj.binding.value.kind == 'table':
             # A local table constructor indexed by a name: a map dispatch,
-            # bound or explicitly unresolved, never silently dynamic.
+            # bound or explicitly unresolved, never silently dynamic. (Not
+            # through a forwarding wrapper: that call is listed as dynamic.)
             self.dispatch(node, binding, arg, ctx)
-        else:
+        elif id(node) not in self.internal:
+            # The call by which a forwarding wrapper hands its key parameter
+            # to its direct wrapper (find_forwarders) is resolved, not dynamic.
             self.unknown(node, 'dynamic-wrapper-argument', wrapper=wrapper['name'])
 
     # -- map dispatch ------------------------------------------------------
@@ -6492,10 +6552,22 @@ class _Linker:
         return [row for _, row in sorted(rows, key=lambda item: item[0])]
 
     def wrapper_returns(self, binding, unit):
-        """True when a wrapper's own consumer-method result reaches its return."""
+        """True when a wrapper's own consumer-method result reaches its return.
+        A forwarding wrapper (_UnitScan.find_forwarders) has no consumer
+        method call of its own: its result is that of a call handing its key
+        to a direct wrapper, so only such calls whose direct wrapper returns
+        its own result are searched from, and one of them must reach the
+        forwarding wrapper's return. The direct wrapper is never a
+        forwarding wrapper, so this goes one level deep."""
         info = unit.scan.wrappers[binding]
+        nodes = info['internal']
+        if 'forwards' in info:
+            nodes = [node for node, target in info['forwards']
+                     if self.wrapper_returns(target, unit)]
+            if not nodes:
+                return False
         stop = ('ret', binding.value)
-        reached, _ = self.search([(node, unit.flow) for node in info['internal']], stop=stop)
+        reached, _ = self.search([(node, unit.flow) for node in nodes], stop=stop)
         return stop in reached
 
     def prove(self, roots_by_key):

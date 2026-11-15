@@ -4062,6 +4062,151 @@ class ConsumerBindingTests(unittest.TestCase):
                 self.assertEqual([problem["detail"] for problem
                                   in self.problems(receipt, "binding-unresolved")], problems)
 
+    def test_c30_a_local_forwarding_wrapper_binds_only_through_one_proved_level(self):
+        # The current ui/Readout.lua shape (Permission): a local function
+        # hands its own key parameter to the file's direct wrapper TF, which
+        # returns the Format result. Here the charge row's only consumer is
+        # routed through such a forwarding wrapper over the real T and TF of
+        # the real Readout. Each case differs only in the inserted forwarder
+        # or in the call. Passing the key on is never enough: the nested
+        # result must come back and the site must reach its own output.
+        readout = self.files[READOUT]
+        lf = readout.replace(b"\r\n", b"\n")
+        for real in (b"\nlocal function T(key, english)\n",
+                     b"\nlocal function TF(key, args, english)\n",
+                     b"\nlocal function Permission(key, setting, value, english, command)\n"
+                     b"    return TF(key, {setting = setting, value = value, command = command}, english)\n"):
+            self.assertEqual(lf.count(real), 1, real)       # SETUP: the mirrored current shapes
+        anchor = b"local QUALITY_NAMES = {"
+        line = lf[:lf.index(anchor)].count(b"\n") + 1        # the line of the inserted forwarder
+        direct = b'localization.Format("readout.charge_counts",'
+        statement = b'local text, source = localization.Format("readout.charge_counts",'
+        through = b'ChargeForward("readout.charge_counts",'
+        forward = b"local function ChargeForward(key, args) return TF(key, args, nil) end"
+
+        def routed(forwarder, old=direct, new=through):
+            data = edit(edit(readout, anchor, forwarder + b"\n" + anchor), old, new)
+            return self.receipt(with_file(self.files, READOUT, data))
+
+        def unproven(row):
+            return [(site["wrapper"]["name"], site["reason"]) for site in row["unprovenSites"]
+                    if site["path"] == READOUT and site["site"] == "wrapper-call"]
+
+        def listed(receipt):
+            return sorted((row["construct"], row.get("wrapper")) for row in receipt["dynamicUnknown"]
+                          if row["path"] == READOUT
+                          and (row["line"] == line or str(row.get("wrapper")).startswith("Charge")))
+
+        def others(receipt):
+            return [(problem["code"], problem.get("detail", problem.get("key")), problem.get("method"))
+                    for problem in receipt["problems"] if problem["code"] != "binding-unbound"]
+
+        with self.subTest(case="forwarded, returned and shown"):
+            receipt = routed(forward)
+            assert_binding_receipt(self, receipt)
+            row = self.binding(receipt, CHARGE)
+            self.assertEqual([(site["site"], site["method"], site["path"], site["wrapper"])
+                              for site in row["sites"]],
+                             [("wrapper-call", "Format", READOUT,
+                               {"name": "ChargeForward", "line": line, "path": READOUT})])
+            # The same output as the direct call it replaces (C2).
+            self.assertEqual({(output["path"], output["output"])
+                              for site in row["sites"] for output in site["outputs"]},
+                             {(PANEL, "SetText")})
+            # The resolved inner call is no dynamic construct any more.
+            self.assertEqual((unproven(row), listed(receipt), others(receipt)), ([], [], []))
+
+        not_returned = [("ChargeForward", "wrapper-result-not-returned")]
+        not_shown = [("ChargeForward", "output-not-reached")]
+        cases = (
+            # (name, forwarder, call replaced, call written,
+            #  unproven forwarder sites, listed dynamic rows, other problems)
+            ("nested result discarded",
+             b'local function ChargeForward(key, args) TF(key, args, nil); return "B:? R:? F:?" end',
+             direct, through, not_returned, [], []),
+            ("nested result replaced",
+             b'local function ChargeForward(key, args) local text = TF(key, args, nil); '
+             b'text = "replaced"; return text end',
+             direct, through, not_returned, [], []),
+            ("direct wrapper discards its consumer-method result",
+             b'local function ChargeSeam(key, args) Nexus.Localization.Format(key, args); return "x" end '
+             b"local function ChargeForward(key, args) return ChargeSeam(key, args) end",
+             direct, through, not_returned, [], []),
+            # Readout's own use: lines[#lines + 1] = "- " .. Permission(...).
+            ("returned, but only appended to a table", forward, statement,
+             b'local lines, text, source = {} lines[#lines + 1] = "- " .. '
+             b'ChargeForward("readout.charge_counts",',
+             not_shown, [], []),
+            ("another call of it is shown, this one is discarded", forward, statement,
+             b'local text, source = ChargeForward(charges.key, {}) ChargeForward("readout.charge_counts",',
+             not_shown, [("dynamic-wrapper-argument", "ChargeForward")], []),
+            # LoadingStatus Clause: T(key) on one path, TF(key, ...) on the other.
+            ("Text and Format kinds mixed",
+             b"local function ChargeForward(key, args) if args == nil then return T(key, nil) end "
+             b"return TF(key, args, nil) end",
+             direct, through, [],
+             [("dynamic-wrapper-argument", "T"), ("dynamic-wrapper-argument", "TF")], []),
+            ("key parameter assigned again",
+             b"local function ChargeForward(key, args) key = tostring(key) return TF(key, args, nil) end",
+             direct, through, [], [("dynamic-wrapper-argument", "TF")], []),
+            ("direct wrapper assigned again",
+             b"local function ChargeSeam(key, args) return (Nexus.Localization.Format(key, args)) end "
+             b"ChargeSeam = ChargeSeam "
+             b"local function ChargeForward(key, args) return ChargeSeam(key, args) end",
+             direct, through, [], [],
+             [("binding-unresolved", "the wrapper ChargeSeam is assigned again", None)]),
+            ("forwarding wrapper assigned again", forward + b" ChargeForward = ChargeForward",
+             direct, through, [], [("dynamic-wrapper-argument", "TF")], []),
+            ("a cycle without a consumer method",
+             b"local function ChargeForward(key, args) return ChargeForward(key, args) end",
+             direct, through, [], [], []),
+            ("a second forwarding level",
+             b"local function ChargeMid(key, args) return TF(key, args, nil) end "
+             b"local function ChargeForward(key, args) return ChargeMid(key, args) end",
+             direct, through, [], [("dynamic-wrapper-argument", "ChargeMid")], []),
+            ("an unrelated caller",
+             forward + b" local function ChargeOther(key, args) return nil end",
+             direct, b'ChargeOther("readout.charge_counts",', [], [], []),
+            ("the literal at another parameter",
+             b"local function ChargeForward(label, key, args) return TF(key, args, nil) end",
+             direct, b'ChargeForward("readout.charge_counts", charges.key,',
+             [], [("dynamic-wrapper-argument", "ChargeForward")], []),
+            ("forwarded to a wrapper of the other kind",
+             b"local function ChargeForward(key, args) return T(key, nil) end",
+             direct, through, [], [], [("binding-kind", CHARGE, "Text")]),
+        )
+        for name, forwarder, old, new, sites, dynamic, problems in cases:
+            with self.subTest(case=name):
+                receipt = routed(forwarder, old, new)
+                self.assert_unbound_exactly(receipt, (CHARGE,))
+                row = self.binding(receipt, CHARGE)
+                self.assertEqual(row["sites"], [])
+                self.assertEqual((unproven(row), listed(receipt), others(receipt)),
+                                 (sites, dynamic, problems))
+
+    def test_c31_the_real_readout_permission_wrapper_is_a_site_without_an_output(self):
+        # The real ui/Readout.lua, unedited: each literal key passed to its
+        # forwarding wrapper Permission is a Format site through that wrapper,
+        # and none is counted: every result is only appended to a returned
+        # table or stored in a row field, which is no output. The whole
+        # receipt is read here, because these keys are outside the dated 28.
+        lf = self.files[READOUT].replace(b"\r\n", b"\n")
+        header = b"\nlocal function Permission(key, setting, value, english, command)\n"
+        defined = lf[:lf.index(header)].count(b"\n") + 2
+        calls = [number for number, text in enumerate(lf.split(b"\n"), 1)
+                 if b'Permission("readout.' in text]
+        self.assertEqual(len(calls), 13)                    # SETUP: the current literal calls
+        receipt = self.catalog.consumer_binding_report(*binding_args(self.files))
+        wrapper = {"name": "Permission", "line": defined, "path": READOUT}
+        found = sorted((site["line"], site["site"], site["method"], row["binding"], proved,
+                        site.get("reason"))
+                       for row in receipt["keys"]
+                       for proved, sites in ((True, row["sites"]), (False, row["unprovenSites"]))
+                       for site in sites
+                       if site["path"] == READOUT and site.get("wrapper") == wrapper)
+        self.assertEqual(found, [(number, "wrapper-call", "Format", "UNBOUND", False,
+                                  "output-not-reached") for number in calls])
+
 
 # The V15 host label (C26 to C29) and the Spec toy module (C29): the toy
 # differs between its cases only by INSTALL_MARKER.
