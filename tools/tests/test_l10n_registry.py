@@ -4747,6 +4747,77 @@ class ConsumerBindingTests(unittest.TestCase):
             ("a read through a holder with a computed key",
              make(b"specRead") + one + b'local k = "specRead" local v = a[k] '
              + show(b"specRead"), True),
+            # The older direct-frame defect (Spec O1): no helper at all. A
+            # write with a computed key through a plain name that may hold the
+            # frame is no recorded field write, so the receiver field was
+            # proved although the write can overwrite it. Root's program,
+            # byte for byte, then the same object reached in other ways. Each
+            # case has its own frame, names and field.
+            ("a computed-key write on a directly created frame overwrites the field",
+             b'local f=CreateFrame("Frame") f.existingDirect=f:CreateFontString(nil,"OVERLAY") '
+             b'local k="existingDirect" f[k]="plain" '
+             b'f.existingDirect:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("the key is a concatenation",
+             b'local dCat = CreateFrame("Frame") dCat.specT1Cat' + widget % b"dCat"
+             + b'dCat["specT1" .. "Cat"] = "plain" ' + show(b"specT1Cat", b"dCat"), False),
+            ("the key is a call result",
+             b'local function specT1KeyName() return "specT1Call" end '
+             b'local dCall = CreateFrame("Frame") dCall.specT1Call' + widget % b"dCall"
+             + b'dCall[specT1KeyName()] = "plain" ' + show(b"specT1Call", b"dCall"), False),
+            ("the write goes through an unassigned local alias of the frame",
+             b'local dAlias = CreateFrame("Frame") dAlias.specT1Alias' + widget % b"dAlias"
+             + b'local gAlias = dAlias local kAlias = "specT1Alias" gAlias[kAlias] = "plain" '
+             + show(b"specT1Alias", b"dAlias"), False),
+            ("the receiver is read through the alias and the write goes through the frame",
+             b'local dVia = CreateFrame("Frame") dVia.specT1Via' + widget % b"dVia"
+             + b'local gVia = dVia local kVia = "specT1Via" dVia[kVia] = "plain" '
+             + show(b"specT1Via", b"gVia"), False),
+            ("the write is made by a resolved local helper through its parameter",
+             b"local function specT1Put(t, key, value) t[key] = value end "
+             b'local dParam = CreateFrame("Frame") dParam.specT1Param' + widget % b"dParam"
+             + b'specT1Put(dParam, "specT1Param", "plain") '
+             + show(b"specT1Param", b"dParam"), False),
+            ("a pairs loop copies a table into the frame",
+             b'local dCopy = CreateFrame("Frame") dCopy.specT1Copy' + widget % b"dCopy"
+             + b'for name, value in pairs({specT1Copy = "plain"}) do dCopy[name] = value end '
+             + show(b"specT1Copy", b"dCopy"), False),
+            # Not flow-sensitive: the write stands after the call, and the
+            # field is refused all the same, as after a literal write there.
+            ("the computed-key write stands after the SetText call",
+             b'local dLate = CreateFrame("Frame") dLate.specT1Late' + widget % b"dLate"
+             + show(b"specT1Late", b"dLate")
+             + b' local kLate = "specT1Late" dLate[kLate] = "plain"', False),
+            # The value is not kept, so even a widget written under an
+            # unknown key refuses the field (no false proof either way).
+            ("a widget written with a computed key",
+             b'local dWidget = CreateFrame("Frame") dWidget.specT1Widget' + widget % b"dWidget"
+             + b'local kWidget = "specT1Widget" dWidget[kWidget]' + widget % b"dWidget"
+             + show(b"specT1Widget", b"dWidget"), False),
+            # What stays proved: no computed-key write can reach the frame.
+            ("a directly created frame without any computed-key write",
+             b'local dPlain = CreateFrame("Frame") dPlain.specT1Plain' + widget % b"dPlain"
+             + show(b"specT1Plain", b"dPlain"), True),
+            ("a read through the frame with a computed key",
+             b'local dGet = CreateFrame("Frame") dGet.specT1Get' + widget % b"dGet"
+             + b'local kGet = "specT1Get" local vGet = dGet[kGet] '
+             + show(b"specT1Get", b"dGet"), True),
+            ("a computed-key write on an unrelated fresh table",
+             b'local dOther = CreateFrame("Frame") dOther.specT1Other' + widget % b"dOther"
+             + b'local tOther = {} local kOther = "specT1Other" tOther[kOther] = "plain" '
+             + show(b"specT1Other", b"dOther"), True),
+            ("a computed-key write on a second frame of its own CreateFrame call",
+             b'local dFirst = CreateFrame("Frame") local dSecond = CreateFrame("Frame") '
+             b"dFirst.specT1Second" + widget % b"dFirst"
+             + b'local kSecond = "specT1Second" dSecond[kSecond] = "plain" '
+             + show(b"specT1Second", b"dFirst"), True),
+            ("literal writes of other fields of the same frame, in both spellings",
+             b'local dKeep = CreateFrame("Frame") dKeep.specT1Keep' + widget % b"dKeep"
+             + b'dKeep.specT1Else = "plain" dKeep["specT1Else2"] = "plain" '
+             + show(b"specT1Keep", b"dKeep"), True),
+            ("a computed-key write on a table kept in a field of the frame",
+             b'local dNest = CreateFrame("Frame") dNest.specT1Nest' + widget % b"dNest"
+             + b'dNest.data = {} local kNest = "specT1Nest" dNest.data[kNest] = "plain" '
+             + show(b"specT1Nest", b"dNest"), True),
         ))
 
     def test_c35_the_real_loading_status_frame_is_one_cached_object_for_its_receivers(self):

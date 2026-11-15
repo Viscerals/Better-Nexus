@@ -3004,6 +3004,13 @@ def _cli_provenance(receipt, toc, require_complete):
 # the loaded source may replace on the receiver (any write of that field on
 # an object possibly the receiver, or on an untracked table) is no output;
 # and only a nil given by a local's own declaration is neutral for a receiver.
+# A receiver field X.F is also not proved when the same file writes with a
+# computed key (any key that is no string literal, any value, anywhere in the
+# file) through a plain name whose tracked object may be the one X holds: the
+# key may be F. Only such a write is refused. One through a name whose object
+# is not tracked, through another table expression or in another file, a
+# rawset, and an output method replaced through a computed key are not
+# examined and are not proved harmless.
 #
 # Comments, strings that merely contain call text, data and declaration
 # tables, Has and Kind queries and Text methods of other objects never bind.
@@ -3083,7 +3090,13 @@ _CONSUMER_LIMITS = (
     'through constructors, unassigned local aliases and local-function or pcall arguments in '
     'one file; values in globals, computed-key writes, method calls and calls deeper than '
     '8 frames are not followed; and an output outside the loaded source (such as the stock '
-    'dropdown menu) or on a receiver not proved to be a client object is not an output',
+    'dropdown menu) or on a receiver not proved to be a client object is not an output; a '
+    'receiver field is not proved when the same file writes with a computed key (whatever '
+    'the key expression and the value) through a plain name whose tracked object may be the '
+    'one the field is read from, and only that case is refused: a computed-key write through '
+    'a name whose object is not tracked, through any other table expression or in another '
+    'file, a rawset, an output method replaced through a computed key and an object handed '
+    'to code that is not followed are not examined and are not proved harmless',
     'a function result after the first is followed by its own position only: from that '
     'position of a return statement of a resolved local function, an established module '
     'function or its export, to the name that a local declaration or an assignment whose last '
@@ -7170,12 +7183,29 @@ class _Linker:
         code (for example a script handler's self, a global frame name),
         and the methods called on these names are the client's own. The
         results of
-        any other helper stay separate objects."""
+        any other helper stay separate objects.
+
+        A write with a computed key is not a recorded field write: its key
+        may be F and its value is not kept. So the field is not proved when
+        this file makes such a write through a plain name whose tracked
+        object origins meet those X may hold (_UnitFlow.dynamic_modules holds
+        the root of each such name; objects follows the same unassigned
+        local aliases and resolved local-function parameters as for X),
+        whatever the key expression and the value, and wherever the write
+        stands. Only that is refused here. A computed-key write through a
+        name whose object is not tracked (assigned more than once, a loop
+        variable), through any other table expression, or in another file,
+        a rawset, and an object handed to code that is not followed are not
+        examined and are not proved harmless."""
         name = expr.key.value
         held = self.widened(flow, self.objects_at(expr.obj.binding, flow, stack)) \
             if expr.obj.kind == 'name' and expr.obj.binding is not None else None
         if not held:
             return False
+        for root in flow.dynamic_modules:
+            written = self.widened(flow, flow.objects(root))
+            if written and written & held:
+                return False    # a computed-key write on an object X may hold
         matched = False
         for unit in self.units:
             other = unit.flow
