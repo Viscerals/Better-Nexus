@@ -2961,7 +2961,8 @@ def _cli_provenance(receipt, toc, require_complete):
 # A site counts only when its localization result reaches an output (review
 # fix 1): a may-flow path in _UnitFlow, from the call through parens, the
 # text-carrying operands of and/or/.., bindings every definition of which
-# carries the same proof, function returns into their resolved calls, field
+# carries the same proof, function returns into their resolved calls (each
+# return position into the same result position only), field
 # channels and parameters, ends at argument 1 of SetText, AddLine or
 # AddMessage or an argument of print. A wrapper must return its own
 # consumer-method result, and a forwarding wrapper the result of a wrapper
@@ -3066,6 +3067,50 @@ _CONSUMER_LIMITS = (
     'one file; values in globals, computed-key writes, method calls and calls deeper than '
     '8 frames are not followed; and an output outside the loaded source (such as the stock '
     'dropdown menu) or on a receiver not proved to be a client object is not an output',
+    'a function result after the first is followed by its own position only: from that '
+    'position of a return statement of a resolved local function, an established module '
+    'function or its export, to the name that a local declaration or an assignment whose last '
+    'expression is that call gives the position (only a local that its own function body alone '
+    'reads and assigns), or on through a call that is the last expression of a return '
+    'statement; at most 8 positions; a call that is not last or stands in parentheses gives '
+    'its first value only; a later result of any other call (a consumer method, pcall, an '
+    'unresolved or reassigned callee, ...), in a field, a global or a local a nested function '
+    'uses, and a wrapper text returned after its first value are not followed',
+    'a receiver field of a local that holds the result of a local helper is proved on the '
+    'helper\'s object only for the exact singleton cache shape: a local function that is no '
+    'method, takes no parameter and no ..., starts with "if CACHE then return CACHE end; local '
+    'OBJECT = CreateFrame(...); CACHE = OBJECT" and ends with a return; CACHE is a local of the '
+    'file chunk declared without a value (an initializer, nil included, is refused) and '
+    'assigned nowhere else, so that the store is its only definition; every creator argument is a '
+    'literal or a plain name (an index, an operator, a constructor, a call or a function is '
+    'refused, since it could run loaded code before the store); OBJECT is never assigned '
+    'again; every return gives exactly CACHE or OBJECT; and every use of the helper\'s name in '
+    'the file is the callee of a call that is the one declared value of a local declared once '
+    'and never assigned again, the helper never being assigned: any other use (an alias, a '
+    'parenthesized, returned, passed, assigned or discarded call, pcall) refuses the helper as '
+    'a whole. No name that holds the object may hand it on: CACHE, OBJECT and each such local '
+    'are used only as the base of an index read, as the base of a field write with a literal '
+    'key (a write with a computed key through any of them refuses the helper), as the '
+    'receiver of a method call (unless the file gives one of these names a function for that '
+    'field that can take an argument), as a value that is only tested or compared (the '
+    'condition of an if, elseif, while or repeat, the operand of not, an operand of ==, ~=, <, '
+    '<=, > or >=, or an and/or operand of an expression that is itself only tested or '
+    'compared, through parentheses), and in the shape itself (the guard, the store, the '
+    'helper\'s returns, and OBJECT as an argument of the creator); an operand of arithmetic, '
+    '.. or ^, of unary minus or #, an and/or expression used as a value, and a holder, CACHE '
+    'or OBJECT returned by another function, stored in a field, a table or a global, passed '
+    'to a function or aliased by a local refuse the helper as a whole. Three things are '
+    'assumed about the client and are not proved; the routes named are examples, not a '
+    'complete list: that the creator, a client function no loaded source assigns, runs no '
+    'loaded code itself (for example a frame template with load scripts, or a hook on the '
+    'creator); that the client does not hand the object back to loaded code by another route '
+    '(for example a script handler\'s self, the global name of a named frame, GetParent); and '
+    'that the methods called on these names are the client\'s own, neither added to nor '
+    'hooked on the method table that the widgets of a type share, by loaded code or by '
+    'another addon. '
+    'The model treats the result of any other helper as a separate object per local, so a '
+    'field set through one result of an uncached factory proves nothing for another; and the '
+    'flow of values through fields does not use this rule',
     'trusted globals (sinks, client roots, pairs, setmetatable and the string transforms) are '
     'trusted only while no loaded source assigns them, by name or through _G, writes the '
     'string library field used, or reaches the string metatable through a getmetatable result '
@@ -4811,6 +4856,12 @@ def _local_function(callee):
 
 
 _STACK_LIMIT = 8
+# Function results are followed position by position (Lua 5.1 manual 2.4.3
+# and 2.5): result 0 is the first value, the value of the call expression
+# itself, as before; results 1 to _RESULT_LIMIT - 1 are followed only where
+# _UnitFlow.later_result and _Linker.result_states say. A position at or
+# beyond the limit is not followed (it also ends a recursive tail return).
+_RESULT_LIMIT = 8
 # Output receivers are client objects, proved from evidenced roots (review
 # fix 3): the client globals below while the loaded source never assigns
 # them, widgets made by the global CreateFrame, and widgets made by a
@@ -4819,6 +4870,17 @@ _STACK_LIMIT = 8
 _CLIENT_GLOBALS = frozenset(('UIParent', 'GameTooltip', 'DEFAULT_CHAT_FRAME'))
 _WIDGET_FUNCTIONS = frozenset(('CreateFrame',))
 _WIDGET_METHODS = frozenset(('CreateFontString',))
+# A receiver field is proved on the object its base may hold. A local that
+# holds the result of a local helper is that object only for one proved
+# shape, the singleton cache (_UnitFlow.cached_singleton): every value the
+# helper ever returns is then the one object it made, and every use of the
+# helper is a local declared with its direct call, so every such local and
+# the helper's own local hold the same object (_Linker.widened). A helper
+# with any other use, or whose object is handed on by any name holding it
+# (stored, returned, passed, aliased), is refused as a whole. Any other
+# helper result stays
+# a separate object per local: two calls of an uncached factory never
+# share a field.
 
 
 class _UnitFlow:
@@ -4827,14 +4889,18 @@ class _UnitFlow:
     A value flows from an expression into a paren, into an operation for the
     operands _flowing_operands names, into the binding a local statement or
     assignment gives it, into a literal table field (constructor or field
-    assignment), into the return of its function (first value only), into
+    assignment), into the return of its function (each expression of a
+    return statement into its own position: ('ret', function) for the first,
+    ('ret', function, n) for a later one, never into another position), into
     the parameter of a local function it is passed to (directly or through
     pcall), and into argument 1 of a _SINK_METHODS call or any argument of a
     _SINK_FUNCTIONS call, the candidate outputs. A binding passes a value on
     to its reads only when every definition (its declared value and every
     assignment, closures included) carries a value of the same proof; a
-    value-less definition such as a for variable or a later multiple-value
-    position never does. Review fix 2 (SPEC-147-S8-RF1-1..3): a field value
+    value-less definition such as a for variable never does, and a later
+    multiple-value position does only for a flow-sensitive local, through
+    the result node of its call (later_result); in defs that position stays
+    value-less, so every other rule sees it as before. Review fix 2 (SPEC-147-S8-RF1-1..3): a field value
     reaches only a read whose table shares an object origin with the
     written table (objects); a parameter value returns only to the call
     that passed it (call_args, direct_calls, kept by the linker's call
@@ -4855,6 +4921,13 @@ class _UnitFlow:
         self.module_defs, self.dynamic_modules = {}, set()
         self.alias_of, self.export_values, self.exports = {}, set(), []
         self.chunk_returns = set()
+        # Later result positions (see _RESULT_LIMIT). results: {(call node,
+        # n): the node standing for result n of that call}, made only for a
+        # name that a multiple assignment gives that position (later_result).
+        # tail_calls: {call node: (function, index)} for a call that is the
+        # last expression of a return statement of function, at index: its
+        # result n is that function's return position index + n.
+        self.results, self.tail_calls = {}, {}
         # Name nodes passed as the table of a lazy-field metatable statement
         # (metatable_hook); the linker also requires the global setmetatable
         # to stay unassigned in the loaded source.
@@ -4891,6 +4964,9 @@ class _UnitFlow:
         self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
         self.block(body, None)
         self.flow_sensitive(body)
+        # {function node: (the local holding its one object, the creator
+        # global)} for each singleton cache helper (cached_singleton).
+        self.singletons = self.cached_singletons(body)
         established, load_calls = self.load_points(body)
         self.metatable_contained()
         self.check_env_reads(body)
@@ -4985,7 +5061,7 @@ class _UnitFlow:
                 eligible.add(binding)
         if not eligible:
             return
-        passes = _ReachingDefinitions(eligible)
+        passes = _ReachingDefinitions(eligible, self.later_result)
         passes.run(body)
         functions = self.functions
         if functions is None:   # the resolver's list, else one walk of the file
@@ -5008,6 +5084,30 @@ class _UnitFlow:
         if value is not _OPAQUE:
             self.edge(value, binding)
             self.def_of.setdefault(value, []).append(binding)
+
+    def later_result(self, exprs, index):
+        """The node standing for the value that the name or target at index
+        gets from an expression list with no expression of its own for it,
+        or None. By Lua 5.1 (manual 2.4.3, 2.5) only a function call that is
+        the last expression gives more than one value; the name at index
+        then holds result index - len(exprs) + 1 of that call (its first
+        result is 0 and is the call expression itself). A call that is not
+        last, a parenthesized call, a method call, ... and every other last
+        expression give no node: the position stays value-less, as does one
+        at or beyond _RESULT_LIMIT. The node is one per (call, position); it
+        carries no value of its own and is reached only when the linker
+        proves that position of a function the call resolves to
+        (_Linker.result_states), so the first result, a consumer method's
+        later status values and an unresolved callee never reach it."""
+        if not exprs or index < len(exprs) or exprs[-1].kind != 'call':
+            return None
+        position = index - len(exprs) + 1
+        if position >= _RESULT_LIMIT:
+            return None
+        key = (exprs[-1], position)
+        if key not in self.results:
+            self.results[key] = _Node('result', exprs[-1], call=exprs[-1], value=position)
+        return self.results[key]
 
     def write_field(self, name, value, base):
         """value written to field name of base (a local binding, a table
@@ -5061,6 +5161,337 @@ class _UnitFlow:
                 origins |= self.objects(source.binding, depth + 1) or frozenset()
         self.object_memo[base] = frozenset(origins)
         return self.object_memo[base]
+
+    def cached_singletons(self, body):
+        """{function node: (the local holding the object, the creator global
+        name)} for the functions of this file that have the singleton cache
+        shape (cached_singleton) and whose object never leaves the names
+        that hold it (review F1): the cache, the helper's own local and
+        every holder are each used only in ways that keep the object in
+        place (confined). The use places are collected once, and only for a
+        file that has such a helper at all."""
+        functions = self.functions
+        if functions is None:   # the resolver's list, else one walk of the file
+            functions = [node for node in _descendants(body, True) if node.kind == 'function']
+        found, places = {}, None
+        for func in functions:
+            shape = self.cached_singleton(func)
+            if shape is None:
+                continue
+            if places is None:
+                places = self.singleton_places(body)
+            receivers, creator_args, tested = places
+            owned, creator, cache, store, holders, cache_values, owned_values = shape
+            names = frozenset([cache, owned] + holders)
+            # A write with a computed key through one of these names is not
+            # recorded as a field write, so it could overwrite the receiver
+            # field or store a method unseen (review S5): refuse the helper.
+            if names & self.dynamic_modules:
+                continue
+            if self.confined(cache, cache_values, receivers, names, tested, store) \
+                    and self.confined(owned, owned_values | creator_args, receivers, names,
+                                      tested) \
+                    and all(self.confined(holder, frozenset(), receivers, names, tested)
+                            for holder in holders):
+                found[func] = (owned, creator)
+        return found
+
+    @staticmethod
+    def singleton_places(body):
+        """({id(name node): method name} for each name that is the receiver
+        of a method call, {id(name node)} for each name that is an argument
+        of a call of a _WIDGET_FUNCTIONS global by its plain name, {id(name
+        node)} for each name whose value is only tested or compared), over
+        the whole file, nested functions included.
+
+        The third set is built here for this purpose alone (review S6); the
+        flow's truth_only answers another question (whether text flows on)
+        and also holds arithmetic and concatenation operands, which hand the
+        value to the other operand's metamethod. A name is in the set only
+        when its value ends in one of these places, through parentheses:
+
+        - the condition of an if, elseif, while or repeat;
+        - the operand of not;
+        - an operand of ==, ~=, <, <=, > or >= (a comparison calls a
+          metamethod only when both operands share it);
+        - an operand of and/or whose whole expression is itself in one of
+          these places. An and/or expression used as a value can be the
+          operand itself (a or {}, true and a), so it is not admitted.
+
+        An operand next to any other operator (arithmetic, .., ^) is not in
+        the set, nor is the operand of unary minus or #. The parser keeps a
+        chain of binary operators flat and does not model precedence, so the
+        places are decided here by Lua 5.1 precedence: arithmetic, .. and ^
+        bind tighter than a comparison, a comparison tighter than and/or, a
+        unary operator tighter than every binary one except ^ (not a ^ b is
+        not (a ^ b): the operand of that not is refused)."""
+        receivers, creator_args, tested = {}, set(), set()
+        for node in _descendants(body, True):
+            if node.kind == 'method' and node.obj.kind == 'name':
+                receivers[id(node.obj)] = node.name
+            elif node.kind == 'call' and node.func.kind == 'name' \
+                    and node.func.binding is None and node.func.value in _WIDGET_FUNCTIONS:
+                creator_args.update(id(arg) for arg in node.args if arg.kind == 'name')
+        testing = _COMPARISON | frozenset(('and', 'or'))
+        # (node, state): True when the node's value is only tested or
+        # compared, False when it is not, None when it is the left operand
+        # of ^ (a unary operator before it then applies to the power).
+        stack = [(stmt, False) for stmt in body]
+        while stack:
+            node, state = stack.pop()
+            kind = node.kind
+            if kind == 'name':
+                if state is True:
+                    tested.add(id(node))
+            elif kind == 'paren':
+                stack.append((node.expr, state))
+            elif kind == 'operation':
+                operands, ops = node.operands, node.ops
+                if len(operands) == 1:
+                    stack.append((operands[0], None if state is None else ops[0] == 'not'))
+                    continue
+                for index, operand in enumerate(operands):
+                    near = ops[max(index - 1, 0):index + 1]
+                    if index < len(ops) and ops[index] == '^':
+                        inner = None
+                    elif any(op not in testing for op in near):
+                        inner = False
+                    elif any(op in _COMPARISON for op in near):
+                        inner = True
+                    else:
+                        inner = state is True
+                    stack.append((operand, inner))
+            elif kind == 'if':
+                for cond, block in node.clauses:
+                    stack.append((cond, True))
+                    stack.extend((stmt, False) for stmt in block)
+                stack.extend((stmt, False) for stmt in node.orelse or ())
+            elif kind in ('while', 'repeat'):
+                stack.append((node.cond, True))
+                stack.extend((stmt, False) for stmt in node.body)
+            else:
+                stack.extend((child, False) for child in _children(node))
+        return receivers, creator_args, tested
+
+    def confined(self, binding, values, receivers, names, tested, store=None):
+        """True when no use of binding, a name that holds a singleton
+        helper's object, can hand that object on (reviews F1, S5, S6).
+        Allowed, and nothing else:
+
+        - the base of an index read (X.f, X[k]) or of a field write with a
+          literal key (X.f = v), which client_field examines; a write with a
+          computed key through any of these names refuses the helper before
+          this test (cached_singletons);
+        - a value that is only tested or compared, in the exact places of
+          singleton_places (tested): a condition, under not, a comparison
+          operand, an and/or operand of an expression that is itself only
+          tested or compared, through parentheses. An arithmetic or
+          concatenation operand is refused: it hands the object to the other
+          operand's metamethod;
+        - the receiver of a method call X:name(...), unless this file gives
+          one of the names holding the object a function for that field
+          that can take an argument (loaded_method): the call would hand the
+          object to loaded code as its first argument. That the method is
+          otherwise the client's own is an assumption about the client, not
+          proved (see loaded_method);
+        - a use in values: for the cache its returns in the helper; for the
+          helper's own local the store, its returns in the helper and an
+          argument of a creator global (the client's function);
+        - as an assignment target, only the store itself.
+
+        Every other use is refused: the name as a plain value (stored in a
+        field, a table or a global, returned by another function, passed to
+        any function, aliased by a local, an operand that flows on) or as a
+        callee. A name so used could give the object to a local that the
+        object model takes for a separate object, and a conflicting write
+        through that local would go unseen."""
+        for use, node in binding.uses:
+            if use in ('index', 'field-target'):
+                continue
+            if use == 'target':
+                if node is store:
+                    continue
+                return False
+            if use != 'value':
+                return False
+            if id(node) in values or id(node) in tested:
+                continue
+            method = receivers.get(id(node))
+            if method is None or self.loaded_method(method, names):
+                return False
+        return True
+
+    def loaded_method(self, name, names):
+        """True when this file writes a field called name on one of names
+        (the names holding a singleton helper's object) with anything but a
+        function literal that takes no argument at all (_parameterless), or
+        writes that field with an unknown value: X:name(...) could then run
+        a function of the loaded source with the object as its argument.
+        This looks only at this file's own writes on these names. Without
+        such a write the method is ASSUMED to be the client's own; that is
+        not proved (review S7). A function that loaded code or another addon
+        adds to, or hooks on, the method table shared by the widgets of a
+        type (reached for example through getmetatable of any widget) would
+        be found by X:name(...) and would receive the object; nothing here
+        sees that."""
+        for value in self.field_writes.get(name, ()):
+            if value is _OPAQUE:
+                return True
+            if _parameterless(value):
+                continue
+            base = self.field_bases[value][1]
+            if type(base) is _Binding and self.alias_root(base) in names:
+                return True
+        return False
+
+    def cached_singleton(self, func):
+        """(the local holding the object, the creator global name, the cache
+        binding, the store target, the holder bindings, and the ids of the
+        value uses of the cache and of the object that belong to the shape)
+        when func has the singleton cache shape, else None; cached_singletons
+        then applies the use rule (confined). The shape is exact:
+
+            if CACHE then return CACHE end
+            local OBJECT = Creator(arguments)
+            CACHE = OBJECT
+            ...
+            return OBJECT
+
+        - func takes no parameter and no ...; its first three statements are
+          exactly these, and its body ends with a return.
+        - CACHE is a local of the file chunk (not of a function), declared
+          without a value and assigned nowhere else, nested functions
+          included: its one and only definition is this store. A declaration
+          with a value is refused, nil included (review S4): with 'local
+          CACHE = nil' the name has two definitions, so the object model
+          does not track it, and an alias of it (local g = CACHE) would be a
+          separate object although it is the same frame, hiding a
+          conflicting write. With the store as its single definition CACHE
+          and every alias of it hold OBJECT's origins.
+        - OBJECT is a local of func declared with a call of a _WIDGET_FUNCTIONS
+          global by its plain name, and it is never assigned again. Every
+          argument of that call is a literal (string, number, nil, true,
+          false) or a plain name. An index, an operator, a parenthesized
+          expression, a constructor, ..., a call or a function is refused: a
+          field read, a concatenation or an arithmetic operand can run a
+          metamethod of the loaded source between the guard and the store,
+          which could call the helper again and make a second object
+          (review S1). A plain name runs no code: a local is a slot, and a
+          global read meets a metatable only when the environment table was
+          given one, which needs the environment as a value and so opens it
+          (the linker then refuses the creator global).
+        - Every return statement of func itself returns exactly one value,
+          the name CACHE or the name OBJECT: no other object, no scalar, no
+          nil, no missing value.
+        - Every use of the helper's own name, anywhere in the file, is the
+          callee of a call that is the one declared value of a local declared
+          once and never assigned again (local HOLDER = Helper()), and that
+          name is never assigned. Any other use refuses the helper as a
+          whole: an alias, a parenthesized call, a call returned, passed on,
+          assigned or discarded, pcall (review S2). A result held any other
+          way would be a separate object in the object model although it is
+          the same frame, so a conflicting write through it would go unseen;
+          with this rule every result of the helper is held by a local that
+          _Linker.widened merges.
+        - No name that holds the object hands it on (review F1; checked by
+          cached_singletons with confined): CACHE, OBJECT and every HOLDER
+          are used only as the base of an index read or of a field write
+          with a literal key, as the receiver of a method the file does not
+          itself define on them, as a value that is only tested or compared
+          (the exact places are in singleton_places), and in the shape
+          itself (the guard, the store, the helper's returns; OBJECT also as
+          an argument of the creator). A write with a computed key through
+          one of these names (review S5), an arithmetic or concatenation
+          operand or an and/or expression used as a value (review S6), a
+          holder returned by another function, stored in a field, a table
+          or a global, passed to a function or aliased refuse the helper as
+          a whole, and so does the cache returned or aliased anywhere else.
+
+        Then an invocation that finds CACHE set returns it, the one that
+        finds it unset makes the object and stores it before any code of the
+        loaded source runs, and nothing unsets or replaces it: every value
+        func returns is that one object, and within the loaded source only
+        CACHE, OBJECT and the holders can name it. Three things are assumed
+        about the client and are not proved (the routes named are examples,
+        not a complete list): that the creator, the client's own function,
+        runs no loaded code (for example a frame template with load scripts
+        or a hook on the creator); that the client does not hand the object
+        back to loaded code by another route (for example a script
+        handler's self, the global name of a named frame, GetParent); and
+        that the methods called on these names are the client's own, neither
+        added to nor hooked on the method table shared by the widgets of a
+        type, by loaded code or by another addon (review S7). The linker
+        requires that no loaded source assigns the
+        creator global (_Linker.widened). OBJECT may be read by nested
+        functions (a script handler) within these uses; that changes no
+        identity. Any other helper proves nothing here."""
+        if func.params or func.vararg or func.method or len(func.body) < 4:
+            return None
+        guard, made, stored = func.body[:3]
+        if guard.kind != 'if' or len(guard.clauses) != 1 or guard.orelse is not None:
+            return None
+        cond, inner = guard.clauses[0]
+        if cond.kind != 'name' or cond.binding is None or len(inner) != 1 \
+                or inner[0].kind != 'return' or len(inner[0].exprs) != 1:
+            return None
+        cache, back = cond.binding, inner[0].exprs[0]
+        if back.kind != 'name' or back.binding is not cache:
+            return None
+        if made.kind != 'local' or len(made.names) != 1 or len(made.exprs) != 1:
+            return None
+        owned, creator = made.names[0].binding, made.exprs[0]
+        if creator.kind != 'call' or creator.func.kind != 'name' \
+                or creator.func.binding is not None \
+                or creator.func.value not in _WIDGET_FUNCTIONS \
+                or not all(arg.kind in ('string', 'name')
+                           or (arg.kind == 'constant' and arg.value != '...')
+                           for arg in creator.args):
+            return None
+        if stored.kind != 'assign' or len(stored.targets) != 1 or len(stored.exprs) != 1:
+            return None
+        target, value = stored.targets[0], stored.exprs[0]
+        if target.kind != 'name' or target.binding is not cache \
+                or value.kind != 'name' or value.binding is not owned:
+            return None
+        if cache.kind != 'local' or cache not in self.made_in or self.made_in[cache] is not None:
+            return None
+        # The store is the cache's single definition: a valueless declaration
+        # records none, any initializer (nil included) is a second one (S4).
+        if self.defs.get(cache) != [value]:
+            return None
+        if owned.assigned or self.defs.get(owned) != [creator]:
+            return None
+        if func.body[-1].kind != 'return':
+            return None
+        for stmt in _descendants(func.body):
+            if stmt.kind == 'return' and (
+                    len(stmt.exprs) != 1 or stmt.exprs[0].kind != 'name'
+                    or (stmt.exprs[0].binding is not cache
+                        and stmt.exprs[0].binding is not owned)):
+                return None
+        # Every use of the helper's name is the callee of a direct call that
+        # is the one declared value of a once-declared local (review S2).
+        helper = self.function_binding.get(func)
+        calls = self.direct_calls.get(func, ())
+        if helper is None or helper.value is not func or helper.assigned \
+                or len(helper.uses) != len(calls):
+            return None
+        holders = []
+        for call in calls:
+            defined = self.def_of.get(call, ())
+            if len(defined) != 1 or call not in self.declared:
+                return None
+            holder = defined[0]
+            if type(holder) is not _Binding or holder.kind != 'local' or holder.assigned \
+                    or self.defs.get(holder) != [call]:
+                return None
+            holders.append(holder)
+        # The value uses that belong to the shape itself (see confined).
+        returned = [stmt.exprs[0] for stmt in _descendants(func.body) if stmt.kind == 'return']
+        cache_values = frozenset(id(node) for node in returned if node.binding is cache)
+        owned_values = frozenset([id(value)] + [id(node) for node in returned
+                                                if node.binding is owned])
+        return owned, creator.func.value, cache, target, holders, cache_values, owned_values
 
     def module_ok(self, binding, depth=0):
         """A local module table (or alias of one) whose identity stays here:
@@ -5162,6 +5593,15 @@ class _UnitFlow:
                 self.expr(expr, func)
             if func is not None and stmt.exprs:
                 self.edge(stmt.exprs[0], ('ret', func))
+                # Each later expression into its own return position, never
+                # into another: an expression gives one value there (a call
+                # its first result). Only a call in the last position gives
+                # more; its later results are followed on demand, position
+                # by position (tail_calls, _Linker.result_states).
+                for index in range(1, min(len(stmt.exprs), _RESULT_LIMIT)):
+                    self.edge(stmt.exprs[index], ('ret', func, index))
+                if stmt.exprs[-1].kind == 'call':
+                    self.tail_calls[stmt.exprs[-1]] = (func, len(stmt.exprs) - 1)
             elif func is None:
                 # The WoW TOC loader discards a file chunk's return values.
                 self.chunk_returns.update(expr for expr in stmt.exprs if expr.kind == 'name')
@@ -5622,12 +6062,26 @@ class _ReachingDefinitions:
     definition killed on every path to a read does not reach it, so an
     overwritten result is never followed there. Locals that a nested
     function assigns or reads keep the flow-insensitive every-definition
-    rule of _UnitFlow. A multiple-value position without its own value, a
-    for variable and a value-less declaration hold no followed value."""
+    rule of _UnitFlow. A for variable and a value-less declaration hold no
+    followed value. A multiple-value position without its own expression
+    holds the result node of the call that is the last expression of its
+    list (_UnitFlow.later_result, given as later), which the linker reaches
+    only for that position of a resolved function; without such a call it
+    holds no followed value."""
 
-    def __init__(self, eligible):
+    def __init__(self, eligible, later=None):
         self.eligible = eligible
+        self.later_result = later
         self.reach = {}
+
+    def later(self, exprs, index, binding):
+        """The definition a name without its own expression gets at index
+        of a non-empty expression list: the result node of a last call for
+        an eligible local, else no followed value."""
+        if self.later_result is None or binding not in self.eligible:
+            return _OPAQUE
+        node = self.later_result(exprs, index)
+        return _OPAQUE if node is None else node
 
     def run(self, func_body):
         self.block(func_body, {})
@@ -5696,7 +6150,7 @@ class _ReachingDefinitions:
                 self.uses(expr, env)
             for index, name in enumerate(stmt.names):
                 value = stmt.exprs[index] if index < len(stmt.exprs) else (
-                    _OPAQUE if stmt.exprs else _NIL_DEF)
+                    self.later(stmt.exprs, index, name.binding) if stmt.exprs else _NIL_DEF)
                 env = self.assign(env, name.binding, value)
             return env, []
         if kind in ('localfunction', 'funcstat'):
@@ -5713,7 +6167,8 @@ class _ReachingDefinitions:
                     self.uses(target, env)
             for index, target in enumerate(stmt.targets):
                 if target.kind == 'name':
-                    value = stmt.exprs[index] if index < len(stmt.exprs) else _OPAQUE
+                    value = stmt.exprs[index] if index < len(stmt.exprs) \
+                        else self.later(stmt.exprs, index, target.binding)
                     env = self.assign(env, target.binding, value)
             return env, []
         if kind == 'callstat':
@@ -6200,11 +6655,37 @@ class _Linker:
             if tag == 'fwrite':
                 return [(read, flow, next_stack)
                         for read, next_stack in self.field_reads(key[1], flow, stack)]
+            if tag == 'pret' and len(key) == 3:
+                # A later return position of an exported function: the same
+                # calls as its first value, each at that position only.
+                point = self.pret_points[key[:2]]
+                return [state for unit in self.units
+                        for call in unit.flow.path_calls.get(key[1], ())
+                        if not self.runs_before(unit, call, point)
+                        for state in self.result_states(call, unit.flow, key[2], ())]
             if tag == 'pret':
                 point = self.pret_points[key]
                 return [(call, unit.flow, ()) for unit in self.units
                         for call in unit.flow.path_calls.get(key[1], ())
                         if not self.runs_before(unit, call, point)]
+            if tag == 'ret' and len(key) == 3:
+                # A later return position: the same resolved calls as the
+                # first value (the call on the stack, else every direct call,
+                # module call and export), each at that position only.
+                func, position = key[1], key[2]
+                if stack:
+                    call = stack[-1]
+                    if call in flow.direct_calls.get(func, ()):
+                        return self.result_states(call, flow, position, stack[:-1])
+                    return []
+                out = [state for call in flow.edges.get(('ret', func), ())
+                       for state in self.result_states(call, flow, position, ())]
+                for nxt, owner in self.ret_links.get(func, ()):
+                    if type(nxt) is tuple:
+                        out.append((nxt + (position,), None, ()))
+                    else:
+                        out.extend(self.result_states(nxt, owner, position, ()))
+                return out
             if tag == 'ret':
                 if stack:
                     call = stack[-1]
@@ -6223,6 +6704,25 @@ class _Linker:
         if len(stack) < _STACK_LIMIT:
             out.extend((param, flow, stack + (call,))
                        for param, call in flow.call_args.get(key, ()))
+        return out
+
+    def result_states(self, call, flow, position, stack):
+        """Where result number position (1 or later; the first result is the
+        call expression itself and is not handled here) of a resolved call
+        goes, as (key, flow, stack) states: to the result node of the name a
+        multiple assignment gives that position (_UnitFlow.later_result),
+        and, when the call is the last expression of a return statement, on
+        to the return position of that function behind the expressions
+        before it (tail_calls), within _RESULT_LIMIT. Nothing else takes a
+        later result: an argument, an operand, a parenthesized or non-last
+        call sees the first value only, so no other position is reached."""
+        out = []
+        node = flow.results.get((call, position))
+        if node is not None:
+            out.append((node, flow, stack))
+        tail = flow.tail_calls.get(call)
+        if tail is not None and tail[1] + position < _RESULT_LIMIT:
+            out.append((('ret', tail[0], tail[1] + position), flow, stack))
         return out
 
     def search(self, roots, allowed=None, stop=None):
@@ -6367,7 +6867,7 @@ class _Linker:
         refuse outputs: its object origins under stack, plus a token per
         field it is read from (local a = x.F), so that any alias of a widget
         read from a field shares that field's token."""
-        tokens = set(self.objects_at(base, flow, stack) or ())
+        tokens = set(self.widened(flow, self.objects_at(base, flow, stack)) or ())
         root = flow.alias_root(base)
         tokens.add(root)
         defs = flow.defs.get(root, ()) if type(root) is _Binding else ()
@@ -6383,6 +6883,40 @@ class _Linker:
                     if arg.kind == 'index' and arg.key.kind == 'string':
                         tokens.add(('field-value', arg.key.value))
         return frozenset(tokens)
+
+    def widened(self, flow, origins):
+        """origins (of flow.objects or objects_at) together with the one
+        object of each singleton cache helper whose result a local among
+        them holds. Such a local is declared once with a call, by its plain
+        name, of an unassigned local function that _UnitFlow.cached_singleton
+        proves, while no loaded source assigns the creator global (by name,
+        through _G or by an open environment): the helper's own local for
+        the object is then another name of the very object this local
+        holds. A helper is admitted (cached_singletons) only when every use
+        of its name is such a local and when neither those locals nor the
+        cache nor the helper's own local hand the object on, so within the
+        loaded source no other name can hold it. That holds under the three
+        assumptions about the client stated in cached_singleton, which are
+        not proved. A local declared
+        with any other call and an untracked base add nothing, so two
+        results of an uncached factory are never merged. Used for receiver
+        fields and for the identity that refuses outputs when an output
+        method is replaced (method_overridden) only; the flow of values
+        through fields is unchanged."""
+        if not origins:
+            return origins
+        extra = set()
+        for origin in origins:
+            if type(origin) is not _Binding or origin.kind != 'local':
+                continue
+            defs = flow.defs.get(origin, ())
+            if len(defs) != 1 or defs[0] is _OPAQUE or defs[0].kind != 'call':
+                continue
+            target = _local_function(defs[0].func)
+            single = flow.singletons.get(target) if target is not None else None
+            if single is not None and single[1] not in self.global_writes:
+                extra |= flow.objects(single[0]) or frozenset()
+        return origins | extra if extra else origins
 
     def receiver_identity(self, receiver, flow, stack):
         """The broad identity of an output receiver, or None when unknown."""
@@ -6488,10 +7022,27 @@ class _Linker:
         value's call stack (review fix 4), at least one write of F must be on
         an object X may hold, and every such write, every write of F on an
         untracked table here and every write of F in another file on an
-        untracked table must be a client object."""
+        untracked table must be a client object. A local declared with the
+        direct call of a singleton cache helper, on either side, also stands
+        for that helper's one object (widened), so a write through any such
+        local counts for every other one, a client widget and a conflicting
+        value alike. A helper is such a helper only when every use of its
+        name is one of these locals and none of the names holding the object
+        hands it on (cached_singletons, confined): a holder that is stored,
+        returned, passed or aliased, used as an arithmetic or concatenation
+        operand, or written through with a computed key refuses the helper.
+        So within the loaded source a write on the object is a write with a
+        literal key through one of the merged names, and those are the
+        writes examined here. That rests on three assumptions about the
+        client, which are not proved (cached_singleton): the creator runs
+        no loaded code, the client does not hand the object back to loaded
+        code (for example a script handler's self, a global frame name),
+        and the methods called on these names are the client's own. The
+        results of
+        any other helper stay separate objects."""
         name = expr.key.value
-        held = self.objects_at(expr.obj.binding, flow, stack) if expr.obj.kind == 'name' \
-            and expr.obj.binding is not None else None
+        held = self.widened(flow, self.objects_at(expr.obj.binding, flow, stack)) \
+            if expr.obj.kind == 'name' and expr.obj.binding is not None else None
         if not held:
             return False
         matched = False
@@ -6499,7 +7050,7 @@ class _Linker:
             other = unit.flow
             for value in other.field_writes.get(name, ()):
                 base = other.field_bases[value][1] if value is not _OPAQUE else None
-                written = other.objects(base) if base is not None else None
+                written = self.widened(other, other.objects(base)) if base is not None else None
                 if other is flow and written and not (written & held):
                     continue        # a write on another tracked object here
                 if other is not flow and written:

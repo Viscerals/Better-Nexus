@@ -1693,16 +1693,39 @@ class ProvenanceTests(unittest.TestCase):
                           self.release["packProvenance"]["contractVersion"]),
                          ("nexus.l10n.pack_provenance", 1))
         # Entry and review facts are unchanged: every current English key
-        # (the full visible-UI catalog), six packs of 27 draft entries (162),
-        # no review declaration or gate upgrade.
+        # (the full visible-UI catalog, 4116), six packs of 4078 draft
+        # entries each (24468 in all; each pack still lacks 38 of the 4116
+        # keys), no translated entry reviewed and no gate upgrade. The
+        # current metadata holds 539 structural entry declarations, every one
+        # "legitimately_identical" with status "declared": frFR 110, deDE
+        # 108, esES 90, plPL 89, ptBR 92, ruRU 50. They are source facts of
+        # RELEASE_LANGUAGES, counted here so that they cannot drift unseen;
+        # a declaration is not fluent, rights or native evidence, and the
+        # acceptance facts below stay as they were.
         report = self.catalog.registry_catalog_report(*self.inputs)
         self.assertEqual(report["denominator"]["englishKeys"], CURRENT_FULL_UI_KEYS)
-        self.assertEqual([row["entriesPresent"] for row in report["products"]], [27] * 6)
-        self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 162)
+        self.assertEqual([row["entriesPresent"] for row in report["products"]], [4078] * 6)
+        self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 24468)
+        declared = {"frFR": 110, "deDE": 108, "esES": 90, "plPL": 89, "ptBR": 92, "ruRU": 50}
+        self.assertEqual(sorted(row["productId"] for row in report["products"]), sorted(declared))
         for row in report["products"]:
             self.assertEqual((row["counts"]["translated_and_reviewed"],
-                              row["counts"]["reviewed_legitimately_identical"]), (0, 0))
-        self.assertEqual(self.release["entryReview"]["declarations"], [])
+                              row["counts"]["reviewed_legitimately_identical"]),
+                             (0, declared[row["productId"]]), row["productId"])
+        declarations = self.release["entryReview"]["declarations"]
+        self.assertEqual(len(declarations), 539)
+        for declaration in declarations:
+            self.assertEqual(sorted(declaration),
+                             ["decision", "evidenceReference", "key", "productId", "reviewer",
+                              "status", "translatedTextSha256"])
+            self.assertEqual({type(value) for value in declaration.values()}, {str})
+            self.assertEqual((declaration["decision"], declaration["status"]),
+                             ("legitimately_identical", "declared"))
+        self.assertEqual({product: sum(1 for declaration in declarations
+                                       if declaration["productId"] == product)
+                          for product in OPTIONAL_IDS}, declared)
+        self.assertEqual(len({(declaration["productId"], declaration["key"])
+                              for declaration in declarations}), 539)
         for product in self.release["products"]:
             self.assertEqual(product["review"]["nativeAcceptance"], {"status": "NOT_RUN",
                                                                      "records": []})
@@ -4206,6 +4229,522 @@ class ConsumerBindingTests(unittest.TestCase):
                        if site["path"] == READOUT and site.get("wrapper") == wrapper)
         self.assertEqual(found, [(number, "wrapper-call", "Format", "UNBOUND", False,
                                   "output-not-reached") for number in calls])
+
+    def test_c32_a_later_function_result_is_followed_by_its_own_position_only(self):
+        # Lua 5.1 (manual 2.4.3 and 2.5): only a call that is the last
+        # expression of a list gives more than its first value, a call in
+        # parentheses gives one, and a name without a value gets nil. The
+        # current ui/LoadingStatus.lua shape is
+        #     return 100, T(key)   and   local percent, progress = M.Progress(status)
+        # Each case is one line in its own do block after the proved client
+        # label specLabel (per_site). Its site binds only when the localized
+        # text stands at the very position that the shown name holds.
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        two = b"local function Two() return 100, " + text + b" end "
+        pair = (b"local function Pair(key) local text, source = Nexus.Localization.Text(key) "
+                b"return text, source end ")
+        pick = b"local function Pick(value) return 1, value end "
+        show = b" specLabel:SetText(progress)"
+        self.per_site((
+            ("the second result of a local function",
+             two + b"local percent, progress = Two()" + show, True),
+            ("the current shape: a wrapper call returned second, shown in a concatenation",
+             b"local function T(key) return (Nexus.Localization.Text(key)) end "
+             b'local function Progress() return 100, T("panel.heading.progress") end '
+             b'local percent, progress = Progress() specLabel:SetText("Local: " .. progress)', True),
+            ("assigned later from the call",
+             two + b"local percent, progress percent, progress = Two()" + show, True),
+            ("a tail call keeps the position",
+             two + b"local function Tail() return Two() end local percent, progress = Tail()" + show,
+             True),
+            ("a tail call behind one value moves the position by one",
+             two + b"local function Shift() return 0, Two() end local a, b, progress = Shift()" + show,
+             True),
+            ("the result beside it stays a number",
+             two + b"local function Shift() return 0, Two() end local a, progress, c = Shift()" + show,
+             False),
+            ("a value passed in returns second to its own call",
+             pick + b"local a, progress = Pick(" + text + b') local c, d = Pick("plain")' + show, True),
+            ("and not to another call of that function",
+             pick + b"local a, b = Pick(" + text + b') local c, progress = Pick("plain")' + show, False),
+            # The first value behaves as before, and only it carries the text.
+            ("the first result is followed as before",
+             pair + b'local progress, status = Pair("panel.heading.progress")' + show, True),
+            ("a wrapper's returned status is not its text",
+             pair + b'local shown, progress = Pair("panel.heading.progress")' + show, False),
+            ("the consumer method's own status is not its text",
+             b"local shown, progress = " + text + show, False),
+            ("a tail call of the consumer method passes no status on as text",
+             b"local function Tail() return " + text + b" end local shown, progress = Tail()" + show,
+             False),
+            ("a first result is not the second",
+             b"local function Lead() return " + text + b", 100 end local shown, progress = Lead()"
+             + show, False),
+            ("a function returning one value gives no second",
+             b"local function One() return (" + text + b") end local shown, progress = One()" + show,
+             False),
+            ("a shorter return path adds nothing to a later position",
+             b"local function Few(flag) if flag then return 100 end return 100, 200, " + text
+             + b" end local a, progress = Few(true)" + show, False),
+            ("the names swapped", two + b"local progress, percent = Two()" + show, False),
+            ("a call that is not last gives its first value only",
+             two + b"local percent, progress = Two(), nil" + show, False),
+            ("a call in parentheses gives its first value only",
+             two + b"local percent, progress = (Two())" + show, False),
+            ("a tail call in parentheses gives its first value only",
+             two + b"local function Tail() return (Two()) end local percent, progress = Tail()" + show,
+             False),
+            ("a call that is not last in a return gives its first value only",
+             two + b"local function Mid() return Two(), 0 end local a, b, progress = Mid()" + show,
+             False),
+            ("overwritten before it is shown",
+             two + b'local percent, progress = Two() progress = "none"' + show, False),
+            ("read by a nested function",
+             two + b"local percent, progress = Two() local function Show()" + show + b" end Show()",
+             False),
+            ("the function assigned again",
+             two + b"Two = Two local percent, progress = Two()" + show, False),
+            ("an unresolved callee",
+             b"local percent, progress = select(1, 100, " + text + b")" + show, False),
+            ("results through pcall",
+             b"local function One() return " + text + b" end local ok, progress = pcall(One)" + show,
+             False),
+            ("results through ...",
+             b"local function Var(...) return ... end local percent, progress = Var(100, " + text
+             + b")" + show, False),
+        ))
+
+    def test_c33_the_real_loading_status_text_reaches_update_and_stops_at_its_receiver(self):
+        # The real ui/LoadingStatus.lua on a real-bytes substrate of the
+        # registry inputs and that file alone (built as s8_cohort_files
+        # builds the cohort, so nothing else can show these keys). M.Progress
+        # returns its sentence as its second value, and M.Update shows it
+        # with f.detail:SetText. The whole receipt is read: these keys are
+        # outside the dated 28. What is measured is the proved output of
+        # each key, never only a site.
+        loading = "ui/LoadingStatus.lua"
+        full = self.full_files
+        wanted = set(INPUTS) | {loading}
+        toc = b"".join(line for line in full["Nexus.toc"].splitlines(True)
+                       if not line.strip() or line.strip().startswith(b"#")
+                       or line.strip().replace(b"\\", b"/").decode("utf-8") in wanted)
+        companion = set(toc_listing(CONSUMER_TOCS[1], full[CONSUMER_TOCS[1]]))
+        base = {path: data for path, data in full.items()
+                if path in wanted or path in CONSUMER_TOCS or path in companion}
+        base["Nexus.toc"] = toc
+        real = full[loading]
+        lf = real.replace(b"\r\n", b"\n")
+        call = b"local percent,progress=M.Progress(status)"
+        shown = b'f.detail:SetText(localText.."\\n"..progress)'
+        for line in (b'    if status.state=="ready" then return 100,T("loading.status.ready") end\n',
+                     b"    local f=EnsureFrame()\n", b"    " + call + b"\n", b"    " + shown + b"\n"):
+            self.assertEqual(lf.count(line), 1, line)       # SETUP: the current path
+        second = ("loading.status.ready", "loading.status.see_status_for_reason",
+                  "loading.status.current_step_counted", "loading.status.current_step_records_read",
+                  "loading.status.current_step_in_progress")
+        for key in second + ("loading.status.elapsed", "loading.button.wishlists"):
+            self.assertEqual(lf.count(b'"' + key.encode() + b'"'), 1, key)      # SETUP: one site each
+
+        def measured(data, keys=second):
+            receipt = self.catalog.consumer_binding_report(
+                *binding_args(with_file(base, loading, data)))
+            rows = {row["key"]: row for row in receipt["keys"]}
+            return {key: (rows[key]["binding"],
+                          sorted({(site["path"], output["output"])
+                                  for site in rows[key]["sites"] for output in site["outputs"]}),
+                          sorted((site["path"], site["reason"])
+                                 for site in rows[key]["unprovenSites"]))
+                    for key in keys}
+
+        unshown = ("UNBOUND", [], [(loading, "output-not-reached")])
+        tooltip = ("DIRECT_LITERAL_CONSUMER", [(loading, "AddLine")], [])
+        swapped = edit(real, shown, b'GameTooltip:AddLine(localText.."\\n"..progress)')
+        # Receiver-blocked control (C35 proves the unedited receiver): one
+        # more assignment of the frame cache, so EnsureFrame is no singleton
+        # cache helper and f in M.Update is again only a call result. The two
+        # cases that rest on a blocked receiver keep their expectations.
+        self.assertEqual(lf.count(b"\nlocal frame, lastSnapshot, startedAt, completedAt\n"), 1)
+        blocked = real + b"\nlocal function Forget() frame=nil end\n"
+        with self.subTest(case="the frame cache assigned elsewhere: the receiver is not proved"):
+            # The second value reaches the SetText call, but no output is
+            # counted there: f is the result of the local function
+            # EnsureFrame(), and a receiver field is proved only on a tracked
+            # object, which such a call result is not. The elapsed line, shown
+            # directly on f.progress, stops at the same receiver; the button
+            # text, set where f is the CreateFrame local itself, is proved.
+            self.assertEqual(
+                measured(blocked, second + ("loading.status.elapsed", "loading.button.wishlists")),
+                dict({key: unshown for key in second + ("loading.status.elapsed",)},
+                     **{"loading.button.wishlists":
+                        ("DIRECT_LITERAL_CONSUMER", [(loading, "SetText")], [])}))
+        with self.subTest(case="only the receiver changed to a proved client object"):
+            self.assertEqual(measured(swapped), {key: tooltip for key in second})
+        with self.subTest(case="through the Nexus export, shown by a proved client object"):
+            self.assertEqual(
+                measured(blocked + b"\ndo local percent, progress = Nexus.LoadingStatus.Progress("
+                         b"Snapshot()) GameTooltip:AddLine(progress) end\n"),
+                {key: tooltip for key in second})
+        with self.subTest(case="the module function defined twice"):
+            self.assertEqual(
+                measured(swapped + b'\nfunction M.Progress(status) return nil, "replaced" end\n'),
+                {key: unshown for key in second})
+        with self.subTest(case="called through a local alias of the module function"):
+            self.assertEqual(
+                measured(edit(swapped, call, b"local Progress=M.Progress "
+                              b"local percent,progress=Progress(status)")),
+                {key: unshown for key in second})
+
+    def test_c34_a_receiver_field_follows_a_helper_result_only_for_a_singleton_cache(self):
+        # The current ui/LoadingStatus.lua shape: a file-level cache, a
+        # helper that returns it when set, else makes the frame, stores it at
+        # once and returns it; callers then use fields of the result as
+        # receivers. Only that exact shape makes every result one object.
+        # Each case is one line in its own do block (per_site), with its own
+        # field name, so no case can lend a widget to another.
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        widget = b' = %s:CreateFontString(nil, "OVERLAY") '
+
+        def make(field, head=b"local cache ", guard=b"if cache then return cache end ",
+                 create=b'local w = CreateFrame("Frame") ', store=b"cache = w ", fill=True,
+                 tail=b"return w end "):
+            filled = b"w." + field + widget % b"w" if fill else b""
+            return head + b"local function Make() " + guard + create + store + filled + tail
+
+        def show(field, holder=b"a"):
+            return holder + b"." + field + b":SetText(" + text + b")"
+
+        one = b"local a = Make() "
+        two = b"local a = Make() local b = Make() "
+        self.per_site((
+            ("a cached factory: the widget set in the helper is the holder's",
+             make(b"specA") + one + show(b"specA"), True),
+            ("two holders of a cached factory are one object",
+             make(b"specB", fill=False) + two + b"a.specB" + widget % b"a" + show(b"specB", b"b"),
+             True),
+            ("its object read by a nested function only (a script handler)",
+             make(b"specC", tail=b'w:SetScript("OnHide", function() w:Show() end) return w end ')
+             + one + show(b"specC"), True),
+            # The critical control: two results of ONE uncached helper are two
+            # objects; the widget set on a is not b's.
+            ("two callers of one uncached factory: b does not borrow the widget set on a",
+             b'local function Make() local w = CreateFrame("Frame") return w end ' + two
+             + b"a.specD" + widget % b"a" + show(b"specD", b"b"), False),
+            ("stored but never returned from the cache: every call makes a new object",
+             make(b"specE", guard=b"", fill=False) + two + b"a.specE" + widget % b"a"
+             + show(b"specE", b"b"), False),
+            ("another field of the cached object", make(b"specF") + one + show(b"specFother"), False),
+            ("the cache unset elsewhere",
+             make(b"specG") + b"local function Reset() cache = nil end " + one + show(b"specG"), False),
+            ("the cache given another table elsewhere",
+             make(b"specH") + b"local function Swap() cache = {} end " + one + show(b"specH"), False),
+            ("the cache not nil at first",
+             make(b"specI", head=b'local cache = CreateFrame("Frame") ') + one + show(b"specI"), False),
+            ("a return of another object",
+             make(b"specJ", head=b'local cache local spare = CreateFrame("Frame") ',
+                  tail=b"if Nexus.Flag then return spare end return w end ") + one + show(b"specJ"),
+             False),
+            ("a scalar return",
+             make(b"specK", tail=b"if Nexus.Flag then return 1 end return w end ") + one
+             + show(b"specK"), False),
+            ("a return without a value",
+             make(b"specL", tail=b"if Nexus.Flag then return end return w end ") + one
+             + show(b"specL"), False),
+            ("a path that returns nothing at its end",
+             make(b"specM", tail=b"if Nexus.Flag then return w end end ") + one + show(b"specM"),
+             False),
+            ("the helper assigned again",
+             make(b"specN") + b"Make = Make " + one + show(b"specN"), False),
+            ("the helper called through an alias",
+             make(b"specO") + b"local Other = Make local a = Other() " + show(b"specO"), False),
+            ("two helpers storing into one cache",
+             make(b"specP") + b"local function Again() if cache then return cache end "
+             b'local w = CreateFrame("Frame") cache = w return w end ' + one + show(b"specP"), False),
+            ("the helper's object assigned again",
+             make(b"specQ", store=b'cache = w w = CreateFrame("Frame") ') + one + show(b"specQ"),
+             False),
+            ("the helper's object assigned by a nested function",
+             make(b"specR", tail=b"local function Drop() w = nil end return w end ") + one
+             + show(b"specR"), False),
+            ("the cache stored only after other code ran",
+             make(b"specS", create=b'local w = CreateFrame("Frame") w:Hide() ') + one
+             + show(b"specS"), False),
+            ("a call among the creator's arguments",
+             make(b"specT", head=b"local cache local function Parent() return UIParent end ",
+                  create=b'local w = CreateFrame("Frame", nil, Parent()) ') + one + show(b"specT"),
+             False),
+            ("a helper with a parameter",
+             b"local cache local function Make(kind) if cache then return cache end "
+             b"local w = CreateFrame(kind) cache = w w.specU" + widget % b"w"
+             + b'return w end local a = Make("Frame") ' + show(b"specU"), False),
+            ("the cache a local of an enclosing function",
+             b"local function Outer() " + make(b"specV") + one + show(b"specV") + b" end Outer()",
+             False),
+            ("a conflicting value set through another holder",
+             make(b"specW") + two + b'b.specW = "plain" ' + show(b"specW"), False),
+            ("the widget set on another object only",
+             make(b"specX", fill=False) + b'local other = CreateFrame("Frame") other.specX'
+             + widget % b"other" + one + show(b"specX"), False),
+            ("a holder assigned again",
+             make(b"specY") + one + b"a = Make() " + show(b"specY"), False),
+            # Review S1: only literals and plain names may be creator
+            # arguments, as in the real CreateFrame("Frame", "Name", UIParent).
+            ("literal and plain-name creator arguments",
+             make(b"specArgs", create=b'local w = CreateFrame("Frame", "SpecNamedFrame", UIParent) ')
+             + one + show(b"specArgs"), True),
+            # Root's reproduced case, byte for byte: the index argument runs
+            # an __index of the loaded source before the store; that call of
+            # the helper makes and stores another frame, so a and b are two
+            # objects and b has no such field.
+            ("an index among the creator's arguments can re-enter the helper",
+             b"local cache local args = {} local active = false local observed "
+             b"local function Make() if cache then return cache end "
+             b'local w = CreateFrame("Frame", args.name) cache = w return w end '
+             b"setmetatable(args, {__index = function() if not active then active = true "
+             b'local a = Make() a.specReentry = a:CreateFontString(nil, "OVERLAY") observed = a end '
+             b"return nil end}) local b = Make() "
+             b'b.specReentry:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("an operator among the creator's arguments",
+             make(b"specConcat", head=b'local cache local prefix = "Spec" ',
+                  create=b'local w = CreateFrame("Frame", prefix .. "Frame") ') + one
+             + show(b"specConcat"), False),
+            # Review S2, Root's three reproduced cases, byte for byte: another
+            # result of the same helper is the same frame. A use of the helper
+            # that is no directly declared holder refuses the helper as a
+            # whole, so the string written through g cannot go unseen.
+            ("a conflicting value through a parenthesized call of the helper",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specParen=w:CreateFontString(nil,"OVERLAY") '
+             b'return w end local a=Make() local g = (Make()) g.specParen="plain" '
+             b'a.specParen:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a conflicting value through an alias of the helper",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specAlias=w:CreateFontString(nil,"OVERLAY") '
+             b'return w end local a=Make() local Other=Make local g=Other() g.specAlias="plain" '
+             b'a.specAlias:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a conflicting value through a function that returns the helper's call",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specWrap=w:CreateFontString(nil,"OVERLAY") '
+             b"return w end local a=Make() local function Get() return Make() end local g=Get() "
+             b'g.specWrap="plain" '
+             b'a.specWrap:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            # Review S3: an output method replaced through one holder of a
+            # cached frame is replaced for every holder; two results of an
+            # uncached factory stay two frames, so b keeps its own method.
+            ("an output method replaced through another holder of the cached frame",
+             make(b"specMethod", fill=False) + two + b"a.AddMessage = function() end b:AddMessage("
+             + text + b")", False),
+            ("the same replacement on one of two uncached frames leaves the other its method",
+             b'local function Make() local w = CreateFrame("Frame") return w end ' + two
+             + b"a.AddMessage = function() end b:AddMessage(" + text + b")", True),
+            # Review S4, Root's two reproduced cases, byte for byte. A cache
+            # declared with nil has two definitions, so an alias of it was a
+            # separate object and the string written through it went unseen:
+            # that declaration form is refused. A cache declared without a
+            # value has the store as its only definition, so its alias is the
+            # same frame and the conflicting write refuses the receiver. (With
+            # review F1 an alias of the cache refuses the helper as a whole;
+            # the row stays unbound either way.)
+            ("a cache declared with an explicit nil: a conflicting value through its alias",
+             b"local cache = nil local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specExplicitNil=w:CreateFontString(nil,"OVERLAY") return w end '
+             b'local a=Make() local g=cache g.specExplicitNil="plain" '
+             b'a.specExplicitNil:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a cache declared without a value: a conflicting value through its alias",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specNoInit=w:CreateFontString(nil,"OVERLAY") return w end '
+             b'local a=Make() local g=cache g.specNoInit="plain" '
+             b'a.specNoInit:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            # Review F1, Root's four reproduced cases, byte for byte. In each
+            # the cached frame reaches a local g that the object model takes
+            # for another object, and a string is written through g. A name
+            # that holds the frame and is handed on (returned by another
+            # function, stored in a field, passed to a function; the cache
+            # returned elsewhere) refuses the helper as a whole.
+            ("a holder returned by another function, then written through",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specFwdRet=w:CreateFontString(nil,"OVERLAY") '
+             b"return w end local function Get() local x=Make() return x end local a=Make() "
+             b'local g=Get() g.specFwdRet="plain" '
+             b'a.specFwdRet:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a holder stored in a field and read back, then written through",
+             b"local cache local box={} local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specFwdFld=w:CreateFontString(nil,"OVERLAY") '
+             b"return w end local a=Make() box.held=a local g=box.held "
+             b'g.specFwdFld="plain" '
+             b'a.specFwdFld:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("the cache returned by another function, then written through",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specFwdCache=w:CreateFontString(nil,"OVERLAY") return w end '
+             b"local function Peek() return cache end local a=Make() local g=Peek() "
+             b'g.specFwdCache="plain" '
+             b'a.specFwdCache:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a holder passed to a function reached through a field, which writes through it",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w w.specFwdArg=w:CreateFontString(nil,"OVERLAY") '
+             b'return w end local a=Make() Nexus.SpecTake=function(o) o.specFwdArg="plain" end '
+             b"Nexus.SpecTake(a) "
+             b'a.specFwdArg:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            # The same class, found while closing F1: a method call hands the
+            # frame to the function the file itself stored on it.
+            ("a function stored on a holder and called as its method writes through its argument",
+             make(b"specFwdMeth") + one
+             + b'a.Refresh = function(self) self.specFwdMeth = "plain" end a:Refresh() '
+             + show(b"specFwdMeth"), False),
+            # What stays admitted: the uses of the real helper and of its
+            # caller. The frame as an index base, a method receiver and in a
+            # test; the helper's own local as the parent given to the creator
+            # and read by a nested function.
+            ("a holder used as an index base, a method receiver and in a test",
+             make(b"specUse") + one
+             + b"if a then a:SetAlpha(1) end a.specNote = 1 local n = a.specNote "
+             + show(b"specUse"), True),
+            ("the helper's object given to the creator as a parent and read by a handler",
+             make(b"specParent", tail=b'local child = CreateFrame("Frame", nil, w) '
+                  b'child:SetScript("OnHide", function() w:Show() end) return w end ')
+             + one + show(b"specParent"), True),
+            ("a same-named field of an unrelated fresh table",
+             make(b"specRec") + one + b'local rec = {} rec.specRec = "plain" '
+             + show(b"specRec"), True),
+            # Reviews G1/S5 and S6, Root's seven programs, byte for byte. A
+            # write with a computed key through a name that holds the frame
+            # is not recorded as a field write: it can overwrite the receiver
+            # field or store a method unseen. An arithmetic or concatenation
+            # operand hands the frame to the other operand's metamethod. Each
+            # refuses the helper. The last two were already refused: an
+            # and/or expression used as a value can be the frame itself.
+            ("a computed-key write through a holder overwrites the field",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specKeyWrite=w:CreateFontString(nil,"OVERLAY") return w end '
+             b'local a=Make() local k="specKeyWrite" a[k]="plain" '
+             b'a.specKeyWrite:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a computed-key write through a holder stores a method that takes the frame",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specKeyMeth=w:CreateFontString(nil,"OVERLAY") return w end '
+             b'local a=Make() local k="Refresh" '
+             b'a[k]=function(self) self.specKeyMeth="plain" end a:Refresh() '
+             b'a.specKeyMeth:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a computed-key write through the helper's own local",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specKeyObj=w:CreateFontString(nil,"OVERLAY") local k="specKeyObj" '
+             b'w[k]="plain" return w end local a=Make() '
+             b'a.specKeyObj:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a holder as an arithmetic operand reaches the other operand's __add",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specArith=w:CreateFontString(nil,"OVERLAY") return w end local a=Make() '
+             b'local trap=setmetatable({}, {__add=function(x,y) x.specArith="plain" return 0 end}) '
+             b"local n=a+trap "
+             b'a.specArith:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("a holder as a tested concatenation operand reaches the other operand's __concat",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specConcat=w:CreateFontString(nil,"OVERLAY") return w end local a=Make() '
+             b'local trap=setmetatable({}, {__concat=function(x,y) x.specConcat="plain" '
+             b'return "" end}) if a..trap then end '
+             b'a.specConcat:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("an or expression used as a value can be the holder itself",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specOr=w:CreateFontString(nil,"OVERLAY") return w end local a=Make() '
+             b'local g=a or {} g.specOr="plain" '
+             b'a.specOr:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            ("an and expression used as a value can be the holder itself",
+             b"local cache local function Make() if cache then return cache end "
+             b'local w=CreateFrame("Frame") cache=w '
+             b'w.specAnd=w:CreateFontString(nil,"OVERLAY") return w end local a=Make() '
+             b'local g=true and a g.specAnd="plain" '
+             b'a.specAnd:SetText(Nexus.Localization.Text("panel.heading.progress"))', False),
+            # The same class by precedence: not a ^ b is not (a ^ b), so the
+            # holder is an operand of ^ although it stands right after not.
+            ("a holder after not is still the operand of a following ^",
+             make(b"specPow") + one
+             + b'local trap = setmetatable({}, {__pow = function(x, y) x.specPow = "plain" '
+             b"return 0 end}) local n = not a ^ trap " + show(b"specPow"), False),
+            # What stays admitted: values that are only tested or compared,
+            # and a read with a computed key.
+            ("a holder under not, in comparisons and in a tested and/or chain",
+             make(b"specBool") + one
+             + b"local same = a == nil if not a or a ~= nil and (a and a.specFlag) then end "
+             + show(b"specBool"), True),
+            ("a read through a holder with a computed key",
+             make(b"specRead") + one + b'local k = "specRead" local v = a[k] '
+             + show(b"specRead"), True),
+        ))
+
+    def test_c35_the_real_loading_status_frame_is_one_cached_object_for_its_receivers(self):
+        # The real ui/LoadingStatus.lua, unedited, on the C33 substrate (the
+        # registry inputs and that file alone). EnsureFrame is a singleton
+        # cache helper, so f in M.Update is the frame whose detail and
+        # progress fields EnsureFrame set to font strings: f.detail:SetText
+        # and f.progress:SetText are client outputs. The proved output of
+        # each key is measured, on the whole receipt. This substrate is that
+        # one file only. It says nothing about the full repository, which is
+        # measured apart: there Root's receipt proves the elapsed line on
+        # f.progress and not the f.detail outputs, for a cause not yet
+        # established.
+        loading = "ui/LoadingStatus.lua"
+        full = self.full_files
+        wanted = set(INPUTS) | {loading}
+        toc = b"".join(line for line in full["Nexus.toc"].splitlines(True)
+                       if not line.strip() or line.strip().startswith(b"#")
+                       or line.strip().replace(b"\\", b"/").decode("utf-8") in wanted)
+        companion = set(toc_listing(CONSUMER_TOCS[1], full[CONSUMER_TOCS[1]]))
+        base = {path: data for path, data in full.items()
+                if path in wanted or path in CONSUMER_TOCS or path in companion}
+        base["Nexus.toc"] = toc
+        real = full[loading]
+        lf = real.replace(b"\r\n", b"\n")
+        for lines in (b"\nlocal frame, lastSnapshot, startedAt, completedAt\n",
+                      b"\nlocal function EnsureFrame()\n    if frame then return frame end\n"
+                      b'    local f=CreateFrame("Frame","NexusLoadingStatusFrame",UIParent)\n'
+                      b"    frame=f\n",
+                      b"\n    return f\nend\nfunction M.Update(status,force)\n",
+                      b"\n    local f=EnsureFrame()\n",
+                      b"\n    local percent,progress=M.Progress(status)\n",
+                      b'\n    f.detail:SetText(localText.."\\n"..progress)\n',
+                      b'\n    f.progress:SetText(status.state=="ready" and "" or '
+                      b'TF("loading.status.elapsed",\n'):
+            self.assertEqual(lf.count(lines), 1, lines)     # SETUP: the current shape
+        second = ("loading.status.ready", "loading.status.see_status_for_reason",
+                  "loading.status.current_step_counted", "loading.status.current_step_records_read",
+                  "loading.status.current_step_in_progress")
+        elapsed, button = "loading.status.elapsed", "loading.button.wishlists"
+        for key in second + (elapsed, button):
+            self.assertEqual(lf.count(b'"' + key.encode() + b'"'), 1, key)      # SETUP: one site each
+
+        def measured(data):
+            receipt = self.catalog.consumer_binding_report(
+                *binding_args(with_file(base, loading, data)))
+            rows = {row["key"]: row for row in receipt["keys"]}
+            return {key: (rows[key]["binding"],
+                          sorted({(site["path"], output["output"])
+                                  for site in rows[key]["sites"] for output in site["outputs"]}),
+                          sorted((site["path"], site["reason"])
+                                 for site in rows[key]["unprovenSites"]))
+                    for key in second + (elapsed, button)}
+
+        label = ("DIRECT_LITERAL_CONSUMER", [(loading, "SetText")], [])
+        unshown = ("UNBOUND", [], [(loading, "output-not-reached")])
+        with self.subTest(case="the unedited file"):
+            # The five second-value sentences on f.detail, the elapsed line on
+            # f.progress, and, as before, the button text on f.localButton.
+            self.assertEqual(measured(real), {key: label for key in second + (elapsed, button)})
+        with self.subTest(case="a conflicting value set on the same frame through another holder"):
+            # g is the same cached frame, so its detail field is no longer
+            # only a font string; the progress field is untouched.
+            self.assertEqual(
+                measured(real + b'\ndo local g = EnsureFrame() g.detail = "plain" end\n'),
+                dict({key: unshown for key in second}, **{elapsed: label, button: label}))
+        with self.subTest(case="the helper assigned again"):
+            self.assertEqual(
+                measured(real + b"\nEnsureFrame = EnsureFrame\n"),
+                dict({key: unshown for key in second + (elapsed,)}, **{button: label}))
 
 
 # The V15 host label (C26 to C29) and the Spec toy module (C29): the toy
