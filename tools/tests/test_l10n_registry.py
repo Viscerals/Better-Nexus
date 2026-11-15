@@ -4868,6 +4868,38 @@ class ConsumerBindingTests(unittest.TestCase):
         self.assertEqual({(site["site"], site["path"], site["map"], site["dispatcher"])
                           for site in mapped},
                          {("map-value", USER_TEXT, "reasonKeys", DISPATCHER)})
+        # Normal against forced replay: the permanent guard of prove's use of
+        # one single-root search for every key with that same root (here the
+        # 34 single-entry keys of reasonKeys and the dated mapped reasons).
+        # The same cohort inputs once more, with single_root_replay forced on
+        # the one linker that call builds: every root is then searched on its
+        # own under its key's allowed set and no kept result is used. The
+        # two complete unviewed receipts must be equal, no field masked. The
+        # constructor is restored whatever happens, so no later receipt of
+        # this or another test is made in that mode.
+        linker_class = self.catalog._Linker
+        constructor = linker_class.__dict__["__init__"]
+        forced = []
+
+        def replaying(linker, *args, **kwargs):
+            constructor(linker, *args, **kwargs)
+            forced.append(getattr(linker, "single_root_replay", None))
+            linker.single_root_replay = True
+
+        linker_class.__init__ = replaying
+        try:
+            replayed = report(*binding_args(self.files))
+        finally:
+            linker_class.__init__ = constructor
+        self.assertIs(linker_class.__dict__["__init__"], constructor)
+        # Exactly one linker was built for that call, with the switch off by
+        # default, so the replay was really forced and nothing else was.
+        self.assertEqual(forced, [False])
+        self.assertIs(type(replayed), dict)
+        self.assertEqual(sorted(field for field in set(receipt) | set(replayed)
+                                if field not in receipt or field not in replayed
+                                or receipt[field] != replayed[field]), [])
+        self.assertTrue(replayed == receipt)
         # Every real dispatcher caller disconnected (as in C15): nothing of
         # T.Message is shown, so every one of them is a site without an output.
         callers = {"core/WishlistController.lua": (b"Nexus.UserText.Message(message)",),

@@ -5079,6 +5079,11 @@ class _UnitFlow:
         self.def_statement = {}
         self.target_statement = {}
         self.declared = set()   # values given by local declarations (not later assignments)
+        # Write-once memos (objects, module_ok): an entry, once final, is
+        # never changed or dropped. object_memo holds a provisional entry
+        # only while objects computes it, seen only by that computation; no
+        # linker search may run inside one. _Linker.prove relies on both for
+        # object_memo when it uses one single-root search for several keys.
         self.object_memo, self.module_ok_memo = {}, {}
         self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
         self.block(body, None)
@@ -6450,6 +6455,13 @@ class _Linker:
         for unit in self.units:
             for path, rows in unit.scan.path_assignments.items():
                 self.assignments.setdefault(path, []).extend(rows)
+        # field_cache, receiver_memo and output_memo must stay write-once:
+        # an entry, once final, is never changed or dropped (receiver_memo
+        # holds a provisional False only while that entry is computed), and
+        # search must never run inside such a computation. prove relies on
+        # both when it uses one single-root search for several keys; C36
+        # compares its receipt with a forced single_root_replay. ret_links
+        # is written in this constructor only.
         self.field_cache, self.ret_links, self.receiver_memo = {}, {}, {}
         self.output_memo = {}
         # {Nexus path assignment target: its load point (unit order,
