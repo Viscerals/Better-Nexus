@@ -37,11 +37,17 @@ to a player or that it should be translated.
 """
 from __future__ import annotations
 import argparse, json, pathlib, sys
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NEWLINE = {'\n', '\r'}
 DIGITS = set('0123456789')
 ESCAPES = {'a': '\a', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v'}
+# Per opening quote: the longest run of characters that Scanner.short_string
+# appends one at a time, unchanged. The class excludes exactly four
+# characters: that quote, the backslash, '\n' and '\r'. Fixed at import; no
+# input or result is kept.
+PLAIN_SPANS = {quote: re.compile('[^' + quote + '\\\\\n\r]*') for quote in ('"', "'")}
 MESSAGES = {
     'missing': 'no such file',
     'outside-root': 'the path is outside --root',
@@ -119,10 +125,46 @@ class Scanner:
                 self.index += 1
 
     def short_string(self, quote: str, line: int, column: int) -> bytes:
-        """The value of a quoted string whose opening quote is here."""
+        """The value of a quoted string whose opening quote is here.
+
+        A run of characters that are not the quote, a backslash or a line
+        break (PLAIN_SPANS) is appended in one step: its UTF-8 bytes are the
+        bytes the character-by-character branch below would append, index
+        ends where that branch would leave it, and line and line_start are
+        not touched by either. If the run holds a character that cannot be
+        encoded (a lone surrogate), only the run before it is taken, after
+        the encoding error has been left, and the branch below then meets that
+        character and raises exactly as before. Every other character (the
+        quote, an escape, a line break, the end of the text) is read by the
+        loop below, unchanged. The run is taken only for an exact Scanner
+        with an exact str text, an exact str quote of the two quote marks
+        and an exact int index of at least 0; any other call reads every
+        character through the loop below, as before."""
         self.index += 1
         value = bytearray()
+        plain = None
+        if type(self) is Scanner and type(self.text) is str and type(quote) is str \
+                and type(self.index) is int and self.index >= 0:
+            plain = PLAIN_SPANS.get(quote)
         while True:
+            if plain is not None:
+                start = self.index
+                end = plain.match(self.text, start).end()
+                if end > start:
+                    span = self.text[start:end]
+                    stop = None
+                    try:
+                        encoded = span.encode('utf-8')
+                    except UnicodeEncodeError as error:
+                        stop = error.start
+                    # Outside the except clause: an error the loop below
+                    # raises next is not chained to the one caught here.
+                    if stop is None:
+                        stop = end - start
+                    else:
+                        encoded = span[:stop].encode('utf-8')
+                    value += encoded
+                    self.index = start + stop
             char = self.peek()
             if char == '' or char in NEWLINE:
                 raise SourceError('unfinished-string', line, column)

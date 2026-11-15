@@ -373,5 +373,142 @@ class FileSystemErrorTests(unittest.TestCase):
                 self.assertEqual(run.after, run.before)
 
 
+def load_tool():
+    """The tool module, loaded in this process from its file. Its command line
+    does not run (the module is not __main__) and no bytecode is written."""
+    import importlib.util
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location('l10n_inventory_scanner_under_test', TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
+class ScannerShortStringTests(unittest.TestCase):
+    """Scanner.short_string called directly: the value, the scanner state
+    after the call, and the first error with its exact payload. Every
+    expectation is written out by hand from the Lua 5.1 rules the docstring
+    states; none is computed by another copy of the scanner. The line and
+    column given to the call (7 and 9) are what an error must carry; the
+    scanner's own line state is set apart from them to show it is untouched."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tool = load_tool()
+
+    def short(self, text, at=0, state=(3, 0), quote=None, scanner=None):
+        """(value or raised error, index, line, line_start) after
+        short_string on text with the opening quote at index at."""
+        scanner = self.tool.Scanner(text) if scanner is None else scanner
+        scanner.index = at
+        scanner.line, scanner.line_start = state
+        quote = text[at] if quote is None else quote
+        try:
+            result = scanner.short_string(quote, 7, 9)
+        except Exception as error:      # every outcome is checked exactly below
+            result = error
+        return result, scanner.index, scanner.line, scanner.line_start
+
+    def assert_value(self, outcome, value, index, line=3, line_start=0):
+        result = outcome[0]
+        self.assertIs(type(result), bytes, result)
+        self.assertEqual(outcome, (value, index, line, line_start))
+
+    def assert_source_error(self, outcome, code, index, line=3, line_start=0):
+        error = outcome[0]
+        self.assertIs(type(error), self.tool.SourceError, error)
+        self.assertEqual((error.args, error.code, error.line, error.column),
+                         ((code,), code, 7, 9))
+        self.assertEqual(outcome[1:], (index, line, line_start))
+
+    def assert_encode_error(self, outcome, character, index):
+        error = outcome[0]
+        self.assertIs(type(error), UnicodeEncodeError, error)
+        self.assertEqual((error.encoding, error.object, error.start, error.end, error.reason),
+                         ('utf-8', character, 0, 1, 'surrogates not allowed'))
+        self.assertEqual(error.args, ('utf-8', character, 0, 1, 'surrogates not allowed'))
+        self.assertIsNone(error.__context__)
+        self.assertIsNone(error.__cause__)
+        self.assertEqual(outcome[1:], (index, 3, 0))
+
+    def test_plain_text_in_either_quote_with_the_other_quote_inside(self):
+        # The opening quote at index 4 of a longer line; the state is kept.
+        self.assert_value(self.short('x = "a\'b" y', at=4, state=(5, 1)), b"a'b", 9, 5, 1)
+        self.assert_value(self.short('\'say "hi"\''), b'say "hi"', 10)
+        self.assert_value(self.short('""'), b'', 2)
+        self.assert_value(self.short("''"), b'', 2)
+        self.assert_value(self.short('"' + 'a' * 100000 + '"'), b'a' * 100000, 100002)
+
+    def test_multibyte_text_counts_characters_and_keeps_its_utf8_bytes(self):
+        self.assert_value(self.short('"caf\u00e9 \u2014 \U0001f600"'),
+                          b'caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80', 10)
+
+    def test_controls_nul_and_line_separator_are_plain_characters(self):
+        self.assert_value(self.short('"\t\f\x00\u2028\x0b|"'),
+                          b'\t\x0c\x00\xe2\x80\xa8\x0b|', 8)
+
+    def test_escapes_between_plain_runs(self):
+        self.assert_value(self.short('"a\\tb\\"c\\\\d\\qe"'), b'a\tb"c\\dqe', 15)
+        self.assert_value(self.short('"\\a\\b\\f\\n\\r\\t\\v"'), b'\a\b\f\n\r\t\v', 16)
+        self.assert_value(self.short("'it\\'s'"), b"it's", 7)
+
+    def test_decimal_escapes_take_at_most_three_digits(self):
+        self.assert_value(self.short('"\\65\\066\\0067x"'), b'AB\x067x', 15)
+        self.assert_value(self.short('"\\255"'), b'\xff', 6)
+        self.assert_value(self.short('"\\0"'), b'\x00', 4)
+        self.assert_source_error(self.short('"x\\256y"'), 'invalid-escape', 6)
+
+    def test_each_escaped_line_break_is_one_newline_counted_once(self):
+        for separator in ('\n', '\r', '\r\n', '\n\r'):
+            with self.subTest(separator=separator):
+                after = 3 + len(separator)
+                self.assert_value(self.short('"a\\' + separator + 'b"'), b'a\nb', after + 2,
+                                  4, after)
+        # Two equal breaks are two lines: the second is a raw break.
+        for separator in ('\r\r', '\n\n'):
+            with self.subTest(separator=separator):
+                self.assert_source_error(self.short('"a\\' + separator + 'b"'),
+                                         'unfinished-string', 4, 4, 4)
+
+    def test_a_raw_line_break_or_the_end_leaves_the_string_unfinished(self):
+        self.assert_source_error(self.short('"ab\ncd"'), 'unfinished-string', 3)
+        self.assert_source_error(self.short('"ab\rcd"'), 'unfinished-string', 3)
+        self.assert_source_error(self.short('"abc'), 'unfinished-string', 4)
+        self.assert_source_error(self.short('"'), 'unfinished-string', 1)
+        self.assert_source_error(self.short('"ab\\'), 'unfinished-string', 4)
+
+    def test_an_unencodable_character_raises_where_it_stands(self):
+        # Only a direct Scanner input can hold a lone surrogate: the tools
+        # decode files strictly. The error is the one the character's own
+        # encoding raises, with no other exception attached.
+        self.assert_encode_error(self.short('"a\ud800b"'), '\ud800', 3)
+        self.assert_encode_error(self.short('"\ud83d\ude00z"'), '\ud83d', 2)
+        self.assert_encode_error(self.short('"\\n\udc00"'), '\udc00', 4)
+
+    def test_other_text_quote_and_scanner_types_read_as_before(self):
+        class Upper(str):
+            def __getitem__(self, index):
+                return str.__getitem__(self, index).upper()
+
+        class Shout(self.tool.Scanner):
+            def peek(self, offset=0):
+                return super().peek(offset).upper()
+
+        class Quote(str):
+            pass
+
+        self.assert_value(self.short(Upper('"ab"')), b'AB', 4)
+        self.assert_value(self.short('"ab"', scanner=Shout('"ab"')), b'AB', 4)
+        self.assert_value(self.short('"ab"', quote=Quote('"')), b'ab', 4)
+        # A character other than the two quote marks closes its own string.
+        self.assert_value(self.short('xabx', quote='x'), b'ab', 4)
+        # An index below the text's start reads from its end, as indexing does.
+        self.assert_value(self.short('"xy"', at=-4), b'xy', 0)
+
+
 if __name__ == '__main__':
     unittest.main()
