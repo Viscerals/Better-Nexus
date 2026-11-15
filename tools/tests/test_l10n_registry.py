@@ -3677,6 +3677,121 @@ class ConsumerBindingTests(unittest.TestCase):
                 self.assertEqual([row["binding"] for row in receipt["keys"]],
                                  ["UNBOUND"] * len(CURRENT_KEYS))
 
+    def test_c27_rawget_of_an_ordinary_global_is_one_read_while_rawget_is_the_builtin(self):
+        # Registry rawget repair (current repository, core/GameAdapter.lua:
+        # rawget(_G, "NexusDB"), a metamethod-free read of the saved data).
+        # rawget(_G, key) is the read of one ordinary global, like _G.key,
+        # only in this exact form: the global name rawget, the global name _G
+        # and a static key that names no tracked global, and only while no
+        # loaded source assigns rawget. Every other form still opens the
+        # environment at its own reference. The expected positions below are
+        # computed from the appended bytes, never read from the tool.
+        progress = "panel.heading.progress"
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        method = b'specLabel:SetText(' + text + b':upper())'
+        host, other = "core/SessionPause.lua", "core/WishlistController.lua"
+        read = b'local saved = rawget(_G, "NexusDB")'
+        first = (self.files[host] + V15_LABEL).count(b"\n") + 1
+        self.assertIn(other, self.files)
+        self.assertNotEqual(host, other)
+
+        # 1. The safe read keeps the whole gate: no mutation problem, every
+        # dated key bound, and the progress heading bound by the hosted site.
+        with self.subTest(case="the safe read keeps the whole gate"):
+            receipt = self.receipt(self.hosted(read + b' ' + method))
+            self.assertEqual(self.problems(receipt, "binding-mutation"), [])
+            assert_binding_receipt(self, receipt)
+            row = self.binding(receipt, progress)
+            self.assertEqual({site["path"] for site in row["sites"] if site["outputs"]}, {host})
+            self.assertEqual([site["line"] for site in row["sites"] if site["outputs"]], [first])
+        # Its other safe shapes, each judged by its own site in one receipt.
+        self.per_site((
+            ("a static key", read + b' ' + method, True),
+            ("a concatenated static key",
+             b'local saved = rawget(_G, "Nexus" .. "DB") ' + method, True),
+            ("an unassigned local static key",
+             b'local name = "NexusDB" local saved = rawget(_G, name) ' + method, True),
+            ("the value read on with rawget inside a function",
+             b'local function mark() local root = rawget(_G, "NexusDB") '
+             b'return type(root) == "table" and rawget(root, "chars") or nil end mark() '
+             + method, True)))
+
+        # 2. Every other form refuses for its own reason: one mutation problem
+        # at the reference that opens the environment, and nothing bound.
+        # (name, code after the bound call, bytes that locate the reference,
+        # offset of the reference in them)
+        opened = (
+            ("a local named rawget",
+             b'local rawget = function(t, k) return t end local e = rawget(_G, "NexusDB")',
+             b'rawget(_G', 7),
+            ("a parameter named rawget",
+             b'local function f(rawget) return rawget(_G, "NexusDB") end', b'rawget(_G', 7),
+            ("a local alias of rawget",
+             b'local get = rawget local e = get(_G, "NexusDB")', b'get(_G', 4),
+            ("rawget assigned before the read",
+             b'rawget = function(t, k) return t end local e = rawget(_G, "NexusDB")',
+             b'rawget(_G', 7),
+            ("rawget assigned after the read",
+             b'local e = rawget(_G, "NexusDB") rawget = function(t, k) return t end',
+             b'rawget(_G', 7),
+            ("rawget defined as a global function",
+             b'function rawget(t, k) return t end local e = rawget(_G, "NexusDB")',
+             b'rawget(_G', 7),
+            ("rawget replaced through _G",
+             b'_G.rawget = function(t, k) return t end local e = rawget(_G, "NexusDB")',
+             b'rawget(_G', 7),
+            ("rawget replaced under a static _G key",
+             b'_G["raw" .. "get"] = function(t, k) return t end local e = rawget(_G, "NexusDB")',
+             b'rawget(_G', 7),
+            ("the environment itself read",
+             b'local e = rawget(_G, "_G") e.pairs = pairs', b'rawget(_G', 7),
+            ("an environment opener read", b'local f = rawget(_G, "setfenv")', b'rawget(_G', 7),
+            ("the Nexus root read", b'local n = rawget(_G, "Nexus")', b'rawget(_G', 7),
+            ("the string library read", b'local s = rawget(_G, "string")', b'rawget(_G', 7),
+            ("a trusted function read", b'local p = rawget(_G, "pairs")', b'rawget(_G', 7),
+            ("an unknown key", b'local e = rawget(_G, specLabel:GetName())', b'rawget(_G', 7),
+            ("a reassigned local key",
+             b'local name = "NexusDB" name = "_G" local e = rawget(_G, name)', b'rawget(_G', 7),
+            ("no key", b'local e = rawget(_G)', b'rawget(_G', 7),
+            ("the environment through an alias",
+             b'local G = _G local e = rawget(G, "NexusDB")', b'= _G', 2),
+            # A real mutation beside the safe read is reported at the mutation,
+            # not at the read.
+            ("the environment written beside a safe read",
+             read + b' rawset(_G, "pairs", pairs)', b'rawset(_G', 7),
+            ("an environment function beside a safe read",
+             read + b' setfenv(1, {})', b'setfenv', 0),
+        )
+        for name, code, needle, offset in opened:
+            with self.subTest(case=name):
+                line = method + b' ' + code
+                self.assertEqual(line.count(needle), 1)
+                column = line.index(needle) + offset + 1
+                receipt = self.receipt(self.hosted(line))
+                self.assertEqual([(problem["path"], problem["construct"], problem["line"],
+                                   problem["column"]) for problem
+                                  in self.problems(receipt, "binding-mutation")],
+                                 [(host, "global-environment", first, column)])
+                self.assertEqual([row["binding"] for row in receipt["keys"]],
+                                 ["UNBOUND"] * len(CURRENT_KEYS))
+
+        # 3. rawget replaced in ANOTHER loaded file: the read in this file is
+        # no longer the builtin's, so it is the reference reported, here.
+        line = method + b' ' + read
+        column = line.index(b'rawget(_G') + 7 + 1
+        for name, write in (("by name", b'\nrawget = function(t, k) return t end\n'),
+                            ("through _G", b'\n_G.rawget = function(t, k) return t end\n')):
+            with self.subTest(case="rawget replaced in another loaded file " + name):
+                files = self.hosted(line)
+                files = with_file(files, other, files[other] + write)
+                receipt = self.receipt(files)
+                self.assertEqual([(problem["path"], problem["construct"], problem["line"],
+                                   problem["column"]) for problem
+                                  in self.problems(receipt, "binding-mutation")],
+                                 [(host, "global-environment", first, column)])
+                self.assertEqual([row["binding"] for row in receipt["keys"]],
+                                 ["UNBOUND"] * len(CURRENT_KEYS))
+
     def test_c28_format_arguments_bind_only_when_shown(self):
         # V15 review fix (STD-V15-1, STD-8849-1): a format argument flows to
         # its result only when a static Lua 5.1 format shows it with %s and

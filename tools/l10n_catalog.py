@@ -4816,7 +4816,10 @@ class _UnitFlow:
         # Computed _G[k] reads (STD-8849-2): (read, function) while walking;
         # then, for each read proved harmless only on conditions the linker
         # checks, (read, globals that must stay unassigned, method names it
-        # is the receiver of, method names it is an argument of).
+        # is the receiver of, method names it is an argument of). The
+        # environment argument of a rawget(_G, "name") read of an ordinary
+        # global is recorded the same way while walking, on the one condition
+        # that rawget stays unassigned (raw_global_read).
         self.env_reads, self.env_read_conditions = [], []
         # Load-time establishment (V15 review fix SPEC-V15-2, unused initializer;
         # STD-8849-3 ordering, see load_points): the statement of each
@@ -5444,13 +5447,51 @@ class _UnitFlow:
             self.call_args.setdefault(arg, []).append((param.binding, call))
             self.param_args.setdefault(param.binding, []).append(arg)
 
+    def raw_global_read(self, callee, args):
+        """True for rawget(_G, key) when it is the read of one ordinary global
+        and nothing more, so its environment argument is no escape of the
+        environment: the callee is the global name rawget itself (a local of
+        that name, a parameter or an alias has a binding and is never this
+        form), there are exactly two arguments, the first is the global name
+        _G itself (not a local holding it, a field or a parenthesized form)
+        and the second is a static string (_static_string) that names no
+        tracked global (_ENV_TRACKED: the environment, the string library,
+        Nexus, the trusted functions and client roots, the environment
+        openers and the debug functions). The read then equals the static
+        field read _G.key, which is no escape either (global_value), without
+        its metamethods; its result is an opaque call result here, so no text
+        and no field value flows through it.
+        The proof holds only while rawget stays the builtin in every loaded
+        unit. That is a linker condition, recorded like those of a computed
+        _G[k] read (env_read_conditions, read by _Linker.env_read_refuted):
+        once any loaded source assigns the global rawget, by name or through
+        _G, the environment argument is an escape again and is reported at
+        its own position. Every other form is left to the ordinary walk, so
+        its _G argument opens the environment as before."""
+        if not (callee.kind == 'name' and callee.binding is None and callee.value == 'rawget'
+                and len(args) == 2 and args[0].kind == 'name' and args[0].binding is None
+                and args[0].value == _ENV):
+            return False
+        key = _static_string(args[1])
+        if key is None or key in _ENV_TRACKED:
+            return False
+        if not any(row[0] is args[0] for row in self.env_read_conditions):
+            self.env_read_conditions.append((args[0], frozenset(('rawget',)), frozenset(),
+                                             frozenset()))
+        return True
+
     def call(self, node, func):
         callee, args = node.func, node.args
         self.expr(callee, func)
         if callee.kind == 'name' and callee.binding is None and callee.value == 'type' \
                 and len(args) == 1:
             self.type_args.add(args[0])
-        for arg in args:
+        # rawget(_G, "name"): the environment argument is not walked as a
+        # value (raw_global_read); the key and every other call are as before.
+        raw_read = self.raw_global_read(callee, args)
+        for position, arg in enumerate(args):
+            if raw_read and position == 0:
+                continue
             self.expr(arg, func)
         if callee.kind == 'name' and callee.binding is None and callee.value == 'getmetatable':
             self.getmetatable_calls.append(node)
