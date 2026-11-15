@@ -2819,6 +2819,16 @@ local function ApplyWantedVisibility()
     if panelWantedVisible and not menuSuppressed
         and renderState.committed and not renderState.applying then
         frame:Show()
+        -- The panel's first Show: the widths its never-shown layout pass
+        -- measured are read again, once (M.AfterFirstShow). Protected; its
+        -- own failures end in a layout pass or in a withdrawn commit, never
+        -- in a changed text under this one. When its one re-layout failed
+        -- or the commit was withdrawn the panel is hidden again, and this
+        -- answers so.
+        if not frame._nexusFirstShown then
+            pcall(M.AfterFirstShow)
+            if not renderState.committed then return false end
+        end
         return true
     end
     if panelWantedVisible and not menuSuppressed and not renderState.committed then
@@ -6062,12 +6072,143 @@ function M.LineWidth(text, line)
     local ok, measured = pcall(text.GetStringWidth, text)
     if held and held > 0 then text:SetWidth(held) end
     measured = ok and tonumber(measured) or nil
-    if measured and measured > 0 and measured < math.huge then return measured end
+    if measured and measured > 0 and measured < math.huge then
+        -- Noted only while the panel has never been shown (M.AfterFirstShow).
+        if frame and not frame._nexusFirstShown then M.NoteFirstWidth(text, line, measured) end
+        return measured
+    end
     local metrics = Nexus.LayoutMetrics
     local scale = metrics and metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
     local char = metrics and metrics.ConservativeText and metrics.ConservativeText(scale) or 7
     local visible = tostring(line or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     return #(visible:gsub("[\128-\191]", "")) * char
+end
+
+------------------------------------------------------------------------
+-- First-show widths (native QA test.163037). The client reports another
+-- width for a text while its frame is hidden and has never been shown than
+-- it reports once that frame has been shown; hiding the frame again changes
+-- nothing. That was observed with a probe frame. Why the client does it is
+-- not known, and nothing here assumes a rule, a ratio or a direction.
+-- The panel's first layout pass runs in exactly that state: EnsureFrame
+-- hides the new panel, and it is shown only after the commit
+-- (ApplyWantedVisibility). The boxes that pass gave its one-line texts then
+-- stood at widths the shown texts no longer reported, so the client
+-- shortened them (the Wishlist caption, CALLBOARD, PROGRESS) until some
+-- later layout pass happened to measure them again.
+-- While the panel has never been shown, M.LineWidth notes what the client
+-- measured: per text its words, its width and its nominal font and size
+-- (M.NoteFirstWidth). At the panel's first Show, once (M.AfterFirstShow),
+-- each noted text that still holds those words in that font is read again
+-- as M.LineWidth reads it, without setting its words
+-- (M.FirstShownWidthsDiffer). Only when a reading differs is the committed
+-- model laid out once more, on the shown panel, so every block is measured
+-- as it is shown: at most one further layout pass, and none on a client
+-- whose readings agree. Nothing is padded or fitted, no font, scale or
+-- saved value is touched, no script, event or timer is used, and the notes
+-- are dropped at that first Show whatever they say. A panel that is never
+-- shown keeps one note per measured text, no more.
+------------------------------------------------------------------------
+function M.NoteFirstWidth(text, line, measured)
+    if not frame or frame._nexusFirstShown then return end
+    local noted = frame._nexusFirstWidths
+    if not noted then
+        noted = {}
+        frame._nexusFirstWidths = noted
+    end
+    local entry = noted[text]
+    if not entry then
+        entry = {}
+        noted[text] = entry
+    end
+    local okFont, path, size = pcall(text.GetFont, text)
+    entry.line, entry.width = line, measured
+    entry.path, entry.size = okFont and path or nil, okFont and size or nil
+end
+
+-- Whether a noted text now reports another width, and whether reading it
+-- left a text's box in doubt. The notes are released first, so they are read
+-- once. A text whose words or font have changed since is not compared: its
+-- note is no longer about what it shows.
+-- This runs after the commit, on the shown panel, so it must not leave a
+-- text changed under that commit. Each widget call is protected. A text
+-- whose width cannot be read is not touched. Once a text's box has been
+-- released, a release or a restore that fails means the box is no longer
+-- known to be the one the layout gave it: the restore is tried once, never
+-- again, and the answer is `true, true` at once (differ, in doubt), so the
+-- caller replaces every box through a layout pass or withdraws the commit
+-- (M.AfterFirstShow). Returns differ, inDoubt.
+function M.FirstShownWidthsDiffer()
+    if not frame then return false, false end
+    local noted = frame._nexusFirstWidths
+    frame._nexusFirstWidths = nil
+    if type(noted) ~= "table" then return false, false end
+    for text, entry in pairs(noted) do
+        local okText, words = pcall(text.GetText, text)
+        local okFont, path, size = pcall(text.GetFont, text)
+        local okHeld, held = pcall(text.GetWidth, text)
+        if okText and words == entry.line and okFont and path == entry.path and size == entry.size and okHeld then
+            held = tonumber(held)
+            -- (The box released and restored, as M.LineWidth measures.)
+            local okRelease = pcall(text.SetWidth, text, 0)
+            local okRead, now = false, nil
+            if okRelease then okRead, now = pcall(text.GetStringWidth, text) end
+            local okRestore = true
+            if held and held > 0 then okRestore = pcall(text.SetWidth, text, held) end
+            if not (okRelease and okRestore) then return true, true end
+            now = okRead and tonumber(now) or nil
+            if now and now > 0 and now < math.huge and math.abs(now - entry.width) > 0.01 then
+                return true, false
+            end
+        end
+    end
+    return false, false
+end
+
+-- Called from ApplyWantedVisibility right after the panel's first Show,
+-- which only a committed, non-applying panel reaches. One-shot: the mark is
+-- set before anything else, so the render below, whose own commit comes
+-- back through ApplyWantedVisibility, cannot come here again.
+-- When a reading differs: a new shown revision (part of the layout key,
+-- M.Render), the header's own key and row heights released so its captions
+-- and names are measured again too, and the committed model rendered once
+-- (Render only, as M.FollowPanelWidth does: no refresh step and no action).
+-- While that cannot run now (no committed model, a move in progress) the
+-- revision alone stands, and the next ordinary render takes that one pass.
+-- A failed render is the render's own failure (the panel is hidden and
+-- uncommitted until the next refresh); M.Render then answers for it.
+-- A reading that left a box in doubt (a failed release or restore, or the
+-- reading itself raising) is never passed over: it takes the same one layout
+-- pass, which places every box again through the ordinary transaction. If
+-- that pass did not run or did not commit while the panel is still
+-- committed, the commit is withdrawn the way a failed render withdraws it
+-- (no certified tree, uncommitted, hidden, a failure counted), so no damaged
+-- text stays shown under a commit, M.Render answers false for it, and the
+-- next ordinary refresh applies the panel in full. One attempt: the mark
+-- above is already set, so nothing here runs twice.
+function M.AfterFirstShow()
+    if not frame or frame._nexusFirstShown then return false end
+    frame._nexusFirstShown = true
+    local okRead, differ, inDoubt = pcall(M.FirstShownWidthsDiffer)
+    if not okRead then differ, inDoubt = true, true end
+    if not differ then return false end
+    frame._nexusShownRevision = (frame._nexusShownRevision or 0) + 1
+    frame._nexusHeaderKey, frame._nexusHeaderRows = nil, nil
+    local rendered = false
+    if M._lastModel and not M._panelDrag and not renderState.applying then
+        local okRender, result = pcall(M.Render, M._lastModel)
+        rendered = okRender and result ~= false
+    end
+    if inDoubt and not rendered and renderState.committed then
+        renderState.signatures = nil
+        renderState.committed = false
+        renderState.hadFailure = true
+        renderStats.failures = renderStats.failures + 1
+        frame:Hide()
+        pcall(M.SettlePanelDrag)
+        pcall(M.RefreshExtraList)
+    end
+    return rendered
 end
 
 -- The offer heading (Readout.OfferHeadingForms: whose choice the offer is),
@@ -9406,6 +9547,11 @@ function M.Render(model)
         frame._nexusFaceRevision = (frame._nexusFaceRevision or 0) + 1
     end
     signatures.layout = signatures.layout .. "|face:" .. tostring(frame._nexusFaceRevision)
+    -- Widths measured while the panel had never been shown and found
+    -- different at its first Show are a new shown revision
+    -- (M.AfterFirstShow): one layout pass measures them on the shown panel.
+    -- 0, and unchanged for good, on a client whose readings agree.
+    signatures.layout = signatures.layout .. "|shown:" .. tostring(frame._nexusShownRevision or 0)
     -- The Orb run line wraps in full: its wrapped height is geometry, its
     -- words are not (a changed line of the same height stays a settled
     -- render, C-03).
@@ -9478,7 +9624,11 @@ function M.Render(model)
     -- neither can undo the commit.
     pcall(M.UpdatePauseBanner)
     pcall(M.RefreshExtraList)
-    return true
+    -- True for this commit. The one case in which it no longer stands: the
+    -- single re-layout after the panel's first Show (M.AfterFirstShow) ran
+    -- inside ApplyWantedVisibility above and failed, which left the panel
+    -- hidden and uncommitted; the caller is then told so.
+    return renderState.committed == true
 end
 
 -- Issue #171 (UI slice): the session pause is owned by Nexus.SessionPause
