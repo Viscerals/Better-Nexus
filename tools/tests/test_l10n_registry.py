@@ -5392,13 +5392,28 @@ class ConsumerCommandLineTests(unittest.TestCase):
     def test_repository_root(self):
         # main() on the actual repository root (named explicitly, so the
         # result never depends on where the tool file lives) reads both TOCs
-        # and all 100 loaded files itself and writes exactly the API receipt.
-        run = self.run_cli("--root", ROOT, "--consumers")
-        self.assertEqual((run.returncode, run.stderr), (0, b""))
-        record = json.loads(run.stdout)
-        self.assertEqual((record["record"], record["exitCode"]), ("consumers", 0))
+        # and all 100 loaded files itself and writes exactly the API receipt,
+        # with the exit status the documented --consumers contract gives that
+        # receipt: 2 while it is not valid; else 0, or 1 with
+        # --require-complete (completeness is never established). The
+        # receipt's validity is taken from the independent API call on the
+        # same bytes, never from the command line. This checks the command
+        # line's status and serialization only. Whether the repository's
+        # receipt is valid at all is the registered gate (C2), which stays
+        # strict: the current receipt is invalid, so exit 2 is expected here
+        # while C2 fails.
         expected = s8_catalog().consumer_binding_report(*binding_args(s8_files()))
-        self.assertEqual(record["consumers"], json.loads(json.dumps(expected)))
+        valid = expected["valid"]
+        self.assertIs(type(valid), bool)
+        self.assertIs(valid, not expected["problems"])
+        status, held_status = (0, 1) if valid else (2, 2)
+        shown = json.loads(json.dumps(expected))
+        run = self.run_cli("--root", ROOT, "--consumers")
+        self.assertEqual((run.returncode, run.stderr), (status, b""))
+        record = json.loads(run.stdout)
+        self.assertEqual((record["record"], record["exitCode"], record["requireComplete"]),
+                         ("consumers", status, "not_requested"))
+        self.assertEqual(record["consumers"], shown)
         self.assertEqual(len(record["consumers"]["sources"]), 100)
         # A real process on a small confined root: the same entry point, exit
         # status and one record, with unbound keys there (exit 2).
@@ -5415,8 +5430,14 @@ class ConsumerCommandLineTests(unittest.TestCase):
             receipt = json.loads(process.stdout)["consumers"]
             self.assertEqual((len(receipt["sources"]), receipt["counts"]["UNBOUND"]),
                              (4, CURRENT_FULL_UI_KEYS))
+        # --require-complete on the same root: the same receipt, the status
+        # the contract gives it (1 only for a valid receipt, 2 while invalid).
         held = self.run_cli("--root", ROOT, "--consumers", "--require-complete")
-        self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
+        held_record = json.loads(held.stdout)
+        self.assertEqual((held.returncode, held.stderr, held_record["exitCode"],
+                          held_record["requireComplete"]),
+                         (held_status, b"", held_status, "requested"))
+        self.assertEqual(held_record["consumers"], shown)
         for args, code in ((("--consumers", "--consumers"), "argument-duplicate"),
                            (("--consumers", "--diagnose"), "argument-conflict"),
                            (("--provenance", "--consumers"), "argument-conflict")):
