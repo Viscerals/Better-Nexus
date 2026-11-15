@@ -3655,10 +3655,23 @@ class _LuaParser:
         return _Node('table', start, fields=fields)
 
 
+# Exactly the kinds that the branches of _children below compare against.
+# Every other kind (a name, string, constant, break, field or result node,
+# or any future kind) has no children there; for such a kind given as an
+# exact str, _children returns a new empty list at once instead of testing
+# every branch first. Fixed at import; it holds no input. The test file's
+# children drift guard derives this set from the branches and must equal it.
+_CHILD_KINDS = frozenset(('local', 'return', 'localfunction', 'funcstat', 'assign', 'callstat',
+                          'do', 'function', 'while', 'repeat', 'if', 'fornum', 'forin', 'call',
+                          'method', 'index', 'paren', 'operation', 'table'))
+
+
 def _children(node):
     """The direct child nodes of node, in source order. Declared names are
     not children: they are not expressions."""
     kind = node.kind
+    if type(kind) is str and kind not in _CHILD_KINDS:
+        return []
     if kind in ('local', 'return'):
         return list(node.exprs)
     if kind == 'localfunction':

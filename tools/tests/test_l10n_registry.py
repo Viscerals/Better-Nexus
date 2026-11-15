@@ -41,6 +41,7 @@ PYTHON_TESTS of tools/run_prototype_tests.py.
 Run directly:  python tools/tests/test_l10n_registry.py -v
 """
 
+import ast
 import hashlib
 import importlib.util
 import inspect
@@ -5326,6 +5327,159 @@ setmetatable(T, {__index = function(_, name)
     end
 end})
 ''' + TOY_SHOW
+
+
+class ChildrenTests(unittest.TestCase):
+    """_children (the direct children of one syntax-tree node) on nodes made
+    directly with the tool's _Node: each branch kind gives its children in
+    source order as a new list; every other kind gives a new empty list; a
+    kind that is not an exact str goes through the branches as it always
+    did; and the fixed set of branch kinds (_CHILD_KINDS) is the set the
+    branches themselves compare against, read from the tool's source. No
+    input file is parsed and no receipt is made."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tool = s8_catalog()
+        cls.module_tree = ast.parse(inspect.getsource(cls.tool))
+        cls.at = type("At", (), {"line": 1, "column": 1})()
+
+    def node(self, kind, **fields):
+        return self.tool._Node(kind, self.at, **fields)
+
+    def branch_comparisons(self):
+        """(the kind strings _children's branches test with == or in, every
+        other comparison of kind there as (operator, target source))."""
+        function = next(item for item in self.module_tree.body
+                        if isinstance(item, ast.FunctionDef) and item.name == "_children")
+        kinds, others = set(), []
+        for item in ast.walk(function):
+            if not (isinstance(item, ast.Compare) and isinstance(item.left, ast.Name)
+                    and item.left.id == "kind"):
+                continue
+            self.assertEqual(len(item.ops), 1, ast.dump(item))
+            operator, target = item.ops[0], item.comparators[0]
+            if isinstance(operator, ast.Eq) and isinstance(target, ast.Constant):
+                kinds.add(target.value)
+            elif isinstance(operator, ast.In) and isinstance(target, ast.Tuple):
+                for element in target.elts:
+                    self.assertIsInstance(element, ast.Constant, ast.dump(item))
+                    kinds.add(element.value)
+            else:
+                others.append((type(operator).__name__, ast.unparse(target)))
+        return kinds, others
+
+    def created_kinds(self):
+        """Every kind the tool's source gives _Node as a literal first argument."""
+        return {item.args[0].value for item in ast.walk(self.module_tree)
+                if isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+                and item.func.id == "_Node" and item.args
+                and isinstance(item.args[0], ast.Constant) and type(item.args[0].value) is str}
+
+    def ids(self, values):
+        return [id(value) for value in values]
+
+    def test_the_fixed_branch_kinds_are_the_kinds_the_branches_compare(self):
+        kinds, others = self.branch_comparisons()
+        self.assertTrue(all(type(kind) is str for kind in kinds), kinds)
+        self.assertEqual(len(kinds), 19)
+        self.assertIs(type(self.tool._CHILD_KINDS), frozenset)
+        self.assertEqual(kinds, set(self.tool._CHILD_KINDS))
+        # The only other comparison of kind is the early exit on that set.
+        self.assertEqual(others, [("NotIn", "_CHILD_KINDS")])
+        # Every branch kind is one the parser or the flow creates.
+        self.assertLessEqual(kinds, self.created_kinds())
+
+    def test_every_other_kind_gives_a_new_empty_list(self):
+        # The leaf kinds are read from the tool's own _Node constructors.
+        leaves = self.created_kinds() - self.branch_comparisons()[0]
+        self.assertTrue({"name", "string", "constant"} <= leaves, sorted(leaves))
+        for kind in sorted(leaves) + ["not-a-kind", ""]:
+            with self.subTest(kind=kind):
+                item = self.node(kind)
+                first, second = self.tool._children(item), self.tool._children(item)
+                self.assertEqual((type(first), first, type(second), second), (list, [], list, []))
+                self.assertIsNot(first, second)
+                first.append(object())
+                self.assertEqual(self.tool._children(item), [])
+
+    def test_each_branch_kind_gives_its_children_in_order_as_a_new_list(self):
+        o = [object() for _ in range(6)]
+        node = self.node
+        fields = [node("field", key=o[0], value=o[1]), node("field", key=None, value=o[2])]
+        cases = (
+            ("local", node("local", exprs=[o[0], o[1]]), [o[0], o[1]]),
+            ("return", node("return", exprs=[o[0]]), [o[0]]),
+            ("return without a value", node("return", exprs=[]), []),
+            ("localfunction", node("localfunction", func=o[0]), [o[0]]),
+            ("funcstat", node("funcstat", target=o[0], func=o[1]), [o[0], o[1]]),
+            ("assign", node("assign", targets=[o[0], o[1]], exprs=[o[2]]), [o[0], o[1], o[2]]),
+            ("callstat", node("callstat", call=o[0]), [o[0]]),
+            ("do", node("do", body=[o[0], o[1]]), [o[0], o[1]]),
+            ("function", node("function", body=[o[0]]), [o[0]]),
+            ("while", node("while", cond=o[0], body=[o[1], o[2]]), [o[0], o[1], o[2]]),
+            ("repeat", node("repeat", body=[o[0], o[1]], cond=o[2]), [o[0], o[1], o[2]]),
+            ("if with elseif and else",
+             node("if", clauses=[(o[0], [o[1], o[2]]), (o[3], [o[4]])], orelse=[o[5]]),
+             [o[0], o[1], o[2], o[3], o[4], o[5]]),
+            ("if without else", node("if", clauses=[(o[0], [o[1]])], orelse=None), [o[0], o[1]]),
+            ("fornum with a step", node("fornum", start=o[0], stop=o[1], step=o[2], body=[o[3]]),
+             [o[0], o[1], o[2], o[3]]),
+            ("fornum without a step",
+             node("fornum", start=o[0], stop=o[1], step=None, body=[o[3]]), [o[0], o[1], o[3]]),
+            ("forin", node("forin", exprs=[o[0]], body=[o[1], o[2]]), [o[0], o[1], o[2]]),
+            ("call", node("call", func=o[0], args=[o[1], o[2]]), [o[0], o[1], o[2]]),
+            ("method", node("method", obj=o[0], args=[o[1]]), [o[0], o[1]]),
+            ("index", node("index", obj=o[0], key=o[1]), [o[0], o[1]]),
+            ("paren", node("paren", expr=o[0]), [o[0]]),
+            ("operation", node("operation", operands=[o[0], o[1], o[2]]), [o[0], o[1], o[2]]),
+            ("table with a keyed and a positional field", node("table", fields=fields),
+             [o[0], o[1], o[2]]),
+        )
+        covered = set()
+        for name, item, expected in cases:
+            with self.subTest(case=name):
+                covered.add(item.kind)
+                inputs = [getattr(item, slot) for slot in item.__slots__
+                          if hasattr(item, slot) and type(getattr(item, slot)) is list]
+                before = [list(value) for value in inputs]
+                result = self.tool._children(item)
+                self.assertIs(type(result), list)
+                self.assertEqual(self.ids(result), self.ids(expected))
+                self.assertIsNot(result, self.tool._children(item))
+                for value in inputs:
+                    self.assertIsNot(result, value)
+                result.append(object())
+                self.assertEqual([list(value) for value in inputs], before)
+                self.assertEqual(self.ids(self.tool._children(item)), self.ids(expected))
+        self.assertEqual(covered, self.branch_comparisons()[0])
+
+    def test_a_kind_that_is_not_an_exact_str_goes_through_the_branches(self):
+        class Plain(str):
+            pass
+
+        class CallLike(str):
+            # Unhashable, and equal to "call" whatever its own text: with a
+            # leaf's text it still takes the call branch, as it always did.
+            __hash__ = None
+
+            def __eq__(self, other):
+                return other == "call" or str.__eq__(self, other)
+
+        o = [object() for _ in range(3)]
+        cases = (
+            ("an ordinary str subclass naming call",
+             self.node(Plain("call"), func=o[0], args=[o[1], o[2]]), [o[0], o[1], o[2]]),
+            ("an ordinary str subclass naming a leaf", self.node(Plain("name")), []),
+            ("an unhashable str subclass equal to call with a leaf's text",
+             self.node(CallLike("name"), func=o[0], args=[o[1]]), [o[0], o[1]]),
+            ("a kind that is not a str", self.node(None), []),
+        )
+        for name, item, expected in cases:
+            with self.subTest(case=name):
+                result = self.tool._children(item)
+                self.assertIs(type(result), list)
+                self.assertEqual(self.ids(result), self.ids(expected))
 
 
 class StateBoundTests(unittest.TestCase):
