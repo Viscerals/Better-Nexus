@@ -2657,6 +2657,61 @@ class ConsumerBindingTests(unittest.TestCase):
                           if site["site"] == "wrapper-call" and site["wrapper"]["name"]
                           == "DraftLine"], ["wrapper-result-not-returned"])
 
+    def test_c3_excluded_leads_of_a_unit_with_more_lead_values_than_declared_keys(self):
+        # The progress heading has its consumer site in ui/Panel.lua (the
+        # progress call). The seed adds one plain literal of that key in an
+        # unused do/local block after that call, on the same line, so Panel has
+        # an excluded lead of the key next to a site of it. The grown fixture
+        # keeps the seed and adds, after it on the same line, more distinct
+        # plain non-key strings than there are declared keys and one more plain
+        # literal of the same key (no localization call, no mutation), so
+        # Panel's leads are then counted by looking each declared key up in
+        # them. Its site must still be subtracted: compared with the seed, only
+        # that key's excluded lead count for Panel may change, by exactly the
+        # one added literal, and every other dated key's row stays the same. No
+        # line or column of any earlier token moves.
+        key = "panel.heading.progress"
+        literal = b'"' + key.encode() + b'"'
+        seed_block = b' do local specLeadSeed = ' + literal + b' end'
+        noise = len(full_keys()) + 84
+        table = b"".join(b'"spec lead noise %d", ' % number for number in range(noise))
+        grown_block = b' do local specLeadNoise = {' + table + literal + b'} end'
+        seeded = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_CALL + seed_block)
+        grown = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_CALL + seed_block + grown_block)
+        self.assertGreater(noise, len(full_keys()))
+        # Branch guards from the tool's own parse and declarations, so the
+        # comparison stays one of the two loops even if Panel or the catalog
+        # changes size: the seed Panel has at most as many distinct lead
+        # values as there are declared keys (the per-lead loop), the grown
+        # Panel more (the per-declared-key loop).
+        declared = len(self.catalog.parse_registry_declarations(self.files[INPUTS[4]]))
+        self.assertLessEqual(len(self.catalog._parsed(seeded)[2]), declared)
+        self.assertGreater(len(self.catalog._parsed(grown)[2]), declared)
+        seed = self.receipt(with_file(self.files, PANEL, seeded))
+        changed = self.receipt(with_file(self.files, PANEL, grown))
+        self.assertEqual(changed["counts"], seed["counts"])
+        # No excluded lead count of 0 is ever stored, in either loop.
+        for receipt in (seed, changed):
+            for row in receipt["keys"]:
+                with self.subTest(key=row["key"]):
+                    self.assertTrue(all(count > 0 for count
+                                        in row["excludedLiteralLeads"]["byPath"].values()))
+        before, after = self.binding(seed, key), self.binding(changed, key)
+        self.assertTrue(any(site["path"] == PANEL
+                            for site in before["sites"] + before["unprovenSites"]))
+        before_leads = before["excludedLiteralLeads"]
+        self.assertGreater(before_leads["byPath"].get(PANEL, 0), 0)
+        expected = json.loads(json.dumps(before))
+        expected["excludedLiteralLeads"]["count"] += 1
+        expected["excludedLiteralLeads"]["byPath"][PANEL] += 1
+        self.assertEqual(after, expected)
+        self.assertEqual(list(after["excludedLiteralLeads"]["byPath"]),
+                         list(before_leads["byPath"]))
+        for other in CURRENT_KEYS:
+            if other != key:
+                with self.subTest(key=other):
+                    self.assertEqual(self.binding(changed, other), self.binding(seed, other))
+
     def test_c4_mapped_chain_breaks_fail_the_gate(self):
         user = self.files[USER_TEXT]
         dispatch = b"if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end"

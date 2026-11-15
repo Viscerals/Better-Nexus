@@ -7545,11 +7545,25 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
         taken.setdefault(path, set()).add((line, column))
     for unit in units:
         sited = taken.get(unit.path)
-        for value, spots in unit.leads.items():
-            if value in leads:
-                count = len(spots) - (sum(1 for spot in spots if spot in sited) if sited else 0)
-                if count:
-                    leads[value][unit.path] = count
+        if len(unit.leads) > len(leads):
+            # A unit with more lead values than there are declared keys (a
+            # catalog data file): look each declared key up in it instead of
+            # testing every lead value. Both loops visit exactly the values
+            # in both dicts, each once, with the same spots and sited, and
+            # each leads[value] gets at most one entry per unit, in unit
+            # order, so every count and every byPath order is the same.
+            for value in leads:
+                if value in unit.leads:
+                    spots = unit.leads[value]
+                    count = len(spots) - (sum(1 for spot in spots if spot in sited) if sited else 0)
+                    if count:
+                        leads[value][unit.path] = count
+        else:
+            for value, spots in unit.leads.items():
+                if value in leads:
+                    count = len(spots) - (sum(1 for spot in spots if spot in sited) if sited else 0)
+                    if count:
+                        leads[value][unit.path] = count
     for key, declaration in declarations.items():
         sites, unproven = proven_rows[key]
         kinds = {row['site'] for row in sites}
