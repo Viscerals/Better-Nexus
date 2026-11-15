@@ -5,40 +5,52 @@ local M = {}
 Nexus.LoadingStatus = M
 local frame, lastSnapshot, startedAt, completedAt
 local lastUpdate, dismissed = -math.huge, false
+-- requested: the player asked for this window this session (/nexus loading,
+-- M.Show). Memory only, so a reload drops it. A forced Update is not a
+-- request. dismissed: the window's own X, until the next M.Show.
+local requested = false
 local buttons = setmetatable({}, {__mode="k"})
+-- Full UI localization (issues #143-#148): every sentence below comes from
+-- Nexus.Localization, looked up when it is shown. Numbers, times, reasons
+-- and the labels callers supply are formatted here and inserted verbatim;
+-- line breaks stay in code. The English bytes are unchanged.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
 -- One plain description per step reported by StartupStatus. Any step not
--- listed falls back to a general description, never to a percentage.
+-- listed falls back to a general description, never to a percentage. Each
+-- step code maps to the semantic key of its description; the step codes
+-- stay the lookup keys and are never shown.
 local phases = {
-    ["store-validation"]="Reading your saved data",
-    ["store-characters"]="Checking saved character data",
-    ["store-finish"]="Finishing saved-data checks",
-    ["local-setup"]="Starting local Wishlist and Echo tools",
-    catalog="Preparing the build library",
-    ["catalog-collect"]="Collecting build library records",
-    ["catalog-sort"]="Sorting build library records",
-    ["catalog-rows"]="Checking build library records",
-    ["catalog-finalize-scan"]="Verifying checked build library records",
-    ["catalog-finalize-prune"]="Removing redundant build library copies",
-    ["catalog-index"]="Indexing build library records",
-    ["catalog-bundle"]="Preparing the build library save",
-    ["catalog-witness-capture"]="Verifying build library data",
-    ["catalog-mutation-capture"]="Verifying build library data",
-    ["catalog-witness-verify"]="Verifying build library data",
-    ["catalog-mutation-bundle"]="Preparing a build library update",
-    ["catalog-mutation"]="Preparing a build library update",
-    ["catalog-maintenance-prepare"]="Preparing a build library update",
-    ["catalog-put-prepare"]="Preparing a build library update",
-    ["catalog-mutation-session-writes"]="Applying a build library update",
-    ["catalog-mutation-session-tombstones"]="Applying a build library update",
-    ["catalog-mutation-session-barriers"]="Applying a build library update",
-    ["catalog-published"]="Finishing a build library update",
-    scan="Reading Community builds",
-    legacy="Reading older saved Community records",
-    identities="Preparing shared build information",
-    commit="Updating the build library",
-    ["source-changed"]="Refreshing changed Community data",
-    community="Preparing Community data",
-    complete="Community data ready",
+    ["store-validation"]="loading.status.reading_saved_data",
+    ["store-characters"]="loading.status.checking_character_data",
+    ["store-finish"]="loading.status.finishing_saved_data_checks",
+    ["local-setup"]="loading.status.starting_local_tools",
+    catalog="loading.status.preparing_build_library",
+    ["catalog-collect"]="loading.status.collecting_library_records",
+    ["catalog-sort"]="loading.status.sorting_library_records",
+    ["catalog-rows"]="loading.status.checking_library_records",
+    ["catalog-finalize-scan"]="loading.status.verifying_checked_records",
+    ["catalog-finalize-prune"]="loading.status.removing_redundant_copies",
+    ["catalog-index"]="loading.status.indexing_library_records",
+    ["catalog-bundle"]="loading.status.preparing_library_save",
+    ["catalog-witness-capture"]="loading.status.verifying_library_data",
+    ["catalog-mutation-capture"]="loading.status.verifying_library_data",
+    ["catalog-witness-verify"]="loading.status.verifying_library_data",
+    ["catalog-mutation-bundle"]="loading.status.preparing_library_update",
+    ["catalog-mutation"]="loading.status.preparing_library_update",
+    ["catalog-maintenance-prepare"]="loading.status.preparing_library_update",
+    ["catalog-put-prepare"]="loading.status.preparing_library_update",
+    ["catalog-mutation-session-writes"]="loading.status.applying_library_update",
+    ["catalog-mutation-session-tombstones"]="loading.status.applying_library_update",
+    ["catalog-mutation-session-barriers"]="loading.status.applying_library_update",
+    ["catalog-published"]="loading.status.finishing_library_update",
+    scan="loading.status.reading_community_builds",
+    legacy="loading.status.reading_older_community_records",
+    identities="loading.status.preparing_shared_build_info",
+    commit="loading.status.updating_build_library",
+    ["source-changed"]="loading.status.refreshing_changed_community",
+    community="loading.status.preparing_community_data",
+    complete="loading.status.community_data_ready",
 }
 local function Now()
     local value=type(GetTime)=="function" and GetTime() or 0
@@ -48,13 +60,26 @@ local function Safe(value)
     local text=tostring(value or "")
     local identity=Nexus.Identity
     if identity and identity.DisplaySafeText then
-        return identity.DisplaySafeText(text,320,true) or "Unavailable"
+        return identity.DisplaySafeText(text,320,true) or T("loading.value.reason_unavailable")
     end
     return text:gsub("|","||"):gsub("[%c]"," "):sub(1,320)
 end
 local function Snapshot()
     if type(Nexus.StartupStatus)=="function" then return Nexus.StartupStatus() end
     return {state="pending",coreReady=false,phase="store-validation"}
+end
+-- Whether the player wants the main panel shown (issue #164): its owner's
+-- own wanted visibility (Panel.VisibilityFacts, the saved Hide Nexus Panel
+-- choice read per saved root, session-only for a read-only root), never
+-- whether the panel is shown at this moment. Read only; it neither creates
+-- nor writes saved data. Without an answer the window keeps showing as
+-- before.
+local function PanelWanted()
+    local panel=Nexus.Panel
+    if not (panel and type(panel.VisibilityFacts)=="function") then return true end
+    local ok,facts=pcall(panel.VisibilityFacts)
+    if not ok or type(facts)~="table" then return true end
+    return facts.wanted~=false
 end
 -- Saved-capacity refusals of the shared catalog, stated plainly. The data is
 -- complete and unchanged; only the shared catalog cannot be opened.
@@ -66,12 +91,17 @@ end
 -- keys ("root-map-edges"). The maps are read in a fixed order (builds,
 -- shipped builds, removal markers, retention markers), so nothing after the
 -- map where counting stopped is named.
+-- body is the translated clause. A limit is inserted as code-formatted text.
 local function Refused(body)
-    return "Community data unavailable: "..body.." Nothing was changed or deleted."
+    return TF("loading.status.community_unavailable_refused",{reason=body})
+end
+local function Clause(key, limitText)
+    if limitText == nil then return T(key) end
+    return TF(key,{limit=limitText})
 end
 local single = {
-    TOMBSTONE_SET_LIMIT="the saved removal markers exceed the limit (%d).",
-    BARRIER_SET_LIMIT="the saved retention markers exceed the limit (%d).",
+    TOMBSTONE_SET_LIMIT="loading.status.removal_markers_over_limit",
+    BARRIER_SET_LIMIT="loading.status.retention_markers_over_limit",
 }
 -- The one sentence for a saved-capacity refusal, or nil for every other
 -- state. Callers ask for it directly instead of matching message text.
@@ -87,76 +117,94 @@ function M.CapacityText(status)
     local counted=type(facts.counted)=="table" and facts.counted or {}
     local shipped=(tonumber(counted.bundled) or 0)>0
     if reason=="ROOT_MAP_LIMIT" or counter=="root-map-edges" then
-        return Refused("your saved Community records and markers together exceed the total this build opens (limit 8192).")
+        return Refused(Clause("loading.status.records_markers_over_total"))
     end
     if limit<=0 then
-        return Refused("your saved Community data is larger than this build opens.")
+        return Refused(Clause("loading.status.saved_community_data_too_large"))
     end
+    -- The limit exactly as the English showed it: concatenated, or %d for
+    -- the two marker sets.
+    local limitText=tostring(limit)
     if counter=="map-keys" then
         if reason=="ROOT_SLOT_LIMIT" then
             return Refused(map=="bundled"
-                and ("the builds shipped with this version exceed the limit ("..limit..").")
-                or ("your saved Community list holds more builds than this build opens (limit "..limit..")."))
+                and Clause("loading.status.shipped_builds_over_limit",limitText)
+                or Clause("loading.status.saved_list_over_build_limit",limitText))
         end
-        return Refused(string.format(single[reason],limit))
+        return Refused(Clause(single[reason],string.format("%d",limit)))
     end
     if counter=="distinct-builds" then
-        return Refused((shipped
-            and "your saved Community builds and the builds shipped with this version together hold"
-            or "your saved Community list holds")
-            .." more than the "..limit.." different builds this build opens.")
+        return Refused(Clause(shipped
+            and "loading.status.saved_and_shipped_over_distinct_builds"
+            or "loading.status.saved_list_over_distinct_builds",limitText))
     end
     if counter=="distinct-slots" then
-        local builds=shipped and "your saved Community builds, the builds shipped with this version" or "your saved Community builds"
-        local parts=map=="barrier" and (builds..", removal markers and retention markers")
-            or map=="tombstone" and (builds.." and removal markers")
-            or (shipped and "your saved Community builds and the builds shipped with this version" or builds)
-        return Refused(parts.." together hold more than the "..limit.." different entries this build opens.")
+        -- One whole clause for each combination of the counted maps.
+        local key
+        if map=="barrier" then
+            key=shipped and "loading.status.saved_shipped_markers_over_entries"
+                or "loading.status.saved_markers_over_entries"
+        elseif map=="tombstone" then
+            key=shipped and "loading.status.saved_shipped_removals_over_entries"
+                or "loading.status.saved_removals_over_entries"
+        else
+            key=shipped and "loading.status.saved_and_shipped_over_entries"
+                or "loading.status.saved_builds_over_entries"
+        end
+        return Refused(Clause(key,limitText))
     end
-    return Refused("your saved Community data is larger than this build opens.")
+    return Refused(Clause("loading.status.saved_community_data_too_large"))
 end
 function M.PhaseText(status)
     status=status or Snapshot()
     if status.state=="failed" then
         local text=M.CapacityText(status)
         if text then return text end
-        return (status.coreReady and "Shared data unavailable: " or "Startup stopped: ") .. Safe(status.reason)
+        return TF(status.coreReady and "loading.status.shared_data_unavailable_reason"
+            or "loading.status.startup_stopped_reason",{reason=Safe(status.reason)})
     end
-    if status.state=="ready" then return "Community builds and Leaderboard ready" end
+    if status.state=="ready" then return T("loading.status.community_leaderboard_ready") end
     local step=status.step or status.phase
-    if phases[step] then return phases[step] end
+    if phases[step] then return T(phases[step]) end
     -- An unlisted catalog step is still catalog work, not Community reading.
-    if type(step)=="string" and step:sub(1,8)=="catalog-" then return phases.catalog end
-    return phases[status.phase] or "Preparing Community data"
+    if type(step)=="string" and step:sub(1,8)=="catalog-" then return T(phases.catalog) end
+    return T(phases[status.phase] or phases.community)
 end
 -- A percentage exists only for the current step, from that step's own
 -- completed/total pair in the same snapshot. Every other step is shown as
 -- in progress with no bar, so a previous step's value cannot remain.
 function M.Progress(status)
     local done,total=tonumber(status.stepDone),tonumber(status.stepTotal)
-    if status.state=="ready" then return 100,"Ready" end
-    if status.state=="failed" then return nil,"See /nexus status for the recorded reason" end
+    if status.state=="ready" then return 100,T("loading.status.ready") end
+    if status.state=="failed" then
+        return nil,TF("loading.status.see_status_for_reason",{command="/nexus status"})
+    end
     local step=M.PhaseText(status)
     if done and total and total>0 and total<math.huge and done>=0 and done<=total
         and done==math.floor(done) and total==math.floor(total) then
         local percent=math.floor(done*100/total)
-        return percent,string.format("Current step: %s; %d / %d (%d%%)",step,done,total,percent)
+        return percent,TF("loading.status.current_step_counted",{step=step,
+            done=string.format("%d",done),total=string.format("%d",total),
+            percent=string.format("%d",percent)})
     end
     local scanned=tonumber(status.recordsSeen)
     if (status.step or status.phase)=="scan" and scanned and scanned>0 and scanned<math.huge
         and scanned==math.floor(scanned) then
-        return nil,string.format("Current step: %s; %d records read (in progress)",step,scanned)
+        return nil,TF("loading.status.current_step_records_read",{step=step,
+            records=string.format("%d",scanned)})
     end
-    return nil,"Current step: "..step.." (in progress)"
+    return nil,TF("loading.status.current_step_in_progress",{step=step})
 end
 -- Local availability only; the step line is shown once, next to its bar.
 function M.Detail(status)
     if status.state=="failed" then
-        return status.coreReady and "Local Wishlist tools and Echo controls remain available.\nShared views are unavailable; see status for the reason."
-            or "Local controls wait until saved data is checked.\nSee /nexus status for details. Keep your saved-data backup."
+        return status.coreReady and (T("loading.body.local_tools_remain_available").."\n"
+                ..T("loading.body.shared_views_unavailable"))
+            or (T("loading.body.local_controls_wait").."\n"
+                ..TF("loading.body.see_status_keep_backup",{command="/nexus status"}))
     end
-    return status.coreReady and "Wishlist tools are ready; shared builds are still loading."
-        or "Wishlist tools unlock after your saved data is checked."
+    return T(status.coreReady and "loading.body.wishlist_ready_shared_loading"
+        or "loading.body.wishlist_unlocks_after_check")
 end
 local function PaintButtons(status)
     for button,label in pairs(buttons) do
@@ -177,9 +225,12 @@ function M.BindSharedButton(button,label)
             local status=Snapshot()
             if status.state~="ready" and GameTooltip then
                 GameTooltip:SetOwner(self,"ANCHOR_TOP")
-                GameTooltip:AddLine(label .. " - " .. (status.state=="failed" and "unavailable" or "Loading"),.65,.65,.68)
+                -- label is the caller's own (already shown) button text.
+                GameTooltip:AddLine(TF(status.state=="failed" and "loading.tooltip.view_unavailable"
+                    or "loading.tooltip.view_loading",{view=label}),.65,.65,.68)
                 GameTooltip:AddLine(M.PhaseText(status),.9,.9,.9,true)
-                GameTooltip:AddLine(status.coreReady and "Local Wishlist and Echo tools remain available." or "Local tools unlock after saved-data validation.",.8,.8,.8,true)
+                GameTooltip:AddLine(T(status.coreReady and "loading.tooltip.local_tools_available"
+                    or "loading.tooltip.local_tools_unlock"),.8,.8,.8,true)
                 GameTooltip:Show()
             end
         end)
@@ -220,7 +271,7 @@ local function EnsureFrame()
     f.progress:SetPoint("TOPLEFT",12,-92);f.progress:SetSize(300,28);f.progress:SetJustifyH("LEFT")
     f.localButton=CreateFrame("Button","NexusLoadingOpenWishlist",f,"UIPanelButtonTemplate")
     f.localButton:SetFrameStrata("HIGH");f.localButton:SetFrameLevel(82)
-    f.localButton:SetPoint("BOTTOMRIGHT",-12,8);f.localButton:SetSize(96,23);f.localButton:SetText("Wishlists")
+    f.localButton:SetPoint("BOTTOMRIGHT",-12,8);f.localButton:SetSize(96,23);f.localButton:SetText(T("loading.button.wishlists"))
     f.localButton:SetScript("OnClick",function()
         local status=Snapshot()
         if status.coreReady and Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
@@ -241,11 +292,17 @@ function M.Update(status,force)
     PaintButtons(status)
     -- No status frame is allocated for a fully ready standalone consumer.
     if not frame and status.state=="ready" and not force then return end
+    -- Shown automatically only while the player wants the main panel; a
+    -- player who hid it sees progress only on request. Start-up work and the
+    -- buttons above are not affected. No frame is allocated while hidden.
+    local shown=not dismissed and (requested or PanelWanted())
+    if not frame and not shown then return end
     local f=EnsureFrame()
     local percent,progress=M.Progress(status)
-    f.title:SetText(status.state=="ready" and "Nexus ready"
-        or status.state=="failed" and "Nexus loading stopped" or "Nexus loading")
-    local localText=status.coreReady and "Wishlist tools ready; shared builds may still be loading" or "Reading your local Wishlist and Echo data"
+    f.title:SetText(T(status.state=="ready" and "loading.title.ready"
+        or status.state=="failed" and "loading.title.stopped" or "loading.title.loading"))
+    local localText=T(status.coreReady and "loading.status.wishlist_ready_shared_may_load"
+        or "loading.status.reading_local_data")
     -- The full-width line carries the step; elapsed time never sets a percent.
     f.detail:SetText(localText.."\n"..progress)
     -- Both lines keep their measured height (a wider face wraps the step
@@ -258,7 +315,8 @@ function M.Update(status,force)
         f:SetHeight(130+extra)
     end
     local elapsed=math.max(0,math.floor(now-startedAt))
-    f.progress:SetText(status.state=="ready" and "" or string.format("Elapsed %d:%02d",math.floor(elapsed/60),elapsed%60))
+    f.progress:SetText(status.state=="ready" and "" or TF("loading.status.elapsed",
+        {time=string.format("%d:%02d",math.floor(elapsed/60),elapsed%60)}))
     -- Unknown size: no bar at all, rather than an empty one that looks stuck.
     if percent then f.bar:SetValue(percent);f.bar:Show() else f.bar:Hide() end
     if status.coreReady then f.localButton:Enable() else f.localButton:Disable() end
@@ -266,10 +324,11 @@ function M.Update(status,force)
         completedAt=completedAt or now
         if not force and now-completedAt>=3 then f:Hide();return end
     else completedAt=nil end
-    if not dismissed then f:Show() end
+    if shown then f:Show() else f:Hide() end
 end
 function M.Show()
     dismissed=false
+    requested=true
     local status=Snapshot()
     if status.state=="ready" then completedAt=Now() end
     M.Update(status,true)

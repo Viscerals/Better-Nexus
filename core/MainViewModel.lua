@@ -8,8 +8,38 @@ local ViewModel = {}
 Nexus.MainInternals.ViewModel = ViewModel
 
 local QUALITY_NAMES = { [0]="Common", [1]="Uncommon", [2]="Rare", [3]="Epic", [4]="Legendary" }
+-- Full-UI localization, chat family: the reviewed key of each quality label
+-- (QUALITY_NAMES keeps the English, shown when the seam is absent). The
+-- seam is looked up at call time. Echo, family and build names are data.
+local QUALITY_KEYS = {
+    [0]="main.value.quality_common", [1]="main.value.quality_uncommon",
+    [2]="main.value.quality_rare", [3]="main.value.quality_epic",
+    [4]="main.value.quality_legendary",
+}
+local function SeamText(key, english)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" or type(localization.Text) ~= "function" then return english end
+    local text, source = localization.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+-- A quality's label, or nil for a quality without one.
+local function QualityLabel(quality)
+    local english = QUALITY_NAMES[quality]
+    if english == nil then return nil end
+    return SeamText(QUALITY_KEYS[quality], english)
+end
 local function QualityName(quality)
-    return QUALITY_NAMES[quality] or ("q" .. quality)
+    return QualityLabel(quality) or ("q" .. quality)
+end
+-- The label of an Echo the catalog does not name: "spell <id>".
+local function UnknownSpell(id)
+    local english = "spell " .. tostring(id)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" or type(localization.Format) ~= "function" then return english end
+    local text, source = localization.Format("main.value.unknown_spell", {id=tostring(id)})
+    if source == "unavailable" then return english end
+    return text
 end
 
 -- Tables created by Copy in this session, for every view model. Observational
@@ -45,6 +75,19 @@ local function Equal(left, right, leftSeen, rightSeen)
         if left[key] == nil then return false end
     end
     return true
+end
+
+-- Display only: a character name the caller already read. Only a nonempty
+-- string other than the client's Unknown placeholder is kept; anything else
+-- is nil (not known). It is never identity, owner or Store authority.
+local function DisplayCharacter(value)
+    if type(value) ~= "string" or value == "" or value == "Unknown" then
+        return nil
+    end
+    if type(UNKNOWNOBJECT) == "string" and value == UNKNOWNOBJECT then
+        return nil
+    end
+    return value
 end
 
 local function ActiveSlotRow(slots)
@@ -113,7 +156,7 @@ function ViewModel.New(options)
                     local row = rows[id]
                     local remaining = want - have
                     toLock[#toLock + 1] = tostring((row and row.name)
-                        or ("spell " .. tostring(id)))
+                        or UnknownSpell(id))
                         .. (remaining > 1 and (" ×" .. remaining) or "")
                     seenToLock[id] = true
                 end
@@ -152,7 +195,7 @@ function ViewModel.New(options)
             local function ExactLabel(id, remaining)
                 local row = catalog and catalog.rows and catalog.rows[id]
                 local label = tostring((row and row.name)
-                    or ("spell " .. tostring(id)))
+                    or UnknownSpell(id))
                 local quality = row and tonumber(row.quality)
                 if quality ~= nil then
                     label = label .. " (" .. QualityName(quality) .. ")"
@@ -237,7 +280,7 @@ function ViewModel.New(options)
                 bySpell[id] = (bySpell[id] or 0) + (tonumber(echo.stacks) or 1)
                 if echo.locked then
                     local row = catalog and catalog.rows and catalog.rows[id]
-                    locked[#locked + 1] = (row and row.name) or ("spell " .. tostring(id))
+                    locked[#locked + 1] = (row and row.name) or UnknownSpell(id)
                 end
             end
         end
@@ -316,9 +359,9 @@ function ViewModel.New(options)
                 local shedCount = math.max(0, (tonumber(count) or 0) - keep)
                 if shedCount > 0 then
                     local row = catalog and catalog.rows and catalog.rows[id]
-                    local name = row and row.name or ("spell " .. tostring(id))
+                    local name = row and row.name or UnknownSpell(id)
                     local quality = row and tonumber(row.quality)
-                    local qualityLabel = quality ~= nil and QUALITY_NAMES[quality] or nil
+                    local qualityLabel = quality ~= nil and QualityLabel(quality) or nil
                     shed[#shed + 1] = tostring(name)
                         .. (qualityLabel and (" (" .. qualityLabel .. ")") or "")
                         .. (shedCount > 1 and (" ×" .. shedCount) or "")
@@ -338,7 +381,7 @@ function ViewModel.New(options)
             loadoutMissing=loadoutMissing,loadoutStacks=loadoutStacks,
             locked=locked,shed=shed,toLock=toLock,
             wishlistName=wishlist and ((wishlist.name ~= "" and wishlist.name)
-                or "(unnamed)") or nil,
+                or SeamText("main.value.unnamed_wishlist", "(unnamed)")) or nil,
             activeSlot=activeRow and tonumber(activeRow.slot) or 0,
             -- M4 (UX-04): the same verified active row's name, projected for
             -- the shared destination presentation; nothing new is read.
@@ -366,6 +409,9 @@ function ViewModel.New(options)
         end
         out.status = snapshot.status
         out.assignment = snapshot.assignment
+        -- Set on every rebuild, nil when not known: neither a base field nor
+        -- an earlier character stands in for the current one.
+        out.character = DisplayCharacter(snapshot.character)
         if out.level == nil then out.level = snapshot.level or 0 end
         local notice = snapshot.updateNotice
         if notice then

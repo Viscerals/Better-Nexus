@@ -8,6 +8,20 @@ Nexus = Nexus or {}
 
 local M = {}
 local panelCache, communityCache = {}, {}
+
+-- Full-UI localization (issues #143-#148): the one code-owned label this
+-- file chooses (the Orb mini-panel button) resolves through
+-- Nexus.Localization when a layout is computed; while the seam is absent or
+-- the key answers "unavailable" the exact English is used. A cached layout
+-- keeps the label of its session, whose language does not change.
+local function ShownLabel(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
 local panelOrder, communityOrder = {}, {}
 local MAX_CACHE_ENTRIES = 64
 local stats = {
@@ -17,12 +31,30 @@ local stats = {
 local fontsReady = false
 local runtimeSignature, runtimeRevision = nil, 1
 
+-- small / normal / large are the shared fonts of every Nexus window.
+-- secondary is the main panel's own secondary text (labels, headings, tags,
+-- reasons, and the words on its controls): 11 units, the panel's readable
+-- floor, where the shared small font is 10. title is the main panel's own
+-- title, 15 units. Both follow the same native reference; no shared size
+-- changes.
 local FONT_NAMES = {
     small="NexusFontSmall",
     normal="NexusFontNormal",
     large="NexusFontLarge",
+    secondary="NexusFontSecondary",
+    title="NexusFontTitle",
 }
-local FONT_SIZES = {small=10,normal=12,large=14}
+local FONT_SIZES = {small=10,normal=12,large=14,secondary=11,title=15}
+-- The owned sizes follow the client's own small text: the native font object
+-- the loading overlay's detail line is drawn in. Its reported height becomes
+-- the owned small size and the 10 / 12 / 14 hierarchy keeps its proportions,
+-- up to the largest font scale the layouts support (2). The owned sizes
+-- never fall below 10 / 12 / 14: a client whose small font is 10 or smaller
+-- keeps exactly those. The font object itself is read, so no loading frame
+-- has to exist or be shown; only the owned objects are ever set, never a
+-- game font or a UI scale.
+local FONT_REFERENCE = "GameFontHighlightSmall"
+local fontReference
 
 local function Clamp(value, low, high)
     value = tonumber(value) or low
@@ -70,9 +102,28 @@ local function Remember(cache, order, key, value)
     return value
 end
 
+-- The reference's scale against the owned small size, from 1 (the fixed
+-- sizes, as before; also without a readable reference) to 2.
+local function ReferenceScale()
+    local font = _G[FONT_REFERENCE]
+    if font and type(font.GetFont) == "function" then
+        local ok, _, size = pcall(font.GetFont, font)
+        size = ok and tonumber(size) or nil
+        if size and size > 0 and size < math.huge then
+            return Clamp(Round(size, 2) / FONT_SIZES.small, 1, 2)
+        end
+    end
+    return 1
+end
+
+-- Builds the owned fonts once, and again only when the reference's height
+-- has changed since (a client that sets its fonts after this file first
+-- ran). The runtime font scale below then differs, which advances the
+-- runtime revision every layout cache is keyed by.
 function M.EnsureFonts()
-    if fontsReady then return FONT_NAMES end
-    fontsReady = true
+    local reference = ReferenceScale()
+    if fontsReady and reference == fontReference then return FONT_NAMES end
+    fontsReady, fontReference = true, reference
     if type(CreateFont) ~= "function" then return FONT_NAMES end
     local path = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT
         or "Fonts\\FRIZQT__.TTF"
@@ -83,7 +134,7 @@ function M.EnsureFonts()
             if ok then font = created end
         end
         if font and type(font.SetFont) == "function" then
-            pcall(font.SetFont, font, path, FONT_SIZES[kind], "")
+            pcall(font.SetFont, font, path, Round(FONT_SIZES[kind] * reference, 2), "")
         end
     end
     stats.fontBuilds = stats.fontBuilds + 1
@@ -348,15 +399,24 @@ end
 -- A fixed-size window wider or taller than the visible UI (a 1024 or 960 px
 -- wide UI at scale 1 on 4:3 and 5:4 screens) is scaled down to fit with a
 -- margin, so its edges and close button stay on screen; one that fits keeps
--- scale 1. An implausibly small reported UI size is not acted on.
-function M.FitToScreen(frame, margin)
+-- scale 1. An implausibly small reported UI size is not acted on. `ceiling`
+-- (the main panel's chosen size, issue #170) replaces that 1 as the largest
+-- scale; a missing or invalid ceiling is 1. Width and height are the frame's
+-- own size and the screen is UIParent's, both in UIParent-relative units, so
+-- no effective scale is multiplied in.
+function M.FitToScreen(frame, margin, ceiling)
     margin = tonumber(margin) or 24
+    ceiling = type(ceiling) == "number" and ceiling == ceiling and ceiling > 0
+        and ceiling < math.huge and ceiling or 1
     local width, height = tonumber(frame:GetWidth()), tonumber(frame:GetHeight())
     local screenW = UIParent and tonumber(UIParent:GetWidth())
     local screenH = UIParent and tonumber(UIParent:GetHeight())
-    if not (width and height and screenW and screenH) or width <= 0 or height <= 0
-        or screenW < 640 or screenH < 480 then return nil end
-    local scale = math.max(0.5, math.min(1, (screenW - margin) / width,
+    -- Finite sizes only (review of e1183fd): an infinite size would make a
+    -- ratio infinite or zero and step past the ceiling or the floor.
+    local function Finite(v) return v ~= nil and v == v and v > -math.huge and v < math.huge end
+    if not (Finite(width) and Finite(height) and Finite(screenW) and Finite(screenH))
+        or width <= 0 or height <= 0 or not (screenW >= 640 and screenH >= 480) then return nil end
+    local scale = math.max(0.5, math.min(ceiling, (screenW - margin) / width,
         (screenH - margin) / height))
     if math.abs((tonumber(frame:GetScale()) or 1) - scale) > 0.001 then
         frame:SetScale(scale)
@@ -385,6 +445,23 @@ function M.FitButtonWidth(button, minimum, maximum)
     return width
 end
 
+-- A DPS entry of the panel spec as a key part: absent, unmeasured (true) or
+-- its measured label and value widths.
+local function RecordKey(entry)
+    if type(entry) == "table" then
+        return math.ceil(tonumber(entry[1]) or 0) .. ":" .. math.ceil(tonumber(entry[2]) or 0)
+    end
+    return entry and "1" or "0"
+end
+
+-- A measurement a caller took from the client (a line height, a label
+-- width): a finite number above 0, else 0 (not measured).
+local function Measured(value)
+    value = tonumber(value)
+    if value and value == value and value > 0 and value < math.huge then return value end
+    return 0
+end
+
 local function PanelKey(spec)
     return table.concat({
         Round(spec.width or 272,1),Round(spec.fontScale or 1,3),
@@ -396,9 +473,252 @@ local function PanelKey(spec)
         (tonumber(spec.unknownTomes) or 0) > 0 and 1 or 0,
         spec.orbButton and 1 or 0,tonumber(spec.guidanceRows) or 0,
         spec.cardRows and 1 or 0,
+        spec.callboard and 1 or 0,
+        spec.planDetails and 1 or 0,spec.orbLine and 1 or 0,
+        tonumber(spec.autoScopeRows) or 0,
+        spec.noOffer and 1 or 0,
+        math.ceil(tonumber(spec.detailNamesH) or 0),
+        RecordKey(spec.recordYours),RecordKey(spec.recordBest),
+        spec.autoInfo and 1 or 0,
+        math.ceil(tonumber(spec.statusTierH) or 0),spec.statusBar == false and 0 or 1,
+        type(spec.offerRowsH) == "table" and (math.ceil(tonumber(spec.offerRowsH[1]) or 0) .. ":"
+            .. math.ceil(tonumber(spec.offerRowsH[2]) or 0) .. ":" .. math.ceil(tonumber(spec.offerRowsH[3]) or 0)) or 0,
+        math.ceil(tonumber(spec.bodyH) or 0),math.ceil(tonumber(spec.bodyFloorH) or 0),
+        math.ceil(tonumber(spec.headerBuildH) or 0),math.ceil(tonumber(spec.headerWishlistH) or 0),
+        math.ceil(tonumber(spec.callboardTitleH) or 0),math.ceil(tonumber(spec.callboardDetailH) or 0),
+        math.ceil(tonumber(spec.callboardLabelW) or 0),
+        spec.callboardInline and 1 or 0,math.ceil(Measured(spec.progressLabelW)),
+        math.ceil(Measured(spec.toLockH)),
+        type(spec.offerRowsPx) == "table" and (math.ceil(tonumber(spec.offerRowsPx[1]) or 0) .. ":"
+            .. math.ceil(tonumber(spec.offerRowsPx[2]) or 0) .. ":" .. math.ceil(tonumber(spec.offerRowsPx[3]) or 0)) or 0,
+        spec.performanceH == nil and "m" or math.ceil(tonumber(spec.performanceH) or 0),
+        math.ceil(tonumber(spec.progressValueH) or 0),
+        type(spec.countRowsH) == "table" and (math.ceil(tonumber(spec.countRowsH[1]) or 0) .. ":"
+            .. math.ceil(tonumber(spec.countRowsH[2]) or 0)) or 0,
+        math.ceil(tonumber(spec.footerH) or 0),
+        spec.autoInfoInline and 1 or 0,math.ceil(tonumber(spec.autoInfoW) or 0),
+        math.ceil(tonumber(spec.headingH) or 0),
+        type(spec.offerReason) == "table" and (tostring(spec.offerReason.row) .. ":"
+            .. math.ceil(tonumber(spec.offerReason.top) or 0)) or 0,
+        spec.measured and 1 or 0,math.ceil(tonumber(spec.reservedRollH) or 0),
+        -- (The design lengths a kept offer block is ended with: below.)
+        type(spec.reservedRollSteps) == "table" and table.concat(spec.reservedRollSteps, ":") or 0,
+        math.ceil(tonumber(spec.orbLineH) or 0),
+        spec.orbDetail and 1 or 0,math.ceil(tonumber(spec.orbDetailH) or 0),
+        math.ceil(tonumber(spec.headerTitleH) or 0),
+        math.ceil(Measured(spec.lineSmallH)),math.ceil(Measured(spec.planDetailsW)),
+        math.ceil(Measured(spec.setupTitleH)),math.ceil(Measured(spec.setupHintH)),
+        math.ceil(Measured(spec.completeTitleH)),math.ceil(Measured(spec.completeTextH)),
+        math.ceil(Measured(spec.listHeadingH)),
+        math.ceil(Measured(spec.headerControlsH)),math.ceil(Measured(spec.planDetailsH)),
+        math.ceil(Measured(spec.progressLabelH)),
+        math.ceil(Measured(spec.setupHintW)),
     }, "|")
 end
 
+-- The former two-line offer rows (the main panel's rows are the approved
+-- compact ones now: M.Compact, M.Panel; this helper and M.OfferRowGrid are
+-- kept as they were for any other caller). The three offer rows of the roll
+-- box, from the panel's text lines and section gap. A row is a fixed grid of two text lines: the
+-- offer's name on its primary line (`normal`) and its quality on the
+-- secondary line under it (`small`), with a row gap above and below them
+-- (M.OfferRowGrid gives the columns). Every row has that same base height,
+-- so the three rows keep one rhythm; a row whose own text needs more grows
+-- by its measured height (M.Panel: spec.offerRowsH). Rows are a row gap
+-- apart, and the band keeps two row gaps under the heading line and above
+-- the text below. Returns, from the roll box's top: the first row's top, a
+-- row's height, the gap between rows and where the text under the rows
+-- starts. At font scale 1 (small 11, normal 14, gap 6): 16, 29, 2 and 111.
+-- A caller without the primary line gets the two lines' 14 : 11 share of
+-- the small line, the proportion the layout's own rows have.
+function M.OfferRows(small, gap, normal)
+    local rowGap = math.max(2, math.floor(gap / 3))
+    normal = tonumber(normal) or math.ceil(small * 14 / 11)
+    local rowH = normal + small + 2 * rowGap
+    local top = 1 + small + 2 * rowGap
+    return top, rowH, rowGap, top + 3 * rowH + 4 * rowGap
+end
+
+-- The grid inside one offer row `width` units wide, for its placement and
+-- its measurement (Panel.PlaceOfferCards, Panel.MeasuredLayout): the row's
+-- content is inset one layout gap from both ends; the icon is a square as
+-- tall as the two text lines, at the left; the text column starts one gap
+-- after it and the status column ends at the right inset. `content` is the
+-- room the text and status columns share; `pad` is the row gap kept above
+-- and below the lines.
+function M.OfferRowGrid(small, gap, normal, width)
+    local _, rowH, rowGap = M.OfferRows(small, gap, normal)
+    normal = tonumber(normal) or math.ceil(small * 14 / 11)
+    local icon = normal + small
+    local textX = gap + icon + gap
+    return {
+        rowH=rowH,pad=rowGap,inset=gap,gap=gap,icon=icon,textX=textX,
+        nameH=normal,metaH=small,
+        content=math.max(1, math.floor(tonumber(width) or 0) - textX - gap),
+    }
+end
+
+-- The main panel's design-base width, 284 units at font scale 1 (it was
+-- 420), and the unit of the approved compact design (design draft "Nexus
+-- compact panel", difficulty B with its bar and ticks, inline Callboard).
+--
+-- What 284 is: one fixed layout parameter of this panel, calibrated once
+-- from a measurement of the build before it. That build's panel followed
+-- this file's own width rule with a 420-unit base, and at the reference
+-- client settings it was measured 672 UI units wide and 621 pixels wide in
+-- an unresized capture. The approved design is drawn in the pixels of that
+-- capture and is 420 of them wide at the same text size, so the base that
+-- gives that width under the unchanged rule is 420 x 420 / 621 = 284.06,
+-- taken as 284.
+--
+-- What it is not: a pixel-per-unit, DPI or UI-scale conversion, a multiplier
+-- applied while the addon runs, or a figure that holds for another client
+-- setting or another capture. No client scale, effective scale or font size
+-- is stored or assumed here. The width is still this base times the font
+-- scale the owned fonts follow, bounded by the screen (M.PanelWidth, whose
+-- rule is unchanged), so the panel follows the client's text size and screen
+-- as it did. No font is made smaller and nothing is scaled as a whole: only
+-- the room around the text is.
+--
+-- It is a calculation from one measured baseline, not a measurement of this
+-- layout: the width and heights the client really gives the compact panel
+-- are known only from the client. A block that needs more than the design
+-- draws takes it (M.Panel); no height is reached by cutting or clamping.
+--
+-- One design pixel is PANEL_BASE_WIDTH / PANEL_DESIGN_WIDTH units times the
+-- font scale (M.Design): the design's lengths keep their proportion to the
+-- panel's width at every text scale.
+M.PANEL_BASE_WIDTH = 284
+M.PANEL_DESIGN_WIDTH = 420
+
+-- A length of the approved design, given in its reference pixels, in whole
+-- UI units at a font scale (0.75 to 2; 1 without a valid one). A length
+-- above 0 is at least 1 unit.
+function M.Design(pixels, scale)
+    pixels = tonumber(pixels)
+    if not (pixels and pixels == pixels and pixels > 0 and pixels < math.huge) then return 0 end
+    scale = tonumber(scale)
+    if not (scale and scale == scale) then scale = 1 end
+    scale = Clamp(scale, 0.75, 2)
+    return math.max(1, math.floor(pixels * M.PANEL_BASE_WIDTH / M.PANEL_DESIGN_WIDTH * scale + 0.5))
+end
+
+-- The approved compact panel's own lengths at a font scale, each named for
+-- what it is in the design and given there in reference pixels (the number
+-- in each call). One table per scale, kept: a layout pass builds nothing.
+-- These are the lengths inside a block (insets, columns, icons, controls);
+-- where the blocks stand, and how tall each is, M.Panel takes from the
+-- design's own coordinates. Text heights are not in it: every row is at
+-- least its design height and grows by the height the client measures for
+-- its text (M.Panel).
+-- The grip is the at-least-24 x 24 UI-unit drag target at every scale; where
+-- that is larger than the design's 24 pixels, header line 1 is as tall as
+-- the grip less the one pixel the design lets it stand out above and below.
+local compactCache, compactCount = {}, 0
+function M.Compact(scale)
+    scale = tonumber(scale)
+    if not (scale and scale == scale) then scale = 1 end
+    scale = Clamp(scale, 0.75, 2)
+    local key = Round(scale, 3)
+    local held = compactCache[key]
+    if held then return held end
+    local function D(pixels) return M.Design(pixels, scale) end
+    local grip = math.max(24, D(24))
+    -- The room around the words of a button whose label is held inside the
+    -- button's end caps (Options; My Builds and Change): the design's 14
+    -- pixels, and never under 14 units, which are the label's two 6-unit end
+    -- caps and 2 to spare. So such a label is never cut by its own button at
+    -- a text size where 14 design pixels are fewer units than that (under
+    -- about one and a half times the normal size).
+    local labelPad = math.max(D(14), 14)
+    local compact = {
+        scale = scale,
+        -- The panel: its side inset (the 1-pixel edge and 6), the gap under
+        -- the header, the gap between body blocks, the room from the body
+        -- to the footer hubs and under them.
+        inset = D(7), headerGap = D(6), blockGap = D(5), footerGap = D(12), footerBottom = D(6),
+        -- Header line 1: the grip, the title and Auto, Options and Close.
+        headerTop = D(5), controlH = D(22), grip = grip, line1H = math.max(D(22), grip - 2 * D(1)),
+        controlGap = D(6), closeW = D(24), autoPad = D(16), optionsPad = labelPad,
+        -- The Build and Wishlist rows and their buttons.
+        headerRowGap = D(2), headerRowH = D(20), headerBottom = D(5), captionGap = D(6), buttonPad = labelPad,
+        -- The difficulty band (B): its frame and inner edge, the text line
+        -- and the Intensity bar under it.
+        bandH = D(34), bandPlainH = D(26), bandPadY = D(3), bandPadX = D(8), bandGap = D(10),
+        bandBarTop = D(1), bandBarH = D(4), bandBarBottom = D(3),
+        -- The Callboard line.
+        callboardH = D(20), callboardLine = D(18), callboardIcon = D(16), callboardIconTop = D(2),
+        callboardIconGap = D(6), callboardLabelGap = D(8), callboardLineGap = D(10),
+        -- The offer heading and rows.
+        headingH = D(18), headingGap = D(3), rowH = D(28), rowLine = D(24), rowPadY = D(2), rowPadX = D(6),
+        rowGap = D(2), icon = D(24), iconGap = D(8), metaGap = D(10), wordGap = D(5), reasonLine = D(18),
+        mark = D(12), markGap = D(4),
+        -- The progress row and the open Details block.
+        progressH = D(22), progressGap = D(8), progressBar = D(6), progressBarMin = D(40),
+        detailsPad = D(14), detailsH = D(20), detailGap = D(3), valueLine = D(20), countLine = D(18),
+        countGap = D(1), countColumnGap = D(12), listGap = D(5), listLine = D(18), listColumnGap = D(8),
+        -- The footer hubs.
+        hubH = D(26), hubGap = D(6), hubPad = D(3),
+    }
+    if compactCount >= MAX_CACHE_ENTRIES then compactCache, compactCount = {}, 0 end
+    compactCache[key] = compact
+    compactCount = compactCount + 1
+    return compact
+end
+
+-- The main panel's width for a text scale: the reference width (above) times
+-- the font scale the owned fonts follow (never narrower than the reference,
+-- and at most twice it: the largest supported scale), bounded by the room
+-- the screen leaves the panel at its chosen size (`screenWidth` in UIParent
+-- units less M.FitToScreen's 24-unit margin, over `panelScale`), so a wider
+-- panel is never one the fit would then have to scale down for its width. A
+-- screen width that is not plausible (M.FitToScreen's own 640-unit floor)
+-- bounds nothing. One deterministic value from its three inputs: the caller
+-- reads them once per render and nothing is fed back from the fitted size.
+-- Returns whole units.
+function M.PanelWidth(fontScale, screenWidth, panelScale)
+    local base = M.PANEL_BASE_WIDTH
+    local scale = tonumber(fontScale)
+    if not (scale and scale == scale) then scale = 1 end
+    scale = Clamp(scale, 1, 2)
+    local width = math.floor(base * scale + 0.5)
+    screenWidth = tonumber(screenWidth)
+    if screenWidth and screenWidth == screenWidth and screenWidth >= 640 and screenWidth < math.huge then
+        panelScale = Measured(panelScale)
+        if panelScale <= 0 then panelScale = 1 end
+        width = math.min(width, math.floor((screenWidth - 24) / panelScale))
+    end
+    return math.max(base, width)
+end
+
+-- The three footer hubs across a row `full` units wide: three hubs of one
+-- width, `gap` apart, that together span the row exactly. What three equal
+-- whole widths leave over (0 to 2 units) goes to the two gaps, never to one
+-- hub. Returns the hub width and the two gaps.
+function M.FooterColumns(full, gap)
+    full = math.max(3, math.floor(tonumber(full) or 0))
+    gap = math.max(0, math.floor(tonumber(gap) or 0))
+    local hub = math.max(1, math.floor((full - 2 * gap) / 3))
+    local spare = math.max(0, full - 2 * gap - 3 * hub)
+    return hub, gap + math.ceil(spare / 2), gap + math.floor(spare / 2)
+end
+
+-- The approved compact panel, block by block from the top: the header, the
+-- difficulty band, the Callboard line, the offer heading and rows, the
+-- progress row with the Details block under it while that is open, the
+-- records, and one line of footer hubs.
+-- Heights and gaps are the design's, given below in its reference pixels
+-- (the first number of each Block and Gap). They are added up in the
+-- design's own pixels and each block's top is that sum in whole units, so a
+-- block stands where the design draws it at every font scale and no rounding
+-- adds up down the panel: the whole panel is the design's height in units,
+-- to the unit, while every text fits its design row.
+-- Every block is as tall as the design draws it while its content fits
+-- there, and as tall as its content when that needs more (the second number
+-- of a Block: the heights the caller measured, in units); what is under it
+-- then starts lower by exactly the difference. Nothing is shortened, cut or
+-- held to a number of lines, and a block that is absent leaves no row, rule
+-- or gap. Lengths inside a block are M.Compact's.
 function M.Panel(spec)
     spec = type(spec) == "table" and spec or {}
     stats.requests = stats.requests + 1
@@ -410,150 +730,664 @@ function M.Panel(spec)
     stats.computations = stats.computations + 1
 
     local scale = Clamp(spec.fontScale or 1, 0.75, 2)
+    local compact = M.Compact(scale)
     local width = math.max(240, math.floor(tonumber(spec.width) or 272))
     local small = math.ceil(11 * scale)
     local normal = math.ceil(14 * scale)
     local large = math.ceil(16 * scale)
     local gap = math.ceil(6 * scale)
+    -- One line of the panel's secondary text is as tall as the client
+    -- measures it (spec.lineSmallH), never under the modelled small row: a
+    -- face whose line is taller than its nominal size keeps its whole line
+    -- wherever a row holds one line of that text. Without a measurement the
+    -- small row stands (the caller passes only a height the client itself
+    -- reported: Panel.ClientLineHeight).
+    local lineSmall = math.max(small, math.ceil(Measured(spec.lineSmallH)))
     local layout = {
         kind="panel",width=width,boxes={},required={},scale=scale,
         key=key,small=small,normal=normal,large=large,gap=gap,
+        lineSmall=lineSmall,compact=compact,
     }
-    local cursor = 6
-    local headerHeight = math.max(26, large + 8)
-    Add(layout,"header",8,cursor,width-16,headerHeight)
-    cursor = cursor + headerHeight + gap
+    -- The charges cell of the offer heading row. 72 units hold the compact
+    -- row at the 10-unit small size; the cell is never narrower than that,
+    -- and chargesGap separates it from the heading. The panel gives the cell
+    -- the width its own row of counts measures on one line, while the
+    -- heading keeps at least those 72 units (Panel.ChargesCell); chargesW,
+    -- the cell the font scale alone would give, is kept for other readers.
+    layout.chargesMinW, layout.chargesGap = 72, 4
+    layout.chargesW = math.max(72, math.floor(72 * scale + 0.5))
+    local inset = compact.inset
+    local full = width - inset * 2
+    layout.inset, layout.full = inset, full
 
-    if spec.statusVisible then
-        local height = math.max(52, normal + small * 2 + gap * 2)
-        Add(layout,"status",10,cursor,width-20,height)
-        cursor = cursor + height + gap
+    -- `drawn`: how far down the design is, in units, unrounded. `grown`:
+    -- the whole units content has added beyond the design so far. `cursor`:
+    -- where the next block starts. `closing`: the design gap given last.
+    local unit = M.PANEL_BASE_WIDTH / M.PANEL_DESIGN_WIDTH * scale
+    local drawn, grown, cursor, closing = 0, 0, 0, 0
+    -- `steps`: while a table, the design lengths given from here on, in
+    -- order (the offer block keeps its own: a block kept between boards is
+    -- ended with them, below).
+    local steps
+    local function Gap(pixels)
+        if steps and pixels ~= 0 then steps[#steps + 1] = pixels end
+        drawn = drawn + pixels * unit
+        cursor = math.floor(drawn + 0.5) + grown
+        closing = pixels
     end
-    if spec.activeRoll then
-        local height = math.max(104, small * 6 + gap * 4)
+    local function Block(pixels, need)
+        local top = cursor
+        if steps and pixels ~= 0 then steps[#steps + 1] = pixels end
+        drawn = drawn + pixels * unit
+        local height = math.floor(drawn + 0.5) + grown - top
+        need = math.ceil(tonumber(need) or 0)
+        if need > height then
+            grown = grown + need - height
+            height = need
+        end
+        cursor = top + height
+        closing = 0
+        return top, height
+    end
+    -- Where a block would start after a design gap of `pixels` from here
+    -- (nothing is laid out).
+    local function After(pixels)
+        return math.floor(drawn + pixels * unit + 0.5) + grown
+    end
+    -- A part of the panel that is there only at times (the Callboard, the
+    -- Auto lines, the Orb line, the open Details, the records) is laid out
+    -- from its own top with a design cursor of its own, and what it adds to
+    -- the panel is a whole number of units. So every block under it moves
+    -- by exactly its height when it appears or goes, and the rest of the
+    -- panel is laid out the same with or without it.
+    local function Section(body)
+        local heldDrawn, heldGrown, top = drawn, grown, cursor
+        drawn, grown = 0, top
+        body()
+        local height = cursor - top
+        drawn, grown = heldDrawn, heldGrown + height
+        cursor = math.floor(drawn + 0.5) + grown
+    end
+
+    -- The header. Line 1 (22) holds the grip, the title and the three
+    -- controls; it is never under the 24-unit grip less the one design pixel
+    -- the grip stands out above and below it, and a title that needs more (a
+    -- state cue that wraps in the title's slot, a line taller than the row)
+    -- takes its measured height (spec.headerTitleH). The Build and Wishlist
+    -- rows follow 2 apart, each 20 while its name fits one line there; a name
+    -- too long for its line wraps beside its button and the row is its
+    -- measured height (spec.headerBuildH, spec.headerWishlistH: the caller
+    -- gives the taller of the name and of a row button whose own label
+    -- wraps).
+    -- Line 1 also holds its controls whole: where a control's label wraps in
+    -- the control (a long translation of Options or Auto, or the Auto state
+    -- words in the Auto slot), the caller gives what the line must be tall
+    -- for it (spec.headerControlsH), and the line grows by what that is over
+    -- the title's own row. The title keeps its own height
+    -- (layout.headerTitleH); the rows under line 1 start lower by the
+    -- difference.
+    Gap(5)
+    local headerTop = cursor
+    local _, titleH = Block(22, math.max(compact.grip - 2 * M.Design(1, scale),
+        math.ceil(tonumber(spec.headerTitleH) or 0)))
+    local controlsH = math.ceil(Measured(spec.headerControlsH))
+    if controlsH > titleH then Block(0, controlsH - titleH) end
+    Gap(2)
+    local buildY, buildH = Block(20, spec.headerBuildH)
+    Gap(2)
+    local wishlistY, wishlistH = Block(20, spec.headerWishlistH)
+    Gap(5)
+    layout.headerLine, layout.headerTitleH = compact.headerRowH, titleH
+    layout.headerBuildY, layout.headerBuildH = buildY, buildH
+    layout.headerWishlistY, layout.headerWishlistH = wishlistY, wishlistH
+    Add(layout,"header",inset,headerTop,full,cursor-headerTop)
+    Gap(6)
+
+    local play = not spec.noBuild and not spec.complete
+    layout.play = play
+    if spec.statusVisible then
+        -- The difficulty band (B): the original card's frame around one text
+        -- line (the tier, Soul Ash and the multiplier) with the Intensity bar
+        -- and its ticks under it: 34, or 26 without a validated Intensity
+        -- scale (spec.statusBar false: no room is kept for a bar). Where the
+        -- band's words need more than that line (spec.statusTierH, the
+        -- measured height of its text block: a long tier that wraps, Soul Ash
+        -- on a line of its own under it), the band grows by exactly that.
+        local bar = spec.statusBar ~= false
+        local around = 2 * compact.bandPadY
+            + (bar and (compact.bandBarTop + compact.bandBarH + compact.bandBarBottom) or 0)
+        local top, height = Block(bar and 34 or 26, around + math.max(1, math.ceil(tonumber(spec.statusTierH) or 0)))
+        layout.statusInset, layout.statusTierH = compact.bandPadY, height - around
+        layout.statusBarH = bar and compact.bandBarH or 0
+        Add(layout,"status",inset,top,full,height)
+        Gap(5)
+    end
+    if spec.callboard then
+        -- The Callboard: its icon, its label and the objective's title on one
+        -- line (20), with the objective's progress at the right end of that
+        -- line while the caller found that one line of it fits there
+        -- (spec.callboardInline). Otherwise the progress lines stand under
+        -- the title from the label's left edge, whole, at their measured
+        -- height (spec.callboardDetailH; one line is 18), and a title too
+        -- long for its column wraps there (spec.callboardTitleH). Nothing is
+        -- shortened or cut to one line, and the block has no rule.
+        Section(function()
+            local inline = spec.callboardInline and true or false
+            local top, titleRow = Block(20, spec.callboardTitleH)
+            local detailH = 0
+            if not inline then
+                local _, measured = Block(18, spec.callboardDetailH)
+                detailH = measured
+            end
+            local char = M.ConservativeText(scale)
+            layout.callboardLine = compact.callboardH
+            layout.callboardTitleH, layout.callboardDetailH, layout.callboardInline = titleRow, detailH, inline
+            layout.callboardIcon = compact.callboardIcon
+            layout.callboardLabelW = math.ceil(tonumber(spec.callboardLabelW) or (9 * char * 1.1))
+            Add(layout,"callboard",inset,top,full,titleRow + detailH)
+            Gap(5)
+        end)
+    end
+    if spec.activeRoll and spec.noOffer then
+        -- Level 80, normal rolls finished, no offer (the collapsed state): no
+        -- heading row and no offer rows. One guidance block of the
+        -- conservative model's rows (the caller counts them at the width
+        -- left of the button) with the passive Open Orbs... button inline at
+        -- its right, exactly as tall as its guidance (or the button), one
+        -- block gap from its neighbours.
+        local char, line = M.ConservativeText(scale)
+        local rows = math.max(1, tonumber(spec.guidanceRows) or 1)
+        layout.noOffer = true
+        layout.noOfferGap = compact.blockGap
+        if spec.orbButton then
+            layout.orbButtonH = math.max(small + 6, line)
+            layout.orbButtonW = math.min(full, math.ceil(12 * char) + 20)
+        end
+        local top, height = Block(0, math.max(rows * line, layout.orbButtonH or 0))
+        Add(layout,"roll",inset,top,full,height)
+        Gap(5)
+    elseif spec.activeRoll then
+        -- The offer block. The heading row (18, or the measured height of a
+        -- heading or charges text that wraps: spec.headingH), then, 3 under
+        -- it, the three offer rows 2 apart: each 28 with its name and its
+        -- quality and status on one line, and as tall as its own measured
+        -- content when that needs more (spec.offerRowsH: a wrapped name, a
+        -- status on a line of its own). The selected offer's reason stands
+        -- inside its row, under those lines (spec.offerReason: {row, top,
+        -- h}): that row is 46 with one line of it and grows with a longer
+        -- one.
+        -- Text that is not such a reason stands 3 under the rows (or under
+        -- the heading without rows) at its measured height (spec.bodyH), and
+        -- the passive Open Orbs... row closes the block. The block is exactly
+        -- its content; one kept through a gap between boards keeps the
+        -- height it had (spec.reservedRollH), so the panel does not jump.
+        -- It also ends where it ended in the design (spec.reservedRollSteps:
+        -- the design lengths the block was laid out with, layout.rollSteps):
+        -- every block's top is the design's running sum in whole units, so a
+        -- kept block that had only its height would leave what is under it
+        -- at another place of that sum, where a row or a gap can round one
+        -- unit differently and the panel's height with it.
+        local topDrawn = drawn
+        steps = {}
+        local top, headH = Block(18, spec.headingH)
+        layout.headingH, layout.headingExtra = headH, headH - compact.headingH
+        -- The control of the Auto scope line shares the heading row while
+        -- the caller found room for it there (spec.autoInfoInline, at its
+        -- measured width spec.autoInfoW); it then takes no row of its own.
+        layout.autoInfoInline = spec.autoInfo and spec.autoInfoInline and true or false
+        if spec.cardRows then
+            local rows = type(spec.offerRowsH) == "table" and spec.offerRowsH or nil
+            local reason = rows and type(spec.offerReason) == "table" and spec.offerReason or nil
+            -- spec.offerRowsPx: the design's own height of each row as the
+            -- caller arranged it, in reference pixels (28; 24 more with the
+            -- status on a line of its own; 18 more with the reason's line).
+            -- Without it, 28, and 46 for the row that holds the reason.
+            local drawnRows = rows and type(spec.offerRowsPx) == "table" and spec.offerRowsPx or nil
+            local tops, heights = {}, {}
+            for index = 1, 3 do
+                Gap(index == 1 and 3 or 2)
+                local pixels = drawnRows and tonumber(drawnRows[index])
+                    or ((reason and reason.row == index) and 46 or 28)
+                local rowTop, rowHeight = Block(pixels, rows and rows[index] or 0)
+                tops[index], heights[index] = rowTop - top, rowHeight
+            end
+            layout.offerRowTops, layout.offerRowHeights = tops, heights
+            layout.offerRowsH, layout.offerReason = rows, reason
+        end
+        -- Where the text under the heading or the rows starts: the whole
+        -- unit the layout gives it 3 under them (below), not their end plus
+        -- a gap rounded on its own, which can be one unit lower.
+        layout.bodyTop = After(3) - top
+        local buttonH = 0
         if spec.orbButton then
             -- Its own row for the passive "Open Orbs..." button, sized for
             -- its 12-character label in the conservative text model plus the
             -- template's end caps, and at least one of its lines high.
             local char, line = M.ConservativeText(scale)
             layout.orbButtonH = math.max(small + 6, line)
-            layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
+            layout.orbButtonW = math.min(full, math.ceil(12 * char) + 20)
             -- The optional mini-panel access shares this row, immediately
             -- left of Open Orbs. Keep the existing window/button geometry.
             layout.orbMiniButtonGap = 6
-            local available = width - 24 - layout.orbButtonW - layout.orbMiniButtonGap
-            local fullWidth = math.ceil(14 * char) + 20
+            local available = full - layout.orbButtonW - layout.orbMiniButtonGap
+            -- Its label is the panel's 11-unit secondary text, a tenth wider
+            -- than the 10-unit small font the model's character is for, and
+            -- is never fitted below that size: the full label's width
+            -- allows for it.
+            local fullWidth = math.ceil(14 * char * 1.1) + 20
             layout.orbMiniButtonW = math.max(1, math.min(fullWidth, available))
-            layout.orbMiniButtonLabel = fullWidth <= available and "Orb mini panel" or "Mini"
-            height = height + layout.orbButtonH + math.ceil(gap/2)
+            -- The width rule above is unchanged; only the chosen label is
+            -- shown in the session's language (ShownLabel).
+            layout.orbMiniButtonLabel = fullWidth <= available
+                and ShownLabel("layout.button.orb_mini_panel", "Orb mini panel")
+                or ShownLabel("layout.button.orb_mini_short", "Mini")
+            buttonH = layout.orbButtonH
         end
-        local rows = tonumber(spec.guidanceRows) or 0
-        if rows > 0 then
-            -- Readable allocation for the Orb guidance body: every row of the
-            -- conservative text model below the heading (and the card rows,
-            -- if any), above the button row. Never smaller than before.
-            local _, line = M.ConservativeText(scale)
-            local y = 1 + small + math.max(3,math.floor(gap/2))
-            if spec.cardRows then
-                y = y + 3 * (small + math.max(2,math.floor(gap/3)))
+        local bodyH = math.ceil(tonumber(spec.bodyH) or 0)
+        if not spec.measured then
+            -- A caller that measured nothing: the conservative model's rows
+            -- for the Orb guidance body (spec.guidanceRows), never under a
+            -- measured text.
+            local rows = tonumber(spec.guidanceRows) or 0
+            if rows > 0 then
+                local _, line = M.ConservativeText(scale)
+                bodyH = math.max(bodyH, rows * line)
             end
-            local needed = y + rows * line + gap
-            if spec.orbButton then needed = needed + layout.orbButtonH + math.ceil(gap/2) end
-            height = math.max(height, needed)
+        elseif bodyH > 0 then
+            -- spec.bodyFloorH: the rows of the conservative text model for a
+            -- text that must stay readable in a face wider than the measured
+            -- one (the Orb guidance, an Orb pause reason, the inline Auto
+            -- line). The text is never shorter than that while nothing else
+            -- holds the block's height. In a block kept through a gap
+            -- between boards the text takes the room that block already has,
+            -- up to the floor, and the block itself grows only for the
+            -- measured text: the footprint of an Auto cycle stays the
+            -- board's.
+            local floorH = math.ceil(tonumber(spec.bodyFloorH) or 0)
+            if floorH > bodyH then
+                local reserved = math.ceil(tonumber(spec.reservedRollH) or 0)
+                if reserved > 0 then
+                    -- (What the block holds with this text: the text 3
+                    -- under the heading or the rows and, with the button,
+                    -- its row 3 under the text.)
+                    local used = (buttonH > 0 and (After(6) + buttonH) or After(3)) - top + bodyH
+                    bodyH = bodyH + math.max(0, math.min(floorH - bodyH, reserved - used))
+                else
+                    bodyH = floorH
+                end
+            end
         end
-        Add(layout,"roll",10,cursor,width-20,height)
-        cursor = cursor + height + gap
+        layout.bodyH = bodyH
+        if bodyH > 0 then
+            Gap(3)
+            Block(0, bodyH)
+        end
+        if buttonH > 0 then
+            Gap(3)
+            Block(0, buttonH)
+        end
+        if spec.measured then
+            local reserved = math.ceil(tonumber(spec.reservedRollH) or 0)
+            local held = type(spec.reservedRollSteps) == "table" and spec.reservedRollSteps or nil
+            if held and reserved > 0 and cursor - top <= reserved then
+                -- A block kept between boards, with content that fits the
+                -- height it had: it ends exactly where it ended, in units
+                -- (its height) and in the design (the same lengths added in
+                -- the same order from the block's top), so what is under it
+                -- is laid out as it was under the board.
+                drawn = topDrawn
+                for index = 1, #held do drawn = drawn + (tonumber(held[index]) or 0) * unit end
+                grown = top + reserved - math.floor(drawn + 0.5)
+                cursor = top + reserved
+                closing = 0
+                steps = held
+            else
+                -- A block kept between boards is never shorter than it was.
+                Block(0, reserved - (cursor - top))
+            end
+        end
+        -- The design lengths this block was laid out with, for a later
+        -- render that keeps it (the caller hands them back with its height).
+        layout.rollSteps = steps
+        steps = nil
+        Add(layout,"roll",inset,top,full,cursor-top)
+        Gap(5)
+        -- The Auto scope line under the offer (the Auto ON note) is behind
+        -- an optional control (spec.autoInfo). While the control shares the
+        -- heading row it has no box; at a text size where it does not fit
+        -- there it takes one short row of its own under the offer. The
+        -- line's own rows are laid out only while it is open (the caller
+        -- then gives autoScopeRows, counted at the block's width).
+        if spec.autoInfo then
+            local char, line = M.ConservativeText(scale)
+            layout.autoInfoW = math.min(full, math.ceil(tonumber(spec.autoInfoW) or (math.ceil(16 * char) + 20)))
+            if layout.autoInfoInline then
+                -- What the heading row keeps free at its right for it.
+                layout.headingReserve = layout.autoInfoW + 4
+            else
+                Section(function()
+                    local infoTop, infoH = Block(0, math.max(small + 6, line))
+                    Add(layout,"autoInfo",inset,infoTop,layout.autoInfoW,infoH)
+                    Gap(5)
+                end)
+            end
+        end
+        local scopeRows = tonumber(spec.autoScopeRows) or 0
+        if scopeRows > 0 then
+            Section(function()
+                local _, line = M.ConservativeText(scale)
+                local scopeTop, scopeH = Block(0, scopeRows * line)
+                Add(layout,"autoScope",inset,scopeTop,full,scopeH)
+                Gap(5)
+            end)
+        end
+    end
+    if spec.orbLine and not spec.noBuild then
+        -- The Orb run status with Open, right under the offer; the Orb
+        -- window owns the run's controls. Its text wraps beside the button
+        -- in its measured height (spec.orbLineH).
+        Section(function()
+            local char, line = M.ConservativeText(scale)
+            local buttonH = math.max(small + 6, line)
+            local openW = math.min(full, math.ceil(6 * char) + 20)
+            layout.orbLineOpenW = openW
+            local top, height = Block(0, math.max(buttonH, math.ceil(tonumber(spec.orbLineH) or 0)))
+            Add(layout,"orbLine",inset,top,math.max(1,full-openW-compact.progressGap),height)
+            Add(layout,"orbLineOpen",width-inset-openW,top,openW,buttonH)
+            Gap(5)
+        end)
     end
     layout.contentTop = cursor
 
+    -- The opt-in DPS RECORDS section (spec.showPerformance). Its height is
+    -- the measured height of the rows that exist (spec.performanceH): only
+    -- records that exist have a row, and without any there is no section,
+    -- heading or reserved block (0). A caller that measured nothing (nil)
+    -- gets the modelled block.
+    local function Performance(modelled)
+        if not spec.showPerformance then return end
+        local need = spec.performanceH == nil and modelled or math.ceil(tonumber(spec.performanceH) or 0)
+        if need <= 0 then return end
+        Section(function()
+            local top, height = Block(0, need)
+            Add(layout,"performance",inset,top,full,height)
+            Gap(5)
+        end)
+    end
     if spec.noBuild then
-        Add(layout,"setupTitle",12,cursor,width-24,large)
-        cursor = cursor + large + gap
-        Add(layout,"setupHint",12,cursor,width-24,small * 2)
-        cursor = cursor + small * 2 + gap
-        local buttonHeight = math.max(24, normal + 8)
-        Add(layout,"setupAssign",(width-146)/2,cursor,146,buttonHeight)
-        cursor = cursor + buttonHeight + gap
-        Add(layout,"setupCreate",(width-146)/2,cursor,146,buttonHeight)
-        cursor = cursor + buttonHeight + gap
+        -- The setup view's title and hint are as tall as their wrapped text
+        -- measures at the width each has here (spec.setupTitleH,
+        -- spec.setupHintH: Panel.MeasuredLayout; the title's is this row's,
+        -- the hint's is given below), never under the modelled rows they had
+        -- (one large line; two small lines), and the buttons and what
+        -- follows move down by what the text needs.
+        local top, height = Block(0, math.max(large, math.ceil(Measured(spec.setupTitleH))))
+        Add(layout,"setupTitle",inset,top,full,height)
+        Gap(5)
+        -- The hint is a block of its own in the panel's middle, not a line
+        -- from edge to edge. Its room is the panel less 24 design pixels at
+        -- each side (layout.setupHintRoom). Inside that room it is as wide
+        -- as the caller found its lines even (spec.setupHintW:
+        -- Panel.BalancedWidth, a width at which the text is no taller than
+        -- across the whole room). The caller measures the hint's height at
+        -- that same width and the panel draws it there, so what is measured
+        -- is what is shown. Without such a width, or with one outside the
+        -- room, the hint has the whole room. Its words, its font and the
+        -- gaps above and below it are unchanged.
+        local hintRoom = math.max(1, width - 2 * math.max(inset, M.Design(24, scale)))
+        local hintW = math.ceil(Measured(spec.setupHintW))
+        if hintW <= 0 or hintW > hintRoom then hintW = hintRoom end
+        layout.setupHintRoom = hintRoom
+        top, height = Block(0, math.max(small * 2, math.ceil(Measured(spec.setupHintH))))
+        Add(layout,"setupHint",(width-hintW)/2,top,hintW,height)
+        Gap(5)
+        local buttonWidth = math.min(146, full)
+        top, height = Block(0, math.max(24, normal + 8))
+        Add(layout,"setupAssign",(width-buttonWidth)/2,top,buttonWidth,height)
+        Gap(5)
+        top, height = Block(0, math.max(24, normal + 8))
+        Add(layout,"setupCreate",(width-buttonWidth)/2,top,buttonWidth,height)
+        Gap(5)
     elseif spec.complete then
         if not spec.statusVisible then
-            Add(layout,"completeTitle",12,cursor,width-24,normal)
-            cursor = cursor + normal + gap
-            Add(layout,"completeText",12,cursor,width-24,small * 2)
-            cursor = cursor + small * 2 + gap
+            -- The completion view's badge and sentence, measured the same
+            -- way (spec.completeTitleH, spec.completeTextH), never under the
+            -- modelled rows they had (one normal line; two small lines).
+            local top, height = Block(0, math.max(normal, math.ceil(Measured(spec.completeTitleH))))
+            Add(layout,"completeTitle",inset,top,full,height)
+            Gap(5)
+            top, height = Block(0, math.max(small * 2, math.ceil(Measured(spec.completeTextH))))
+            Add(layout,"completeText",inset,top,full,height)
+            Gap(5)
         end
-        if spec.showPerformance then
-            local height = small * 8 + gap * 5
-            Add(layout,"performance",12,cursor,width-24,height)
-            cursor = cursor + height + gap
-        end
+        Performance(small * 8 + gap * 5)
     else
-        Add(layout,"progressHeader",12,cursor,width-24,small)
-        cursor = cursor + small + math.max(3,math.floor(gap/2))
-        Add(layout,"progressValue",12,cursor,width-24,normal)
-        cursor = cursor + normal + gap
-        if (tonumber(spec.unknownTomes) or 0) > 0 then
-            Add(layout,"tomes",12,cursor,width-24,small)
-            cursor = cursor + small + gap
+        -- The plan progress: one row (22) with its caption at the left, the
+        -- Details control at the right and the bar between them, 8 from each,
+        -- in the row's middle. The caption is as wide as its own words
+        -- (spec.progressLabelW; without a measurement the conservative
+        -- model's eight characters) and Details as wide as its own label
+        -- needs (spec.planDetailsW: the wider of its two labels with their
+        -- room; without one the modelled 12-character button), held to half
+        -- the row. Where those leave the bar less than 40 (a long caption or
+        -- label), the bar takes a row of its own under them, across the
+        -- block. No rule is drawn above the progress.
+        -- Both stay whole: a caption wider than the room it then has beside
+        -- Details wraps there, and a Details label wider than the control
+        -- wraps in it; the caller gives the wrapped caption's height and the
+        -- control's (spec.progressLabelH, spec.planDetailsH), the row is as
+        -- tall as the taller of them and the control as tall as its label
+        -- needs. Neither is shortened or fitted smaller.
+        -- Collapsed, that row is the whole progress: the run's count is
+        -- hidden with the other four counts until Details is opened. Open,
+        -- the count has its own row 3 under it (20, or its measured height:
+        -- spec.progressValueH), then the four counts in two rows (18 each, 1
+        -- apart, or their measured heights: spec.countRowsH), the Orb run's
+        -- numbers while a run is known (spec.orbDetail), then the Echo names
+        -- behind the counts: Still needed and Extra copies side by side, and
+        -- To lock as a third column beside them while there is one.
+        local char = M.ConservativeText(scale)
+        local detailsW = math.ceil(12 * char) + 20
+        local detailsNeed = math.ceil(Measured(spec.planDetailsW))
+        if detailsNeed > 0 then detailsW = detailsNeed end
+        detailsW = math.max(1, math.min(detailsW, math.floor(full / 2)))
+        local captionW = math.ceil(Measured(spec.progressLabelW))
+        if captionW <= 0 then captionW = math.ceil(8 * char * 1.1) end
+        local barH = compact.progressBar
+        local barW = full - captionW - compact.progressGap * 2 - detailsW
+        local detailsNeedH = math.ceil(Measured(spec.planDetailsH))
+        local top, rowH = Block(22, math.max(lineSmall, detailsNeedH, math.ceil(Measured(spec.progressLabelH))))
+        local detailsH = math.min(rowH, math.max(compact.detailsH, lineSmall, detailsNeedH))
+        layout.planDetailsW = detailsW
+        Add(layout,"planDetails",width-inset-detailsW,top+math.floor((rowH-detailsH)/2),detailsW,detailsH)
+        if barW >= compact.progressBarMin then
+            layout.progressInline = true
+            Add(layout,"progressHeader",inset,top,math.min(captionW,full),rowH)
+            Add(layout,"planBar",inset+captionW+compact.progressGap,top+math.floor((rowH-barH)/2),barW,barH)
+        else
+            layout.progressInline = false
+            Add(layout,"progressHeader",inset,top,math.max(1,full-detailsW-compact.progressGap),rowH)
+            Gap(2)
+            local barTop = Block(0, barH)
+            Add(layout,"planBar",inset,barTop,full,barH)
         end
-        local columnGap = 12
-        local columnWidth = math.floor((width - 24 - columnGap) / 2)
-        local columnHeight = small * 4 + math.max(3,math.floor(gap/2))
-        Add(layout,"needed",12,cursor,columnWidth,columnHeight)
-        Add(layout,"shed",12+columnWidth+columnGap,cursor,
-            width-24-columnWidth-columnGap,columnHeight)
-        cursor = cursor + columnHeight + gap
-        if (tonumber(spec.toLockCount) or 0) > 0 then
-            local height = small * 3 + math.max(3,math.floor(gap/2))
-            Add(layout,"toLock",12,cursor,width-24,height)
-            cursor = cursor + height + gap
+        -- The open Details stand between the progress row and that row's
+        -- own gap: a section, so opening and closing it moves what is under
+        -- it by exactly its height.
+        if spec.planDetails then
+            Section(function()
+                Gap(3)
+                local valueTop, valueH = Block(20, spec.progressValueH)
+                Add(layout,"progressValue",inset,valueTop,full,valueH)
+                Gap(3)
+                local columnGap = compact.countColumnGap
+                local columnWidth = math.floor((full - columnGap) / 2)
+                local rightX, rightW = inset+columnWidth+columnGap, full-columnWidth-columnGap
+                local counts = type(spec.countRowsH) == "table" and spec.countRowsH or {}
+                local firstTop, firstH = Block(18, counts[1])
+                Add(layout,"planNeeded",inset,firstTop,columnWidth,firstH)
+                Add(layout,"planTomes",rightX,firstTop,rightW,firstH)
+                Gap(1)
+                local secondTop, secondH = Block(18, counts[2])
+                Add(layout,"planExtra",inset,secondTop,columnWidth,secondH)
+                Add(layout,"planLocked",rightX,secondTop,rightW,secondH)
+                Gap(5)
+                -- The Orb run's numbers (used of approved, awaiting a result):
+                -- like the other counts, a row of the open Details block only,
+                -- across the block, as tall as its wrapped words measure
+                -- (spec.orbDetailH). Outside Details the Orb strip has no number.
+                if spec.orbDetail then
+                    local orbTop, orbH = Block(18, spec.orbDetailH)
+                    Add(layout,"planOrb",inset,orbTop,full,orbH)
+                    Gap(5)
+                end
+                -- Each name column: its heading (one line of the secondary
+                -- text, 18, unless a heading needs more: below), then its names
+                -- right under it, 18 a line.
+                -- The columns stand side by side (two, and three with To lock),
+                -- so each is a half or a third of the block: a name or a "+N
+                -- more" row wider than its column wraps inside it, and the
+                -- caller measures every row at its wrapped height in its real
+                -- font, width and text (Panel.PanelLayout: spec.detailNamesH for
+                -- Still needed and Extra copies, spec.toLockH for To lock), so
+                -- no row is cut or held to one line. The design's own three
+                -- lines (two names and "+N more") stand while the rows need no
+                -- more. The columns are one height: the tallest one's.
+                -- The headings share one row over the columns: one line of the
+                -- secondary text while every heading fits its column on one
+                -- line (as before), and the tallest heading's measured height
+                -- when a heading wraps inside its column (spec.listHeadingH:
+                -- Panel.MeasureDetailHeadings), so no heading is cut and the
+                -- names, and everything after them, start under the whole of
+                -- it. layout.detailHeadingTall says the row holds more than
+                -- one line; the headings then stand at its top.
+                local columns = (tonumber(spec.toLockCount) or 0) > 0 and 3 or 2
+                local listGap = compact.listColumnGap
+                local listWidth = math.floor((full - listGap * (columns - 1)) / columns)
+                local headingNeed = math.ceil(Measured(spec.listHeadingH))
+                local listTop, headingH = Block(18, math.max(lineSmall, headingNeed))
+                local _, namesH = Block(54, math.max(math.ceil(tonumber(spec.detailNamesH) or 0),
+                    columns == 3 and math.ceil(tonumber(spec.toLockH) or 0) or 0))
+                layout.detailHeadingH = headingH
+                layout.detailHeadingTall = headingNeed > lineSmall
+                Add(layout,"needed",inset,listTop,listWidth,headingH + namesH)
+                Add(layout,"shed",inset+listWidth+listGap,listTop,listWidth,headingH + namesH)
+                if columns == 3 then
+                    local thirdX = inset + (listWidth + listGap) * 2
+                    Add(layout,"toLock",thirdX,listTop,math.max(1,width-inset-thirdX),headingH + namesH)
+                end
+            end)
         end
-        if spec.showPerformance then
-            local height = small * 5 + gap * 4
-            Add(layout,"performance",12,cursor,width-24,height)
-            cursor = cursor + height + gap
-        end
+        Gap(5)
+        -- No flattened Difficulty / Soul Ash row: the band above holds it.
+        Performance(small * 5 + gap * 4)
     end
 
     if not spec.noBuild then
-        Add(layout,"bestDps",12,cursor,width-24,small)
-        cursor = cursor + small + gap
+        -- Your record, then the best known record for the same Echoes: two
+        -- entries, never a rank. Only the records that exist are laid out
+        -- (spec.recordYours, spec.recordBest): without one, no row, note or
+        -- gap is reserved. Each is one entry, a label followed by its value,
+        -- given as the measured widths {label, value} (or true: unmeasured,
+        -- a whole line). Both entries share one line (18) while they fit
+        -- beside each other; otherwise each takes its own line, and an entry
+        -- wider than the line puts its value on a second line under its
+        -- label. Nothing is shortened. What best known means is on that
+        -- entry's hover.
+        -- A line of an entry is one whole line of the secondary text
+        -- (lineSmall: its measured height when the caller gave one).
+        local function Entry(entry)
+            if type(entry) ~= "table" then return full, 1 end
+            local need = math.ceil((tonumber(entry[1]) or 0) + gap + (tonumber(entry[2]) or 0))
+            if need <= full then return need, 1 end
+            return full, 2
+        end
+        local function Row(name, x, entryW, lines)
+            local top, height = Block(18 * lines, lineSmall * lines + (lines - 1) * compact.rowGap)
+            Add(layout,name,x,top,entryW,height)
+            return top, height
+        end
+        local yours, best = spec.recordYours, spec.recordBest
+        layout.recordYours, layout.recordBest = yours, best
+        Section(function()
+            if yours and best then
+                local yoursW, yoursLines = Entry(yours)
+                local bestW, bestLines = Entry(best)
+                if type(yours) == "table" and type(best) == "table"
+                    and yoursLines == 1 and bestLines == 1 and yoursW + gap * 2 + bestW <= full then
+                    local top, height = Row("bestDps", inset, yoursW, 1)
+                    Add(layout,"bestKnown",inset+yoursW+gap*2,top,bestW,height)
+                    Gap(5)
+                else
+                    Row("bestDps", inset, yoursW, yoursLines)
+                    Gap(2)
+                    Row("bestKnown", inset, bestW, bestLines)
+                    Gap(5)
+                end
+            elseif yours or best then
+                local entryW, lines = Entry(yours or best)
+                Row(yours and "bestDps" or "bestKnown", inset, entryW, lines)
+                Gap(5)
+            end
+        end)
     end
     layout.contentBottom = cursor
-    local footerHeight = math.max(22, normal + 7)
-    local reduction = spec.statusVisible and 0 or 59
-    local legacyMinimum
-    if spec.noBuild then
-        legacyMinimum = (spec.activeRoll and 428 or 278) - reduction
-    elseif spec.complete then
-        if spec.showPerformance then
-            legacyMinimum = (spec.activeRoll and 430 or 286) - reduction
-        else
-            legacyMinimum = (spec.activeRoll and 292 or 168) - reduction
-        end
-    elseif spec.showPerformance then
-        legacyMinimum = (spec.activeRoll and 448 or 325) - reduction
-    else
-        legacyMinimum = (spec.activeRoll and 388 or 267) - reduction
-    end
-    if not spec.noBuild and not spec.complete
-        and (tonumber(spec.toLockCount) or 0) > 0 then
-        legacyMinimum = legacyMinimum + 34
-    end
-    local footerY = math.max(cursor + gap,
-        legacyMinimum - footerHeight - 7)
-    Add(layout,"footer",8,footerY,width-16,footerHeight)
-    layout.height = footerY + footerHeight + 7
+    -- The footer: three hubs of one width on one line (26, or the height the
+    -- caller measured a hub's label to need: spec.footerH), 12 under the
+    -- last block (in place of that block's own gap) and 6 above the panel's
+    -- lower edge. Every view is as tall as its content: no least height, so
+    -- a section that is absent leaves no empty block.
+    Gap(12 - closing)
+    local footerY, footerHeight = Block(26, spec.footerH)
+    Add(layout,"footer",inset,footerY,full,footerHeight)
+    Gap(6)
+    layout.height = cursor
     return Remember(panelCache,panelOrder,key,layout)
 end
 
 local CONTROL_ORDER = {"search","scope","mine","class","qualified","sort"}
-local ACTION_ORDER = {"sync","share"}
+local ACTION_ORDER = {"sync","mode","share"}
 local CONTROL_BASE = {
     search=165,scope=84,mine=84,class=128,qualified=112,sort=126,
-    sync=88,share=110,
+    sync=88,mode=96,share=110,
 }
+-- The Build Library status region: rows of its composed text (count, the
+-- latest Share and the current Sync mode) under the conservative text model,
+-- bounded so a very long Share sentence cannot push the list off the window.
+-- The bound holds the longest supported composition at the largest supported
+-- font scale (2.0, 14 px per character in a 720 px status): an 80-byte Share
+-- title in the terminal sentence with its bounded reason, Retry Share, the
+-- locked-target sentence and the roles, the count line and the Automatic line
+-- need about 17 rows there; 8 rows held only the font scale 1 texts.
+local STATUS_MAX_ROWS = 20
+-- The window also stays inside the visible UI (M5 queue item 2). The layout
+-- (height) is laid out as before: every status row, the controls and the
+-- minimum list/detail body. While it fits the UI height less this margin
+-- (FitToScreen's), the window shows all of it. Otherwise the window is that
+-- tall (windowHeight) and the renderer scrolls the laid-out content inside
+-- it (scrollRange), so every control, the whole status and the list/detail
+-- can be brought on screen. Nothing is scaled, shortened or hidden. Only the
+-- body scrolls: the shared header above scrollTop stays where it is. A UI
+-- size under FitToScreen's plausible minimum is not acted on.
+local COMMUNITY_VIEWPORT_MARGIN = 24
+local COMMUNITY_VIEWPORT_MIN_WIDTH, COMMUNITY_VIEWPORT_MIN_HEIGHT = 640, 480
+
+local function StatusLine(scale)
+    return math.max(17, math.ceil(13 * Clamp(scale or 1, 0.75, 2)))
+end
+
+-- Community only: visual rows the status text needs at `width`, 1..20.
+function M.CommunityStatusRows(text, width, scale)
+    local rows = M.TextRows(text, math.max(1, tonumber(width) or 1), scale)
+    return math.max(1, math.min(STATUS_MAX_ROWS, rows))
+end
+
+-- Community only: the status height that holds `rows` rows at `scale`.
+function M.CommunityStatusHeight(rows, scale)
+    rows = math.max(1, math.min(STATUS_MAX_ROWS, math.floor(tonumber(rows) or 2)))
+    local gap = math.ceil(6 * Clamp(scale or 1, 0.75, 2))
+    return math.max(28, rows * StatusLine(scale) + gap)
+end
 
 local function LabelKey(labels)
     local out = {}
@@ -567,7 +1401,9 @@ local function CommunityKey(spec)
     return table.concat({Round(spec.width or 1040,1),
         Round(spec.height or 640,1),Round(spec.fontScale or 1,3),
         Round(spec.uiScale or 1,3),tonumber(spec.revision) or 0,
-        LabelKey(labels)},"|")
+        LabelKey(labels),"s" .. tostring(tonumber(spec.statusRows) or 0),
+        "v" .. tostring(Round(spec.viewportWidth or 0,1)) .. "x"
+            .. tostring(Round(spec.viewportHeight or 0,1))},"|")
 end
 
 local function ControlWidth(name, label, scale, available)
@@ -621,10 +1457,17 @@ function M.Community(spec)
         kind="community",width=width,boxes={},required={},hitboxes={},
         scale=scale,key=key,pageSize=20,small=small,normal=normal,gap=gap,
     }
-    Add(layout,"title",52,10,width-104,normal)
-    local navY = layout.boxes.title.y + layout.boxes.title.h + gap
-    Add(layout,"nav",18,navY,math.min(314,width-70),math.max(24,normal+8))
-    local cursor = layout.boxes.nav.y + layout.boxes.nav.h + gap * 2
+    -- The shared workspace header: the title and the tab row are one row at
+    -- the same anchors as Plan's and Records' (M.WorkspaceHeader).
+    local header = M.WorkspaceHeader(width)
+    local tb, nb = header.boxes.title, header.boxes.tabs
+    Add(layout,"title",tb.x,tb.y,tb.w,tb.h)
+    Add(layout,"nav",nb.x,nb.y,nb.w,nb.h)
+    layout.header = header
+    -- The body below the header (every box from here down) is what scrolls;
+    -- the header stays on the window. scrollTop is where the body begins.
+    layout.scrollTop = header.bottom + gap
+    local cursor = header.bottom + gap * 2
     Add(layout,"browseLabel",20,cursor,width-40,small)
     cursor = cursor + small + math.max(3,math.floor(gap/2))
     cursor = Flow(layout,CONTROL_ORDER,labels,cursor,scale,width-40,nil,true)
@@ -652,14 +1495,22 @@ function M.Community(spec)
         metaY,nextWidth,metaHeight)
     layout.hitboxes.next = nextBox
     cursor = metaY + metaHeight + gap
-    local statusHeight = math.max(28, small * (spec.syncActive and 2 or 2) + gap)
+    -- The detail keeps its heading, a two-row action footer and at least
+    -- three lines of its scrolled body; the list needs less.
+    local minimumBody = math.max(150,math.ceil(133 * scale))
+    -- Without a measured row count the original two-row reserve stands; with
+    -- one, the status holds every measured row (up to STATUS_MAX_ROWS).
+    local statusHeight = math.max(28, small * 2 + gap)
+    local measuredRows = tonumber(spec.statusRows)
+    if measuredRows then
+        statusHeight = M.CommunityStatusHeight(measuredRows, scale)
+    end
+    layout.statusRows = measuredRows or nil
+    layout.statusLine = StatusLine(scale)
     Add(layout,"status",20,cursor,width-40,statusHeight)
     cursor = cursor + statusHeight + gap
 
     local bodyTop = cursor
-    -- The detail keeps its heading, a two-row action footer and at least
-    -- three lines of its scrolled body; the list needs less.
-    local minimumBody = math.max(150,math.ceil(133 * scale))
     local height = math.max(requestedHeight, bodyTop + minimumBody + 20)
     local bodyHeight = height - bodyTop - 20
     local bodyGap = math.max(16,math.ceil(20 * scale))
@@ -676,6 +1527,26 @@ function M.Community(spec)
     Add(layout,"emptyState",30,bodyTop+gap,listWidth-20,
         math.min(bodyHeight-gap*2,small*5),false)
     layout.height = height
+    -- The window shown on screen (see COMMUNITY_VIEWPORT_MARGIN): the whole
+    -- layout while it fits the UI height less the margin, otherwise that
+    -- height, with the rest reached by scrolling. viewportFit says whether
+    -- the window, with its margin, lies inside the UI size; it is nil when
+    -- no plausible UI size was given (the window then shows the layout).
+    layout.windowHeight, layout.scrollRange = height, 0
+    local viewportWidth = tonumber(spec.viewportWidth)
+    local viewportHeight = tonumber(spec.viewportHeight)
+    if viewportWidth and viewportHeight
+        and viewportWidth >= COMMUNITY_VIEWPORT_MIN_WIDTH
+        and viewportHeight >= COMMUNITY_VIEWPORT_MIN_HEIGHT then
+        local windowHeight = math.min(height,
+            math.floor(viewportHeight - COMMUNITY_VIEWPORT_MARGIN))
+        layout.windowHeight = windowHeight
+        layout.scrollRange = height - windowHeight
+        layout.viewportWidth, layout.viewportHeight = viewportWidth, viewportHeight
+        layout.viewportMargin = COMMUNITY_VIEWPORT_MARGIN
+        layout.viewportFit = windowHeight <= viewportHeight - COMMUNITY_VIEWPORT_MARGIN
+            and width <= viewportWidth - COMMUNITY_VIEWPORT_MARGIN
+    end
     layout.cardPoolLimit = math.max(1,math.min(19,
         math.ceil(bodyHeight / 92) + 4))
     local cardWidth = math.max(220,listWidth-20)
@@ -692,6 +1563,33 @@ function M.Community(spec)
     return Remember(communityCache,communityOrder,key,layout)
 end
 
+-- The header Plan, Explore and Records share (FullUIWorkspaces.ApplyHeader):
+-- the three workspace tabs, Plan / Explore / Records, then Help, in one row
+-- from the window's top-left; the title after Help; Reference at the top
+-- right, left of the close button. Every place is measured from the top-left
+-- corner (Reference from the top-right), never centred in the window, so the
+-- tabs and the title keep one place in each workspace at any window width,
+-- and the window's top-left is what navigation carries across. The buttons
+-- keep their template height; a title longer than its room stays one line.
+M.WORKSPACE_WIDTH = 1040
+local WORKSPACE_TABS = {"plan","builds","records"}
+function M.WorkspaceHeader(width)
+    width = math.max(640, math.floor(tonumber(width) or M.WORKSPACE_WIDTH))
+    local top, left, height, gap, tabW, helpW, referenceW = 12, 18, 22, 4, 96, 56, 84
+    local boxes, x = {}, left
+    for _, key in ipairs(WORKSPACE_TABS) do
+        boxes[key] = Box(x, top, tabW, height)
+        x = x + tabW + gap
+    end
+    boxes.help = Box(x, top, helpW, height)
+    x = x + helpW
+    boxes.tabs = Box(left, top, x - left, height)
+    boxes.reference = Box(width - 40 - referenceW, top, referenceW, height)
+    local titleX = x + 16
+    boxes.title = Box(titleX, top + 2, math.max(1, boxes.reference.x - 12 - titleX), 18)
+    return {width=width,top=top,bottom=top + height,order=WORKSPACE_TABS,boxes=boxes}
+end
+
 function M.ResetCache()
     panelCache,communityCache,panelOrder,communityOrder = {},{},{},{}
 end
@@ -703,6 +1601,418 @@ function M.Stats()
         fontApplications=stats.fontApplications,
         runtimeRevision=runtimeRevision,panelEntries=#panelOrder,
         communityEntries=#communityOrder}
+end
+
+-- v26 (native X1, test.163031): owned dialog levels over one known game
+-- control. The client's "Select an Echo" control, PerkChooseButton, was read
+-- (read only) on 3.3.5 / 12340 as DIALOG strata, level 110, parent UIParent,
+-- shown; at that level it draws over the Reference (DIALOG 40), the Support
+-- page and the Build Library (DIALOG 50). While it is a shown DIALOG frame
+-- whose level is a whole number from 1 to 126, a shown owned window's own
+-- DIALOG frames are given levels above it and no higher than 127: the band
+-- below the native failure where a parent at 129 drew over children at 128
+-- (Help). The window's own default levels are recorded and their distinct
+-- values are mapped in order onto level+1 .. 127, so every parent/child and
+-- sibling relation (equal, above or below; the Theme base under its window)
+-- keeps its sense. Parents are set before their children, so a client that
+-- moves children with a parent cannot leave a child at another level. Hiding
+-- the window, or the control going away, sets the recorded defaults back.
+-- Bounds: only the control named here is read (shown, strata, level; each
+-- read protected) and never changed, clicked or hooked; only the window's own
+-- children are walked (GetChildren from the window, at most LIFT_MAX_NODES
+-- frames LIFT_MAX_DEPTH deep), never every frame; no frame, timer, hook or
+-- strata is added or changed. Any failed or out-of-range read, a tree that is
+-- too large, or more distinct levels than the band holds writes nothing (a
+-- lifted window is then set back to its defaults whole). A child created
+-- while its window is lifted gets its default from its parent's default and
+-- its own offset to that parent, never from the lifted level.
+do
+    local FOREIGN = "PerkChooseButton"
+    local CEILING = 127
+    local LIFT_MAX_NODES, LIFT_MAX_DEPTH = 1024, 32
+    local SKIP = {Texture=true, FontString=true, Font=true}
+
+    -- One protected method call on an object; false when it cannot be made.
+    local function Call(object, name)
+        local okIndex, method = pcall(function() return object[name] end)
+        if not okIndex or type(method) ~= "function" then return false end
+        local ok, value = pcall(method, object)
+        if not ok then return false end
+        return true, value
+    end
+    local function WholeLevel(value)
+        value = tonumber(value)
+        if not value or value ~= value or value < 0 or value > 65535
+            or value ~= math.floor(value) then return nil end
+        return value
+    end
+
+    -- The known control's level while it is a shown DIALOG frame with a
+    -- level that leaves room above it, else nil (keep the defaults).
+    function M.ForeignDialogLevel()
+        local control = _G[FOREIGN]
+        local kind = type(control)
+        if kind ~= "table" and kind ~= "userdata" then return nil end
+        local ok, shown = Call(control, "IsShown")
+        if not ok or not (shown == true or shown == 1) then return nil end
+        local okStrata, strata = Call(control, "GetFrameStrata")
+        if not okStrata or strata ~= "DIALOG" then return nil end
+        local okLevel, level = Call(control, "GetFrameLevel")
+        level = okLevel and WholeLevel(level) or nil
+        if not level or level < 1 or level > CEILING - 1 then return nil end
+        return level
+    end
+
+    -- The window and its own descendant frames, parents before children,
+    -- with each one's parent in the walk, level, strata and actual parent
+    -- (GetParent; r2: late frames are matched with their real siblings by
+    -- it); nil when any read fails or the tree is larger than the bound.
+    local function Tree(window)
+        local nodes, parent, level, strata, actual = {}, {}, {}, {}, {}
+        local queue, depth, head = {window}, {[window]=0}, 1
+        while queue[head] do
+            local node = queue[head];head = head + 1
+            local okLevel, value = Call(node, "GetFrameLevel")
+            value = okLevel and WholeLevel(value) or nil
+            local okStrata, layer = Call(node, "GetFrameStrata")
+            local okParent, owner = Call(node, "GetParent")
+            if not value or not okStrata or type(layer) ~= "string" or not okParent then return nil end
+            nodes[#nodes + 1] = node;level[node] = value;strata[node] = layer;actual[node] = owner
+            if #nodes > LIFT_MAX_NODES then return nil end
+            local okChildren, children = pcall(function() return {node:GetChildren()} end)
+            if not okChildren then return nil end
+            for _, child in ipairs(children) do
+                -- r1 (A4): a child whose type cannot be read is not skipped;
+                -- the whole walk is refused (it could be an owned frame).
+                local okType, objectType = Call(child, "GetObjectType")
+                if not okType or type(objectType) ~= "string" then return nil end
+                if not SKIP[objectType] and depth[child] == nil then
+                    if depth[node] + 1 > LIFT_MAX_DEPTH then return nil end
+                    depth[child] = depth[node] + 1;parent[child] = node
+                    queue[#queue + 1] = child
+                end
+            end
+        end
+        return nodes, parent, level, strata, actual
+    end
+
+    -- r1 (R1, both original reviews): the owned windows that take part (Help,
+    -- the Library, Support) are one family. They are lifted together with
+    -- one rank map over the union of their DIALOG DEFAULT levels, so at the
+    -- lifted levels every window keeps its default place among the others
+    -- (Help 39-42 under the Library and Support 49-70) as well as its own
+    -- order. A window joins the family the first time it asks for a lift;
+    -- the registry holds windows weakly and is never walked beyond its
+    -- members. Only shown members are lifted; a hidden member is restored.
+    -- r4: when the shown members' union does not fit, the top windows that
+    -- fit are lifted and the windows strictly below them keep their exact
+    -- defaults (Help under the Library, as at the defaults; LiftFamily).
+    local family = {members=setmetatable({}, {__mode="k"}), level=nil, tried=nil}
+
+    local function State(window)
+        local state = rawget(window, "_nexusOwnedLift")
+        if not state then
+            state = {record=setmetatable({}, {__mode="k"}),
+                changed=setmetatable({}, {__mode="k"}), lifted=false, pending=false}
+            rawset(window, "_nexusOwnedLift", state)
+        end
+        return state
+    end
+    local function IsShown(window)
+        local ok, shown = Call(window, "IsShown")
+        return ok and (shown == true or shown == 1)
+    end
+    local function SetLevel(node, value)
+        return (pcall(function() node:SetFrameLevel(value) end))
+    end
+
+    -- The defaults a walk proposes, without writing them. A window that is
+    -- neither lifted nor waiting for a restore reports its defaults now. A
+    -- lifted or waiting one keeps its records (never what it shows). A frame
+    -- first seen since gets a default without ever using a lifted level:
+    --  * one row above its parent (the client's own child level): its
+    --    parent's default plus one;
+    --  * otherwise, at the current level of a recorded sibling (same actual
+    --    parent): that sibling's exact default, so a level copied from a
+    --    sibling (the Library's detail status frame takes the detail panel's
+    --    level) keeps the tie it was made with (r2, Standards R1);
+    --  * otherwise: its parent's default plus its offset to that parent.
+    -- nil when that cannot be decided safely: a parent's default unknown, or
+    -- recorded siblings at that level with different defaults (ambiguous).
+    -- One pass builds the sibling table and one pass proposes, so a walk is
+    -- linear in its frames.
+    local AMBIGUOUS = {}
+    local function Proposed(state, nodes, parent, level, actual)
+        local out = {}
+        if not (state.lifted or state.pending) then
+            for _, node in ipairs(nodes) do out[node] = level[node] end
+            return out
+        end
+        local copies = {}
+        for _, node in ipairs(nodes) do
+            local value, owner = state.record[node], actual and actual[node]
+            if value ~= nil and owner ~= nil then
+                local slots = copies[owner]
+                if not slots then slots = {};copies[owner] = slots end
+                local seen = slots[level[node]]
+                if seen == nil then slots[level[node]] = value
+                elseif seen ~= value then slots[level[node]] = AMBIGUOUS end
+            end
+        end
+        for _, node in ipairs(nodes) do
+            local value = state.record[node]
+            if value == nil then
+                local up = parent[node]
+                local upValue = up and (out[up] or state.record[up])
+                if not upValue then return nil end
+                if level[node] == level[up] + 1 then
+                    value = upValue + 1
+                else
+                    local owner = actual and actual[node]
+                    local slots = owner ~= nil and copies[owner] or nil
+                    local copied = slots and slots[level[node]]
+                    if copied == AMBIGUOUS then return nil end
+                    value = copied or (upValue + (level[node] - level[up]))
+                end
+            end
+            out[node] = value
+        end
+        return out
+    end
+
+    -- Sets a window's recorded defaults back, parents first: every walked
+    -- DIALOG frame, and every frame the lift raised that has left the tree
+    -- (a released pool card). A write that fails does not stop the others;
+    -- the window then stays waiting (pending) with its records and the
+    -- frames it raised, and the restore is tried again before any later
+    -- lift or re-record, so a level left raised never becomes a default.
+    local function RestoreWindow(window)
+        local state = State(window)
+        if not (state.lifted or state.pending) then return true end
+        local nodes, parent, level, strata, actual = Tree(window)
+        local ok, walked = true, {}
+        -- r2: a walk that fails, or a late frame whose default cannot be
+        -- decided, keeps the window waiting (pending) so the restore is tried
+        -- again; it is never reported as complete.
+        if not nodes then ok = false end
+        if nodes then
+            local proposed = Proposed(state, nodes, parent, level, actual)
+            if proposed then
+                for node, value in pairs(proposed) do
+                    if state.record[node] == nil then state.record[node] = value end
+                end
+            else
+                ok = false
+            end
+            for _, node in ipairs(nodes) do
+                walked[node] = true
+                local value = strata[node] == "DIALOG" and state.record[node] or nil
+                if value and not SetLevel(node, value) then ok = false end
+            end
+        end
+        for node in pairs(state.changed) do
+            local value = state.record[node]
+            if not walked[node] and value and not SetLevel(node, value) then ok = false end
+        end
+        state.lifted, state.level = false, nil
+        if ok then
+            state.pending = false
+            state.changed = setmetatable({}, {__mode="k"})
+        else
+            state.pending = true
+        end
+        return ok
+    end
+
+    -- Restores every member that is lifted or waiting. True when all are.
+    local function RestoreAll()
+        local ok = true
+        for window in pairs(family.members) do
+            if not RestoreWindow(window) then ok = false end
+        end
+        family.level = nil
+        return ok
+    end
+
+    -- A lift that cannot be made restores the whole family and is
+    -- remembered for that control level, so a periodic check does not walk
+    -- again until it changes.
+    local function Refuse(over)
+        RestoreAll()
+        family.tried = over
+        return false
+    end
+
+    -- Lays the family out for the control as it reads now. Preflight first:
+    -- every shown member is walked (any failed read refuses), any member
+    -- waiting for a restore is restored first (a failure refuses), the
+    -- defaults of all shown members are proposed and the union fit is
+    -- checked; only then are records kept and levels written, each window
+    -- parents first. A write that fails restores the whole family. r4: a
+    -- union that does not fit lifts only its top windows when they fit and
+    -- are strictly separated from the windows left at their defaults (see
+    -- below); otherwise the whole family is refused as before.
+    local function LiftFamily()
+        local over = M.ForeignDialogLevel()
+        local shown = {}
+        for window in pairs(family.members) do
+            if IsShown(window) then
+                shown[#shown + 1] = window
+            else
+                local state = State(window)
+                if state.lifted or state.pending then RestoreWindow(window) end
+            end
+        end
+        if not over or #shown == 0 then
+            RestoreAll()
+            family.tried = nil
+            return false
+        end
+        local walks = {}
+        for _, window in ipairs(shown) do
+            local state = State(window)
+            if state.pending and not RestoreWindow(window) then return Refuse(over) end
+            local nodes, parent, level, strata, actual = Tree(window)
+            if not nodes then return Refuse(over) end
+            local proposed = Proposed(state, nodes, parent, level, actual)
+            if not proposed then return Refuse(over) end
+            walks[#walks + 1] = {window=window, state=state, nodes=nodes, strata=strata, proposed=proposed}
+        end
+        -- The distinct DIALOG proposed defaults of a list of walks, sorted.
+        local function Distinct(list)
+            local out, seen = {}, {}
+            for _, walk in ipairs(list) do
+                for _, node in ipairs(walk.nodes) do
+                    local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
+                    if value and not seen[value] then seen[value] = true;out[#out + 1] = value end
+                end
+            end
+            table.sort(out)
+            return out
+        end
+        local distinct = Distinct(walks)
+        if #distinct == 0 then return Refuse(over) end
+        if over + #distinct > CEILING then
+            -- r4 (Plan B; native pending probe 2026-11-14: the control at 110,
+            -- Help 39-43 and the Library 49-70, union 18 > 17 ranks, Library
+            -- alone 13). The shown family does not fit, so its top windows
+            -- may be lifted alone: windows are taken from the highest DIALOG
+            -- default down while the union still fits, and every window left
+            -- out keeps its exact defaults. Only a strict split is allowed:
+            -- each window kept lies wholly above every window below it, and
+            -- every window left out lies wholly below every window kept (a
+            -- tie or an overlap refuses the whole family, as before), so no
+            -- cross-window order changes its sense. A window left out that is
+            -- lifted is restored first; a failed restore refuses the whole
+            -- family. A top window that does not fit alone refuses as before.
+            for _, walk in ipairs(walks) do
+                local lo, hi = nil, nil
+                for _, node in ipairs(walk.nodes) do
+                    local value = walk.strata[node] == "DIALOG" and walk.proposed[node] or nil
+                    if value then
+                        if lo == nil or value < lo then lo = value end
+                        if hi == nil or value > hi then hi = value end
+                    end
+                end
+                walk.lo, walk.hi = lo, hi
+            end
+            table.sort(walks, function(a, b) return (a.lo or -1) > (b.lo or -1) end)
+            local kept, count, keptLo = {}, 0, nil
+            for _, walk in ipairs(walks) do
+                if walk.hi == nil or (keptLo and walk.hi >= keptLo) then break end
+                local own = #Distinct({walk})
+                if over + count + own > CEILING then break end
+                kept[#kept + 1], count = walk, count + own
+                keptLo = keptLo and math.min(keptLo, walk.lo) or walk.lo
+            end
+            if #kept == 0 then return Refuse(over) end
+            for i = #kept + 1, #walks do
+                local walk = walks[i]
+                if walk.hi ~= nil and walk.hi >= keptLo then return Refuse(over) end
+            end
+            for i = #kept + 1, #walks do
+                local walk = walks[i]
+                if (walk.state.lifted or walk.state.pending)
+                    and not RestoreWindow(walk.window) then return Refuse(over) end
+            end
+            walks, distinct = kept, Distinct(kept)
+        end
+        local rank = {}
+        for i, value in ipairs(distinct) do rank[value] = over + i end
+        for _, walk in ipairs(walks) do
+            local state = walk.state
+            if not state.lifted then
+                state.record = setmetatable({}, {__mode="k"})
+            end
+            for node, value in pairs(walk.proposed) do state.record[node] = value end
+            state.lifted, state.level = true, over
+        end
+        for _, walk in ipairs(walks) do
+            for _, node in ipairs(walk.nodes) do
+                if walk.strata[node] == "DIALOG" then
+                    walk.state.changed[node] = true
+                    if not SetLevel(node, rank[walk.proposed[node]]) then return Refuse(over) end
+                end
+            end
+        end
+        family.level, family.tried = over, nil
+        return true
+    end
+
+    -- A shown window asks for its family's lift (on its show, a page change
+    -- or its own render); it joins the family the first time.
+    function M.LiftOwned(window)
+        if type(window) ~= "table" then return false end
+        State(window)
+        family.members[window] = true
+        return LiftFamily()
+    end
+
+    -- A member that hides takes its defaults back (when lifted or waiting),
+    -- and the family is decided again without it. r2 (Spec R2): this runs
+    -- whether or not any member is lifted, so after a whole-family refusal
+    -- the members still shown are laid out again when one hides: the refusal
+    -- memo (made for the family that was shown) is cleared first, and
+    -- LiftFamily lifts the remaining shown members if they fit, or refuses
+    -- them as a whole again. Only on a hide event; the periodic check is
+    -- unchanged. A window that never joined the family does nothing.
+    function M.RestoreOwned(window)
+        if type(window) ~= "table" or not family.members[window] then return false end
+        local state = rawget(window, "_nexusOwnedLift")
+        local ok = true
+        if state and (state.lifted or state.pending) then ok = RestoreWindow(window) end
+        family.tried = nil
+        local others = false
+        for member in pairs(family.members) do
+            if member ~= window and IsShown(member) then others = true end
+        end
+        if others then LiftFamily() else family.level = nil end
+        return ok
+    end
+
+    -- A cheap check for a periodic caller: reads only the control, and walks
+    -- the family only when the control's state differs from the one the
+    -- family was laid out (or last refused) for.
+    function M.RecheckOwned(window)
+        if type(window) ~= "table" then return false end
+        local over = M.ForeignDialogLevel()
+        local lifted = family.level ~= nil
+        if not lifted and not over then return false end
+        if lifted and family.level == over then return false end
+        if not lifted and family.tried == over then return false end
+        family.members[window] = true
+        State(window)
+        return LiftFamily()
+    end
+
+    -- After an owned re-layout or render set levels from the window's
+    -- current (lifted) ones: the family is laid out again from its records.
+    function M.ReapplyOwned(window)
+        if type(window) ~= "table" then return false end
+        local state = rawget(window, "_nexusOwnedLift")
+        if not (state and state.lifted) then return false end
+        return LiftFamily()
+    end
 end
 
 Nexus.LayoutMetrics = M

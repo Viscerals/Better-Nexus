@@ -4,7 +4,7 @@
 -- recorded date) and its own owner flag; unknown stays unsaid, never "Level 0".
 -- Build Library cards name the category of their best-DPS headline and say
 -- when a row's owner is not established (R6).
--- One user meaning per label: the panel's ... button is "Menu and status",
+-- One user meaning per label: the panel's menu button is "Options" (#165),
 -- the Build Library scope is "Mine" (the game's own page keeps "My Builds"),
 -- Help gives the same words, and an offline terminology lint keeps the
 -- deprecated unqualified forms out of the player-facing UI sources, with
@@ -90,8 +90,10 @@ local function ShowRecords()
  CloseDropDownMenus=CloseDropDownMenus or function() end
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
+ -- A direct Options choice (native QA test.163008).
  for _,item in ipairs(captured or {}) do
-  if item.text=='Show DPS records' and type(item.func)=='function' then item.func();return true end
+  -- Owner-approved item 9 (#165): the action words plus the current value.
+  if item.text=='Show DPS records (now hidden)' and type(item.func)=='function' then item.func();return true end
  end
  return false
 end
@@ -104,7 +106,12 @@ C.scenario('R1 panel records: best known for these Echoes, real facts only, owne
  C.setup(RenderRecords(false),'R1: fixture: the panel renders two shared records')
  local texts=Joined(PanelTexts())
  print('OBSERVED','R1 texts='..texts:gsub('\n',' | '))
- C.expect(texts:find('Best known  25k',1,true)~=nil and texts:find('Best known  31k',1,true)~=nil,
+ -- Approved panel cleanup (the DPS RECORDS rows are measured from their
+ -- shown content and wrap): a shared record is one row, its label at the
+ -- left and its value at the right, as two texts in that order, where it was
+ -- one "Best known  25k" text beside your record. The label's words and the
+ -- value they label are unchanged (PanelTexts joins texts with a line break).
+ C.expect(texts:find('Best known\n25k',1,true)~=nil and texts:find('Best known\n31k',1,true)~=nil,
   'R1: the shared column is labelled Best known',texts)
  C.expect(not texts:find('Global',1,true),'R1: no record is labelled Global',texts)
  local before=Effects()
@@ -135,16 +142,23 @@ C.scenario('R3 the menu button has one name, and Help uses the same words',funct
  local lines=button and V.TooltipLines(function() button:GetScript('OnEnter')(button) end) or {}
  local tip=V.Plain(table.concat(lines,'\n'))
  print('OBSERVED','R3 menu tip='..tip:gsub('\n',' | '))
- C.expect(V.Plain(lines[1] or '')=='Menu and status' and not tip:find('Nexus Settings',1,true),
-  'R3: the ... button is called Menu and status',tip)
+ -- Issue #165: the control shows "Options" and its hover is headed by that
+ -- same visible name (Panel.OptionsLabel), never by a name the panel does not
+ -- show (panel_options_label checks the hover drops "Menu and status").
+ local shown=button and V.Plain(button:GetText() or '') or ''
+ C.expect(V.Plain(lines[1] or '')=='Options' and shown:find('Options',1,true)~=nil
+  and not tip:find('Nexus Settings',1,true) and not tip:find('Menu and status',1,true),
+  'R3: the menu button has one name, Options, on the control and its hover',tip)
  local before=Effects()
  if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show('start') end
- local body=V.Plain(NexusHelpWindow and NexusHelpWindow.body and NexusHelpWindow.body:GetText() or '')
+ -- The whole shown Start page (all of Help's parts, V.HelpShown).
+ local body=NexusHelpWindow and V.HelpShown(NexusHelpWindow) or ''
  C.expect(body:find('Best known: the best shared DPS record this client holds',1,true)~=nil
-  and body:find('Menu and status: the ... button',1,true)~=nil
+  and body:find('Options: the Options button on the Nexus panel header',1,true)~=nil
+  and not body:find('Menu and status: the ... button',1,true)
   and body:find("My Builds is the game's page of your Saved Builds",1,true)~=nil
   and body:find('the Mine scope lists your Saved Builds and shared listings',1,true)~=nil,
-  'R3: Help names Best known, Menu and status, the game\'s My Builds page and the Mine scope',body:sub(-700))
+  'R3: Help names Best known, the Options button, the game\'s My Builds page and the Mine scope',body:sub(-700))
  C.guard(Same(Effects(),before),'R3: opening Help sends, requests and acts nothing')
 end)
 
@@ -194,19 +208,22 @@ end)
 -- to the traced check behaviour (M3 FN7/OD4), so none remains.
 local UI_FILES={'ui/Panel.lua','ui/Leaderboard.lua','ui/CommunityRenderer.lua','ui/CommunityBuilds.lua',
  'ui/Help.lua','ui/QuickStart.lua','ui/OrbPanel.lua','ui/WishlistRenderer.lua','ui/WishlistEditor.lua',
- 'ui/JournalTab.lua','ui/Readout.lua'}
+ 'ui/JournalTab.lua','ui/Readout.lua',
+ -- Issues #143/#148: the reviewed English base now holds the Panel's moved
+ -- labels and hovers, so that shipped player-facing copy stays linted.
+ 'data/LocalizationEnglish.lua'}
 local RULES={
  {phrase='Global Best',why='a shared record is the best known to this client, not a global ranking (UX-14)'},
  {phrase='"Global  ',why='the compact shared column is Best known (UX-14)'},
  {phrase='/ %d complete',why='a run count is rolled copies this run; complete needs every category (UX-13)'},
  {phrase='in progress|r',why='the Saved Build card counts Wishlist copies in this Saved Build (UX-13)'},
- {phrase='Nexus Settings',why='the ... button is Menu and status (UX-15)'},
+ {phrase='Nexus Settings',why='the menu button is Options (UX-15, #165)'},
  {phrase='within seconds',why='no replacement latency is promised (UX-05/UX-15)'},
  {phrase='right away',why='no replacement latency is promised; the copy states the check trigger (FN7/OD4)'},
  {phrase='"My Builds"',files={['ui/CommunityRenderer.lua']=true},why='the Build Library scope is Mine; My Builds is the game\'s page (UX-15)'},
  {phrase='All Shared and My Builds',files={['ui/Help.lua']=true},why='Help names the Build Library scope Mine (UX-15)'},
  {phrase='deleting from My Builds',files={['ui/Help.lua']=true},why='Help names the Build Library scope Mine (UX-15)'},
- {phrase='Open My Builds and browse',files={['ui/Panel.lua']=true},why='Build Library is not the game\'s My Builds page (UX-15)'},
+ {phrase='Open My Builds and browse',files={['ui/Panel.lua']=true,['data/LocalizationEnglish.lua']=true},why='Build Library is not the game\'s My Builds page (UX-15)'},
  -- Final copy closure (UX-13/UX-15): the editor footer and the save notice
  -- count planned rolled copies; an unnamed or empty selector row is a Saved
  -- Build, not a Loadout.
@@ -223,8 +240,22 @@ local function Excepted(file,phrase)
  return false
 end
 -- Where "My Builds" names the game's own page it stays (one meaning, kept).
-local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText("My Builds")'},
- {file='ui/JournalTab.lua',phrase='"Assign in My Builds"'}}
+-- Issues #143/#148: the Panel's My Builds button and its hover now show
+-- reviewed keys, and a selected pack may translate that navigation label.
+-- Each Panel entry is its actual binding in ui/Panel.lua plus the exact
+-- English the real seam gives the key, stated here as an independent literal
+-- (not read from the data); the hover still names the server's own My Builds
+-- page. The Journal tab's shortcut is bound the same way (full-UI
+-- localization owner follow-up).
+local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))',
+  key='panel.button.my_builds',english='My Builds'},
+ {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_my_builds")',
+  key='panel.tooltip.open_my_builds',english='Open My Builds'},
+ {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.my_builds_destination")',
+  key='panel.tooltip.my_builds_destination',
+  english='Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.'},
+ {file='ui/JournalTab.lua',phrase='b:SetText(T("journal.button.assign_in_my_builds"))',
+  key='journal.button.assign_in_my_builds',english='Assign in My Builds'}}
 
 C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped UI sources',function()
  local found,read,sources={},0,{}
@@ -259,9 +290,32 @@ C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped U
  -- No blind replacement: the game's own My Builds page keeps its name.
  local missing={}
  for _,g in ipairs(GAME_PAGE_LABELS) do
-  if not (sources[g.file] or ''):find(g.phrase,1,true) then missing[#missing+1]=g.file..': '..g.phrase end
+  local kept=(sources[g.file] or ''):find(g.phrase,1,true)~=nil
+  if kept and g.key then
+   local text,source,why=Nexus.Localization.Resolve(g.key)
+   kept=Nexus.Localization.Kind(g.key)=='text' and text==g.english and source=='base' and why==nil
+  end
+  if not kept then missing[#missing+1]=g.file..': '..g.phrase..(g.key and (' = '..g.english) or '') end
  end
  C.guard(#missing==0,'R5: the game\'s own My Builds page keeps its name where it means that page',table.concat(missing,'; '))
+ -- The actual bound button in this English session, and its unchanged
+ -- destination: the real Panel's My Builds button shows exactly My Builds,
+ -- and its click still opens the game's own My Builds page through the
+ -- deferred close callback. A refused game-page open must leave Plan intact.
+ Nexus.Panel.Show()
+ local switch=NexusPanel and NexusPanel._switchBtn
+ local shown=switch and V.Plain(switch:GetText() or '') or ''
+ local journal=Nexus.JournalTab
+ local openBuilds,calls=journal and journal.OpenBuilds,{}
+ if journal then journal.OpenBuilds=function(deferred,close,...)
+  calls[#calls+1]={deferred=deferred,close=close,extra=select('#',...)}
+  return true
+ end end
+ local clicked=switch~=nil and pcall(switch.Click,switch)
+ if journal then journal.OpenBuilds=openBuilds end
+ C.guard(Nexus.Localization.ActiveLanguage()=='enUS' and shown=='My Builds' and clicked==true
+  and #calls==1 and calls[1].deferred==false and type(calls[1].close)=='function' and calls[1].extra==0,
+  'R5: the My Builds button keeps its name and guarded game-page route',shown..' / '..#calls..' call(s)')
 end)
 
 -- R6: the real Build Library window. The Mine scope (internal key "mine"),

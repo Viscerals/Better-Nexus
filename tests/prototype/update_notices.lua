@@ -127,7 +127,7 @@ for i=1,12 do assert(Deliver(request28,'Crowd'..i))end
 HintOnly('1.20.0-beta.1 test.9028','many agreeing peers')
 assert(Chat('UNVERIFIED')==1,'twelve peers repeating it add no further chat line')
 assert(#Nexus.Updates.PeerObservations()>=13,'every peer is still observed')
-assert(NexusPanel._menuBtn:GetText()~='!','an unverified hint never raises the trusted HUD badge')
+assert(NexusPanel._menuBtn:GetText()=='Options','an unverified hint never raises the trusted HUD badge: '..tostring(NexusPanel._menuBtn:GetText()))
 Nexus.Panel.ShowUpdateStatus()
 assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases'
  and popup.text:find('Newer public test reported: 1.20.0-beta.1 test.9028',1,true)
@@ -164,17 +164,20 @@ for _,version in ipairs({'1.96.6','999.0.0',FORGED,'2.0.0-beta.1+test.1','1.20.0
  local items;EasyMenu=function(list)items=list end
  NexusPanel._menuBtn:Click();H.Advance(1,.05)
  local found=false
- for _,item in ipairs(items or {})do
+ -- The notice entries are direct Options choices (native QA test.163008).
+ assert(type(items)=='table' and #items>0,'the Options menu lists its direct choices')
+ for _,item in ipairs(items)do
   if type(item.text)=='string' then
    if not hinted then
     assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
    end
-   if item.text=='Update status unknown - open Releases page' then found=not item.disabled end
+   -- Owner-approved item 12 (issue #175): the unknown row says no verified update information.
+   if item.text=='Version and updates: no verified update info' then found=not item.disabled end
    if hinted and item.text=='Newer public test reported: 1.20.0-beta.1 test.99999 (unverified)' then found=not item.disabled end
   end
  end
  assert(found,'the menu keeps an enabled entry to the manual Releases page')
- assert(NexusPanel._menuBtn:GetText()~='!','no HUD badge for a peer version '..version)
+ assert(NexusPanel._menuBtn:GetText()=='Options','no HUD badge for a peer version '..version..': '..tostring(NexusPanel._menuBtn:GetText()))
 end
 print('PASS 1.96.6, 999.0.0, another lineage and peer stable claims stay silent; a forged same-series test is an unverified hint only')
 
@@ -196,8 +199,15 @@ db=NexusDB;Boot(PUBLIC27,db);Ready()
 NoNotice('reload after the quarantine')
 assert(NexusDB.updateAdvisoryQuarantine.stableRelease.version=='1.96.6','idempotent: the diagnostic record stays once')
 -- A malformed saved advisory is handled the same way.
+-- Before the saved-data owner gives its writable verdict the status is read
+-- and nothing is moved; the move happens once start-up is ready.
 d=T.Profile(3,0);d.updateAdvisory='9.9.9'
-Boot(PUBLIC27,d);NoNotice('malformed saved advisory')
+Boot(PUBLIC27,d)
+assert(Nexus.Store.StateWriteStatus().mode~='durable' and Nexus.Updates.Status().state=='unknown','fixture: the status is read before the owner is ready')
+assert(NexusDB.updateAdvisory=='9.9.9' and NexusDB.updateAdvisoryQuarantine==nil,'malformed saved advisory: nothing is moved before the owner is ready')
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+NoNotice('malformed saved advisory')
+assert(type(NexusDB.updateAdvisoryQuarantine)=='table' and NexusDB.updateAdvisoryQuarantine.reason=='peer report is not release evidence','malformed saved advisory: quarantined once the owner is ready')
 print('PASS saved peer advisory: no notice at login or reload, quarantined once, nothing else touched')
 
 -- 6. Trusted bundled evidence keeps its notice, its wording and its place; a higher peer
@@ -226,8 +236,10 @@ assert(Nexus.Updates.GetCandidate().display=='1.20.0-beta.1 test.9029','and the 
 local items;EasyMenu=function(list)items=list end
 NexusPanel._menuBtn:Click();H.Advance(1,.05)
 local entry
-for _,item in ipairs(items or {})do if item.text=='Update available: 1.20.0-beta.1 test.9029' then entry=item end end
-assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='!','menu entry and HUD badge for trusted evidence')
+for _,item in ipairs(items or {})do
+ if item.text=='Update available: 1.20.0-beta.1 test.9029' then entry=item end
+end
+assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='! Options','menu entry and HUD badge for trusted evidence: '..tostring(NexusPanel._menuBtn:GetText()))
 popup=nil;entry.func()
 assert(popup and popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('New Nexus test build available: 1.20.0-beta.1 test.9029',1,true))
 print('PASS trusted bundled notice kept; peer versions cannot replace or hide it')
@@ -305,6 +317,17 @@ NoNotice('hostile and free-form versions ('..rejected..' refused by the decoder)
 for _,l in ipairs(H.chat)do assert(not l:find('evil',1,true),'no peer text in chat')end
 Nexus.Release.releasesUrl='http://evil.example/x';assert(Nexus.Updates.ReleaseUrl()=='https://github.com/Viscerals/Better-Nexus/releases','a malformed local link falls back to the fixed page')
 Boot(PUBLIC27,(function()local x=T.Profile(3,0);x.updateNotice={version='9.9.9',authority='peer'};return x end)())
+-- Before the saved-data owner gives its writable verdict the notice is not
+-- shown and the saved keys are exactly as found; the quarantine follows once
+-- start-up is ready.
+assert(Nexus.Store.StateWriteStatus().mode~='durable','fixture: the owner has not given a writable verdict yet')
+assert(Nexus.Updates.Status().state=='unknown','a peer-authority notice kept by an older client is not shown before the owner is ready')
+local legacyNotice=NexusDB.updateNotice
+assert(type(legacyNotice)=='table' and legacyNotice.version=='9.9.9' and legacyNotice.authority=='peer'
+ and legacyNotice.quarantinedReason==nil and NexusDB.updateNoticeQuarantine==nil,
+ 'a peer-authority notice kept by an older client is not moved or rewritten before the owner is ready')
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+assert(Nexus.Store.StateWriteStatus().mode=='durable','fixture: the owner is writable once start-up is ready')
 assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateNotice==nil and NexusDB.updateNoticeQuarantine.version=='9.9.9','a peer-authority notice kept by an older client is quarantined, not shown')
 print('PASS hostile input, local link only, legacy notice quarantine')
 

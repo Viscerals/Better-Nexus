@@ -62,15 +62,27 @@ local function Shows(needle)
  for _,t in ipairs(PanelTexts()) do if t:find(needle,1,true) then return t end end
  return nil
 end
--- The model the runtime published, with only its count fields varied.
-local function RenderCounts(owned,total,toLock)
+-- The model the runtime published, with only its count fields varied (and,
+-- when given, its DPS records: Q4).
+local function RenderCounts(owned,total,toLock,performance)
  local model=H.Clone(Nexus.Panel._lastModel)
  model.progress=model.progress or {}
  model.progress.owned,model.progress.total,model.progress.toLock=owned,total,toLock
  model.progress.missing={};model.progress.unknownTomes={}
  model.progress.wishlistName=model.progress.wishlistName or 'W-Free'
+ if performance~=nil then model.progress.performance=performance end
  model.cards={};model.recommendation=nil;model.orbGuidance=nil;model.autoNote=nil
  return Nexus.Panel.Render(model)==true
+end
+-- Approved panel cleanup (Progress: the run's count is hidden with the other
+-- four counts until Details expands). The count's words are unchanged; they
+-- are read after the player's own Show details click (the panel's Details
+-- button, memory only). Returns whether Details is open.
+local function OpenDetails()
+ local play=NexusPanel and NexusPanel._play
+ local button=play and play.details
+ if Nexus.Panel._playDetails~=true and button and button:IsShown() then button:GetScript('OnClick')(button) end
+ return Nexus.Panel._playDetails==true
 end
 
 C.scenario('Q1 rolled copies met while a locked target is still to lock: not complete, and said so',function()
@@ -80,6 +92,13 @@ C.scenario('Q1 rolled copies met while a locked target is still to lock: not com
  C.setup(type(Nexus.Panel._lastModel)=='table','Q1: fixture: the runtime published a panel model')
  local before=Effects()
  C.setup(RenderCounts(79,79,{'Locked Echo (Rare)'}),'Q1: fixture: the panel renders 79/79 rolled with one locked target to lock')
+ -- Approved panel cleanup: collapsed, the panel shows no count line at all;
+ -- Show details gives the run's count in the same words as before.
+ C.expect(Nexus.Panel._playDetails~=true and ProgressLine()==nil,'Q1: with Details collapsed the run count is not shown',ProgressLine())
+ -- The Details click renders the runtime's own model again, so the varied
+ -- counts are rendered once more with Details open.
+ C.setup(OpenDetails() and RenderCounts(79,79,{'Locked Echo (Rare)'}),
+  'Q1: fixture: the Details button opens the detail section and the same counts are rendered in it')
  local line=ProgressLine() or ''
  print('OBSERVED','Q1 progress='..line)
  C.expect(line:find('79 / 79 rolled',1,true)~=nil and line:find('to lock',1,true)~=nil,
@@ -90,7 +109,7 @@ C.scenario('Q1 rolled copies met while a locked target is still to lock: not com
 end)
 
 C.scenario('Q2 a partial run names its unit',function()
- C.setup(RenderCounts(12,79,{}),'Q2: fixture: the panel renders 12/79 rolled')
+ C.setup(RenderCounts(12,79,{}) and OpenDetails(),'Q2: fixture: the panel renders 12/79 rolled with Details open (the count shows there)')
  local line=ProgressLine() or ''
  print('OBSERVED','Q2 progress='..line)
  C.expect(line=='12 / 79 rolled copies this run','Q2: the progress names rolled copies this run',line)
@@ -104,16 +123,26 @@ end)
 
 C.scenario('Q4 the plan count says copies, not Echoes',function()
  -- The real ... menu item turns the DPS records view on (its own handler).
+ -- Owner-approved item 9 (#165): the row keeps its action words and adds the
+ -- current value, so while records are hidden it reads (now hidden).
  local captured
  EasyMenu=function(items) captured=items end
  CloseDropDownMenus=CloseDropDownMenus or function() end
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
  local show
- for _,item in ipairs(captured or {}) do if item.text=='Show DPS records' then show=item end end
- C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records')
+ -- A direct Options choice (native QA test.163008).
+ for _,item in ipairs(captured or {}) do if item.text=='Show DPS records (now hidden)' then show=item end end
+ C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records (now hidden)')
  if show then show.func() end
- C.setup(RenderCounts(12,79,{}),'Q4: fixture: the panel renders the plan with DPS records shown')
+ -- Approved panel cleanup (absent DPS sections are hidden completely, the
+ -- heading and the plan count beside it included): without any record the
+ -- section is not there, so the plan count's words are read from a section
+ -- that has a record (one synthetic personal Dummy record).
+ C.setup(RenderCounts(12,79,{},{}),'Q4: fixture: the panel renders the plan with DPS records turned on and no record')
+ C.expect(Shows('DPS RECORDS')==nil and Shows('Target build')==nil,
+  'Q4: with no record the DPS RECORDS section, its heading and its plan count are not shown',Shows('DPS RECORDS') or Shows('Target build'))
+ C.setup(RenderCounts(12,79,{},{dummy={personal={dps=12000,duration=95}}}),'Q4: fixture: the panel renders the plan with DPS records shown')
  local label=Shows('Target build') or ''
  print('OBSERVED','Q4 label='..label)
  C.expect(label:find('79 rolled copies',1,true)~=nil and not label:find('Echoes',1,true),
@@ -224,12 +253,23 @@ C.scenario('Q5 the Saved Build card counts the Wishlist copies found in that Sav
  C.expect(line:find(expected,1,true)~=nil,'Q5: the card names the unit: Wishlist copies in this Saved Build',line)
  -- Only a shown card can hold this (an empty line is not evidence).
  C.expect(line~='' and not line:find('in progress',1,true),'Q5: it no longer calls the Saved Build\'s copies "in progress"',line)
+ -- The mirror's generated description, served beside it, counts the same
+ -- copies (EchoProgress) and names the same unit; every count it gives is
+ -- qualified.
+ local desc=V.Plain(mirror.description or '')
+ local unit=Nexus.UserText and Nexus.UserText.COUNT_UNITS and Nexus.UserText.COUNT_UNITS.savedBuild or '?'
+ local bare=desc:gsub('%d+ ?/ ?%d+ '..unit:gsub('%p','%%%0'),'')
+ print('OBSERVED','Q5 description='..desc)
+ C.expect(desc:find(string.format('%d/%d %s',tonumber(mirror.destinationProgress) or -1,
+  tonumber(mirror.destinationTotal) or -1,unit),1,true)~=nil and not bare:find('%d+ ?/ ?%d+'),
+  'Q5: the generated description gives its count only as '..unit,desc)
  C.guard(#H.actions==before,'Q5: opening and filtering the Build Library performs no game action',#H.actions)
 end)
 
 C.scenario('Q6 Help gives the same count words',function()
  if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show('start') end
- local body=V.Plain(NexusHelpWindow and NexusHelpWindow.body and NexusHelpWindow.body:GetText() or '')
+ -- The whole shown Start page (all of Help's parts, V.HelpShown).
+ local body=NexusHelpWindow and V.HelpShown(NexusHelpWindow) or ''
  C.expect(body:find('Unavailable is not 0',1,true)~=nil and body:find('Echo families represented counts a family once',1,true)~=nil
   and body:find('rolled copies this run',1,true)~=nil,'Q6: Help names the count units and that unavailable is not 0',body:sub(-500))
 end)

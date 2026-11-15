@@ -3,7 +3,23 @@
 Nexus helps you work toward an Echo build: plan a Wishlist, follow roll
 recommendations or let Auto act for you, refine with Orbs, share builds and
 compare recorded DPS. This is an experimental build, not a stable release.
-The same guide is in the game: `/nexus help`.
+The in-game Help reference (`/nexus reference`) covers the same topics, but the two are not
+identical; where they differ, the game's own windows are current. In the game,
+**Setup checklist and status** (in the **Options** menu under **More help and
+windows**, or **Setup checklist** in Help) shows which setup steps are true now; it only reads and opens windows.
+The Build Library, Leaderboard, Wishlist Editor, Orb window and the Journal's
+Build Progress page have a **Help** button that opens a Help page (the Build
+Library and Leaderboard close themselves first); it assigns, saves and sends
+nothing.
+
+The panel footer holds **Auto** on its own, then three hubs: **Plan** (Wishlist
+Editor, Assign Wishlist..., the game's My Builds page), **Explore** (Build
+Library, Leaderboard) and **Orbs** (the Orb window). A hub only opens windows;
+it assigns, saves, shares and spends nothing. The **Options** button on the
+panel header opens a menu grouped into help and setup, settings, notices, the
+session pause and panel actions. Its **More help and windows** list opens
+**Reference (full manual)**, the setup information and checklist, the support
+report, the log viewer, Orbs and the Wishlist Editor.
 
 ## Install and roll back
 
@@ -33,13 +49,18 @@ sent to other players. Do not roll back while an Orb result is unresolved.
 Before you create or assign a Wishlist with Auto ON, read **Automatic save and
 your Saved Build** below. Auto starts OFF each session.
 
-1. Open the Wishlist Editor: click **...** on the Nexus panel, then
-   **Wishlist Editor**, or type `/nexus editor`. To use a Wishlist code, click
-   **Import** and paste it. Import opens a draft.
+1. Open the Wishlist Editor: click **Options** on the Nexus panel, then
+   **More help and windows** and **Wishlist Editor**, or type `/nexus editor`.
+   To use a Wishlist code, click **Import** and paste it. Import opens a draft.
 2. Check exact qualities, copy counts and the planned locked Echo targets.
-3. Click **Create Wishlist** for a new or imported plan. It saves the plan and
-   makes it the target of the loadout shown in the editor. For an existing
-   Wishlist, click **Save Wishlist**.
+3. For a new or imported plan, click **Create & assign**. It saves the plan and
+   makes it the target of the loadout shown in the editor. **Create
+   unassigned** saves the plan without a target; when the editor has no
+   loadout it can assign to, it is the only create button. For an existing
+   Wishlist, click **Save changes**. It keeps the Wishlist's current target.
+   If you opened the Wishlist for a Saved Build that does not hold it,
+   **Save & assign** saves it and makes it that loadout's target, and
+   **Save changes** stands beside it.
 4. To target another Saved Build: in **My Builds**, select the intended Saved
    Build and choose the Wishlist with the Wishlist selector. Assigning only
    chooses the target; by itself it does not change the Saved Build.
@@ -205,8 +226,8 @@ When it is blocked:
   learning or cancelling the result.
 - “No Echo choice is showing.” — no choice is on screen now. It does not mean the
   run is finished, and it is not a reason to retry.
-- “Auto ON — paused” — Auto stays ON but is not acting; point at the **...**
-  button to see the reason in its Status line.
+- “Auto ON — paused” — Auto stays ON but is not acting; point at the
+  **Options** button to see the reason in its Status line.
 - “Waiting for current Echo data” — waiting for ownership data, not Sync status.
 - Ordinary rolling stays paused during active or unknown Orb offers.
 
@@ -218,8 +239,10 @@ not count for a higher-quality target.
 
 - Currently locked Echoes are what you have. Locked Echo targets are what the
   plan wants.
-- **Create Wishlist** saves a new plan (and makes it the loadout's target);
-  **Save Wishlist** saves an existing one. **Unassign Wishlist** keeps the
+- **Create & assign** saves a new plan and makes it the loadout's target;
+  **Create unassigned** saves it without a target. **Save changes** saves an
+  existing one and keeps its target; **Save & assign** also makes it the
+  target of the Saved Build it was opened for. **Unassign Wishlist** keeps the
   Wishlist.
 - If the editor asks, choose the locked targets and click
   **Confirm locked targets & edit** (or **& assign**). Confirming locks nothing.
@@ -236,8 +259,8 @@ Orbs refine rolled Echoes toward the assigned Wishlist, one Orb per replacement.
 They cannot create or replace locked slots; a run stops when rolled targets are
 complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
 
-1. Open `/nexus orbs`, **Orbs / Lost Memories** in the **...** menu, or
-   **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
+1. Open `/nexus orbs`, **Orbs** on the panel footer, **Orbs / Lost Memories**
+   in the **Options** menu under **More help and windows**, or **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
    the confirmed Orb balance. Loading is never a zero balance.
 2. Set the maximum. Until you type an amount it follows your confirmed balance,
    up to 1000. Typing stops that; **Max** returns to following the balance. A
@@ -253,7 +276,7 @@ Login, reconnect, new resources or reload never restart spending. If the game
 has no Orb service, only Orb mode is unavailable and ordinary rolling still
 works. If the Orb service exists but Nexus cannot read its state, ordinary
 rolling waits too. The Orb window's **Help** button
-opens this Orb section in `/nexus help`.
+opens this Orb section in `/nexus reference`.
 
 Closing the window does not stop an approved run. Use Pause or Stop.
 
@@ -285,20 +308,39 @@ When it is blocked:
 
 ## Shared builds, DPS and Sync
 
-1. Click **Build Library**. The scope button switches between **All Shared** and
-   **My Builds**.
+1. Click **Explore** on the panel footer, then **Build Library**. The scope
+   buttons switch between **All Shared** and **Mine** (your Saved Builds and
+   shared listings; not the game's My Builds page).
 2. **Require both DPS records** — checked: only builds with both a Training Dummy
    and a Lich King record this client holds. Unchecked: no such requirement;
    other filters still apply. A record is availability, not build quality,
    outside verification or finished Sync. While a change applies, the list says
    **Updating results...**
 3. **Copy into Editor** creates a draft; it does not activate or spend.
-   **Share Build** sends a listing; it is separate from saving a Wishlist or a
-   Saved Build.
+   **Share Build...** on your own Saved Build asks you to confirm first. It then
+   saves its title, description and Echo list as your shared listing on this
+   client and queues a short summary for other Nexus users only if your saved
+   Sync mode (**Sync mode...** beside **Sync Now**) and the summary's size
+   allow; with Sync Off nothing is queued. The summary has no Echo list or
+   description. The full listing, with its description and Echo list, can be
+   sent in answers to other Nexus users' requests. An answer can go on the
+   shared Sync channel, where any Nexus user who receives it may keep a valid
+   copy. In Automatic, if your character's best DPS on the Training Dummy
+   (a fight of at least 30 seconds) or the Lich King (at least 20 seconds) is
+   newly eligible and linked to this listing, Nexus may also send each such
+   DPS record with its Echoes, any locked Echoes and your player info (such as
+   character name, realm, class and level) without an additional request,
+   even if the summary is not queued. A personal best for these exact Echoes
+   that is lower than your character's best for that encounter stays on this
+   client. Receiving such a DPS record alone can give a player a Record
+   Loadout page with its Echoes that they can view and copy. The Manual and
+   Off Sync modes refuse these automatic DPS sends. Queued is not sent, and
+   receipt by other players is not confirmed. A shared build cannot be
+   recalled. Sharing is separate from saving a Wishlist or a Saved Build.
 
 - **Stop Sharing** removes the listing on this client; removal on other clients
-  is not confirmed. Stop Sharing, administrator removal and deleting from My
-  Builds are different actions; read each confirmation. Removing a shared
+  is not confirmed. Stop Sharing, administrator removal and deleting one of
+  your builds under **Mine** are different actions; read each confirmation. Removing a shared
   listing does not delete your server build or Wishlist.
 - Names show the player and realm a record states; they are not proof of
   identity. A record whose owner is not established says
@@ -346,9 +388,18 @@ full SavedVariables or account details publicly.
 
 ## Commands
 
-- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
-  Started** in the **...** menu and the Welcome window): this guide, also during
-  loading.
+- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, **Setup / Welcome**
+  in the Options menu, **Help: Guided setup** in the setup window and
+  **Help** in the setup checklist): Guided setup at your current step, also
+  during loading. Opening it changes nothing. While an Auto warning waits for
+  its answer, Guided setup does not open and says why. Nothing else opens and
+  nothing is queued: answering the warning does not open it. Open it again
+  yourself afterwards. The Reference stays a separate choice
+  (`/nexus reference`).
+- `/nexus reference` (also **Reference (full manual)** in the Options menu
+  under **More help and windows**, and
+  **Reference** in the setup window and the setup checklist): the in-game
+  Help reference pages, also during loading.
 - `/nexus report`: support report.
 - `/nexus editor`: Wishlist Editor.
 - `/nexus orbs`: Orb window; does not spend.
@@ -365,7 +416,7 @@ paged report:
 undemote, anchor, restore, err) are troubleshooting tools, not generic fixes.
 
 Update notices come from release information shipped in this package (the
-**...** button then shows **!**). Another player's client can report a newer test
+**Options** button then shows **!**). Another player's client can report a newer test
 build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your
 build is the latest. Nexus never downloads or installs anything.
 

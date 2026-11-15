@@ -159,10 +159,24 @@ local function Label(H,text)
   end
  end
 end
+-- The editor fits its Auto-manage caption to the room left of My Builds
+-- (whole, shortened to "Auto-manage", or hidden; frame._fitAutoLock), so the
+-- rendered text is not an identity. The switch is the CheckButton the
+-- editor's own label (frame._autoLockLabel, its whole caption kept in
+-- _nexusFullText) is anchored to. A label found by its exact rendered text
+-- must, when present, name the same check box. The checks below prove that
+-- its click reaches the runtime setting (Controller.SetAutoLockEnabled).
 local function AutoLockBox(H)
  Nexus.WishlistEditor.Show()
- local label=Label(H,'Auto-manage locked Echo slots')
- return label and label.points[1][2]
+ local f=_G.NexusEditorFrame
+ local label=f and f._autoLockLabel
+ if not (label and label._nexusFullText=='Auto-manage locked Echo slots') then return nil end
+ local box=label.points[1] and label.points[1][2]
+ if not (type(box)=='table' and box.kind=='CheckButton' and box:GetParent()==f
+  and type(box:GetScript('OnClick'))=='function') then return nil end
+ local rendered=Label(H,'Auto-manage locked Echo slots')
+ if rendered and rendered.points[1] and rendered.points[1][2]~=box then return nil end
+ return box
 end
 for _,case in ipairs(PROTECTED)do
  local db=F.Database({mutate=function(d)d.settings.autoLockEchoes=false;case.mutate(d)end})
@@ -326,6 +340,62 @@ do
   local ok,why=Nexus.BuildCatalog.Put(Row('syn-3'),{source='overlay'})
   check(ok~=true and why=='SAVED_FORMAT_READ_ONLY',case.label..': a catalog write is refused as read-only ('..tostring(why)..')')
   check(Nexus.BuildCatalog.Get('syn-3')==nil and F.Serialize(NexusDB.authorityBundle)==bundle,case.label..': nothing was written')
+ end
+end
+
+-- 8b. Issue #123: the UI language preference in a read-only saved root. An
+-- exact saved enum ID is adopted into the detached settings view and is the
+-- active language; any other value is shown as English. The chooser refuses
+-- before the private writer, and the whole root stays byte for byte.
+for _,case in ipairs({PROTECTED[1],PROTECTED[3],PROTECTED[5]})do
+ for _,raw in ipairs({'esES','esEs'})do
+  local db=F.Database({mutate=function(d)d.settings.uiLanguage=raw;case.mutate(d)end})
+  local before=F.Serialize(db)
+  Boot(db)
+  local label=case.label..', saved language '..raw
+  local valid=raw=='esES'
+  local owner=Writer();local original,writes=owner.UpdateSettingsV1,0
+  owner.UpdateSettingsV1=function(...)writes=writes+1;return original(...)end
+  check(Class()==case.class,label..': classification unchanged')
+  check(Nexus.Store.Settings().uiLanguage==(valid and 'esES' or nil) and rawget(NexusDB.settings,'uiLanguage')==raw,label..': the view adopts only an exact enum ID; the saved value is kept')
+  check(Nexus.Localization.ActiveLanguage()==(valid and 'esES' or 'enUS'),label..': the active language')
+  local want=valid and Nexus.LocalizationPacks.esES.entries['reason.list_preparing'] or 'This list is still being prepared'
+  check(Nexus.UserText.Message('CURSOR_REQUIRED')==want,label..': the status text shown')
+  Nexus.Panel.Show()
+  local items;EasyMenu=function(list)items=list end;NexusPanel._menuBtn:Click()
+  -- The language chooser is a direct Options choice (native QA test.163008).
+  -- With a pack active its row and submenu title are localized, so the actual
+  -- opened submenu is found by its exact title row and row label in the active
+  -- language (literal expectations), and exactly one item must match.
+  local active=Nexus.Localization.ActiveLanguage()
+  local TITLE={enUS='Nexus language',esES='Idioma de Nexus'}
+  local ROW={enUS='Language: ',esES='Idioma: '}
+  local menu,matches
+  matches=0
+  for _,item in ipairs(items or {})do
+   local first=type(item.menuList)=='table' and item.menuList[1] or nil
+   if type(item.text)=='string' and item.text:sub(1,#ROW[active])==ROW[active]
+    and first and first.isTitle and first.text==TITLE[active] then menu=item;matches=matches+1 end
+  end
+  check(matches==1,label..': exactly one Options item opens the language submenu ('..matches..')')
+  -- All eight offered choices: Automatic, then the seven manual languages in
+  -- enum order, each visibly disabled; the refused Automatic row has no click,
+  -- the seven manual rows keep their guarded callbacks.
+  local ORDER={'enUS','frFR','deDE','esES','plPL','ptBR','ruRU'}
+  local NAMES={enUS='English',frFR='Fran\195\167ais',deDE='Deutsch',esES='Espa\195\177ol',plPL='Polski',ptBR='Portugu\195\170s (Brasil)',ruRU='\208\160\209\131\209\129\209\129\208\186\208\184\208\185'}
+  local list=menu and menu.menuList or {}
+  local choices=0;for _,row in ipairs(list)do if not row.isTitle and not row.notCheckable then choices=choices+1 end end
+  check(choices==8 and list[2] and list[2].disabled==true and list[2].func==nil,label..': eight offered choices; the refused Automatic row is disabled without a click')
+  for i,id in ipairs(ORDER)do
+   local row=list[i+2]
+   check(row and row.disabled==true and row.func~=nil and type(row.text)=='string' and row.text:find(NAMES[id],1,true)~=nil,label..': manual choice '..id..' is listed by its own name and visibly disabled')
+  end
+  local disabled=0;for _,row in ipairs(list)do if row.func and row.disabled==true then disabled=disabled+1 end end
+  check(menu and disabled==7,label..': every language choice is disabled')
+  local result=Nexus.Panel.ChooseLanguage('frFR')
+  check(result.state=='refused' and result.reason=='read-only' and writes==0,label..': a choice is refused before the writer')
+  check(F.Serialize(NexusDB)==before,label..': the whole saved root is unchanged')
+  owner.UpdateSettingsV1=original
  end
 end
 

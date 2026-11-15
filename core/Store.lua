@@ -266,13 +266,37 @@ local function HasFutureSettingsOwner(db)
     return class == "future" or class == "unverified" or class == "malformed"
 end
 
--- Read-only: the saved Sync mode this build honors. Only an accepted saved
--- format 3-5 carries one ("off" or "manual"); every other profile, and an
--- absent or "automatic" value, keeps today's automatic behavior. The saved
--- value is never normalized or rewritten here. Internals seam, not a Store
--- export (the public Store inventory stays fixed).
+-- The player's own explicit Sync mode choice (Build Library "Sync mode...").
+-- An optional account-level preference, separate from the old `syncMode`
+-- field, and absent unless the player applied a choice. Not a default, not a
+-- migration and not part of any format marker or its classification.
+SavedFormat.CHOICE_KEY = "nexusSyncModeChoice"
+
+-- The valid explicit choice stored in a supported (format 2 or earlier) or
+-- accepted known (3-5) root, or nil. Any other root keeps its graph and its
+-- current behavior exactly, so a value there is not read.
+function SavedFormat.ExplicitSyncMode(db, class)
+    class = class or SavedFormat.Classify(db)
+    if (class ~= "supported" and class ~= "known") or type(db) ~= "table" then return nil end
+    local settings = rawget(db, "settings")
+    if type(settings) ~= "table" or getmetatable(settings) ~= nil then return nil end
+    local choice = rawget(settings, SavedFormat.CHOICE_KEY)
+    if SavedFormat.SYNC_MODES[choice] then return choice end
+    return nil
+end
+
+-- Read-only: the Sync mode this build honors. The player's own valid explicit
+-- choice comes first. Without one, today's rule applies unchanged: only an
+-- accepted saved format 3-5 carries an inherited choice ("off" or "manual");
+-- every other profile, including a dormant format-2 `syncMode`, and an absent
+-- or "automatic" value keep automatic behavior. Nothing is normalized or
+-- rewritten here. Internals seam, not a Store export (the public Store
+-- inventory stays fixed).
 function SavedFormat.SyncMode(db)
-    if SavedFormat.Classify(db) ~= "known" then return "automatic" end
+    local class = SavedFormat.Classify(db)
+    local explicit = SavedFormat.ExplicitSyncMode(db, class)
+    if explicit then return explicit end
+    if class ~= "known" then return "automatic" end
     local settings = rawget(db, "settings")
     local mode = type(settings) == "table" and rawget(settings, "syncMode") or nil
     if mode == "off" or mode == "manual" then return mode end
@@ -394,6 +418,9 @@ local ReadOnlyRoot = {
         autoPick=true, autoActivate=true, autoDisable=true, autoSave=true,
         autoBanish=true, autoReroll=true, autoFreeze=true,
         autoLockEchoes=true, communityRetentionEnabled=true,
+        -- Optional leveling pick (/nexus leveling on|off). Not a shipped
+        -- default: absent stays absent (OFF) and no profile is rewritten.
+        autoPickLeveling=true,
     },
     -- Known settings outside the permissions whose meaning this build owns,
     -- beyond the numeric and list defaults. Anything else in the saved
@@ -422,6 +449,27 @@ function ReadOnlyRoot.Valid(key, value)
         return value == "stable" or value == "test"
     elseif key == "rollingPolicy" then
         return value == "adaptive" or value == "released"
+    elseif key == "uiLanguage" then
+        -- Issue #123: the Nexus-only UI language. Only an exact ID of the
+        -- enum in data/DefaultProfile.lua (uiLanguages) is adopted into the
+        -- detached view; any other value stays in the saved root as it is,
+        -- and the session shows English.
+        -- Issue #141: the Automatic value (uiLanguages.automatic) is adopted
+        -- too; it is a preference, not a language ID.
+        local profile = Nexus.DefaultProfile
+        local languages = profile and type(profile.uiLanguages) == "table"
+            and profile.uiLanguages or nil
+        local enum = languages and languages.ids or nil
+        if type(value) ~= "string" then return false end
+        if languages and type(languages.automatic) == "string"
+            and value == languages.automatic then
+            return true
+        end
+        if type(enum) ~= "table" then return false end
+        for _, id in ipairs(enum) do
+            if id == value then return true end
+        end
+        return false
     elseif key == "lastChangelogSeen" then
         return type(value) == "string" and #value <= ReadOnlyRoot.TEXT
     elseif key == "anchorSpellId" then
@@ -1442,8 +1490,26 @@ end
 --   SOE=9 fields, SON=6 (the table plus five numeric scalar nodes),
 --   SOK=117 exact field-name bytes, SOB=18*9+8*5=202, SOP=18.
 -- "Its settings, chars, and account-character child graphs are the already
--- charged admitted candidates and are referenced, not rebuilt", so this wrapper
--- carries references and rebuilds nothing.
+-- charged admitted candidates and are referenced, not rebuilt". That reference
+-- was the durable defect A-STATE-01: the wrapper is saved inside the bundle, so
+-- a serializer that does not share references wrote db.settings, db.chars and
+-- db.accountCharacters twice, and after the next load the bundle's copies were
+-- detached duplicates that were never refreshed. The three graph fields
+-- therefore carry fresh EMPTY plain tables, never the live graphs: the saved
+-- graphs stay authoritative at their own top-level keys only, and the wrapper
+-- keeps its nine fields, its scalar receipt (schema, revisions, settings
+-- version) and its marker. The admission check below still requires each
+-- graph field to be a plain table, so a wrapper of either shape is admitted by
+-- this build and by every earlier build that runs that same check. The three
+-- empty tables are constant extra nodes; the referenced graphs they replace
+-- were never part of the SON/SOB derivation above.
+--
+-- An existing wrapper written by an earlier build may still hold such stale
+-- copies. It is validated exactly as before and then offered onwards in the
+-- same detached form (StoreData.Detached): its stale graphs are not read, not
+-- written and not carried into the next bundle replacement, which the bundle
+-- owner performs at its own ordinary commit. Nothing here writes the saved
+-- bundle.
 --
 -- The three-field migration-marker candidate is charged separately as SMOE=3,
 -- SMON=4, SMOK=24, SMOB=81, SMOP=6. It is a CANDIDATE: `completed` stays false
@@ -1454,6 +1520,29 @@ end
 -- as a Store facade export: architecture line 1912 fixes the public Store
 -- inventory at exactly nine (MASTER-RC-013).
 local StoreData = {current=nil, revision=0}
+
+-- A-STATE-01. The wrapper this session offers to the bundle owner for an
+-- admitted saved wrapper: the same validated scalar fields and a fresh copy of
+-- its three-field marker, with empty detached graph fields. The saved wrapper
+-- and any stale graph copies it holds are left exactly as found.
+function StoreData.Detached(saved)
+    local marker = rawget(saved, "migrationMarker")
+    return {
+        schemaVersion = rawget(saved, "schemaVersion"),
+        storeRevision = rawget(saved, "storeRevision"),
+        settingsRevision = rawget(saved, "settingsRevision"),
+        accountRevision = rawget(saved, "accountRevision"),
+        settingsVersion = rawget(saved, "settingsVersion"),
+        settings = {},
+        chars = {},
+        accountCharacters = {},
+        migrationMarker = {
+            version = rawget(marker, "version"),
+            completed = rawget(marker, "completed"),
+            decision = rawget(marker, "decision"),
+        },
+    }
+end
 
 function StoreData.Build(db, token)
     local counters = Nexus and Nexus.MainInternals
@@ -1515,8 +1604,11 @@ function StoreData.Build(db, token)
             highest = math.max(highest, probe.value)
         end
         StoreData.revision = highest
-        StoreData.current = {db=db, value=wrapper}
-        return wrapper
+        -- A-STATE-01: offered onwards detached; a stale graph copy an earlier
+        -- build left in the saved wrapper is never served or carried on.
+        local detached = StoreData.Detached(wrapper)
+        StoreData.current = {db=db, value=detached}
+        return detached
     end
     local revision, why = counters.Advance(StoreData, "revision", 1)
     if not revision then return nil, why end
@@ -1526,10 +1618,11 @@ function StoreData.Build(db, token)
         settingsRevision = revision,
         accountRevision = revision,
         settingsVersion = NormalizeVersion(db.settingsVersion),
-        settings = db.settings,
-        chars = db.chars,
-        accountCharacters = type(db.accountCharacters) == "table"
-            and db.accountCharacters or {},
+        -- A-STATE-01: empty detached tables, never db.settings, db.chars or
+        -- db.accountCharacters (see the block comment above).
+        settings = {},
+        chars = {},
+        accountCharacters = {},
         migrationMarker = {
             version = 1,
             completed = false,
@@ -1781,8 +1874,8 @@ local function BootstrapSlice(C)
         -- The account map is NOT created here: a read-only catalog verdict must
         -- withhold the account owner entirely, and the only authorized creation
         -- site is the guarded one in STORE_COMPACTION_PENDING. The wrapper
-        -- references the map when it exists and a detached empty table when it
-        -- does not, so building the candidate never writes to the database.
+        -- holds a detached empty table in place of every graph (A-STATE-01),
+        -- so building the candidate never writes to the database.
         local storeData, storeDataWhy, storeDataCause = StoreData.Build(db, C.token)
         if not storeData then
             C.state = SS.INVALID
@@ -2386,7 +2479,9 @@ end
 -- Read-only. Can StoreAuthorityOwner.UpdateStateV1 write the current
 -- character's row DURABLY right now? UpdateStateV1 creates an absent row, but
 -- falls back to a transient, never-persisted row (and still returns true) when
--- identity, the database, its chars container or the schema is not usable, so
+-- identity, the database, its chars container or the schema is not usable, or
+-- while the bound coordinator is not serving (mode "loading"/"unavailable"
+-- with reason "lifecycle" or "migration-marker" below), so
 -- a caller that must persist (for example an Orb recovery receipt) checks this
 -- first and verifies the row afterwards. Nothing is created or changed here.
 -- Returns {mode="durable", ownerKey=, rowPresent=, carriedFrom=} or
@@ -2396,20 +2491,25 @@ end
 -- an unverified format, the first failing field. carriedFrom names the plain
 -- name-keyed row the first write will copy (known saved formats 3-5 only).
 function Store.StateWriteStatus()
+    local db = NexusDB
+    -- The saved-format verdict is a property of the root, not of the
+    -- character, so it is given first: a read-only root is refused even while
+    -- the identity is not known yet, never reported as merely "loading".
+    if type(db) == "table" then
+        local formatClass, savedFormat, field = SavedFormat.Classify(db)
+        if formatClass == "future" or formatClass == "unverified"
+            or formatClass == "malformed" then
+            local markerType, markerText
+            if formatClass == "malformed" then markerType, markerText = SavedFormat.Describe(db) end
+            return {mode="unavailable", reason="saved-format", format=formatClass,
+                savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
+                knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field,
+                markerType=markerType, markerText=markerText}
+        end
+    end
     local ownerKey = CurrentIdentity()
     if not ownerKey then return {mode="loading", reason="identity"} end
-    local db = NexusDB
     if type(db) ~= "table" then return {mode="unavailable", reason="database"} end
-    local formatClass, savedFormat, field = SavedFormat.Classify(db)
-    if formatClass == "future" or formatClass == "unverified"
-        or formatClass == "malformed" then
-        local markerType, markerText
-        if formatClass == "malformed" then markerType, markerText = SavedFormat.Describe(db) end
-        return {mode="unavailable", reason="saved-format", format=formatClass,
-            savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
-            knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field,
-            markerType=markerType, markerText=markerText}
-    end
     local C = boundCoordinator
     if type(C) == "table" and type(C.State) == "function" then
         local ok, state = pcall(C.State, C)
@@ -2643,9 +2743,90 @@ function Store.Settings()
     return transientSettings
 end
 
+-- Read-only status of the player's explicit Sync mode choice, for its one
+-- Build Library control and its one policy caller. Internals seam
+-- (Nexus.MainInternals.SyncModeChoiceV1), not a Store export. A choice can be
+-- written only into an initialized, supported or accepted known root whose
+-- live saved settings table is the one Store.Settings() serves; any other
+-- state is refused with its reason and never gets a session-only override.
+-- The token names the exact saved root and settings table (as identity text,
+-- not references), so a draft opened on another root is detected as stale.
+function SavedFormat.ChoiceStatus()
+    local db = NexusDB
+    local class, savedFormat = SavedFormat.Classify(db)
+    local settings
+    if type(db) == "table" then settings = rawget(db, "settings") end
+    local explicit = SavedFormat.ExplicitSyncMode(db, class)
+    -- Observation is separate from the applied choice: read-only formats can
+    -- contain a recognized value this build deliberately does not honor.
+    -- Only plain saved tables establish absence; never inspect through a
+    -- metatable or stringify arbitrary saved values, including for the token.
+    local dbPlain = type(db) == "table" and getmetatable(db) == nil
+    local settingsPlain = type(settings) == "table" and getmetatable(settings) == nil
+    local stored, storedChoice, storedChoicePresent
+    local storedChoiceState = "unknown"
+    if dbPlain and settingsPlain then
+        stored = rawget(settings, SavedFormat.CHOICE_KEY)
+        storedChoicePresent = stored ~= nil
+        if stored == nil then storedChoiceState = "absent"
+        elseif stored == "automatic" or stored == "manual" or stored == "off" then
+            storedChoiceState, storedChoice = "recognized", stored
+        else storedChoiceState = "invalid" end
+    end
+    local accepted = class == "supported" or class == "known"
+    local legacy = class == "known" and type(settings) == "table"
+        and rawget(settings, "syncMode") or nil
+    if legacy ~= "off" and legacy ~= "manual" then legacy = nil end
+    local status = {key=SavedFormat.CHOICE_KEY, effective=SavedFormat.SyncMode(db),
+        explicit=explicit, storedInvalid=accepted and stored ~= nil and explicit == nil,
+        storedChoiceState=storedChoiceState, storedChoicePresent=storedChoicePresent,
+        storedChoice=storedChoice,
+        inherited=legacy or "automatic", inheritedSource=legacy and "legacy" or "default",
+        format=class, savedFormat=savedFormat, writable=false,
+        token={db=dbPlain and tostring(db) or "uninspectable",
+            settings=settingsPlain and tostring(settings) or "uninspectable"}}
+    if type(db) ~= "table" then status.reason = "database"; return status end
+    if not accepted then status.reason = "saved-format"; return status end
+    local C = boundCoordinator
+    if type(C) ~= "table" or type(C.State) ~= "function" then
+        status.reason = "loading"; return status
+    end
+    local ok, state = pcall(C.State, C)
+    if not ok or (state ~= SS.READY and state ~= SS.MUTATION_BUILD
+        and state ~= SS.MUTATION_FINAL) then
+        status.reason = (state == SS.INVALID or state == SS.FUTURE_SCHEMA
+            or state == SS.DISPOSITION_FAILED or state == SS.DISPOSITION_REAUTH)
+            and "lifecycle" or "loading"
+        return status
+    end
+    -- The coordinator initialized exactly one saved root. Another table in
+    -- NexusDB, even a valid one, is a replaced root it never bound; it treats
+    -- that as drift too (BootstrapSlice, StartAutomaticMaintenance).
+    local boundOk, bound = false, nil
+    if type(C.Database) == "function" then boundOk, bound = pcall(C.Database, C) end
+    if not boundOk or bound ~= db then
+        status.reason = "replaced"; return status
+    end
+    if type(settings) ~= "table" or getmetatable(settings) ~= nil
+        or Store.Settings() ~= settings then
+        status.reason = "settings"; return status
+    end
+    status.writable = true
+    return status
+end
+Nexus.MainInternals.SyncModeChoiceV1 = function()
+    return SavedFormat.ChoiceStatus()
+end
+
 -- MASTER-RC-001, the counted private `UpdateSettingsV1` entry: a user control
 -- changes one setting through the Store owner instead of writing a settings
 -- table it found itself, and learns whether the change was saved.
+-- Static caller inventory: core/WishlistController.lua UpdateStoreSetting,
+-- ui/Theme.lua Choose, and core/SyncModePolicy.lua ApplyChoice (the explicit
+-- Sync mode choice, SavedFormat.CHOICE_KEY only). For that one key this entry
+-- validates first and writes only durably: an invalid value is refused, and a
+-- root that SavedFormat.ChoiceStatus does not report writable is refused with
+-- its reason, with no session settings or transient write.
 --   {mode="durable"}                      written into the saved settings
 --   {mode="session", format=, savedFormat=, note=} the saved root is
 --       read-only: the change applies to this session's settings only and the
@@ -2657,6 +2838,13 @@ end
 -- this entry is the route for the controls that must report the outcome.
 function StoreAuthorityOwner.UpdateSettingsV1(key, value)
     if type(key) ~= "string" or key == "" then return nil, "invalid-key" end
+    if key == SavedFormat.CHOICE_KEY then
+        if not SavedFormat.SYNC_MODES[value] then return nil, "invalid-value" end
+        local status = SavedFormat.ChoiceStatus()
+        if not status.writable then return nil, "unavailable", status.reason end
+        rawget(NexusDB, "settings")[key] = value
+        return {mode="durable"}
+    end
     local db = NexusDB
     local class = ReadOnlyRoot.Class(db)
     if class then
@@ -2717,6 +2905,26 @@ function StoreAuthorityOwner.ResolveStateRowV1()
         transientState = EnsureStateShape(transientState)
         return transientState, false
     end
+    -- A-STATE-02: the lifecycle verdict Store.StateWriteStatus gives. While
+    -- the bound coordinator has not reached STORE_READY or a post-ready
+    -- MUTATION_* state, or its state cannot be read, the durable row is
+    -- neither created nor written and the transient session row is used, on a
+    -- supported format 2 as on every other format. A call before admission
+    -- therefore inserts no key into db.chars while the bounded admission walk
+    -- resumes over it with next() (Lua 5.1 leaves that insertion undefined),
+    -- and no row escapes that walk's charge. A true return is still not
+    -- readiness: callers that must persist check StateWriteStatus or
+    -- IsDurableStateRowV1. Without a bound coordinator both answers are
+    -- unchanged.
+    local bound = boundCoordinator
+    if type(bound) == "table" and type(bound.State) == "function" then
+        local okState, phase = pcall(bound.State, bound)
+        if not okState or (phase ~= SS.READY and phase ~= SS.MUTATION_BUILD
+            and phase ~= SS.MUTATION_FINAL) then
+            transientState = EnsureStateShape(transientState)
+            return transientState, false
+        end
+    end
     local state = db.chars[ownerKey]
     local created = state == nil
     if state == nil then
@@ -2755,7 +2963,8 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
     local cached = (stateSnapshotOwner == ownerKey and stateSnapshotDb == db
         and stateSnapshotSource == state) and stateSnapshot or nil
     local results = {mutator(state)}
-    if cached == nil or not SameAsSnapshot(cached, state) then
+    -- #151: the reserved top-level pool key is compared by its own owner only.
+    if cached == nil or not StoreAuthorityOwner.SameSnapshotV1(cached, state) then
         InvalidateStateSnapshot()
     end
     return true, unpack(results)
@@ -2827,9 +3036,209 @@ function Store.State()
         and stateSnapshotSource == source then
         return stateSnapshot
     end
-    local snapshot = EnsureStateShape(DeepCopy(source))
+    -- #151: the reserved top-level flexiblePlanPoolV1 key is left out of the
+    -- snapshot; its owner reads it through PlanPoolReadV1's bounded copy.
+    -- Every other key, and that name at any nested level, is copied exactly
+    -- as before (DeepCopy itself is unchanged).
+    local snapshot = source
+    if type(source) == "table" then
+        local poolKey = StoreAuthorityOwner.PLAN_POOL_KEY
+        snapshot = {}
+        for key, value in pairs(source) do
+            if key ~= poolKey then snapshot[key] = DeepCopy(value) end
+        end
+    end
+    snapshot = EnsureStateShape(snapshot)
     stateSnapshot, stateSnapshotOwner = snapshot, ownerKey
     stateSnapshotDb, stateSnapshotRevision = db, stateRevision
     stateSnapshotSource = source
     return snapshot
+end
+
+-- #151: the private local-pool seam (docs/flexible-plans/
+-- LOCAL_PERSISTENCE_CONTRACT.md, "Data owner"). Internals only: the public
+-- Store facade inventory is unchanged and no mutation entry is added (the pool
+-- owner writes through the counted UpdateStateV1). Its constants and helpers
+-- are locals of this do-block, so it adds no file-level local that stays
+-- active after the block; while the block is in scope those locals still
+-- count toward the compiler's limit of 200 active locals (Lua 5.1 and LuaJIT).
+--   PLAN_POOL_KEY        the one reserved character-row key. Store.State and
+--                        the UpdateStateV1 snapshot compare skip exactly this
+--                        top-level key; the same name nested anywhere else,
+--                        and every other key, is copied and compared as before.
+--   PlanPoolReadV1()     pure: creates, shapes and invalidates nothing. Raw
+--                        owner/root/row lookup plus a bounded detached copy of
+--                        the field only; the rest of the row is never walked.
+--                        Returns {mode, reason, ownerKey, root, rowPresent,
+--                        carried, present, copy, refusal, detail, visited}
+--                        (+format, savedFormat for a read-only root).
+--   IsDurableStateRowV1  true only for the live canonical row of a writable,
+--                        serving root (never the transient fallback).
+--   SameSnapshotV1       the UpdateStateV1 change test.
+do
+    local KEY = "flexiblePlanPoolV1"
+    -- Copy bounds: 16 tables two levels deep, 16 root and 257 child entries,
+    -- 16 + 15 * 257 = 3,871 visits, keys strings <= 32 bytes or integers,
+    -- values numbers, booleans or strings <= 64 bytes. Shape violations are
+    -- MALFORMED, size bounds OVERSIZED; both stop at the first offending entry.
+    local BOUND = {TABLES=16, DEPTH=2, ROOT=16, CHILD=257, VISITS=3871,
+        KEY_BYTES=32, VALUE_BYTES=64}
+    local SERVING = {[SS.READY]=true, [SS.MUTATION_BUILD]=true,
+        [SS.MUTATION_FINAL]=true}
+    local FAILED = {[SS.INVALID]="lifecycle", [SS.FUTURE_SCHEMA]="migration-marker",
+        [SS.DISPOSITION_FAILED]="lifecycle", [SS.DISPOSITION_REAUTH]="lifecycle"}
+    -- Root token: a Store-private serial per saved-root identity. Weak keys,
+    -- so it neither keeps a database alive nor exposes a reference to it.
+    local roots = setmetatable({}, {__mode="k"})
+    local serial = 0
+    StoreAuthorityOwner.PLAN_POOL_KEY = KEY
+
+    local function RootToken(db)
+        local token = roots[db]
+        if token == nil then
+            serial = serial + 1
+            token = serial
+            roots[db] = token
+        end
+        return token
+    end
+
+    -- nil: no bound coordinator (pre-init). false: its state is unreadable.
+    local function Lifecycle()
+        local C = boundCoordinator
+        if type(C) ~= "table" or type(C.State) ~= "function" then return nil end
+        local ok, state = pcall(C.State, C)
+        if not ok then return false end
+        return state, C
+    end
+
+    -- next/rawget only; no metamethod runs. FUTURE is decided from the raw
+    -- version before any traversal.
+    local function BoundedCopy(value)
+        if type(value) ~= "table" then return nil, "MALFORMED", "TYPE", 0 end
+        if getmetatable(value) ~= nil then return nil, "MALFORMED", "METATABLE", 0 end
+        local version = rawget(value, "version")
+        if ExactInteger(version) and version > 1 then return nil, "FUTURE", "VERSION", 0 end
+        local work = {tables=0, visited=0, seen={}}
+        local function Fail(class, detail)
+            work.class, work.detail = class, detail
+            return nil
+        end
+        local function Copy(source, depth)
+            work.seen[source] = true
+            work.tables = work.tables + 1
+            if work.tables > BOUND.TABLES then return Fail("OVERSIZED", "TABLES") end
+            local limit = depth == 1 and BOUND.ROOT or BOUND.CHILD
+            local out, entries, key, item = {}, 0, nil, nil
+            repeat
+                key, item = next(source, key)
+                if key ~= nil then
+                    entries, work.visited = entries + 1, work.visited + 1
+                    if entries > limit then return Fail("OVERSIZED", "ENTRIES") end
+                    if work.visited > BOUND.VISITS then return Fail("OVERSIZED", "VISITS") end
+                    if type(key) == "string" then
+                        if #key > BOUND.KEY_BYTES then return Fail("OVERSIZED", "KEY_BYTES") end
+                    elseif not ExactInteger(key) then
+                        return Fail("MALFORMED", "KEY_TYPE")
+                    end
+                    local kind = type(item)
+                    if kind == "table" then
+                        if work.seen[item] then return Fail("MALFORMED", "ALIAS") end
+                        if getmetatable(item) ~= nil then return Fail("MALFORMED", "METATABLE") end
+                        if depth >= BOUND.DEPTH then return Fail("MALFORMED", "DEPTH") end
+                        local child = Copy(item, depth + 1)
+                        if child == nil then return nil end
+                        out[key] = child
+                    elseif kind == "string" then
+                        if #item > BOUND.VALUE_BYTES then return Fail("OVERSIZED", "VALUE_BYTES") end
+                        out[key] = item
+                    elseif kind == "number" or kind == "boolean" then
+                        out[key] = item
+                    else
+                        return Fail("MALFORMED", "VALUE_TYPE")
+                    end
+                end
+            until key == nil
+            return out
+        end
+        local copy = Copy(value, 1)
+        if copy == nil then return nil, work.class, work.detail, work.visited end
+        return copy, nil, nil, work.visited
+    end
+
+    function StoreAuthorityOwner.PlanPoolReadV1()
+        local out = {visited=0, present=false, rowPresent=false, carried=false}
+        local function Mode(mode, reason)
+            out.mode, out.reason = mode, reason
+            return out
+        end
+        local ownerKey = CurrentIdentity()
+        if not ownerKey then return Mode("loading", "identity") end
+        out.ownerKey = ownerKey
+        local db = NexusDB
+        if not PlainTable(db) then return Mode("unavailable", "database") end
+        out.root = RootToken(db)
+        local state, C = Lifecycle()
+        if state == false then return Mode("unavailable", "lifecycle") end
+        if state == nil then return Mode("loading", "lifecycle") end
+        if FAILED[state] then return Mode("unavailable", FAILED[state]) end
+        if not SERVING[state] then return Mode("loading", "lifecycle") end
+        if C.database ~= db then return Mode("unavailable", "database") end
+        local chars = rawget(db, "chars")
+        if not PlainTable(chars) then return Mode("unavailable", "container") end
+        local row = rawget(chars, ownerKey)
+        if row ~= nil and not PlainTable(row) then return Mode("unavailable", "row") end
+        out.rowPresent = row ~= nil
+        local readOnly = ReadOnlyRoot.Class(db)
+        if readOnly then
+            out.format, out.savedFormat = readOnly, select(2, SavedFormat.Classify(db))
+            Mode("readOnly", "saved-format")
+        else
+            local status = Store.StateWriteStatus()
+            if status.mode ~= "durable" then
+                return Mode(status.mode or "unavailable", status.reason)
+            end
+            Mode("durable", nil)
+            -- Known formats 3-5: until the first write copies it, the owned
+            -- plain-name row is read (only), exactly as Store.State shows it.
+            if row == nil and status.carriedFrom ~= nil then
+                local _, from = SavedFormat.OwnedNameRow(db, ownerKey)
+                if PlainTable(from) then row, out.carried = from, true end
+            end
+        end
+        local value
+        if row ~= nil then value = rawget(row, KEY) end
+        out.present = value ~= nil
+        if value ~= nil then
+            out.copy, out.refusal, out.detail, out.visited = BoundedCopy(value)
+        end
+        return out
+    end
+
+    function StoreAuthorityOwner.IsDurableStateRowV1(row)
+        if not PlainTable(row) then return false end
+        local ownerKey, db = CurrentIdentity(), NexusDB
+        if not ownerKey or not PlainTable(db) or ReadOnlyRoot.Class(db) then return false end
+        local state, C = Lifecycle()
+        if not state or not SERVING[state] or C.database ~= db then return false end
+        local chars = rawget(db, "chars")
+        return PlainTable(chars) and rawequal(rawget(chars, ownerKey), row) or false
+    end
+
+    -- SameAsSnapshot with exactly the reserved top-level key skipped; nested
+    -- levels go through SameAsSnapshot unchanged.
+    function StoreAuthorityOwner.SameSnapshotV1(cached, row)
+        if cached == row then return true end
+        if type(cached) ~= "table" or type(row) ~= "table" then return false end
+        local seen = {[cached]={[row]=true}}
+        for key, value in pairs(cached) do
+            if key ~= KEY and not SameAsSnapshot(value, row[key], seen) then
+                return false
+            end
+        end
+        for key in pairs(row) do
+            if key ~= KEY and cached[key] == nil then return false end
+        end
+        return true
+    end
 end

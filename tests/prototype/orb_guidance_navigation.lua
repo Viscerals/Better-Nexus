@@ -105,6 +105,9 @@ local function Boot(opt)
   if opt.before then opt.before(h) end
  end)
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide();H.Advance(.2) end
+ -- First use now opens the guided coach instead of the legacy Welcome.
+ -- Keep this Orb-only navigation comparison clear of that overlay.
+ if _G.NexusGuidedSetup and _G.NexusGuidedSetup:IsShown() then _G.NexusGuidedSetup:Hide();H.Advance(.2) end
  if opt.plan~=false then
   check(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic Plan',opt.rows or Plan(),opt.design or {})==true,'fixture: plan set')
  end
@@ -196,6 +199,28 @@ do
  check(not v.heading:find('Active',1,true),'and not that rolling is active')
  check(v.state=='orb-state' and v.button,'with the Orb button for inspection: '..tostring(v.state))
  check(v.auto==true,'Auto stays ON')
+ ProjectEbonhold.OrbService=nil
+end
+do
+ -- UX-02/J4: the same unknown Orb state with Auto OFF. The player chooses;
+ -- the heading never says Active, and the reason and the inspection button
+ -- remain. Nothing is performed and Auto stays OFF.
+ Boot({pendingRolls=3,auto=false,before=function(h)
+  ProjectEbonhold=ProjectEbonhold or {}
+  ProjectEbonhold.OrbService={IsStateKnown=function() return false end,IsOfferPending=function() return false end}
+ end})
+ local acts=#H.actions
+ H.Board({{spellId=200016,quality=0},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Notify()
+ for _=1,4 do Nexus.RequestRecompute();H.Advance(.4) end
+ local v=View()
+ local body=NexusPanel._rollRec and NexusPanel._rollRec:GetText() or ''
+ check(v.auto==false and v.paused==nil,'fixture: Auto is OFF, not held: '..tostring(v.auto))
+ check(v.state=='orb-state' and v.button,'fixture: the unknown Orb state shows its inspection button: '..tostring(v.state))
+ check(not v.heading:find('Active',1,true),'Auto OFF: the heading does not claim active rolling: '..v.heading)
+ check(v.heading:lower():find('you choose',1,true),'Auto OFF: the heading says the player chooses: '..v.heading)
+ check(body:find('Ordinary rolling paused',1,true),'and the Orb pause reason stays: '..body)
+ check(#H.actions==acts and Nexus.RecomputeStats().autoEnabled~=true,'nothing is performed; Auto stays OFF')
  ProjectEbonhold.OrbService=nil
 end
 

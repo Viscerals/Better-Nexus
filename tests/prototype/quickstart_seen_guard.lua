@@ -8,11 +8,37 @@ local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local function Window() return NexusQuickStart end
 local function Shown() local w=Window();return w~=nil and w:IsShown() end
-local function Button(text)
- local w=Window();if not w then return nil end
+-- First use in a healthy session (a durable owner after local start-up) is
+-- the guided setup coach; the first-time Welcome stays the first-use window
+-- otherwise, and its deliberate secondary presentation (QuickStart.Show).
+local function Coach() local g=NexusGuidedSetup;return g~=nil and g:IsShown() end
+-- The coach's close control follows the design: a visible "X" whose hover
+-- names Close (UserText.Guide.buttons). It is found by that caption and that
+-- hover together, so another "X" cannot stand in for it.
+local function CoachClose()
+ local g=NexusGuidedSetup
+ for _,c in ipairs(g and g.children or {})do
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X'
+   and type(c.tip)=='string' and c.tip:find('^Close') then return c end
+ end
+end
+-- The exact "Close" caption of the Welcome dismiss control is a collected
+-- EXPECT. Only after an exact lookup for it misses may the real legacy
+-- "Later" control stand in, so every original check still runs; the
+-- collected misses fail this test after those checks (end of file).
+local closeCaptionMisses={}
+local function Find(w,text)
  for _,c in ipairs(w.children or {})do
   if c.kind=='Button' and c:GetText()==text then return c end
  end
+end
+local function Button(text)
+ local w=Window();if not w then return nil end
+ local found=Find(w,text)
+ if found or text~='Close' then return found end
+ closeCaptionMisses[#closeCaptionMisses+1]=checks
+ print('FAIL EXPECT the Welcome dismiss control reads exactly "Close" (lookup after check '..checks..'; the legacy "Later" control carries the original checks)')
+ return Find(w,'Later')
 end
 local function Flag()
  if type(NexusDB)~='table' then return nil end
@@ -35,7 +61,7 @@ Nexus.QuickStart.ShowIfFirstTime()
 check(NexusDB==nil,'absent data: deciding whether to show creates no saved table')
 check(Shown(),'absent data: the window is shown')
 check(Nexus.QuickStart.CanRecordSeen()==false,'absent data: the acknowledgement is withheld')
-Button('Later'):Click()
+Button('Close'):Click()
 check(NexusDB==nil,'absent data: closing the window creates no saved table')
 check(not Shown(),'absent data: the window closes')
 Nexus.QuickStart.ShowIfFirstTime()
@@ -49,34 +75,41 @@ NexusDB='not a saved table'
 Nexus.QuickStart.ShowIfFirstTime()
 check(NexusDB=='not a saved table','invalid data: the saved value is unchanged by the decision')
 check(Shown(),'invalid data: the window is shown')
-Button('Later'):Click()
+Button('Close'):Click()
 check(NexusDB=='not a saved table','invalid data: closing writes nothing and repairs nothing')
 NexusDB=keep
 
--- 3. Normal ready start-up: the user action saves the acknowledgement, and
--- nothing else in the saved data changes. It survives a reload.
+-- 3. Normal ready start-up: first use is the guided setup coach, with no
+-- first-time Welcome beside it. Its deliberate Close saves the
+-- acknowledgement, and nothing else in the saved data changes. It survives a
+-- reload.
 local H=F.Boot(F.Database())
 local s=Nexus.StartupStatus()
 check(s.coreReady and s.state~='failed','ready: local start-up completed: '..tostring(s.reason))
 check(Nexus.Store.StateWriteStatus().mode=='durable','ready: the saved-data owner is writable')
 check(Flag()==nil,'ready: the acknowledgement is not set before the user acts')
 Nexus.QuickStart.ShowIfFirstTime()
-check(Shown(),'ready: the window is shown once')
+check(Coach(),'ready: the first-use coach is shown once')
+check(not Shown(),'ready: no first-time Welcome is shown beside it')
 local before=F.Serialize(NexusDB)
-Button('Later'):Click()
-check(Flag()==true,'ready: the user action records the acknowledgement')
+local readyClose=CoachClose()
+check(readyClose~=nil,'ready: the coach offers Close')
+readyClose:Click()
+check(Flag()==true,'ready: the coach Close records the acknowledgement')
 NexusDB.hasSeenQuickStart=nil
 check(F.Serialize(NexusDB)==before,'ready: the acknowledgement is the only change')
 NexusDB.hasSeenQuickStart=true
-check(not Shown(),'ready: the window closes')
+check(not Coach(),'ready: the coach closes')
 H=F.Reload();H.Advance(1,.05)
 check(Flag()==true,'ready: the acknowledgement survives a reload')
 Nexus.QuickStart.ShowIfFirstTime()
-check(not Shown(),'ready: the window is not offered again')
+check(not Coach() and not Shown(),'ready: neither window is offered again')
 
--- 4. Entry buttons still open their own views and keep their own checks.
+-- 4. Entry buttons of the first-time Welcome (in a healthy session now its
+-- deliberate secondary presentation, QuickStart.Show) still open their own
+-- views and keep their own checks.
 F.Boot(F.Database())
-Nexus.QuickStart.ShowIfFirstTime()
+Nexus.QuickStart.Show()
 Button('Import / Create Wishlist'):Click()
 check(Flag()==true,'ready: an entry button also records the acknowledgement')
 check(NexusEditorFrame and NexusEditorFrame:IsShown(),'ready: the Wishlist editor opens')
@@ -92,7 +125,7 @@ local failedBefore=F.Serialize(NexusDB)
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'failed: the window is still shown')
 check(Nexus.QuickStart.CanRecordSeen()==false,'failed: the acknowledgement is withheld')
-Button('Later'):Click()
+Button('Close'):Click()
 check(not Shown(),'failed: the window closes')
 check(Flag()==nil,'failed: no acknowledgement is written')
 check(F.Serialize(NexusDB)==failedBefore,'failed: the saved data is unchanged')
@@ -109,7 +142,7 @@ check(w.mode=='unavailable' and w.format=='malformed','read-only: the owner refu
 local roBefore=F.Serialize(NexusDB)
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'read-only: the window is still shown')
-Button('Later'):Click()
+Button('Close'):Click()
 check(Flag()==nil,'read-only: no acknowledgement is written')
 check(F.Serialize(NexusDB)==roBefore,'read-only: the saved data and the marker are unchanged')
 
@@ -127,9 +160,11 @@ check(c.state=='failed' and c.reason=='ROOT_SLOT_LIMIT' and c.coreReady==true,
 check(Nexus.Store.StateWriteStatus().mode=='durable','capacity: the local saved-data owner is writable')
 local communityBefore=F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})
 Nexus.QuickStart.ShowIfFirstTime()
-check(Shown(),'capacity: the window is shown')
+check(Coach() and not Shown(),'capacity: the first-use coach is shown, with no first-time Welcome')
 local capacityBefore=F.Serialize(NexusDB)
-Button('Later'):Click()
+local capacityClose=CoachClose()
+check(capacityClose~=nil,'capacity: the coach offers Close')
+capacityClose:Click()
 check(Flag()==true,'capacity: the dismissal is recorded through the durable local owner')
 NexusDB.hasSeenQuickStart=nil
 check(F.Serialize(NexusDB)==capacityBefore,'capacity: the acknowledgement is the only change')
@@ -137,7 +172,7 @@ NexusDB.hasSeenQuickStart=true
 check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})==communityBefore,
  'capacity: the refused Community data and the marker are unchanged')
 Nexus.QuickStart.ShowIfFirstTime()
-check(not Shown(),'capacity: the window is not offered again')
+check(not Coach() and not Shown(),'capacity: neither window is offered again')
 -- The release note is reached again now that the first-run window is settled.
 check(Nexus.Changelog.CanRecordSeen()==false,'capacity: the release note still records nothing')
 -- Decision C persistence is untouched: a local Wishlist assignment is saved.
@@ -156,12 +191,16 @@ check(savedRows==1,'capacity: exactly one saved character row holds the local Wi
 check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})==communityBefore,
  'capacity: the local save changed no shared Community data')
 
--- 8. Every entry button opens its own view without creating a saved table.
-local buttons={'Later','Set up current build','Import / Create Wishlist',
- 'Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories'}
+-- 8. Every entry button of the first-time Welcome (its deliberate
+-- presentation, QuickStart.Show, in a healthy session where first use is the
+-- coach) opens its own view without creating a saved table. Reference is the
+-- long manual; Help: Guided setup is Help, the coach (design/current "Nexus
+-- Setup Alternative").
+local buttons={'Close','Set up current build','Import / Create Wishlist',
+ 'Browse Community builds','Open Leaderboard','Reference','Orbs / Lost Memories','Help: Guided setup'}
 for _,label in ipairs(buttons)do
  F.Boot(F.Database())
- Nexus.QuickStart.ShowIfFirstTime()
+ Nexus.QuickStart.Show()
  local kept=NexusDB
  NexusDB=nil
  local button=Button(label)
@@ -171,6 +210,24 @@ for _,label in ipairs(buttons)do
  NexusDB=kept
 end
 
+-- 8b. The first-use coach's Close and Escape create no saved table either,
+-- and record nothing for a saved root other than the one it was shown for.
+for _,how in ipairs({'Close','Escape'})do
+ F.Boot(F.Database())
+ Nexus.QuickStart.ShowIfFirstTime()
+ check(Coach(),how..': the first-use coach is shown')
+ local kept=NexusDB
+ NexusDB=nil
+ if how=='Close' then
+  local close=CoachClose();check(close~=nil,how..': the coach offers Close');close:Click()
+ else
+  check(NexusGuidedSetupEscape~=nil,how..': the coach has its listed Escape child');NexusGuidedSetupEscape:Hide()
+ end
+ check(NexusDB==nil and not Coach(),how..': the coach closes and creates no saved table')
+ NexusDB=kept
+ check(Flag()==nil,how..': nothing is recorded for another saved root')
+end
+
 -- 9. A dismissal that could not be saved yet is retried, and the retries are
 -- bounded. The window is dismissed before the saved-data owner is durable.
 local early=F.Database()
@@ -178,7 +235,7 @@ local dismissed=false
 F.Boot(early,nil,function()
  if Nexus.Store.StateWriteStatus().mode~='durable' then
   Nexus.QuickStart.ShowIfFirstTime()
-  Button('Later'):Click()
+  Button('Close'):Click()
   dismissed=true
  end
 end)
@@ -192,7 +249,7 @@ end
 -- A session that can never save stops asking after its bounded attempts.
 F.Boot(F.Database({mutate=function(db)db.settingsVersion={version=5} end}))
 Nexus.QuickStart.ShowIfFirstTime()
-Button('Later'):Click()
+Button('Close'):Click()
 local settledAfter=nil
 for attempt=1,20 do
  if Nexus.QuickStart.ShowIfFirstTime()==true then settledAfter=attempt;break end
@@ -200,4 +257,8 @@ end
 check(settledAfter~=nil and settledAfter<=10,
  'retry: a read-only session stops retrying within its bound: '..tostring(settledAfter))
 check(Flag()==nil,'retry: and it still writes nothing')
+-- The collected exact-caption EXPECT fails only after every original check ran.
+if #closeCaptionMisses>0 then
+ error('quickstart_seen_guard: EXPECT the Welcome dismiss control reads exactly "Close": '..#closeCaptionMisses..' lookup(s) missed it (first after check '..closeCaptionMisses[1]..'); original checks='..checks,0)
+end
 print('PASS quickstart_seen_guard: no database is created or repaired by the window or its buttons; the acknowledgement is saved only through a durable owner; local saves are unaffected checks='..checks)

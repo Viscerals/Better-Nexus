@@ -63,6 +63,19 @@ local function Content()
  for _,r in ipairs(f._rollArea.regions or {}) do
   if r~=f._rollStatus and r~=f._rollRec and r.GetText and r:IsShown() and Plain(r:GetText())~='' then cards[#cards+1]=Plain(r:GetText()) end
  end
+ -- The Play offer cards (Claude Design full UI) replace the shown card rows
+ -- with the same current choices: each shown card is read as its visible
+ -- name, quality and tag lines, in that order.
+ for _,card in ipairs(f._offerCards or {}) do
+  if card:IsShown() then
+   local parts={}
+   for _,key in ipairs({'name','quality','tag'}) do
+    local text=Plain(card[key]:GetText())
+    if text~='' then parts[#parts+1]=text end
+   end
+   if #parts>0 then cards[#cards+1]=table.concat(parts,' ') end
+  end
+ end
  return {head=Plain(f._rollStatus:GetText()),body=Plain(f._rollRec:GetText()),cards=cards,
   orbs=f._orbsBtn and f._orbsBtn:IsShown() or false}
 end

@@ -91,8 +91,11 @@ debug.sethook(function()
  local info=debug.getinfo(2,'f')
  if info and info.func==observeFn then observationCalls=observationCalls+1 end
 end,'c')
+-- The Progress page's own control: the main panel's Play section has a
+-- Show/Hide details button with the same label.
 local function button(text)
- for _,r in ipairs(H.frames) do if r.kind=='Button' and r:IsVisible() and r:GetText()==text then return r end end
+ local child=assert(NexusJournalScroll and NexusJournalScroll.scrollChild,'SETUP: real Progress child')
+ for _,r in ipairs(H.frames) do if r.kind=='Button' and r.parent==child and r:IsVisible() and r:GetText()==text then return r end end
 end
 local function ui(label,fn)
  local actions,sent=#H.actions,#H.sent;fn()

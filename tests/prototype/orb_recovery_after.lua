@@ -55,11 +55,11 @@ section('1 continue, then a new run from the fresh state',function()
  local base=H.Clone(archive[1])
  check(R.Same(stripped,base),'the archive is not touched by anything that happens afterwards')
  check(M.Status().state=='STOPPED' and M.Status().pending==false and M.BlocksOrdinary()==false,'the old run stays stopped and blocks nothing')
- -- a new run needs its own approval and every normal gate
+ -- A new run explicitly represents its disclosed history baseline; every normal gate remains.
  local calls=R.Calls(H)
  check(calls.spend==0,'nothing was spent by Continue or by what followed')
  H.perks.serverActiveSlot=1
- local ok,why=M.Start(1)
+ local ok,why=M.Start(1,false,M.Status().historyReview)
  check(ok==true,'a new run starts through the normal approval: '..tostring(why))
  local st=M.Status()
  check(st.limit==1 and st.spent+st.reserved==1 and st.running==true,'its own limit and its own counter (not the old spent Orb): '..st.spent..'/'..st.limit)
@@ -74,11 +74,11 @@ section('2 the normal gates still refuse',function()
  assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
  -- no balance
  O.charges=0
- local ok,why=M.Start(1)
+ local ok,why=M.Start(1,false,M.Status().historyReview)
  check(ok==nil and why~=nil and not why:find('Continue',1,true),'no Orbs: the ordinary resource gate answers: '..tostring(why))
  -- an open offer
  O.charges=9;O.offer=true;H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
- local ok2,why2=M.Start(1)
+ local ok2,why2=M.Start(1,false,M.Status().historyReview)
  check(ok2==nil and why2~=nil,'an open offer: the ordinary gate answers: '..tostring(why2))
  check(H.Count('orb-spend')==1,'and nothing was spent (only the original spend)')
  -- the old run cannot be resumed
@@ -93,7 +93,7 @@ section('3 late events during a new run',function()
  server.Push(16,'late offer');H.Advance(6)
  check(R.SavedRow('orbRecoveryArchive')[1].lateN==1,'a late offer is recorded')
  H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
- local ok,why=M.Start(1)
+ local ok,why=M.Start(1,false,M.Status().historyReview)
  check(ok==true,'a new run starts: '..tostring(why))
  server.Push(1000,'1');H.Advance(6)
  server.Push(1220,tostring(O.charges)..',0,2');H.Advance(6)
@@ -141,7 +141,7 @@ section('5 label of the first late event',function()
  assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
  server.Push(1000,'1')            -- arrives now; nothing has looked at it yet
  H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
- assert(M.Start(1))               -- the new run starts at once
+ assert(M.Start(1,false,M.Status().historyReview))               -- the new run starts at once
  H.Advance(6)
  local e=R.SavedRow('orbRecoveryArchive')[1]
  check(e.late and e.late[1] and e.late[1].k=='pick_result' and e.late[1].nr==nil,'the event is recorded without the new run flag: '..tostring(e.late and e.late[1] and e.late[1].nr))

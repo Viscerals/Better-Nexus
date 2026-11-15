@@ -1,6 +1,9 @@
 # Player-choice first slice
 
-**Ordinary model accepted; session chooser integration implemented for focused offline review; full feature incomplete.** For the first version of
+**Ordinary model accepted; session chooser integration implemented for focused offline review; full feature incomplete.** This page records the first milestone as published
+with PR #136. The later, separate local Save/Load extension
+([#151](https://github.com/Viscerals/Better-Nexus/issues/151)) is described in
+the [local persistence contract](LOCAL_PERSISTENCE_CONTRACT.md). For the first version of
 [#47](https://github.com/Viscerals/Better-Nexus/issues/47), the player chooses the
 exact Wishlist from a broader local planning pool. Nexus does not propose the
 result. Automatic resolution, priority/substitution/tie rules and pool sharing
@@ -58,9 +61,14 @@ reopening never select results. Two fixed sets of 12 visible row frames use
 choice still holds at most 79 ordinary copies and respects each captured stack
 bound. Exact variants and ordinary IDs currently held locked remain ordinary.
 
-The pool and choice live only in session memory. Hide/reopen retains them;
-Reset clears only this planning session; reload loses them. No pool schema,
-SavedVariables migration or persistent entity is added.
+In this first milestone the pool and choice live only in session memory.
+Hide/reopen retains them; Reset clears only this planning session; reload
+loses them. This milestone adds no pool schema, SavedVariables migration or
+persistent entity.
+
+The #151 extension later adds explicit Save pool and Load saved for one pool
+per character. Without those actions, the session behavior above is
+unchanged.
 
 **Open as new Wishlist draft** validates the complete model result and detaches
 it before replacing anything. `WishlistController.PrepareNewExactDraft` returns
@@ -94,8 +102,10 @@ The accepted model remains unchanged and frame-free. The integration uses
 existing editor UI conventions and catalog projections, with no new refresh,
 game-service, save/assignment, automation, resource-action or sharing route.
 Session-memory retention does not satisfy the issue's reload/persistence goal.
+The separate #151 extension addresses explicit local Save/Load of one pool per
+character ([contract](LOCAL_PERSISTENCE_CONTRACT.md)).
 
-Persistence format, durable pool identity/edit/fork/migration, grouped choices,
+Durable pool identity/edit/fork/migration, grouped choices,
 priorities/substitution/ties, locked planning pools and sharing remain deferred.
 The full issue remains open and is not scheduled for public release by this
 slice.

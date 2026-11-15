@@ -30,7 +30,7 @@ Set the qualities and copies you want, assign your Wishlist to a Saved Build, an
 
 ## Download & status
 
-The current public download is **[1.20.0-beta.1 · test.9093](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9093)**. Choose **`Better-Nexus-test.9093-adc75a6.zip`** under that release's Assets; `SHA256SUMS.txt` is available beside it. This is an experimental prerelease.
+The current public download is the **latest published build** on the **[Releases](https://github.com/Viscerals/Better-Nexus/releases)** page: open the newest entry (its tag has the form `v<version>-test.<number>`) and choose the packaged **`Better-Nexus-test.<number>-<commit>.zip`** under its Assets; `SHA256SUMS.txt` is available beside it. Every public build is an experimental prerelease; GitHub marks a release as “Latest” only when it is not a prerelease, so use the Releases list rather than that shortcut.
 
 Check [Releases](https://github.com/Viscerals/Better-Nexus/releases) for newer public tests and their specific limitations. The `main` branch is the maintained development line and may differ from a published package; a source checkout is not a player release. Download the packaged ZIP rather than GitHub's automatic source archives.
 
@@ -63,7 +63,7 @@ To roll back, close the game and restore the matching old addon folders **and** 
 | --- | --- |
 | **Wishlists & Saved Builds** | Create or import plans with exact qualities and copy counts, distinguish rolled copies from permanent-slot targets, and assign a plan to the intended Saved Build. |
 | **Rolling** | Review Take, Freeze, Banish, and Reroll recommendations, then choose which automatic actions to permit. The experimental adaptive strategy is the current public default; the previous strategy remains selectable. |
-| **Build Library & sharing** | Browse locally known builds and exchange build records through same-realm Sync. Pending, incomplete, refused, and unavailable results have distinct states. |
+| **Build Library & sharing** | Browse locally known builds and exchange build records through same-realm Sync. Pending, incomplete, refused, and unavailable results have distinct states. Copy into Editor only makes a draft; sharing your own Saved Build is a separate action that asks you to confirm first. With the default Automatic Sync mode, Nexus may also send without a click: requests for shared builds after login, answers to other users' requests, and eligible new character-best DPS records for Training Dummy or Lich King. Those records can leave without a request and include ordinary and any locked Echoes and character info; receivers may create a viewable, copyable "Record Loadout" page from the record alone, even if its separate build summary is refused. Each send needs this client's admission; sending is not delivery. In unreleased source, choose Automatic, Manual or Off with **Sync mode...** beside Sync Now in the Build Library; only Apply saves the choice, and it sends nothing by itself. The in-game Help (Sharing page) lists what each mode sends. |
 | **DPS & Leaderboards** | Capture and inspect Dummy and Lich King DPS records, browse rankings, and compare the recorded build context. Recorded DPS is evidence of that capture, not a guarantee of future results. |
 | **Help & troubleshooting** | Reopen the in-game guide, inspect status and diagnostic logs, or prepare a support report with `/nexus report`. |
 | **Orbs / Lost Memories** | An experimental Wishlist refinement workspace with explicit Start, a run cap, and Pause/Stop controls. Check the release notes and in-game capability/status messages before use; native resource-spending behavior is not established by offline tests. |
@@ -72,11 +72,12 @@ Wishlists, Saved Builds, and your Active Loadout serve different purposes. Start
 
 ## Documentation & commands
 
-The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus help` for the guide shipped with it.
+The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus reference` for the guide shipped with it.
 
 | Command | Purpose |
 | --- | --- |
-| `/nexus help` | Open the in-game guide. |
+| `/nexus help` | Open Guided setup at your current step (also `/nexus tutorial`, `/nexus guide`). |
+| `/nexus reference` | Open the in-game reference pages (the full manual). |
 | `/nexus editor` | Open the Wishlist editor. |
 | `/nexus builds` | Browse Community Builds / Build Library. |
 | `/nexus leaderboard` | Open the DPS Leaderboard. |
@@ -85,13 +86,13 @@ The **[documentation website](https://viscerals.github.io/Better-Nexus/)** cover
 | `/nexus auto` | Toggle the master Automation permission. |
 | `/nexus orbs` | Open Orbs / Lost Memories; opening the window does not start a run. |
 | `/nexus log` | Open diagnostic logs. |
-| `/nexus report` | Open the support-report window in public test.9093. |
+| `/nexus report` | Open the support-report window. |
 
 The source repository also contains the [experimental player guide](README-PROTOTYPE.md) and [update-notice documentation](docs/UPDATE_NOTICES.md). Source documentation may describe a different development snapshot.
 
 ## Beta limitations & support
 
-Better Nexus is unfinished software. Same-realm sharing still needs broader native testing, and **Stop Sharing cannot withdraw copies already held by other players**. Orb capabilities, resource spending, and UI behavior depend on the actual client/server. Offline tests do not prove native safety or performance, and the project does not claim that gameplay stutter is resolved. Consult the [release notes](https://github.com/Viscerals/Better-Nexus/releases) and [tracked issues](https://github.com/Viscerals/Better-Nexus/issues) for the build you use.
+Better Nexus is unfinished software. Same-realm sharing still needs broader native testing, and **Stop Sharing cannot withdraw copies already held by other players**: a shared build cannot be recalled. "Sent" means a message left your client, not that another player stored it. Orb capabilities, resource spending, and UI behavior depend on the actual client/server. Offline tests do not prove native safety or performance, and the project does not claim that gameplay stutter is resolved. Consult the [release notes](https://github.com/Viscerals/Better-Nexus/releases) and [tracked issues](https://github.com/Viscerals/Better-Nexus/issues) for the build you use.
 
 Support is limited and provided as time allows. There is no guaranteed response time, fix, future update, or continued compatibility. Feature suggestions can be recorded through the issue forms; new feature work remains secondary to prerelease stabilization.
 
@@ -100,7 +101,7 @@ Support is limited and provided as time allows. There is no guaranteed response 
 If the addon is missing, check the two folder paths above and confirm that you installed the release asset. If a feature stalls or behaves unexpectedly, stop the affected automation and preserve your saved data instead of resetting it.
 
 1. Search [existing issues](https://github.com/Viscerals/Better-Nexus/issues) and choose the appropriate [Bug, Performance / Stutter, or Sync / Multiplayer form](https://github.com/Viscerals/Better-Nexus/issues/new/choose).
-2. Include the **exact version and build label** from `/nexus status` or the ZIP filename, for example `1.20.0-beta.1 · test.9093-f95f68f`. “Latest” alone is not enough.
+2. Include the **exact version and build label**: the `<version> test.<number>` line from `/nexus status`, or the ZIP filename `Better-Nexus-test.<number>-<commit>.zip`. “Latest” alone is not enough.
 3. Describe the smallest reproduction, **what you observed versus what you expected**, whether it recurs after a reload, and relevant addons or existing-data upgrades. Include the complete Lua error if one appeared.
 4. Open **`/nexus report`**. Use **Copy summary** and review the text before putting it in a public issue. **Prepare report file** stores a report for WoW to write at the next reload or logout; the window provides the file path and status. Preparing it does not prove the file is already on disk.
 

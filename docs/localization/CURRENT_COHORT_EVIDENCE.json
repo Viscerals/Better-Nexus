@@ -1,0 +1,1948 @@
+{
+  "schema": "nexus.l10n.current_cohort_evidence",
+  "schemaVersion": 1,
+  "refs": [
+    "#141",
+    "#142",
+    "#143",
+    "#144",
+    "#145",
+    "#146",
+    "#147",
+    "#148",
+    "#149"
+  ],
+  "status": "FROZEN_DOCUMENTATION_EVIDENCE; independent Codex Spec/Standards review PENDING",
+  "nature": "Documentation and metadata only. Freezes the current English base and draft optional-pack cohort and the runtime contract they load under, at one exact source pin. It changes no source, data, test, tool or release metadata, adds no key or translation, and accepts no issue, family, language, review or native gate.",
+  "companion": "docs/localization/CURRENT_COHORT_EVIDENCE.md",
+  "sourcePin": {
+    "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
+  },
+  "historicalContractPin": {
+    "commit": "5c77eec5b791f64468576e37a70b3855375b7fcb",
+    "tree": "692c6693ba50ba5ffc2bf8f3f724b0bceeeda65c",
+    "role": "the sourcePin that KEY_CONTEXT.json and RELEASE_LANGUAGES.json declare for their declarative contract; kept unchanged as historical evidence and still bound by tools/tests/test_l10n_catalog.py"
+  },
+  "localizationBlobStability": "data/LocalizationEnglish.lua, data/LocalizationPacks.lua, core/Localization.lua, docs/localization/*, tools/l10n_catalog.py and tools/tests/test_l10n_catalog.py are byte-identical between b1ef40832899d2cec8312ca1dadb9376ffb49e3e, 87de3ff1ecf8599d4c73fdbb5368fdc04304cb9d and the sourcePin (git diff, no output)",
+  "sourceInputs": {
+    "hashBasis": "sha256 and bytes are of the canonical committed Git blob (LF line ends) read with git show <sourcePin>:<path>. .gitattributes checks *.lua and *.toc out with CRLF; checkoutCrlfSha256 is that physical form and equals the runtime file hash recorded by the final offline run.",
+    "entryHashBasis": "entry sha256 values are of the exact UTF-8 bytes of each decoded Lua string value; no entry at the pin contains a backslash escape, so these equal the source literal bytes",
+    "outputBound": "maxKnownOutputBytes = template bytes minus its {name} tokens plus 20 bytes per placeholder (the longest Lua 5.1 tostring, %.14g, of a finite value >= 0); every current value is below the 254-byte result limit; unknown slots render as ?",
+    "files": [
+      {
+        "path": "data/LocalizationEnglish.lua",
+        "gitBlob": "024557e8ffb9d6f587080e46b47b33daea25e492",
+        "sha256": "69d3998950b651f5b666f7b6a65a718c97bfb3719bfb4523d5c60037ed7f20a5",
+        "bytes": 3916,
+        "checkoutCrlfSha256": "755f2f5d434a23bbff28ad01f23711e14601e1a4c8df5ee99269038ee13b5cf8",
+        "checkoutCrlfBytes": 3970
+      },
+      {
+        "path": "data/LocalizationPacks.lua",
+        "gitBlob": "1898a5ff36caea52d747d47447fdf034d96b5ce9",
+        "sha256": "5c8d10bb711474a0374a0ad851e4f3608ede2389fb58fd01b34ad3c4cda3de95",
+        "bytes": 21168,
+        "checkoutCrlfSha256": "5effb6a15a63822acde26c65de73acf54bf2b449fb7d35e7979aae3486d2a78d",
+        "checkoutCrlfBytes": 21413
+      },
+      {
+        "path": "core/Localization.lua",
+        "gitBlob": "02f8d8d8dc4e6fe367501da4d868153236e1dd22",
+        "sha256": "1adb20d8e5aea04501c51eeab647e82f3bf7b8f6b88cfb56fe7675c9fe66e96b",
+        "bytes": 32714,
+        "checkoutCrlfSha256": "3e9ae6ed8fc3bf48bc323d456f13611e78893194969f3e9108df156d053beb54",
+        "checkoutCrlfBytes": 33404
+      },
+      {
+        "path": "core/UserText.lua",
+        "gitBlob": "935076c017e779f1d0d832667fbd22a17c16859f",
+        "sha256": "b4bf7a769f0a85511fe6f5f3f6dc27efcce1d12df073eafe66e2e3e21d62eec6",
+        "bytes": 73638
+      },
+      {
+        "path": "ui/Panel.lua",
+        "gitBlob": "c8021912322f33aff406e6bfd75ac0e503107f75",
+        "sha256": "1fc48125dcc7e63e7f745812aa8d2dcd96d51243f7aed86ff0e1cd2c07ec8342",
+        "bytes": 326675
+      },
+      {
+        "path": "ui/Readout.lua",
+        "gitBlob": "f4ef71c253fe1506ebf25b0d5b084487ffa03cb0",
+        "sha256": "24d229a14fbed3a206f33605c3a4c490204dd1c71d2bf1d70c64f97499da92d1",
+        "bytes": 30119
+      },
+      {
+        "path": "ui/Help.lua",
+        "gitBlob": "8c3ddaafdcd1038114737ed2a2df8b75ac66e8f7",
+        "sha256": "ee1bfa688ea7ecb6f99efe5fff7148a21e92c99bca58ff0de16e8762c07f02a1",
+        "bytes": 62746
+      },
+      {
+        "path": "data/DefaultProfile.lua",
+        "gitBlob": "a51a675022b5c6195253ed51bc33fd77e4a30b3c",
+        "sha256": "447f0b9405fbf76df98b0693968a5602f640382e9d2dc09bdcfb77a0d078c8f4",
+        "bytes": 5513
+      },
+      {
+        "path": "Nexus.toc",
+        "gitBlob": "38a4b95907a20e97d0d06cfb0df70d6e99b2d01f",
+        "sha256": "298532cd416cdf8ef28c08f8381b944bb8506680a23dd8d36c0213b4fa8a4bd3",
+        "bytes": 2517
+      },
+      {
+        "path": "docs/localization/KEY_CONTEXT.json",
+        "gitBlob": "9863469390bdf341ff850c2b8b0c152f61ec80f8",
+        "sha256": "11d6a95cafebc7112b2c45f73266a0bf258a55426013319a7137a267413b6894",
+        "bytes": 28351,
+        "note": "pre-revision blob at the pin; this revision changes it"
+      },
+      {
+        "path": "docs/localization/RELEASE_LANGUAGES.json",
+        "gitBlob": "e5dd0bb0f583bc065f0b5b9c96511d8a176b6d57",
+        "sha256": "153141a9276effc298206e641b6fa28c25961d60a43743ea018c5d81d961dbec",
+        "bytes": 9748
+      },
+      {
+        "path": "docs/localization/FULL_COVERAGE.md",
+        "gitBlob": "f4208fbe2f4345408a8f3077b32ffce7be91309d",
+        "sha256": "fda6618f75ff3b829c9bd078b4a8ce1a990b7a6e30d6546b809b84bbb7813298",
+        "bytes": 11111,
+        "note": "pre-revision blob at the pin; this revision changes it"
+      },
+      {
+        "path": "tools/l10n_catalog.py",
+        "gitBlob": "d4e4b6f64f1cb1f01bde9609dbb87d421827520e",
+        "sha256": "dfd1fcb9cabc4131831b6dbafa973b1cbb08faef1ecbdcf104a2c2d960aa94c8",
+        "bytes": 73441
+      },
+      {
+        "path": "tools/tests/test_l10n_catalog.py",
+        "gitBlob": "2faab202d391977591885709fe45dc2dae12790e",
+        "sha256": "1711bc71a5116f38b0a058c7ee695e116fe8b13c9073747f8c6e4f7013973823",
+        "bytes": 188168
+      },
+      {
+        "path": "tools/run_prototype_tests.py",
+        "gitBlob": "06101ea378287e1817fb1b659e46f9f2498409a9",
+        "sha256": "16e817eee61ea67cbd78be215160caf75b85b4a4d904cb7912496ddfe3669039",
+        "bytes": 42140
+      },
+      {
+        "path": "tools/ci_check.py",
+        "gitBlob": "a2645a77bc207737f50b9b2451a1bd0084e27b2c",
+        "sha256": "e00472e6c3c5c060011553cedccd56adb37c35cb795a3103ce90428c09c9d7a6",
+        "bytes": 12685
+      },
+      {
+        "path": "tests/prototype/terminology.lua",
+        "gitBlob": "505f293c899d67c60f4064ebc471cfb518e9b0a4",
+        "sha256": "cdca23cb62085c654c9bcd2bd983c89e86b57ac5a3ea9c26dbc57d8b0e107f0d",
+        "bytes": 76054
+      },
+      {
+        "path": "tests/prototype/terminology_consumers.lua",
+        "gitBlob": "d7dc6509d0bd196c20bcb6878c0acb5e3e678891",
+        "sha256": "9857d3352743e5fbca0d647d164bc329c79146b6e8448e1df378c2adac6cf02a",
+        "bytes": 132280
+      },
+      {
+        "path": "tests/prototype/panel_options_label.lua",
+        "gitBlob": "111e3a38fd041fbfc72e1a41e353053256ec4bb2",
+        "sha256": "9153eb92203154732397267d2e6b776a77808a193b9b0a9f48f67daa454ac1fa",
+        "bytes": 16500
+      }
+    ]
+  },
+  "runtimeContract": {
+    "authority": "core/Localization.lua",
+    "language": "Lua 5.1; Nexus.toc ## Interface: 30300; addon identity Nexus; load order data/LocalizationEnglish.lua, data/LocalizationPacks.lua, core/Localization.lua (Nexus.toc lines 13-15)",
+    "keys": "3 to 64 bytes; two or more dot-separated segments of lower-case ASCII letters, digits and _, each starting with a letter (ValidKey, core/Localization.lua:162)",
+    "text": "1 to 256 bytes; well-formed shortest-form UTF-8 of Unicode scalar values only (WellFormedUtf8, :182); at least one byte outside ASCII whitespace 9-13 and 32; no control byte 0-31 or 127 and no | (124), so no colour, link or texture markup and no newline; no normalization (ValidText, :211)",
+    "staticText": "shown exactly as stored; never formatted; a static key cannot be used with Format (wrong_key_kind)",
+    "templatedText": "only keys with a code-owned schema (SCHEMAS, :232) are templates; today only readout.charge_counts with fields banish, reroll, freeze, each exactly once in any order; {{ and }} are literal braces; % and every other byte are literal; {1}, {name:d}, unknown, missing or repeated names and lone braces invalidate the template; a template key cannot be shown as static text (format_requires_arguments)",
+    "countArguments": "each slot is exactly {known = true, value = N} with N a finite whole number >= 0 shown with tostring, or exactly {known = false} shown as ?; 0 is a known count, never unknown; substitution is one pass",
+    "resultLimit": "CHARGE_RESULT_LIMIT = MAX_TEXT_BYTES - 2 = 254 bytes, so the consumer's \" ~\" estimate marker keeps the row within 256; an over-limit candidate falls back to the English template; an over-limit English result is the safe unavailable status; a result is never cut",
+    "unavailableStatus": "This status cannot be shown right now.",
+    "unavailableStatusNote": "English-only safe status for an invalid or unknown key, a template used as static text, a static key used as a template and invalid arguments; it is never translated by a pack",
+    "packs": "a pack is adopted only when it is a plain table with a valid autonym (text contract, at most 64 bytes) and a plain entries table of at most 64 entries; otherwise it is refused and not offered; an entry is copied only for an existing English static key with valid text, or an English template key whose text compiles under the same schema; other entries are left out and counted rejected; a candidate never adds a key",
+    "activeLanguage": "InitializeActiveLanguage(id) is honoured once per Lua session (:679); an ID without an adopted pack, an absent value or the Automatic preference gives English in this build (ResolveAutomatic, :647, has no evidenced client alias); a changed preference applies at the next reload or login",
+    "fallback": "Text/Format with an omitted pack use the active pack; a missing or invalid candidate (or Format output over the limit) yields the exact English text or English template with the same arguments, source base, and a counted reason (missing_candidate, invalid_candidate, unsupported_pack, output_limit); Resolve and FormatResolve are pure supplied-pack functions; Diagnostics keeps at most 8 distinct invalid or unknown keys",
+    "caps": {
+      "MAX_KEY_BYTES": 64,
+      "MAX_TEXT_BYTES": 256,
+      "MAX_BASE_ENTRIES": 64,
+      "MAX_NAME_BYTES": 64,
+      "MAX_LANGUAGES": 16,
+      "MAX_DIAGNOSTIC_KEYS": 8
+    },
+    "capFailureMode": "an English base above 64 entries adopts nothing (oversized; every key then answers the unavailable status); a pack above 64 entries is refused as a whole (tests/prototype/terminology.lua:335 and :342 exercise 64 accepted and 65 failing closed)",
+    "validatorMirror": "tools/l10n_catalog.py mirrors the same byte limits (_MAX_KEY_BYTES, _MAX_TEXT_BYTES, _MAX_BASE_ENTRIES = 64, _MAX_NAME_BYTES, _MAX_LANGUAGES = 16) and the one charge schema with limit 254 (lines 432-440)",
+    "notProvenByThisContract": "native glyph, font, locale, layout, input or visibility behaviour"
+  },
+  "cohort": {
+    "englishKeys": 28,
+    "englishKinds": {
+      "text": 27,
+      "format": 1
+    },
+    "optionalPacks": [
+      "frFR",
+      "deDE",
+      "esES",
+      "plPL",
+      "ptBR",
+      "ruRU"
+    ],
+    "draftEntriesPerPack": 27,
+    "draftEntriesPerPackKinds": {
+      "text": 26,
+      "format": 1
+    },
+    "draftEntriesTotal": 162,
+    "missingInEveryOptionalPack": [
+      "panel.button.options"
+    ],
+    "missingBehavior": "English fallback: exact English \"Options\", source base, reason missing_candidate, counted",
+    "entriesIdenticalToEnglish": 0,
+    "templateReorderedInAnyPack": "none: all six packs keep the order banish, reroll, freeze; the grammar permits any order",
+    "contractViolationsFound": 0,
+    "reviewState": "every optional entry is draft_unreviewed; no entryReview declaration exists; fallback English and autonyms never count as translation",
+    "provenance": "the original three reason entries were drafted for issue #123; the newer three and the 21 Panel texts are original machine-assisted drafts with no imported corpus (data/LocalizationPacks.lua header)",
+    "perPack": [
+      {
+        "productId": "frFR",
+        "autonym": "Français",
+        "autonymBytes": 9,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      },
+      {
+        "productId": "deDE",
+        "autonym": "Deutsch",
+        "autonymBytes": 7,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      },
+      {
+        "productId": "esES",
+        "autonym": "Español",
+        "autonymBytes": 8,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      },
+      {
+        "productId": "plPL",
+        "autonym": "Polski",
+        "autonymBytes": 6,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      },
+      {
+        "productId": "ptBR",
+        "autonym": "Português (Brasil)",
+        "autonymBytes": 19,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      },
+      {
+        "productId": "ruRU",
+        "autonym": "Русский",
+        "autonymBytes": 14,
+        "draftEntries": 27,
+        "missingKeys": [
+          "panel.button.options"
+        ],
+        "entriesIdenticalToEnglish": [],
+        "entryOrder": "English order without the missing key"
+      }
+    ]
+  },
+  "capArithmetic": {
+    "rule": "MAX_BASE_ENTRIES = 64 bounds the English base (static texts and templates together) and, separately, each optional pack's entries table",
+    "englishNow": 28,
+    "englishAdditionalThatFit": 36,
+    "englishArithmetic": "64 - 28 = 36",
+    "perPackNow": 27,
+    "perPackAdditionalSlots": 37,
+    "perPackArithmetic": "64 - 27 = 37; a pack entry is admitted only for an existing English key, so today exactly one more admissible entry exists per pack (panel.button.options) until the English base grows",
+    "historicalBatchRule": "FULL_COVERAGE.md and #144 allow at most 60 newly adopted keys per family batch; that per-dispatch limit does not raise the 64-entry runtime cap. At this pin no batch larger than 36 new English keys can be adopted without a separately reviewed contract change to core/Localization.lua, tools/l10n_catalog.py and their tests",
+    "expansion": "NOT_IN_SCOPE: any cap expansion is separate engineering work with its own reviewed contract change, focused red/green tests and full validation; this ledger does not widen it"
+  },
+  "keyInventory": [
+    {
+      "key": "reason.save_in_progress",
+      "kind": "text",
+      "english": "Saving is still in progress; wait for its final result",
+      "englishSha256": "9dda4ecb2df1b757c4c48d903b363345d162022cf10b40598cca2305a3d9b9d9",
+      "englishBytes": 54,
+      "placeholders": [],
+      "meaning": "saving is still in progress and its final result is not known yet",
+      "consumers": [
+        "core/UserText.lua:52 localizedReasons -> core/UserText.lua:78 LocalizedReason -> Nexus.Localization.Text(key) with the active pack; reached from core/UserText.lua:96 T.Message (code ROOT_MUTATION_PENDING, core/UserText.lua:53)"
+      ],
+      "fallback": "seam result source 'unavailable' -> that safe English status plus T.Details(code); seam absent -> generic English line with the raw code",
+      "familySurface": "PENDING: shared reason text; families not classified",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "9d02086462945b873265ff55baaf65065b381d1287c3b0d42e1dd7f2e7969508",
+          "bytes": 69
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "bed66e8d575b877a32c816586477f1ecd751f4414e64b5653c5836c11f3af11d",
+          "bytes": 64
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "23d5cd47c0c9eea2ac28f1b3169a789c4850e0177e05cef1a1a3291456c46083",
+          "bytes": 55
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "9760d2d9e3c809265d76e5a10764b30b691474f12276421323e30ec3f0f98655",
+          "bytes": 52
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "772ec4773a349f1e8f6287fc71d734e244286297292818622d8c3281c58e3e8a",
+          "bytes": 64
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "08f34c62329bc349b63c1666cd1ba1a3ba7378733e5c6d321531a8442d73acc2",
+          "bytes": 120
+        }
+      },
+      "producerCode": "ROOT_MUTATION_PENDING"
+    },
+    {
+      "key": "reason.list_preparing",
+      "kind": "text",
+      "english": "This list is still being prepared",
+      "englishSha256": "07ca59e8075b6368b4f4e38cc31be8e6c275865fd4bf0152a9fd8fc403f9487e",
+      "englishBytes": 33,
+      "placeholders": [],
+      "meaning": "a list is still being prepared",
+      "consumers": [
+        "core/UserText.lua:52 localizedReasons -> core/UserText.lua:78 LocalizedReason -> Nexus.Localization.Text(key) with the active pack; reached from core/UserText.lua:96 T.Message (code CURSOR_REQUIRED, core/UserText.lua:54)"
+      ],
+      "fallback": "seam result source 'unavailable' -> that safe English status plus T.Details(code); seam absent -> generic English line with the raw code",
+      "familySurface": "PENDING: shared reason text; families not classified",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "5ab14c580d29719d85710bd53fba9270754ed982cbb9f08f5d4a26683931f3a3",
+          "bytes": 47
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "49bb51e389fd48744f377191426238bb5f535d30969e10c9c837d944df0988d1",
+          "bytes": 33
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "d42dbc7706f103d285fca7adb2a9188cc4d3d8e4fd2c15c8d7dffdd7ef0c90d4",
+          "bytes": 35
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "9da3e30c7e9c889bddc12eeaad7d035f2fb58b80409ab7866288ad5ffb0dd3de",
+          "bytes": 36
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "43e6b5c7e5bf06d5d95c9510bf533d91c026657554af2679924d893a8b41567a",
+          "bytes": 38
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "eae0532c76951606586ba85c439af94db0a9c4f900772f7127acc0a30a74b44b",
+          "bytes": 61
+        }
+      },
+      "producerCode": "CURSOR_REQUIRED"
+    },
+    {
+      "key": "reason.saved_data_reading",
+      "kind": "text",
+      "english": "Reading your saved data",
+      "englishSha256": "5ad958c9e06ed2343a5d072f64408cb09531d14209d6cd5c3de2434fc28506a1",
+      "englishBytes": 23,
+      "placeholders": [],
+      "meaning": "the player's saved data is still being read",
+      "consumers": [
+        "core/UserText.lua:52 localizedReasons -> core/UserText.lua:78 LocalizedReason -> Nexus.Localization.Text(key) with the active pack; reached from core/UserText.lua:96 T.Message (code STORE_PENDING, core/UserText.lua:55)"
+      ],
+      "fallback": "seam result source 'unavailable' -> that safe English status plus T.Details(code); seam absent -> generic English line with the raw code",
+      "familySurface": "PENDING: shared reason text; families not classified",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "568dc23c9f2f9cf43c12b37ad3ca448a14fc49e920df817825ebb87dd60be9e9",
+          "bytes": 37
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "f3f3934d3a59341352155eaf512587a32b92b510e3e0bf95bfbf118b9faf43c3",
+          "bytes": 33
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "6d7e2b26fbf643cb1b340cfa0fa0e3d798ab0c8de7e813710a7cd4a9b3ead504",
+          "bytes": 27
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "b4448c0bda8a5ef5944a18d6cb7f3129c49b88f2cecbfff46dec7d8f5bf71221",
+          "bytes": 30
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "e6e37492d1d2aa52e7fb83ef30e5c5d5b65ddc58f1d3a9cca98c1d82b5327031",
+          "bytes": 23
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "e1162260b5c84d3b0c6a95d370c0fea954f74380a1ccef9930425cefd35b82be",
+          "bytes": 48
+        }
+      },
+      "producerCode": "STORE_PENDING"
+    },
+    {
+      "key": "reason.wait_three_choices",
+      "kind": "text",
+      "english": "Waiting for the next three Echo choices",
+      "englishSha256": "6ff24c11e781ac9053a8ba4ebf41ca60e95685d4df5dd6d3a4be128ddacdc298",
+      "englishBytes": 39,
+      "placeholders": [],
+      "meaning": "the planner is waiting for the next three-card Echo board",
+      "consumers": [
+        "core/UserText.lua:52 localizedReasons -> core/UserText.lua:78 LocalizedReason -> Nexus.Localization.Text(key) with the active pack; reached from core/UserText.lua:96 T.Message (producer string 'waiting for three-card board', core/UserText.lua:58)"
+      ],
+      "fallback": "seam result source 'unavailable' -> that safe English status plus T.Details(code); seam absent -> core/UserText.lua:63 legacyWaitText, the same English bytes",
+      "familySurface": "PENDING: shared reason text; families not classified",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "1a70ecdb2b080e163f4c8e34349d7415ecf82b033daec4e9c71aca7c34a123b2",
+          "bytes": 43
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "8b40d0d5593844fcfc029e3b18e147c944054158f06b1a72f77d54c2370b5a17",
+          "bytes": 44
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "9801128a96009a2225cae727c5c9830ecb96bd21ae215c4dd0f0e25bf48b67a8",
+          "bytes": 45
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "4c289b68440c3a12da34045ed575bb219fb75f4073c126824ab181c886818dc5",
+          "bytes": 39
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "ae907df2d93ac994f1ef6800b0cadf5048e5d0e09b7a206bf869a44de7769e36",
+          "bytes": 46
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "e0ac43716340071f7cdb9123f249c8abcdf497dc2aaaccb0b27ceeb03cf7280c",
+          "bytes": 68
+        }
+      },
+      "producerCode": "waiting for three-card board"
+    },
+    {
+      "key": "reason.wait_pending_pick_count",
+      "kind": "text",
+      "english": "waiting for pending-pick count",
+      "englishSha256": "c5c00a9be6045fb20df9d6529c426e40ee485ffac53c1fd41b4dccb293dfd9fd",
+      "englishBytes": 30,
+      "placeholders": [],
+      "meaning": "the planner is waiting for the pending-pick count; keeps the producer's lower-case bytes and is distinct from the older pending-pick count reason mapping",
+      "consumers": [
+        "core/UserText.lua:52 localizedReasons -> core/UserText.lua:78 LocalizedReason -> Nexus.Localization.Text(key) with the active pack; reached from core/UserText.lua:96 T.Message (producer string 'waiting for pending-pick count', core/UserText.lua:59)"
+      ],
+      "fallback": "seam result source 'unavailable' -> that safe English status plus T.Details(code); seam absent -> core/UserText.lua:63 legacyWaitText, the same English bytes",
+      "familySurface": "PENDING: shared reason text; families not classified",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "f75a6bccc802fba7898a4a60fa37ed590e4e27d14d19a0fee44623c3850ce66a",
+          "bytes": 38
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "710da18b3f114e0b09ccbf22043cc6327b3ddb4931dac4f4f8e4982f51a16156",
+          "bytes": 44
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "a265ef7f8da5569fa4daaef62f386511b394b274a0c9ad173c7d8d87001cbca6",
+          "bytes": 45
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "a51f9c14c39228e7cdab73647900d7852ce5ae233c6931527f51237f68c75a04",
+          "bytes": 44
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "4a80d5781cb89b4c4be33801e83f1e84c802b087b23c9e53c112530ef2d520f8",
+          "bytes": 43
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "31bd7e2f97603b3c7372ef127d0564e0c675e0b1274d7088c1660fa0b914b739",
+          "bytes": 63
+        }
+      },
+      "producerCode": "waiting for pending-pick count"
+    },
+    {
+      "key": "readout.charge_counts",
+      "kind": "format",
+      "english": "B:{banish} R:{reroll} F:{freeze}",
+      "englishSha256": "0a8dc67bfc4747ab5bf7b95ebe02e8c9817e700e985795b8db6f4b93d9da6014",
+      "englishBytes": 32,
+      "placeholders": [
+        {
+          "name": "banish",
+          "type": "count"
+        },
+        {
+          "name": "reroll",
+          "type": "count"
+        },
+        {
+          "name": "freeze",
+          "type": "count"
+        }
+      ],
+      "meaning": "compact Banish, Reroll and Freeze charges left this run, as the game last reported them",
+      "consumers": [
+        "ui/Readout.lua:326 M.ChargesLine -> Nexus.Localization.Format(\"readout.charge_counts\", {banish, reroll, freeze}); the consumer appends \" ~\" after the complete row when counts are estimated"
+      ],
+      "fallback": "Format: missing/invalid candidate or candidate above 254 bytes -> English template with the same arguments; result source 'unavailable' or seam absent -> ui/Readout.lua:335 English row built by the consumer",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "ddadc90cec91aedfdb1b215e32894b8df59a91c6386bf1299af647e3531d2972",
+          "bytes": 38,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 74
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "5f0d70c51153ae4e44ecda3498b073042eea0a2464fdbbdbc4d91a88cf9300cf",
+          "bytes": 41,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 77
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "5d80bd66ed3051b49f4276394553420ddddca5a02b2af08dbc89c2d02a5e5e3d",
+          "bytes": 40,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 76
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "7057db7b7e26512e44ec4380254841d054c86fc4f3c29c6f16492ec8f36bc6c0",
+          "bytes": 42,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 78
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "349833806862adbe980d3e20f52374c9688138e20a47fc906d8fb746f40d3edb",
+          "bytes": 43,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 79
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "ea622b2b3a9b73c01393b44f14672f7fd3fd8b843fd339ca318d5bebff6cb4b1",
+          "bytes": 47,
+          "placeholderOrder": [
+            "banish",
+            "reroll",
+            "freeze"
+          ],
+          "maxKnownOutputBytes": 83
+        }
+      },
+      "resultLimitBytes": 254,
+      "maxKnownOutputBytes": 68,
+      "unknownOutput": "B:? R:? F:?"
+    },
+    {
+      "key": "panel.button.my_builds",
+      "kind": "text",
+      "english": "My Builds",
+      "englishSha256": "60496d1fdb1c890bec0f6e7bb59f0d12b226690c7585e0c85e46a787365f1076",
+      "englishBytes": 9,
+      "placeholders": [],
+      "meaning": "label of the button that navigates to the server My Builds page, set at creation and at render reset",
+      "consumers": [
+        "ui/Panel.lua:2130 switchBtn:SetText at creation",
+        "ui/Panel.lua:5250 frame._switchBtn:SetText at render reset"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "6ceb11dc391066b505d0a9deabe10d6fb2a50b1f33f057e9071fc8a95f1a8e0f",
+          "bytes": 10
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "4e1f34d188549c6decc52b138ee5fe35e829a036730f4acdc9623ab950ac0c48",
+          "bytes": 12
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "52bf6304e4fee4177be06a35605a8ac24ce9334b2dccdf01100672f29a45dd8e",
+          "bytes": 10
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "0b8cd5ac2d8ca6120b5934bb709d5eccfe198d600fa20a1e43c4916ff06c0e93",
+          "bytes": 11
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "2e630f4fe75c8c99acf973849c9e6b37a83b5bd5268cbddfbc808331c25d9a80",
+          "bytes": 11
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "13e9f8014455e77bc8e688a5af96c61cb7851f90d273f012af15e306aab0821a",
+          "bytes": 19
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.open_my_builds",
+      "kind": "text",
+      "english": "Open My Builds",
+      "englishSha256": "0e5d71a646f8b7508933b9ee0484ae2c92f463407728b2ce567446f6668dd057",
+      "englishBytes": 14,
+      "placeholders": [],
+      "meaning": "hover heading of the My Builds button",
+      "consumers": [
+        "ui/Panel.lua:2145 My Builds button hover heading",
+        "ui/Panel.lua:3352 M.HubMenuItems(\"plan\") dropdown row \"My Builds (game page)\" tooltipTitle (ui/Panel.lua:3363)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "084c3a8b6acd36811b5fee161a7f2e354a9de4e2976500bc898741c791770b44",
+          "bytes": 16
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "d10ac49cc521451f2c3571d9e341517f7e4f0d83264d456eb7a77188790bfbb1",
+          "bytes": 17
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "ffbd9799b7dfcba2c7a2614abac0b4d53221d5cb83b48b9af5b7e53ef73c074a",
+          "bytes": 15
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "9071601a492cca9aa85e65a014d23deb4d6652cf91d46e1936b7bfd9f2c63ff8",
+          "bytes": 17
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "ffbd9799b7dfcba2c7a2614abac0b4d53221d5cb83b48b9af5b7e53ef73c074a",
+          "bytes": 15
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "00f8fc69eed94af2313d7b926d89b5b7e0e8cc43e1ae6929b908dea44337c250",
+          "bytes": 24
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.my_builds_destination",
+      "kind": "text",
+      "english": "Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.",
+      "englishSha256": "8ad370f59c2b27ec6c6994cc36d181862de0245f149aab69fec8cbed4eb8b9b0",
+      "englishBytes": 98,
+      "placeholders": [],
+      "meaning": "complete consequence of the My Builds button: it opens the server My Builds page, where choosing a different Saved Build changes the active loadout; provider destination lines stay separate",
+      "consumers": [
+        "ui/Panel.lua:2146 My Builds button hover body",
+        "ui/Panel.lua:3352 M.HubMenuItems(\"plan\") dropdown row \"My Builds (game page)\" tooltipText (ui/Panel.lua:3364)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "6e323cbc36cc6b6253b1271fd711733db41e39e909a7f76916dd631cb1af844e",
+          "bytes": 98
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "84792dbfa79856dad94042f637a8cfdcaa445abd2bc803f41fe090ae5817ab25",
+          "bytes": 111
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "ff36c060842d1f74052b8806bebeeded4aa837bc2ef7268c2ba5bd55e242888b",
+          "bytes": 102
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "688126452f783fa9c4abb2aef218d768e84ffd759d95b7ab0d233c06241088d5",
+          "bytes": 90
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "9f91213964c0b68bb08724ceeb5ff37ebf38870afee7b1cded0bc3ff20592af5",
+          "bytes": 97
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "57a7c90d865608a0e2bbb2675947ba14e85fe9c348b1f3120e55d0fa18294553",
+          "bytes": 148
+        }
+      }
+    },
+    {
+      "key": "panel.button.assign_wishlist",
+      "kind": "text",
+      "english": "Assign Wishlist",
+      "englishSha256": "c9bbc4540f15714ac78fff694f80103c6f2fd3e5d0ba7dda8871043d239a90d2",
+      "englishBytes": 15,
+      "placeholders": [],
+      "meaning": "label of the first-run button that navigates to Wishlist assignment for this loadout",
+      "consumers": [
+        "ui/Panel.lua:2582 setupGetStartedBtn:SetText (first-run)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "8059071067d06913bb82cee1a98834462b839893458d84be2f8a1e6101cf022e",
+          "bytes": 30
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "8a8488efe7c0686f2481958b057fe8a04d8a24b701f187f379aa47a6f797f481",
+          "bytes": 20
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "712b6d86f2ca79ef25f17bb50accc58207914d125b75319d8471c28eb00dabf0",
+          "bytes": 23
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "b42bf6e3697f559865c341ec602789abe88ba18d4fac94e9fc6d94e3a5fa39ff",
+          "bytes": 24
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "279d1fa288e3f9ea6483e8071b451ee2bb1e3f05dc7c4b2d56201675bbf77965",
+          "bytes": 25
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "0101d7ad40123eba9c789f251e31783c2283132c42b66d6258b4f923536143a9",
+          "bytes": 46
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.assignment_heading",
+      "kind": "text",
+      "english": "Assign Wishlist",
+      "englishSha256": "c9bbc4540f15714ac78fff694f80103c6f2fd3e5d0ba7dda8871043d239a90d2",
+      "englishBytes": 15,
+      "placeholders": [],
+      "meaning": "hover heading of the first-run assignment button; same English bytes as panel.button.assign_wishlist, separate tooltip meaning",
+      "consumers": [
+        "ui/Panel.lua:2592 first-run Assign Wishlist hover heading",
+        "ui/Panel.lua:3352 M.HubMenuItems(\"plan\") dropdown row \"Assign Wishlist...\" tooltipTitle (ui/Panel.lua:3361)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "8059071067d06913bb82cee1a98834462b839893458d84be2f8a1e6101cf022e",
+          "bytes": 30
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "8a8488efe7c0686f2481958b057fe8a04d8a24b701f187f379aa47a6f797f481",
+          "bytes": 20
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "712b6d86f2ca79ef25f17bb50accc58207914d125b75319d8471c28eb00dabf0",
+          "bytes": 23
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "b42bf6e3697f559865c341ec602789abe88ba18d4fac94e9fc6d94e3a5fa39ff",
+          "bytes": 24
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "279d1fa288e3f9ea6483e8071b451ee2bb1e3f05dc7c4b2d56201675bbf77965",
+          "bytes": 25
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "0101d7ad40123eba9c789f251e31783c2283132c42b66d6258b4f923536143a9",
+          "bytes": 46
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.assignment_chooser",
+      "kind": "text",
+      "english": "Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.",
+      "englishSha256": "4aa05243be971ce558df28b32a2951b6f1e75eaba9cef4c70669030f11812aaf",
+      "englishBytes": 121,
+      "placeholders": [],
+      "meaning": "the button opens the Echo Journal Wishlist chooser for this loadout; nothing is assigned until the player chooses a Wishlist there",
+      "consumers": [
+        "ui/Panel.lua:2593 first-run Assign Wishlist hover body",
+        "ui/Panel.lua:3352 M.HubMenuItems(\"plan\") dropdown row \"Assign Wishlist...\" tooltipText (ui/Panel.lua:3362)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "2383f669340cb7ad7fc4151e759abe6b86373ab0c4501231cffab35192c7e436",
+          "bytes": 163
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "c69c8e23de80957a1d78ad09b8a12dd37014166df04b62cd2d21472f4a227bac",
+          "bytes": 147
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "2a8abcefc5a635aae762887cfd5e07569eb24ee7e839f3a5ad966b09295cba90",
+          "bytes": 143
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "261008823bc903aaf823a97af56ceb185a9e7f3886bec9b0de96429d67c06392",
+          "bytes": 135
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "40d6192a8c490cb0fc973e842bcc79548fc0e973c881f88235839e9d0559ec95",
+          "bytes": 140
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "caa08b65a2b708b268aefdb3b8d28f43c9c89f741a8925ac878f86385c20b767",
+          "bytes": 223
+        }
+      }
+    },
+    {
+      "key": "panel.button.create_wishlist",
+      "kind": "text",
+      "english": "Create Wishlist",
+      "englishSha256": "b103124747ecc6a0b0d37398361ad20f8ad541d9038ac2883ea01198b767ba2f",
+      "englishBytes": 15,
+      "placeholders": [],
+      "meaning": "label of the first-run button that opens a Wishlist editor draft",
+      "consumers": [
+        "ui/Panel.lua:2600 setupImportBtn:SetText (first-run)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "9aeb97b7aa381a0283d7058010f7867bcaaffe30c4184063e16caa7182044314",
+          "bytes": 28
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "a6f2e62cad233e88ffa43b933d90c8a0535356e53d10d87431e0b8aad83ce8fa",
+          "bytes": 21
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "9024d2d0e6c305e1794e5155e3445ac3f0bd10328e19dca09990ee98a22f3e48",
+          "bytes": 21
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "6b3005f75bc08aade41ec59471b5b72d2f5397cc7de57e06eaac01b535d38a41",
+          "bytes": 23
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "3575d04e531eccb895e518cf10cb3f394823fc32d89f651817d7d323a1a75557",
+          "bytes": 22
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "2ed90b2526861b632db2b746a3fbad807b1e90e9163cdf43d8baff9b63ca7899",
+          "bytes": 42
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_heading",
+      "kind": "text",
+      "english": "Import or create a wishlist",
+      "englishSha256": "4a9f7caea886a00be8a55135d2547e744a50993f648e8aa0281db6d8a61b29f1",
+      "englishBytes": 27,
+      "placeholders": [],
+      "meaning": "hover heading of the Create Wishlist editor navigation",
+      "consumers": [
+        "ui/Panel.lua:2612 first-run Create Wishlist hover heading"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "402c914cc1a55f65ec6809e7a0c7f93f39c202d542d85b9b2c55807e467eaca5",
+          "bytes": 40
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "5e7194d85cc77b08a98e02c6845f78f69a06b654ecaca9ff0500979bf611e4a3",
+          "bytes": 38
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "793d2f2b5f310eed954903b4d627af0403fd7d8cbaef53c120e2e9f4123126a1",
+          "bytes": 36
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "837dcfe77e651f3704c01f8cde4d5961f425d4dc66e1efdc30bf5ec6508805a5",
+          "bytes": 38
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "a8096dde5c527c5110de9b816060cd3badc6cff17f3843664a386b1bd005633c",
+          "bytes": 38
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "0dbe686c3e80c43cd8c73ffdefcc8e3771c82a7ada1ceb42989b68cbb17ebc4c",
+          "bytes": 76
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_source",
+      "kind": "text",
+      "english": "Paste a wishlist string or build one directly in Nexus.",
+      "englishSha256": "ba4ba454c790eb91c7dcdb2e4f94579ec2468d1af41d1db203cc96325750ad84",
+      "englishBytes": 55,
+      "placeholders": [],
+      "meaning": "complete sentence: a wishlist can be pasted as a string or built directly in Nexus",
+      "consumers": [
+        "ui/Panel.lua:2613 first-run Create Wishlist hover body"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "52ae7e077417213eae81eb16257e66ac6200d32953cbdb5e8800c460187a34f7",
+          "bytes": 80
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "ddd39ae38ec47de63bb974d2fa573b2d51414dc0a96e27e08b41f0b465917442",
+          "bytes": 76
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "a519e3b4bcb50b2d95311970831c7c2279a59560775df63e9b14683a12e23efe",
+          "bytes": 68
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "d5ddf1a1c8d36ec1048bd55c900dfb90bd0c179cb4853dea8e0e072148a76be1",
+          "bytes": 64
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "a8a0c7517440fece018a3255a6b2a799abb89c4f100df842956c3593b9d95fe1",
+          "bytes": 68
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "14a283d3d2cd1bc3322f5c8cf75e195da947a68488321fdee5c63fe1eefc6e67",
+          "bytes": 109
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_draft",
+      "kind": "text",
+      "english": "This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.",
+      "englishSha256": "feee5ef5a28035f30008c834604ab9e198480b656d3254bbf3108514a86972ec",
+      "englishBytes": 133,
+      "placeholders": [],
+      "meaning": "the editor opens with a draft only; nothing is saved or assigned until one of the two editor actions Create & assign or Create unassigned is pressed",
+      "consumers": [
+        "ui/Panel.lua:2616 first-run Create Wishlist hover body",
+        "ui/Panel.lua:3352 M.HubMenuItems(\"plan\") dropdown row \"Wishlist Editor\" tooltipText (ui/Panel.lua:3360); same Nexus.WishlistEditor.Show() action as the first-run button"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "59b9c2bd8e06762ee9014c10873d5df1c57fb3e3710a84298a587c98bed9f575",
+          "bytes": 168
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "8ad3c5640b9b41472095f46777a1d9a24dc6c79011c504aa91ef3784280a772e",
+          "bytes": 157
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "64edd6928aaa36eddf81686a668b7d42b5f4bd3f429e83f92d8cd1bc36f5fed1",
+          "bytes": 147
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "b254d6cb3fbb684231e60e6af3d0d5074f32abaa7fb1ebe07b25231a5a1d1ff6",
+          "bytes": 161
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "75de16eab825f68b566c56a0bc61f6b3ccefcd3992d10b8d9ff043c993ec3fd7",
+          "bytes": 148
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "815c26a0497a6f057da7c21bc71286fe0eeef2cecbe89bc0c065074159335d36",
+          "bytes": 244
+        }
+      }
+    },
+    {
+      "key": "panel.heading.locked_targets",
+      "kind": "text",
+      "english": "LOCKED TARGETS",
+      "englishSha256": "16f17061465b531338794b348e2e99a3f640a5a53ca25a68df50714e483e0dd5",
+      "englishBytes": 14,
+      "placeholders": [],
+      "meaning": "heading of the lazily created locked-target row",
+      "consumers": [
+        "ui/Panel.lua:1376 f.toLockLabel:SetText (lazily created locked-target row)"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "9fe25eda8cac595d0dd5d85839a60f6f0ea7e7a6531ec160b75716006bdfe891",
+          "bytes": 20
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "805fb378e1172ffd137ab1fe8bfe3c12148a346b5b09ae51b8ff4848af6d0370",
+          "bytes": 15
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "99cc834f86559c7c33892694b75ad3b64caf6e3df55acd2cbb9c479fb268759b",
+          "bytes": 20
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "dbb51de99cf51b0d35b782631278580d6f1b6f800e52ca84a4957735e6c2507a",
+          "bytes": 16
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "1cafe01e5b86b876c4770d7f12ecbd5cd1e07c7dcddd5ee5d0913ec1b9095e34",
+          "bytes": 16
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "d4655ab87a019075170dc112a823f686dce682c485e0c02c0a616f41f3b9d681",
+          "bytes": 33
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_remaining",
+      "kind": "text",
+      "english": "Locked targets remaining",
+      "englishSha256": "0cd41c7652324f47626791c695dadc6c5957fa5e7e9b865e77a38694f3fe0704",
+      "englishBytes": 24,
+      "placeholders": [],
+      "meaning": "hover heading of the locked-target row",
+      "consumers": [
+        "ui/Panel.lua:1391 locked-target row hover heading"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "6d3c3f8886a797dd6e34da39625079dc199bd48addcfca4422783b2dcef8454b",
+          "bytes": 30
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "3081275a2f4c816217567cf267ef87b714d6843d2584b003c677e61a84b715c0",
+          "bytes": 28
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "12e28bd0df3813462195d6faf07271eff235e01251ff6a8eb42772da68826f20",
+          "bytes": 30
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "cbeb88f1db312031fe0284e8a893817bf43b3e477a966c89ae3098eab7583234",
+          "bytes": 27
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "af498af8f04bffcd13c336206423797338d839e0f624cfb912193f9da8e0f2bc",
+          "bytes": 26
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "d3e2b53c92468f5567b4773a25a6fc8758e8b62639faca36ea8e1f892d682106",
+          "bytes": 54
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_plan",
+      "kind": "text",
+      "english": "These targets are planned for your locked Echo slots (a plan designs at most six target copies).",
+      "englishSha256": "d1dd5d6cad710423f030c3767f13723dcf145a1cb80a8c85a8855dc700a12af7",
+      "englishBytes": 96,
+      "placeholders": [],
+      "meaning": "the targets are planned, not owned, for locked Echo slots, with the qualification that a plan designs at most six target copies",
+      "consumers": [
+        "ui/Panel.lua:1392 locked-target row hover body"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "f873c9e00c2b62cdef708f649997718ce132abc499f9398761df19109934698e",
+          "bytes": 112
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "b15dcb8f78b702b794c442e01c761b1ac38c1d041ddb3aaf9b5243a7efd2de29",
+          "bytes": 109
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "66a7a49767151bb8874411ec554c684e9de738340339143fbee3651e4e3c4621",
+          "bytes": 122
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "44c8b2a45da8e4314b65a3e312441f09beed24d96cb45fe6bd81ba667a610e9e",
+          "bytes": 114
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "2d983680ef93ac02a5d54d82d7259c46bee426fec578706483e9b321f73f96ae",
+          "bytes": 118
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "022697641d7bc882c3ed784f0743523dd97878df8d9b339986a544f16fe92d26",
+          "bytes": 195
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_acquire",
+      "kind": "text",
+      "english": "Acquire the exact requested Echo and quality first.",
+      "englishSha256": "baefee5deea99489207e3a5e0407429e8161aaf116c0650e3e4b346cb1b1f7cc",
+      "englishBytes": 51,
+      "placeholders": [],
+      "meaning": "the exact requested Echo in the exact requested quality must be acquired first",
+      "consumers": [
+        "ui/Panel.lua:1393 locked-target row hover body"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "639a04e231cb01d239d38a662f61d4fbb6152a4daff5b70f01f90a91df1a01bd",
+          "bytes": 66
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "e2c93efe5fd48cdc313868dd3a115721ddeb96e96cef3ef7efb9466a2b5d40e4",
+          "bytes": 82
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "e4d48220decdaa9bcef2ff132ae25269f1fa0ec33cac22d9b659c2aad7b9f16e",
+          "bytes": 62
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "2b42a700abf36934a1c5959c06ba5b278b359e89fb116a76d3aacb1374821137",
+          "bytes": 76
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "b0d48f4a06c44b8091b8214b5dedebc23ac4c7759519a57ce3ec720cce8c6589",
+          "bytes": 61
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "c8a677a2ce1b2eff6e4b112fec9dda79447631bcce5046e9b56403bda15759f4",
+          "bytes": 125
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_placement",
+      "kind": "text",
+      "english": "Owned copies still need to be placed in locked Echo slots.",
+      "englishSha256": "3f070bc97ac61e0043edb6caa70fef194982c971171d8b6ca7f22f60067b084f",
+      "englishBytes": 58,
+      "placeholders": [],
+      "meaning": "ownership is not lock placement: owned copies still need to be placed in locked Echo slots",
+      "consumers": [
+        "ui/Panel.lua:1394 locked-target row hover body"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "241126145517a5b6b54786ead3ff79903e9596434fef07828177f421082d825e",
+          "bytes": 95
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "da3d124433f17d29f0d48af6ed26aea455f29b107d68044f128f34d44809bf57",
+          "bytes": 70
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "3119f0be1a06a3fa3c4138324172d93c147b706bb7f1e7a9f391942791c546fe",
+          "bytes": 74
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "e0f538a97ee2ba73f5c2156dd6648d7a8284da3f0d6d33189f0570ab83443a5c",
+          "bytes": 73
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "ea727ecca1d10bb3a920e821d01880b3f5f96f552b637a2cb06b06252bb9b57f",
+          "bytes": 79
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "d9a6f16a0876b80ed0358fd1ba3b98cf380f4781bf9371059cf9f5039239bca9",
+          "bytes": 111
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_not_freeze",
+      "kind": "text",
+      "english": "Current locked Echo slots and card Freeze are separate.",
+      "englishSha256": "9cbf8aab07f77dde654e88c7dcd33b993463942a19e0360edb9330f4477faac7",
+      "englishBytes": 55,
+      "placeholders": [],
+      "meaning": "current locked Echo slots are distinct from card Freeze on the board",
+      "consumers": [
+        "ui/Panel.lua:1395 locked-target row hover body"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "7643809328c51fa6d4eef56a5f743561c2bac8796cbeab19a44a1c5b9d77c91b",
+          "bytes": 84
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "3e2d9d39583e8245d63512a256e4f1beb15d56fa7fde39dd8c456a2df88f70aa",
+          "bytes": 76
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "21f44d7edfcc5c59563afab9395d42debd896bdaa024a4b0231c4e292d654444",
+          "bytes": 83
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "2cc59267fb08520285370f688b9a3e80715509fbe50ed22db8ef211431f0c2fb",
+          "bytes": 63
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "779756e12d76cc8a21081cb02f4366b72acb6107ff99a1989007f326e6753792",
+          "bytes": 81
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "c516f4442041f5f1b524b6a76edb8b8f0edec92cbe602f0727a8ed723e24c195",
+          "bytes": 101
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.locked_acquire_list",
+      "kind": "text",
+      "english": "Still need to acquire:",
+      "englishSha256": "41ca5bf2e7c759e41ba9ce7a1c0e94ce427579457323388fc9690cd5f9de90ff",
+      "englishBytes": 22,
+      "placeholders": [],
+      "meaning": "label before the list of locked targets still to acquire; the listed names remain game or user data",
+      "consumers": [
+        "ui/Panel.lua:1397 locked-target row hover list label; listed names stay game or user data"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "7c508eb825b2420beabd8402b3d93eafb9c2281e2eb8f8193775cab5d99ca44e",
+          "bytes": 19
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "4358ddd48ef782bb820226ed6d5e32cd876778400c84134893040f58c9793ced",
+          "bytes": 19
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "dc0d9c38736e65b56c416ba09a38687a1ae1104242618826140a1d53d794de04",
+          "bytes": 21
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "9fe43205070e4d2ec30db1c50e398e89c245a7bc0268eb1fbaa89b023e57858e",
+          "bytes": 18
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "226c62c2357c1d8c91760e23c5a5310d52003b7e71debe5f60d50225c7d93743",
+          "bytes": 18
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "514dd060742a271b75c66745f76e74b36eb60100611b6a0c7d4d927aaf1b2050",
+          "bytes": 35
+        }
+      }
+    },
+    {
+      "key": "panel.tooltip.open_wishlist_editor",
+      "kind": "text",
+      "english": "Click to open Wishlist Editor",
+      "englishSha256": "557e29582acc6cc49d24706f797ac93b239f02c22d6743b0d08be7427b4b5ff1",
+      "englishBytes": 29,
+      "placeholders": [],
+      "meaning": "click hint of the existing locked-target and still-needed row navigation to the Wishlist Editor",
+      "consumers": [
+        "ui/Panel.lua:1408 locked-target row hover hint",
+        "ui/Panel.lua:2482 still-needed row hover hint"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "ca5af394a1bd99211e75d9b4ca44b1d8f21b5e8b9dedbbc1d00314ffecf7973e",
+          "bytes": 51
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "cc9781f632fdc00c9b8a9aea360da3dd5814e6b67839a05bd192e72ea6be21be",
+          "bytes": 46
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "4742e0188edc507704b45cdf941c7ec5a06e60143943fe2072016653ed929dac",
+          "bytes": 49
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "93f61a639542df44b6e5aa638dee1ff379ba2bad5580777b1f1864e39458d4fb",
+          "bytes": 44
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "8f4d1a05613389d445f3dd1121688ca6d660bcad79d03f29d967fc80ec763467",
+          "bytes": 47
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "15fb18013c782da201e0188935cdf7c5bd061c29ca5a5d245d30180f4b9e2c0b",
+          "bytes": 86
+        }
+      }
+    },
+    {
+      "key": "panel.heading.progress",
+      "kind": "text",
+      "english": "PROGRESS",
+      "englishSha256": "e0d0adc74c8be52ac274521473e1c54da047fb15e51b5d086273560213fa6262",
+      "englishBytes": 8,
+      "placeholders": [],
+      "meaning": "progress section heading only; its counts are shown separately",
+      "consumers": [
+        "ui/Panel.lua:2385 progressLabel:SetText"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "6c984423783836fdac98582eb24b01d6cad2ca3862d5add57ad66d35d791ac4b",
+          "bytes": 11
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "e30e14861b2b26efb9e7f28b18986bd38f42767081f2bb6a039106ad9a4e722b",
+          "bytes": 11
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "91858db92839a3f216a5daed8a4f4600a2ef0553c3bd2b18001ce9c31cff22f1",
+          "bytes": 8
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "369d25c182e641f96d84cd24179be8e003ff6ae2957b38b18b3bc9e1a2d451f8",
+          "bytes": 7
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "b342f871189e233d15a2bfbd6efae4aec66efafb7a01ceb2cdd80e210c7c10a9",
+          "bytes": 9
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "8450650060164d9954ff6e71c7ad71ed5f47c14023c59429f57bfe7f3e2a3628",
+          "bytes": 16
+        }
+      }
+    },
+    {
+      "key": "panel.heading.still_needed",
+      "kind": "text",
+      "english": "STILL NEEDED",
+      "englishSha256": "a57e1459143a614cf6bef02efa0ed00fb71dbfea26f86984303530bc87f2f952",
+      "englishBytes": 12,
+      "placeholders": [],
+      "meaning": "still-needed section heading, set at creation and at legacy render reset",
+      "consumers": [
+        "ui/Panel.lua:2398 needLabel:SetText at creation",
+        "ui/Panel.lua:5508 needLabel:SetText at legacy render reset"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "0a01c549c12d28c569db9b5e989cb47c6c985f09f014670e38fe3763960bef3d",
+          "bytes": 13
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "679dff2627126b7eb4cce6b05db8c9286df56db40b0f339aeeb3b32c37dc9223",
+          "bytes": 14
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "aa0e519198bbd1f3bd8d3cc8a82959e6c8fafd8c2512f22dc390239ed3a3e606",
+          "bytes": 14
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "aa5abb272df4e9226961acdd476df1f60b201c3888e3de4175055859376884a5",
+          "bytes": 15
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "11d3146ef8c1b01e17d50ba1fef13f511e22c16dce7e236897cfbd26a159256e",
+          "bytes": 17
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "0de9b2fd675ad5ec6d31aee69f1f66fc851eea2991199b00474b606712286ce9",
+          "bytes": 17
+        }
+      }
+    },
+    {
+      "key": "panel.heading.extra_copies",
+      "kind": "text",
+      "english": "EXTRA COPIES",
+      "englishSha256": "0b06ab3c7e5f3e6d8e27a7ffc76a8ef8d82bbb88698945c29c22490f7afaecee",
+      "englishBytes": 12,
+      "placeholders": [],
+      "meaning": "extra-copies section heading only; not a delete action",
+      "consumers": [
+        "ui/Panel.lua:2489 shedLabel:SetText"
+      ],
+      "fallback": "Text with the active pack: missing or invalid entry -> exact English base text (source 'base', reason counted)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "draft_unreviewed",
+          "sha256": "349e33fd7ccce35fb429ec83f041ec97359700df69d32f9d99a28605792fdd72",
+          "bytes": 14
+        },
+        "deDE": {
+          "state": "draft_unreviewed",
+          "sha256": "d05dca5ed533e66d9c67448ca2183cf2927e86e414125de1724f29518ca9def8",
+          "bytes": 19
+        },
+        "esES": {
+          "state": "draft_unreviewed",
+          "sha256": "78c1de44cdd90fff44ec4f8f5e3b7d0915bcc61a7450d09c20de5bcd93c8eef1",
+          "bytes": 12
+        },
+        "plPL": {
+          "state": "draft_unreviewed",
+          "sha256": "7a81c426a083b47ac7f8946fc873e64bcbf338ea87f2b884b94f2bdfb4e278fd",
+          "bytes": 15
+        },
+        "ptBR": {
+          "state": "draft_unreviewed",
+          "sha256": "fbf6e9e0263da276b17f4a6fe1764220a357ae400053cb9f1e8168fe8d5356aa",
+          "bytes": 14
+        },
+        "ruRU": {
+          "state": "draft_unreviewed",
+          "sha256": "35ba9f6a65d0ad15427859fe4ad3995c15e563fcbdcf6b1848118e3dddf56d07",
+          "bytes": 23
+        }
+      }
+    },
+    {
+      "key": "panel.button.options",
+      "kind": "text",
+      "english": "Options",
+      "englishSha256": "d0db8b5e364b6989e4b8f38a2b3846b87d99a51c1592ebf35d21cc66405a8e39",
+      "englishBytes": 7,
+      "placeholders": [],
+      "meaning": "label of the Main panel header button that opens the Nexus settings and Manage menu (help and setup, settings, notices, logs and panel actions), also the heading of its hover; the label only: the leading \"! \" shown while a trusted update notice is carried is added by code and is never part of this text, and a resolved label that itself begins with ! is replaced by the English base",
+      "consumers": [
+        "ui/Panel.lua:752 M.OptionsLabel -> Nexus.Localization.Text(\"panel.button.options\"); ui/Panel.lua:759 M.OptionsText adds the code-owned \"! \" trusted-notice mark; header Options button label and its hover heading"
+      ],
+      "fallback": "no optional pack holds this key: with any optional pack active, Text returns the exact English \"Options\" (source 'base', reason 'missing_candidate', counted on each call); a resolved label beginning with optional whitespace and \"!\" is replaced by the pure English base via Resolve (ui/Panel.lua:755)",
+      "familySurface": "Main panel (HUD); family coverage PENDING",
+      "packs": {
+        "frFR": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        },
+        "deDE": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        },
+        "esES": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        },
+        "plPL": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        },
+        "ptBR": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        },
+        "ruRU": {
+          "state": "missing",
+          "runtime": "English fallback (missing_candidate)"
+        }
+      }
+    }
+  ],
+  "consumerObservations": [
+    "Five panel.tooltip keys have a second consumer at the pin that KEY_CONTEXT.json did not list before this revision: the Plan hub dropdown rows of ui/Panel.lua:3352 M.HubMenuItems(\"plan\") (tooltipTitle/tooltipText at :3360-3364). Those rows' labels (\"Wishlist Editor\", \"Assign Wishlist...\", \"My Builds (game page)\"), the \"Wishlist Editor\" tooltipTitle and the \"Opening a window saves, assigns and loads nothing.\" note are hard-coded English, so with an optional pack active these rows mix languages. The comment at :3350-3351 says 3.3.5 dropdowns show item tooltips only with beginner tips on. Recorded as a #143 Main panel family coverage fact, not a defect decision.",
+    "The first-run Create Wishlist button (ui/Panel.lua:2601) and the Plan hub \"Wishlist Editor\" row (OpenEditor, ui/Panel.lua:2917) both call Nexus.WishlistEditor.Show() after CloseOtherNexusWindows(), so panel.tooltip.create_wishlist_draft keeps the same action in both contexts."
+  ],
+  "validatorBindings": {
+    "current": {
+      "pin": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+      "tool": "tools/l10n_catalog.py, STATUS IMPLEMENTED_DRAFT_REVIEW_PENDING: the scoped static-catalog validator (syntax parser, validate_catalog_data, catalog_report, B3b read-only CLI) over data/LocalizationEnglish.lua, data/LocalizationPacks.lua, KEY_CONTEXT.json, RELEASE_LANGUAGES.json and Nexus.toc",
+      "tests": "tools/tests/test_l10n_catalog.py: 76 test methods; registered second in PYTHON_TESTS of tools/run_prototype_tests.py; run by tools/ci_check.py as its own process",
+      "runtimeFixtures": "tests/prototype/terminology.lua, terminology_consumers.lua and panel_options_label.lua (synthetic offline Lua 5.1 harness)",
+      "notIntegrated": "the #147 runtime-registry contract (U1), complete-English admission (U2) and registry-bound catalog/schema migration (U3a/U3b): no registry symbol in core/Localization.lua, tools/l10n_catalog.py or its test file, the catalog suite still has the original 76 tests rather than U3a's 96, and MAX_BASE_ENTRIES is still 64"
+    },
+    "historical": [
+      {
+        "pin": "5c77eec5b791f64468576e37a70b3855375b7fcb",
+        "tree": "692c6693ba50ba5ffc2bf8f3f724b0bceeeda65c",
+        "what": "declarative contract pin of KEY_CONTEXT.json, RELEASE_LANGUAGES.json and FULL_COVERAGE.md: six English keys, three inherited draft entries per pack",
+        "ancestorOfSourcePin": "yes"
+      },
+      {
+        "pin": "d830623df441db88635141a2183a289070056ff2",
+        "what": "#141/#148 chooser and three-message slice; reported on #148 with full 526/526 and a 98-file content check",
+        "ancestorOfSourcePin": "yes",
+        "rerunHere": "no"
+      },
+      {
+        "pin": "ea648430b1e2e27739f1431d09bedb94af0c9757",
+        "tree": "0f03f56c36a0ff700feb9f51cbe4b81c7452f80f",
+        "what": "PR #161 head: 18 added draft entries, six messages per optional pack; published 526 PASS full suite, 10 focused, 98 content checks and hosted CI 3/3 (actions run 40228049254); earlier failed run 40225470734 (525 PASS / 1 FAIL at ce24827b) retained",
+        "ancestorOfSourcePin": "yes (local Git ancestry); PR #161 itself was open, draft and unmerged when read on 2026-10-29",
+        "rerunHere": "no"
+      },
+      {
+        "pin": "55d7350c0d5c60fc5bf39385f48027cd62498c71",
+        "tree": "9a7c51f0683a53adae1aecd833b1f13a590e2595",
+        "what": "Root-admitted technical reference: 27 English keys (26 text, 1 format), 27 draft entries per pack, 21 ui/Panel.lua bindings",
+        "ancestorOfSourcePin": "yes"
+      },
+      {
+        "pin": "ac2cdf5f4924c74f1e744990b2e0bb0405cd1c88",
+        "tree": "458b27a74ba2c65cfb752367c8f8607594a45e79",
+        "what": "last commit to change data/LocalizationPacks.lua; its blob is the current packs blob",
+        "ancestorOfSourcePin": "yes"
+      },
+      {
+        "pin": "a50372ba485fd98043d68ec7d4f732ee947b0c28",
+        "tree": "0f9f68553d5c783ef9b327efc6612882a9c4767b",
+        "what": "first commit holding panel.button.options (#165); English blob 024557e8ffb9d6f587080e46b47b33daea25e492, unchanged at the sourcePin",
+        "ancestorOfSourcePin": "yes"
+      }
+    ]
+  },
+  "issue147": {
+    "source": "public #147 body, latest checkpoint 2026-10-26 05:45 UTC, as read on 2026-10-29",
+    "objectSearch": "git cat-file over the shared Better-Nexus object store and 45 other local repositories (bounded search); none holds the U1, earlier U1 draft or U3a objects below",
+    "rows": [
+      {
+        "part": "U1 corrected runtime-registry review-fix",
+        "reportedCommit": "38662fa6265e22c2bd7e9637ba54c5b8156375e6",
+        "reportedTree": "6fd6f983a840c3b649de0a553633801b1bd5e402",
+        "reportedResult": "541 contract assertions, seven affected fixtures, catalog 76, inventory 8, runner 49 and content check pass; fresh independent Spec/Standards review not started at that checkpoint",
+        "objectAvailable": "no",
+        "integratedAtSourcePin": "no",
+        "state": "HISTORICAL_REPORTED_UNPROVEN: not integrated, not accepted; the pin and result are retained as reported"
+      },
+      {
+        "part": "U1 earlier draft",
+        "reportedCommit": "4bce313bf43f666d59b8bc157361ec038b6a1819",
+        "reportedTree": "e1230fccdaf5bdc7b66b7d5ba8698a632406c0a7",
+        "reportedResult": "65-key test contract passed 499 assertions; two independent reviews requested corrections; exact-head full run 557/558 with one stale guard failure",
+        "objectAvailable": "no",
+        "integratedAtSourcePin": "no",
+        "state": "HISTORICAL_SUPERSEDED_UNPROVEN"
+      },
+      {
+        "part": "stale private-Store-owner guard correction cited by #147",
+        "reportedCommit": "646a37e7aa39f167205b2813f6edd0ddbb406a79",
+        "objectAvailable": "yes",
+        "integratedAtSourcePin": "yes (ancestor of the sourcePin)",
+        "state": "PRESENT_IN_HISTORY; this is not U1, U2 or U3"
+      },
+      {
+        "part": "U2 complete-English-message/plain-content admission",
+        "reportedCommit": "none reported",
+        "reportedResult": "packet rebuilt from 38662fa; implementation call not started at that checkpoint",
+        "objectAvailable": "not applicable",
+        "integratedAtSourcePin": "no",
+        "state": "PREPARED_NOT_STARTED as last reported; no later evidence found"
+      },
+      {
+        "part": "U3a syntax-only parser",
+        "reportedCommit": "5f5b4628c91236d65d60f99207a3d2a8741fcb65",
+        "reportedResult": "normal-context catalog validation 95/96; the sole failure is a documentation phrase split across a physical newline, later assertions in that method not reached; a documentation-only repair prepared, not launched",
+        "objectAvailable": "no",
+        "integratedAtSourcePin": "no",
+        "state": "HISTORICAL_REPORTED_UNPROVEN: not fixed, not integrated, not accepted"
+      },
+      {
+        "part": "U3b current-schema/semantic binding",
+        "reportedCommit": "none",
+        "integratedAtSourcePin": "no",
+        "state": "PENDING"
+      }
+    ],
+    "owner": "The historical implementation owner named on #147 is a historical label only; no current localization worker heartbeat was verified and none is assigned by this ledger. Root decides whether and how the lane resumes.",
+    "obsoleteHolds": "the transfer/provider-approval holds recorded on #147 are historical and are not current blockers under the standing scoped authorization"
+  },
+  "finalOfflineValidation": {
+    "nature": "sanitized facts from a root-held local receipt of an offline full-CI run on the exact sourcePin; the raw receipt and logs are private and not committed",
+    "receiptSha256": "862607b14c0d36dd8254c4b960370a815a492d98454a32c2f3172c00b1f64d43",
+    "resultsSha256": "be61f5092076369c36c1a08641f8de1a9753912259d88a843ce52ab5a6e34040",
+    "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada",
+    "scope": "full-ci, exit 0",
+    "runUTC": {
+      "started": "2026-10-29T22:45:36Z",
+      "finished": "2026-10-29T22:59:34Z"
+    },
+    "lua": {
+      "runtime": "LuaJIT (parse row: compile TOC Lua files=99; interpreter=Lua 5.1; not a native WoW assertion)",
+      "passed": 599,
+      "failed": 0,
+      "notRun": 0
+    },
+    "python": {
+      "version": "3.14.7",
+      "registeredFiles": [
+        "tools/tests/test_l10n_inventory.py",
+        "tools/tests/test_l10n_catalog.py"
+      ],
+      "filesPassed": 2,
+      "cases": {
+        "test_l10n_inventory.py": 8,
+        "test_l10n_catalog.py": 76,
+        "total": 84
+      }
+    },
+    "runtimeHashes": "99 runtime file hashes emitted by the runner matched the working files, including the checkout CRLF hashes of data/LocalizationEnglish.lua, data/LocalizationPacks.lua and core/Localization.lua listed in sourceInputs",
+    "snapshotLimitation": "the source snapshot was taken post-CI; no raw pre-CI snapshot was recorded and no measured raw pre/post equality is claimed",
+    "relevantRows": [
+      {
+        "test": "terminology",
+        "status": "PASS",
+        "checks": 2359,
+        "assertions": [
+          "tests/prototype/terminology.lua:74 English base accepted 28, formatted 1, rejected 0, not oversized",
+          ":112 exactly 28 sorted keys",
+          ":118-119 panel.button.options resolves from the English base",
+          ":165 and :294-295 a missing candidate falls back to English and is counted once as missing_candidate",
+          ":335 and :342 64 entries accepted; 65 fail closed"
+        ]
+      },
+      {
+        "test": "terminology_consumers",
+        "status": "PASS",
+        "assertions": [
+          "tests/prototype/terminology_consumers.lua:543-545 the real Readout row for banish 0, reroll unknown, freeze 7 under English and each optional pack",
+          ":248-251 a pack without panel.button.options records a counted missing_candidate fallback",
+          ":705-724 the language choice is saved and applies after reload only"
+        ]
+      },
+      {
+        "test": "panel_options_label",
+        "status": "PASS",
+        "assertions": [
+          "tests/prototype/panel_options_label.lua:47-70 the Options label is read through the seam and only code adds the \"! \" mark; a resolved label beginning with ! is not shown"
+        ]
+      },
+      {
+        "test": "faq_readability",
+        "status": "PASS",
+        "checks": 32,
+        "note": "FAQ colour, spacing and measured height over stated font models; native colour, contrast and glyph fit NOT RUN"
+      },
+      {
+        "test": "tools/tests/test_l10n_catalog.py",
+        "status": "PASS",
+        "cases": 76,
+        "assertions": [
+          "CatalogCurrentSource (lines 3039-3074): each optional pack reports the 27 present keys as draft_unreviewed and panel.button.options as missing, zero declarations, completeness INCOMPLETE"
+        ]
+      }
+    ],
+    "doesNotEstablish": "translation quality, fluent acceptance, full family coverage, localized native glyph/layout/input behaviour, packaging, installation or delivery"
+  },
+  "gates": {
+    "windowFamilies": "all 15 PENDING (KEY_CONTEXT.json windowFamilies); the Main panel (HUD) family has 23 adopted keys and is incomplete",
+    "competentLanguageReview": "UNASSIGNED for frFR, deDE, esES, plPL, ptBR and ruRU; no per-entry acceptance exists or is implied",
+    "localizedNative": "NOT_RUN",
+    "historicalDeliveries": "the PR #161 six-message delivery (18 added entries, six messages per pack) and the current 27-entry-per-pack source cohort are distinct; neither establishes full family coverage",
+    "englishScreenshots": "existing English test.163012 screenshots and the separate usability review do not establish localized glyph, layout or input acceptance",
+    "helpBaseline": "ui/Help.lua at the sourcePin (blob 8c3ddaafdcd1038114737ed2a2df8b75ac66e8f7) is the Help/FAQ evidence baseline; future #145 work coordinates against accepted #131/FAQ wording, not old screenshots",
+    "designReferences": "the original Main Panel and Setup design references remain unchanged; no design work is requested here"
+  },
+  "responsibilities": [
+    {
+      "item": "This documentation revision",
+      "owner": "Root (integration); independent Codex Spec/Standards review",
+      "state": "COMMITTED_LOCALLY; review PENDING",
+      "dependency": "none",
+      "resumeTrigger": "Codex review verdict"
+    },
+    {
+      "item": "#141 Automatic/explicit language activation",
+      "owner": "Root assigns",
+      "state": "PARTIAL: explicit chooser, once-per-session activation and an Automatic preference that resolves to English exist at the pin; acceptance OPEN",
+      "dependency": "authorized versioned client evidence for any locale alias; native reload/persistence rows under #146",
+      "resumeTrigger": "an evidenced client code or alias, or Root's decision to accept English-only Automatic"
+    },
+    {
+      "item": "#142 dynamic invariants",
+      "owner": "Root assigns",
+      "state": "PARTIAL: one code-owned count template (readout.charge_counts) and two wait reasons; other dynamic text unclassified",
+      "dependency": "behaviour-coupling classification of each dynamic producer before adoption",
+      "resumeTrigger": "a #143-145 family batch that contains dynamic text"
+    },
+    {
+      "item": "#143 main, mini, Orb, Journal",
+      "owner": "Root assigns one non-overlapping author per family; competent reviewer separately",
+      "state": "PENDING (Main panel 23 adopted keys, incomplete; Orb and Journal 0)",
+      "dependency": "measured family inventory; at most 36 new English keys fit the current cap",
+      "resumeTrigger": "Root dispatch of one family batch with an exact key list"
+    },
+    {
+      "item": "#144 editors, sharing, records",
+      "owner": "Root assigns",
+      "state": "PENDING (0 adopted keys in 5 families)",
+      "dependency": "measured family inventory; identity/matching inputs stay invariant",
+      "resumeTrigger": "Root dispatch; may proceed independently of #145"
+    },
+    {
+      "item": "#145 onboarding, Help, safety, support",
+      "owner": "Root assigns",
+      "state": "PENDING (0 adopted keys in 7 families)",
+      "dependency": "accepted #131/FAQ wording at or after the sourcePin; complete consent/refusal English fallback rules",
+      "resumeTrigger": "#131/FAQ wording accepted, then a family dispatch"
+    },
+    {
+      "item": "#146 localized native matrix",
+      "owner": "Root coordinates the established native operator",
+      "state": "NOT_RUN",
+      "dependency": "a reviewed language/view/client/font row set on an exact source and package",
+      "resumeTrigger": "localized source ready for native rows; English screenshots do not substitute"
+    },
+    {
+      "item": "#147 validation contract",
+      "owner": "Root decides whether the historical U1/U2/U3 lane resumes and who owns it",
+      "state": "OPEN: scoped static-catalog validator implemented draft; U1/U3a reported pins unproven and not integrated; U2 not started; U3b pending",
+      "dependency": "the U1/U3a objects or a fresh reviewed implementation from the current pin",
+      "resumeTrigger": "Root assignment; the historical owner is not presumed active"
+    },
+    {
+      "item": "#148 competent language review",
+      "owner": "Root is accountable for assigning competent reviewers; Root is not itself proof of fluency",
+      "state": "UNASSIGNED",
+      "dependency": "the frozen cohort and translator context in this ledger",
+      "resumeTrigger": "reviewer responsibility established for a language; draft authoring need not wait"
+    },
+    {
+      "item": "#149 final composition",
+      "owner": "Root with independent Spec/Standards/content review",
+      "state": "QUEUED_DEPENDENT",
+      "dependency": "#141, #142, #143-145 coverage, #147 coherent validator, full matched checks/package and #146 outcomes",
+      "resumeTrigger": "a frozen final union exists"
+    }
+  ],
+  "findingsForRoot": [
+    {
+      "id": "F1",
+      "path": "tools/tests/test_l10n_catalog.py",
+      "predicate": "lines 202-212 and 231-234 say panel.button.options exists only in an uncommitted working copy that no commit, tree or Git blob holds; at the sourcePin it is committed (first a50372ba485fd98043d68ec7d4f732ee947b0c28, blob 024557e8ffb9d6f587080e46b47b33daea25e492), and WORKING_COPY_PHYSICAL_INPUTS (755f2f5d..., 3970) is the CRLF checkout of that blob",
+      "impact": "stale test commentary; the assertions still pass"
+    },
+    {
+      "id": "F2",
+      "path": "tools/tests/test_l10n_catalog.py:534",
+      "predicate": "assertIn(\"uncommitted working copy\", adoption[\"scope\"]) requires the superseded phrase in KEY_CONTEXT.currentAdoption.scope. The scope states the current committed adoption at 8393f5f4b61a0d62b5043b861539be868ebf80f6 (first committed in a50372ba485fd98043d68ec7d4f732ee947b0c28) as a CURRENT FACT and keeps the phrase only inside a sentence labelled HISTORICAL STATEMENT, SUPERSEDED AND NO LONGER TRUE. No metadata describes the adoption as currently uncommitted. The assertion therefore does not block truthful documentation, but it pins history rather than the current fact","minimalFixtureUpdate": "for Root's assessment, not applied here: in tools/tests/test_l10n_catalog.py replace line 534 `self.assertIn(\"uncommitted working copy\", adoption[\"scope\"])` with `self.assertIn(\"a50372ba485fd98043d68ec7d4f732ee947b0c28\", adoption[\"scope\"])` and `self.assertIn(\"8393f5f4b61a0d62b5043b861539be868ebf80f6\", adoption[\"scope\"])`; with that change the historical sentence may be dropped. Optional, separate: correct the comments at lines 202-212 and 231-234 and, as line 233 itself requests, replace WORKING_COPY_PHYSICAL_INPUTS for data/LocalizationEnglish.lua with the canonical LF blob identity (69d3998950b651f5b666f7b6a65a718c97bfb3719bfb4523d5c60037ed7f20a5, 3916) in CURRENT_REFERENCE_INPUTS; neither change weakens a check",
+      "impact": "test commentary and the pinned phrase are historical; a test-owned rebind lets the current fact be asserted directly"
+    },
+    {
+      "id": "F3",
+      "path": "tools/tests/test_l10n_catalog.py:376,481,668",
+      "predicate": "sourcePin of RELEASE_LANGUAGES.json and KEY_CONTEXT.json and the FULL_COVERAGE.md text are pinned to 5c77eec5b791f64468576e37a70b3855375b7fcb",
+      "impact": "current facts are bound to 8393f5f through additive fields only; moving the declared contract pin needs a reviewed test change"
+    },
+    {
+      "id": "F4",
+      "path": "docs/localization/RELEASE_LANGUAGES.json automaticMode",
+      "predicate": "automaticMode (chooserProductId NONE_AT_BASE, codeChangeInThisTask none) describes only the 5c77eec base; it does not state that at the sourcePin core/Localization.lua has an Automatic preference value (L.AUTOMATIC_PREFERENCE, ResolveAutomatic) that still resolves to English without an evidenced alias; the field is pinned by tools/tests/test_l10n_catalog.py:431-438 and the file is outside this lane",
+      "impact": "base-pin release metadata silent on the current Automatic preference; the English-only resolution and #141 OUTSTANDING status remain true"
+    },
+    {
+      "id": "F5",
+      "path": "ui/Panel.lua:3352-3365",
+      "predicate": "M.HubMenuItems(\"plan\") shows localized tooltip text from five panel.tooltip keys under hard-coded English row labels, the hard-coded \"Wishlist Editor\" tooltipTitle and an English note",
+      "impact": "mixed-language Plan hub rows with an optional pack active; a #143 coverage item, not repaired here"
+    }
+  ],
+  "notClaimed": [
+    "localization completion",
+    "fluent or competent language approval",
+    "family coverage",
+    "native acceptance",
+    "package, install or public delivery",
+    "an integrated or accepted #147 U1/U2/U3 contract",
+    "any new key, translation, language, alias or wording change"
+  ]
+}
