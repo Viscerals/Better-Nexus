@@ -6969,7 +6969,11 @@ class _Linker:
                 if self.output_ok(key[1], flow, stack):
                     sinks[key] = flow
                 continue
-            if allowed is None and flow is not None:
+            # Release the states waiting on this key's definitions. With
+            # nothing waiting every pop below finds nothing, so the block is
+            # skipped; only when field_cache is filled for a name can move
+            # (field_defs, write-once). Search state and receipts are the same.
+            if allowed is None and flow is not None and waiting:
                 gated = list(flow.def_of.get(key, ()))
                 if key in flow.field_bases:
                     name = flow.field_bases[key][0]
