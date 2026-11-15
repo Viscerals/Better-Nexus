@@ -2373,18 +2373,71 @@ def assert_binding_receipt(test, receipt, full=False):
     for row in receipt["keys"]:
         for site in row["sites"]:
             test.assertTrue(site["outputs"], (row["key"], site))
-    chains = [chain for chain in receipt["mapChains"]
-              if chain["dispatcher"] == DISPATCHER and chain["wrapper"]["name"] == "LocalizedReason"]
-    test.assertEqual(len(chains), 1)
+    chain = map_chain(test, receipt, "LocalizedReason")
     if not full:
-        test.assertEqual(len(receipt["mapChains"]), 1)
-    chain = chains[0]
+        # The real core/UserText.lua has exactly two map chains: the dated
+        # mapped reasons and the reasons table's keys (reasonKeys, below).
+        test.assertEqual(len(receipt["mapChains"]), 2)
     test.assertEqual((chain["wrapper"]["name"], chain["wrapper"]["method"],
                       chain["dispatcher"]), ("LocalizedReason", "Text", DISPATCHER))
     test.assertEqual((chain["established"], chain["wrapperReturnsResult"]), (True, True))
     test.assertTrue(chain["outputs"])
     test.assertEqual(sorted(chain["boundKeys"]), sorted(MAPPED_KEYS))
+    # The second real chain: T.Message's first dispatch, guarded by the
+    # parallel reasons table, through SeamReason (seam accessor wrapper).
+    second = map_chain(test, receipt, "SeamReason")
+    test.assertEqual((second["map"]["name"], second["map"]["path"], second["wrapper"]["method"],
+                      second["dispatcher"], second["entries"]),
+                     ("reasonKeys", USER_TEXT, "Text", DISPATCHER, 39))
+    test.assertEqual((second["established"], second["wrapperReturnsResult"]), (True, True))
+    test.assertEqual(second["shadowedEntries"], [])
+    test.assertEqual(sorted(second["boundKeys"]), sorted(REASON_KEYS))
+    test.assertEqual(chain_outputs(second), chain_outputs(chain))
     return receipt
+
+
+def map_chain(test, receipt, wrapper):
+    """The one map chain of receipt dispatched by Nexus.UserText.Message
+    through this wrapper (a stable identity, never a list position)."""
+    chains = [chain for chain in receipt["mapChains"]
+              if chain["dispatcher"] == DISPATCHER and chain["wrapper"]["name"] == wrapper]
+    test.assertEqual(len(chains), 1, wrapper)
+    return chains[0]
+
+
+def chain_outputs(chain):
+    return {(output["path"], output["output"]) for output in chain["outputs"]}
+
+
+# The 36 distinct keys the 39 entries of core/UserText.lua's reasonKeys name
+# (reason.wait_echo_data three times, reason.take_needed twice).
+REASON_KEYS = (
+    "reason.wait_echo_data", "reason.no_wishlist_advisor", "reason.assign_wishlist_targets",
+    "reason.wait_remaining_choice_count", "reason.orb_active_or_unconfirmed",
+    "reason.orb_state_not_confirmed", "reason.orb_state_unreadable",
+    "reason.orb_state_unexposed", "reason.orb_knownness_unreported", "reason.orb_offer_active",
+    "reason.take_needed", "reason.take_available", "reason.freeze_needed_before_search",
+    "reason.banish_find_targets", "reason.reroll_no_requested", "reason.reroll_none_needed",
+    "reason.take_outside_wishlist", "reason.take_outside_no_search",
+    "reason.complete_take_outside", "reason.freeze_one_needed",
+    "reason.banish_unneeded_before_reroll", "reason.take_held_needed",
+    "reason.wishlist_unusable", "reason.saved_build_invalid", "reason.library_preparing",
+    "reason.record_key_unsupported", "reason.shared_data_preparing",
+    "reason.removing_expired_requests", "reason.wait_send_rate",
+    "reason.guaranteed_offer_marked", "reason.no_guarantee_after_activate",
+    "reason.reroll_unneeded_guaranteed", "reason.few_selections_remain",
+    "reason.use_shown_offer", "term.echo_availability_controls",
+    "reason.safety_disablements_cleared",
+)
+# The twelve literal keys that T.Message returns directly through Say or SayF
+# (seam accessor wrappers), in file order.
+MESSAGE_KEYS = (
+    "usertext.status.disabling_control", "usertext.status.enabling_control",
+    "usertext.status.control_detail", "reason.choose_locked_targets",
+    "reason.wait_locked_echo_list", "reason.wait_server_wishlist", "reason.draft_changed",
+    "reason.not_saved_fewer_copies", "reason.not_saved_adds_excess",
+    "reason.not_saved_no_gain", "reason.not_saved_coverage_lost", "reason.unknown_code",
+)
 
 
 _S8_CATALOG, _S8_FILES = [], []
@@ -2437,7 +2490,11 @@ class ConsumerBindingTests(unittest.TestCase):
                 self.assertEqual({field: row[field] for field in ("binding", "sites", "unprovenSites")},
                                  {field: rows[row["key"]][field]
                                   for field in ("binding", "sites", "unprovenSites")})
-        self.assertEqual([chain["dispatcher"] for chain in cohort["mapChains"]], [DISPATCHER])
+        # Two real chains, in file order: reasonKeys through SeamReason
+        # (line 340), then localizedReasons through LocalizedReason.
+        self.assertEqual([(chain["dispatcher"], chain["wrapper"]["name"])
+                          for chain in cohort["mapChains"]],
+                         [(DISPATCHER, "SeamReason"), (DISPATCHER, "LocalizedReason")])
         self.assertEqual([problem["code"] for problem in cohort["problems"]
                           if problem["code"] != "binding-unbound"], [])
         assert_binding_receipt(self, cohort_view(cohort))
@@ -2936,7 +2993,12 @@ class ConsumerBindingTests(unittest.TestCase):
             user, call, call.replace(b"englishPack)\n", b"englishPack)\n        text=code\n", 1))))
         self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
                          list(MAPPED_KEYS))
-        self.assertEqual(receipt["mapChains"][0]["wrapperReturnsResult"], False)
+        self.assertEqual(map_chain(self, receipt, "LocalizedReason")["wrapperReturnsResult"],
+                         False)
+        # The other real chain has its own wrapper and is untouched.
+        other = map_chain(self, receipt, "SeamReason")
+        self.assertEqual((other["wrapperReturnsResult"], other["established"],
+                          sorted(other["boundKeys"])), (True, True, sorted(REASON_KEYS)))
         self.assertEqual({site["reason"] for key in MAPPED_KEYS
                           for site in self.binding(receipt, key)["unprovenSites"]},
                          {"wrapper-result-not-returned"})
@@ -2987,13 +3049,16 @@ class ConsumerBindingTests(unittest.TestCase):
         receipt = self.gate_fails(changed)
         self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
                          list(MAPPED_KEYS))
-        self.assertEqual(receipt["mapChains"][0]["established"], False)
+        for wrapper in ("LocalizedReason", "SeamReason"):
+            chain = map_chain(self, receipt, wrapper)
+            self.assertEqual((chain["established"], chain["boundKeys"], chain["outputs"]),
+                             (False, [], []), wrapper)
         # One real caller restored with its chat output binds them again.
         restored = with_file(changed, "core/Main.lua", self.files["core/Main.lua"])
         receipt = assert_current_bindings(self, self.catalog, binding_args(restored))
-        self.assertEqual({(output["path"], output["output"])
-                          for output in receipt["mapChains"][0]["outputs"]},
-                         {("core/Main.lua", "AddMessage")})
+        for wrapper in ("LocalizedReason", "SeamReason"):
+            self.assertEqual(chain_outputs(map_chain(self, receipt, wrapper)),
+                             {("core/Main.lua", "AddMessage")}, wrapper)
 
     def test_c16_a_module_alias_overwriting_the_dispatcher_is_unresolved(self):
         # Review fix 2 (SPEC-147-S8-2): a field written through a local alias
@@ -3002,10 +3067,16 @@ class ConsumerBindingTests(unittest.TestCase):
         overwrite = (b'\nlocal userTextAlias=T\nuserTextAlias.Message=function(value) return '
                      b'tostring(value or "") end\n')
         receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + overwrite))
-        self.assertEqual([(problem["construct"], problem["detail"]) for problem
+        # One row for each of T.Message's two real dispatches (the reasons
+        # table's keys, then the mapped reasons), each at its own call.
+        lf = user.replace(b"\r\n", b"\n")
+        dispatches = [lf[:lf.index(call)].count(b"\n") + 1 for call in (
+            b"SeamReason(reasonKeys[s],reasons[s])", b"LocalizedReason(localizedReasons[s],s)")]
+        self.assertEqual(dispatches[1], dispatches[0] + 1)
+        self.assertEqual([(problem["construct"], problem["detail"], problem["line"]) for problem
                           in self.problems(receipt, "binding-unresolved")],
                          [("dispatcher", "T.Message has 2 definitions, directly or through a "
-                                         "local alias")])
+                                         "local alias", line) for line in dispatches])
         self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
                          list(MAPPED_KEYS))
         for name, tail, detail in (
@@ -3019,8 +3090,9 @@ class ConsumerBindingTests(unittest.TestCase):
                  "Nexus.UserText or Nexus.UserText.Message is assigned elsewhere")):
             with self.subTest(form=name):
                 receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + tail))
-                self.assertEqual([problem["detail"] for problem
-                                  in self.problems(receipt, "binding-unresolved")], [detail])
+                self.assertEqual([(problem["detail"], problem["line"]) for problem
+                                  in self.problems(receipt, "binding-unresolved")],
+                                 [(detail, line) for line in dispatches])
         # A same-named alias in another function is a different local.
         benign = (b'\nlocal function SpecOtherScope() local localization=Nexus.Other; '
                   b'localization={}; return localization.Text("not.a.binding") end\n')
@@ -4745,6 +4817,384 @@ class ConsumerBindingTests(unittest.TestCase):
             self.assertEqual(
                 measured(real + b"\nEnsureFrame = EnsureFrame\n"),
                 dict({key: unshown for key in second + (elapsed,)}, **{button: label}))
+
+    def test_c36_the_real_user_text_accessor_wrappers_and_reason_keys_bind_through_message(self):
+        # core/UserText.lua fetches the seam through its local accessor Seam
+        # (the seam table, or nil). Its wrappers Say, SayF and SeamReason are
+        # wrappers only through that accessor, and T.Message's first dispatch
+        # is guarded by the reasons table, parallel to its map reasonKeys.
+        # Real bytes and unviewed receipts: these keys are outside the dated
+        # cohort. Every expectation is of T.Message's own first result, the
+        # route the dated mapped reasons already take.
+        user = self.files[USER_TEXT]
+        lf = user.replace(b"\r\n", b"\n")
+        report = self.catalog.consumer_binding_report
+        every = MESSAGE_KEYS + REASON_KEYS
+        self.assertEqual((len(MESSAGE_KEYS), len(REASON_KEYS), len(set(every))), (12, 36, 48))
+
+        def line_of(source, needle):
+            source = source.replace(b"\r\n", b"\n")
+            self.assertEqual(source.count(needle), 1, needle)
+            return source[:source.index(needle)].count(b"\n") + 1
+
+        def judged(files):
+            receipt = report(*binding_args(files))
+            rows = {row["key"]: row for row in receipt["keys"]}
+            other = [(problem["path"], problem.get("line"), problem.get("construct"),
+                      problem.get("detail"))
+                     for problem in receipt["problems"] if problem["code"] != "binding-unbound"]
+            return receipt, rows, {key: rows[key]["binding"] for key in every}, other
+
+        def here(rows, key, field):
+            return [site for site in rows[key][field] if site["path"] == USER_TEXT]
+
+        bound = dict(dict.fromkeys(MESSAGE_KEYS, "DIRECT_LITERAL_CONSUMER"),
+                     **dict.fromkeys(REASON_KEYS, "MAPPED_TO_CONSUMER"))
+        receipt, rows, bindings, other = judged(self.files)
+        self.assertEqual(other, [])
+        self.assertEqual(bindings, bound)
+        chain = map_chain(self, receipt, "SeamReason")
+        self.assertTrue(chain_outputs(chain))
+        for key in MESSAGE_KEYS:
+            with self.subTest(key=key):
+                sites = here(rows, key, "sites")
+                self.assertEqual([(site["site"], site["line"]) for site in sites],
+                                 [("wrapper-call", line_of(lf, b'("' + key.encode() + b'"'))])
+                self.assertIn(sites[0]["wrapper"]["name"], ("Say", "SayF"))
+                self.assertEqual({(output["path"], output["output"])
+                                  for output in sites[0]["outputs"]}, chain_outputs(chain))
+        mapped = [site for key in REASON_KEYS for site in rows[key]["sites"]]
+        self.assertEqual(len(mapped), 39)
+        self.assertEqual({(site["site"], site["path"], site["map"], site["dispatcher"])
+                          for site in mapped},
+                         {("map-value", USER_TEXT, "reasonKeys", DISPATCHER)})
+        # Every real dispatcher caller disconnected (as in C15): nothing of
+        # T.Message is shown, so every one of them is a site without an output.
+        callers = {"core/WishlistController.lua": (b"Nexus.UserText.Message(message)",),
+                   READOUT: (b"Nexus.UserText.Message(model.text)",),
+                   PANEL: (b"userText.Message(raw)", b"Nexus.UserText.Message(reason)"),
+                   "ui/JournalTab.lua": (b"Nexus.UserText.Message(text)",),
+                   "core/Main.lua": (b"Nexus.UserText.Message(msg)",)}
+        changed = dict(self.files)
+        for path, needles in callers.items():
+            for needle in needles:
+                changed[path] = edit(changed[path], needle,
+                                     needle.replace(b".Message(", b".MessageDisconnected("))
+        receipt, rows, bindings, other = judged(changed)
+        self.assertEqual(bindings, dict.fromkeys(every, "UNBOUND"))
+        chain = map_chain(self, receipt, "SeamReason")
+        self.assertEqual((chain["established"], chain["wrapperReturnsResult"], chain["boundKeys"]),
+                         (False, True, []))
+        for key in MESSAGE_KEYS:
+            with self.subTest(disconnected=key):
+                self.assertEqual(here(rows, key, "sites"), [])
+                self.assertEqual([(site["site"], site["reason"])
+                                  for site in here(rows, key, "unprovenSites")],
+                                 [("wrapper-call", "output-not-reached")])
+        self.assertEqual({(site["site"], site["reason"]) for key in REASON_KEYS
+                          for site in here(rows, key, "unprovenSites")},
+                         {("map-value", "output-not-reached")})
+        # The accessor can return another table: it names no seam, so none
+        # of the three functions is a wrapper and nothing here is a site.
+        accessor = (b'    if type(localization)=="table" and type(localization.Text)=="function" '
+                    b'then return localization end\n    return nil\nend\n')
+        receipt, rows, bindings, other = judged(with_file(self.files, USER_TEXT, edit(
+            user, accessor, accessor.replace(b"return nil", b"return {}"))))
+        self.assertEqual(bindings, dict.fromkeys(every, "UNBOUND"))
+        self.assertEqual(other, [])
+        self.assertEqual([chain["wrapper"]["name"] for chain in receipt["mapChains"]],
+                         ["LocalizedReason"])
+        for key in every:
+            with self.subTest(no_site=key):
+                self.assertEqual(here(rows, key, "sites") + here(rows, key, "unprovenSites"), [])
+        # The guard table has a code its map lacks (SeamReason would get nil
+        # as its key): the dispatch is unresolved by name, the map's keys are
+        # unbound, and the literal wrapper calls are untouched.
+        guard = edit(user, b"local reasons={\n",
+                     b'local reasons={\n    ["SPEC_ONLY_IN_GUARD"]="Spec guard only",\n')
+        receipt, rows, bindings, other = judged(with_file(self.files, USER_TEXT, guard))
+        self.assertEqual(bindings, dict(bound, **dict.fromkeys(REASON_KEYS, "UNBOUND")))
+        self.assertEqual(other, [(
+            USER_TEXT, line_of(guard, b"SeamReason(reasonKeys[s],reasons[s])"), "dispatch",
+            "reasons is not a read-only local table of literal strings with exactly the keys "
+            "of reasonKeys")])
+        self.assertEqual([chain["wrapper"]["name"] for chain in receipt["mapChains"]],
+                         ["LocalizedReason"])
+
+    def test_c37_a_seam_accessor_names_the_seam_only_in_its_exact_shape(self):
+        # R1 on the C26 host: a local function without parameters whose every
+        # return is nil or the seam itself (one of them the seam), called
+        # without an argument, names the seam; a local declared with that
+        # call is a receiver like a local alias. One receipt: each case on
+        # its own line in its own do block, judged by its own site. A case
+        # is "bound" (a proved site), "unproven" (a site without an output)
+        # or None (no site at all), with the unresolved construct it names.
+        key = "panel.heading.progress"
+        host = "core/SessionPause.lua"
+        acc = (b'local function A() local l=Nexus.Localization if type(l)=="table" then '
+               b'return l end return nil end ')
+        show = b'local l=A() specLabel:SetText(l.Text("panel.heading.progress"))'
+        plain = b'local function A() return Nexus.Localization end '
+        cases = (
+            ("a direct call on a local fetched through the accessor", acc + show, "bound", None),
+            ("the accessor called in place",
+             acc + b'specLabel:SetText(A().Text("panel.heading.progress"))', "bound", None),
+            ("an accessor declared as a local function value",
+             b'local A=function() return Nexus.Localization end ' + show, "bound", None),
+            ("a wrapper that fetches through the accessor",
+             acc + b'local function W(key) local l=A() if l then local text=l.Text(key) '
+             b'return text end return "x" end specLabel:SetText(W("panel.heading.progress"))',
+             "bound", None),
+            ("the real shape: two type checks, text and source, the English otherwise",
+             b'local function A() local l=Nexus.Localization if type(l)=="table" and '
+             b'type(l.Text)=="function" then return l end return nil end '
+             b'local function W(key,english) local l=A() if l then local text,source='
+             b'l.Text(key) if type(text)=="string" and source~="unavailable" then return text '
+             b'end end return english end '
+             b'specLabel:SetText(W("panel.heading.progress","Progress"))', "bound", None),
+            ("a wrapper that fetches through the accessor and discards the result",
+             acc + b'local function W(key) local l=A() if l then l.Text(key) end return "x" end '
+             b'specLabel:SetText(W("panel.heading.progress"))', "unproven", None),
+            ("a result that is never shown",
+             acc + b'local l=A() local unused=l.Text("panel.heading.progress") '
+             b'specLabel:SetText("x")', "unproven", None),
+            ("an accessor that returns only nil",
+             b'local function A() return nil end ' + show, None, None),
+            ("one return of a fresh table",
+             b'local function A() local l=Nexus.Localization if l then return l end '
+             b'return {} end ' + show, None, None),
+            ("one return of another module",
+             b'local function A() if Nexus.Other then return Nexus.Other end '
+             b'return Nexus.Localization end ' + show, None, None),
+            ("the seam or a fresh table",
+             b'local function A() return Nexus.Localization or {} end ' + show, None, None),
+            ("a return of two values",
+             b'local function A() return Nexus.Localization, 1 end ' + show, None, None),
+            ("a return without a value",
+             b'local function A() if not Nexus.Localization then return end '
+             b'return Nexus.Localization end ' + show, None, None),
+            ("a body that can run off its end",
+             b'local function A() if Nexus.Localization then return Nexus.Localization end end '
+             + show, None, None),
+            ("an accessor with a parameter",
+             b'local function A(x) return Nexus.Localization end ' + show, None, None),
+            ("an accessor with ...",
+             b'local function A(...) return Nexus.Localization end ' + show, None, None),
+            ("an accessor called with an argument",
+             plain + b'local l=A(1) specLabel:SetText(l.Text("panel.heading.progress"))',
+             None, None),
+            ("an accessor with a nested function",
+             b'local function A() local f=function() end return Nexus.Localization end ' + show,
+             None, None),
+            ("an accessor that returns another accessor's call",
+             plain + b'local function B() return A() end local l=B() '
+             b'specLabel:SetText(l.Text("panel.heading.progress"))', None, None),
+            ("an accessor that returns its own call",
+             b'local function A() return A() end ' + show, None, None),
+            ("an accessor that returns a local declared with an accessor call",
+             plain + b'local function B() local l=A() return l end local l=B() '
+             b'specLabel:SetText(l.Text("panel.heading.progress"))', None, None),
+            ("a global function of the same shape",
+             b'function SpecGlobalAccessor() return Nexus.Localization end '
+             b'local l=SpecGlobalAccessor() specLabel:SetText(l.Text("panel.heading.progress"))',
+             None, None),
+            ("a local declared first and given the function later",
+             b'local A A=function() return Nexus.Localization end ' + show, None, None),
+            ("a shadowing local function that returns a fresh table",
+             acc + b'do local function A() return {Text=tostring} end ' + show + b' end',
+             None, None),
+            ("the fetched local as the second name of the declaration",
+             acc + b'local a,l=A() specLabel:SetText(l.Text("panel.heading.progress"))',
+             None, None),
+            ("the accessor assigned again",
+             plain + b'A=function() return {Text=tostring} end ' + show, None, "alias"),
+            ("the fetched local assigned again",
+             acc + b'local l=A() l={Text=tostring} '
+             b'specLabel:SetText(l.Text("panel.heading.progress"))', None, "alias"),
+            ("the accessor's inner alias assigned before its return",
+             b'local function A() local l=Nexus.Localization l={Text=tostring} return l end '
+             + show, None, "alias"),
+            ("a method call on the fetched local",
+             acc + b'local l=A() specLabel:SetText(l:Text("panel.heading.progress"))',
+             None, "method-call"),
+            ("a method call on the accessor call",
+             acc + b'specLabel:SetText(A():Text("panel.heading.progress"))', None, "method-call"),
+            ("the consumer method read through the accessor without being called",
+             acc + b'local f=A().Text specLabel:SetText(f("panel.heading.progress"))',
+             None, "indirect-key-method"),
+        )
+        first = (self.files[host] + V15_LABEL).count(b"\n") + 1
+        code = b"\n".join(b"do " + case + b" end" for _, case, _, _ in cases)
+        receipt = self.receipt(self.hosted(code))
+        row = self.binding(receipt, key)
+        proved = {site["line"] for site in row["sites"] if site["outputs"]}
+        unproven = {site["line"] for site in row["unprovenSites"]}
+        constructs = {}
+        for problem in receipt["problems"]:
+            if problem["code"] != "binding-unbound":
+                self.assertEqual((problem["code"], problem["path"]), ("binding-unresolved", host))
+                constructs.setdefault(problem["line"], set()).add(problem["construct"])
+        for line, (name, _, state, construct) in enumerate(cases, first):
+            with self.subTest(case=name):
+                self.assertEqual((line in proved, line in unproven),
+                                 (state == "bound", state == "unproven"))
+                self.assertEqual(constructs.get(line, set()), {construct} if construct else set())
+        # A write of the seam is never hidden behind an accessor: through
+        # the fetched local, and inside the accessor itself. One receipt.
+        writes = (
+            acc + b'local l=A() l.Text=tostring '
+            b'specLabel:SetText(l.Text("panel.heading.progress"))',
+            b'local function A() Nexus.Localization={Text=tostring} return Nexus.Localization end '
+            + show)
+        receipt = self.gate_fails(self.hosted(b"\n".join(b"do " + case + b" end"
+                                                         for case in writes)))
+        self.assertEqual([(problem["code"], problem["path"], problem["line"], problem["construct"])
+                          for problem in receipt["problems"]
+                          if problem["code"] != "binding-unbound"],
+                         [("binding-mutation", host, first, "seam-assignment"),
+                          ("binding-mutation", host, first + 1, "seam-assignment")])
+
+    def test_c38_a_dispatch_guarded_by_a_parallel_table_needs_exactly_the_maps_keys(self):
+        # R2 on a module appended to the real core/SessionPause.lua: the
+        # guard of "if GUARD[v] then return wrapper(MAP[v]) end" may index a
+        # second read-only local table of literal strings with exactly MAP's
+        # keys. One receipt: each case is one line with its own map, guard,
+        # dispatcher and caller, judged by its own chain or its own problem.
+        host, key = "core/SessionPause.lua", "panel.heading.progress"
+        head = (
+            b'local SpecT = {}',
+            b'Nexus.SpecDispatch = SpecT',
+            b'local function SpecW(key) local l=Nexus.Localization return l.Text(key) end',
+            b'local function SpecSeam() local l=Nexus.Localization if type(l)=="table" then '
+            b'return l end return nil end',
+            b'local function SpecV(key) local l=SpecSeam() if l then local text=l.Text(key) '
+            b'return text end return "x" end',
+        )
+        pairs_of = b'{["A"]="panel.heading.progress",["B"]="panel.heading.progress"}'
+        guarded = b'{["A"]="one",["B"]="two"}'
+        function = (b'function SpecT.D#(v) if specGuard#[v] then return SpecW(specMap#[v]) end '
+                    b'return v end')
+        shown = b'DEFAULT_CHAT_FRAME:AddMessage(Nexus.SpecDispatch.D#("A"))'
+        same = "the call is not the sole return guarded by the same MAP[v]"
+        keys = "specGuard# is not a read-only local table of literal strings with exactly the " \
+               "keys of specMap#"
+        cases = (
+            # (name, guard table, function, statements after it, caller, expectation)
+            # expectation: (established, shadowed codes) of its chain, or the
+            # detail of its unresolved dispatch.
+            ("a parallel guard with exactly the map's keys", guarded, function, b'', shown,
+             (True, [])),
+            ("the same through a seam accessor wrapper", guarded,
+             function.replace(b"SpecW(", b"SpecV("), b'', shown, (True, [])),
+            ("the map itself as the guard", guarded,
+             function.replace(b"if specGuard#[v]", b"if specMap#[v]"), b'', shown, (True, [])),
+            ("a parallel guard that a for-in pairs header reads", guarded, function,
+             b'for code in pairs(specGuard#) do end', shown, (True, [])),
+            ("an entry shadowed by an earlier guard, the other shown", guarded,
+             b'local specOther#={["A"]="shadow"} ' + function.replace(
+                 b"(v) if", b"(v) if specOther#[v] then return v end if"),
+             b'', shown.replace(b'"A"', b'"B"'), (True, ["A"])),
+            ("the result discarded by its only caller", guarded, function, b'',
+             b'local specUnused#=Nexus.SpecDispatch.D#("A")', (False, [])),
+            ("shown only by a call of another dispatcher", guarded, function, b'',
+             b'DEFAULT_CHAT_FRAME:AddMessage(Nexus.SpecDispatch.D1("A")) '
+             b'local specUnused#=Nexus.SpecDispatch.D#("A")', (False, [])),
+            ("a guard key the map lacks", b'{["A"]="one",["B"]="two",["C"]="three"}', function,
+             b'', shown, keys),
+            ("a map key the guard lacks", b'{["A"]="one"}', function, b'', shown, keys),
+            ("a guard value false", b'{["A"]=false,["B"]="two"}', function, b'', shown, keys),
+            ("a guard value that is a number", b'{["A"]=1,["B"]="two"}', function, b'', shown,
+             keys),
+            ("a guard value that is no literal", b'{["A"]=tostring(1),["B"]="two"}', function,
+             b'', shown, keys),
+            ("a guard with a positional entry", b'{"one",["A"]="one",["B"]="two"}', function,
+             b'', shown, keys),
+            ("the guard assigned again", guarded, function, b'specGuard#={}', shown, keys),
+            ("the guard passed to a function", guarded, function, b'tostring(specGuard#)',
+             shown, keys),
+            ("the guard written through", guarded, function, b'specGuard#.C="three"', shown,
+             keys),
+            ("the guard stored in a table", guarded, function,
+             b'local specBox#={specGuard#}', shown, keys),
+            ("a guard that is no local table", guarded,
+             function.replace(b"if specGuard#[v]", b"if SpecGlobalGuard[v]"), b'', shown, same),
+            ("a guard over another variable", guarded,
+             function.replace(b"(v) if specGuard#[v]", b"(v,w) if specGuard#[w]"), b'', shown,
+             same),
+            ("the call is not the guard's return", guarded,
+             function.replace(b"then return SpecW(specMap#[v]) end",
+                              b"then local t=SpecW(specMap#[v]) return t end"), b'', shown, same),
+            ("the variable assigned before the dispatch", guarded,
+             function.replace(b"(v) if", b"(v) v=tostring(v) if"), b'', shown,
+             "the dispatch variable is not a local of this function left unassigned up to "
+             "the dispatch"),
+            ("an earlier statement that can return first", guarded,
+             function.replace(b"(v) if", b'(v) if v=="x" then return v end if'), b'', shown,
+             "an earlier statement at line %d can return first"),
+        )
+        prefix = self.files[host] + b"\n" + b"\n".join(head) + b"\n"
+        first = prefix.count(b"\n") + 1
+        lines = []
+        for number, (_, guard, body, after, caller, _) in enumerate(cases, 1):
+            text = b" ".join(part for part in (
+                b"local specMap#=" + pairs_of, b"local specGuard#=" + guard, body, after, caller)
+                if part)
+            lines.append(text.replace(b"#", str(number).encode()))
+        receipt = self.receipt(with_file(self.files, host, prefix + b"\n".join(lines) + b"\n"))
+        chains = {chain["dispatch"]["line"]: chain for chain in receipt["mapChains"]
+                  if chain["dispatch"]["path"] == host}
+        problems = {}
+        for problem in receipt["problems"]:
+            if problem["code"] != "binding-unbound":
+                self.assertEqual((problem["code"], problem["path"], problem["construct"]),
+                                 ("binding-unresolved", host, "dispatch"))
+                problems.setdefault(problem["line"], []).append(problem["detail"])
+        for number, (name, _, _, _, _, expected) in enumerate(cases, 1):
+            line = first + number - 1
+            with self.subTest(case=name):
+                if type(expected) is tuple:
+                    self.assertNotIn(line, problems)
+                    self.assertIn(line, chains)
+                    chain = chains[line]
+                    self.assertEqual(
+                        (chain["map"]["name"], chain["dispatcher"], chain["entries"],
+                         chain["wrapperReturnsResult"]),
+                        ("specMap%d" % number, "Nexus.SpecDispatch.D%d" % number, 2, True))
+                    self.assertEqual(
+                        (chain["established"], chain["boundKeys"],
+                         [entry["code"] for entry in chain["shadowedEntries"]]),
+                        (expected[0], [key] if expected[0] else [], expected[1]))
+                    self.assertEqual(bool(chain["outputs"]), expected[0])
+                else:
+                    self.assertNotIn(line, chains)
+                    detail = expected.replace("#", str(number))
+                    self.assertEqual(problems.get(line),
+                                     [detail % line if "%d" in detail else detail])
+        # The real chains are as they were beside the appended module.
+        self.assertEqual(sorted(map_chain(self, receipt, "SeamReason")["boundKeys"]),
+                         sorted(REASON_KEYS))
+        # A parallel guard read by pairs needs the global pairs unassigned,
+        # like every guard table read that way (the real reasons table too).
+        iterated = lines[3] + b" pairs = pairs"
+        receipt = self.receipt(with_file(self.files, host, prefix + iterated + b"\n"))
+        self.assertEqual([chain for chain in receipt["mapChains"]
+                          if chain["dispatch"]["path"] == host], [])
+        refused = "a guard table is iterated by pairs, which the loaded source assigns"
+        self.assertEqual(sorted((problem["path"], problem["line"], problem["construct"],
+                                 problem["detail"])
+                                for problem in receipt["problems"]
+                                if problem["code"] != "binding-unbound"),
+                         sorted([(host, first, "dispatcher", refused)]
+                                + [(USER_TEXT, line, "dispatcher", refused) for line in (
+                                    self.dispatch_line(b"SeamReason(reasonKeys[s],reasons[s])"),
+                                    self.dispatch_line(
+                                        b"LocalizedReason(localizedReasons[s],s)"))]))
+
+    def dispatch_line(self, call):
+        """The line of the one occurrence of call in the real core/UserText.lua."""
+        lf = self.files[USER_TEXT].replace(b"\r\n", b"\n")
+        self.assertEqual(lf.count(call), 1)
+        return lf[:lf.index(call)].count(b"\n") + 1
 
 
 # The V15 host label (C26 to C29) and the Spec toy module (C29): the toy

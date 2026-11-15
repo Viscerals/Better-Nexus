@@ -2941,7 +2941,15 @@ def _cli_provenance(receipt, toc, require_complete):
 # and no control flow, reachability or runtime value is decided. Local names
 # are resolved lexically. A receiver is the global Nexus followed by
 # .Localization, directly or through a local alias that is never assigned
-# again; only Text, Resolve and Format are consumer methods, each bound to the
+# again, or the call of a seam accessor (_seam_accessor): a local function
+# that is never assigned again, takes no parameter and no ..., holds no nested
+# function and whose every return gives exactly nil or that receiver (at
+# least one of them the receiver), called without an argument; one level
+# only, so an accessor is never read through another one or through itself,
+# and a local declared with such a call is a receiver like a local alias. A
+# function that can return anything else, takes a parameter or is assigned
+# again names no receiver. Only Text, Resolve and Format are consumer
+# methods, each bound to the
 # declared kind class (text or block, text or block, format or template). A
 # key is bound by:
 #
@@ -2956,7 +2964,13 @@ def _cli_provenance(receipt, toc, require_complete):
 #   "if MAP[v] then ... end" in the body of an exported module function
 #   (function T.Name, with Nexus.<Module> = T, defined once). Only an earlier
 #   "if OTHER[v] then" guard over another such table may precede it; the
-#   codes it holds shadow the map's entries.
+#   codes it holds shadow the map's entries. The guard of the dispatch itself
+#   may also be "if GUARD[v] then" over a second read-only local table of
+#   literal string pairs whose keys are exactly the map's keys
+#   (_UnitScan.parallel_guard): every value of it is a string, so it passes
+#   for exactly the map's codes. A missing or an extra key, a value that is
+#   no literal string, a table that is assigned, passed or stored, or one
+#   iterated by pairs while the loaded source assigns pairs, is unresolved.
 #
 # A site counts only when its localization result reaches an output (review
 # fix 1): a may-flow path in _UnitFlow, from the call through parens, the
@@ -3059,8 +3073,11 @@ _CONSUMER_COMPLETENESS = ('this receipt never establishes completeness: dynamic 
                           'reachability, rendering and native display are outside it')
 _CONSUMER_LIMITS = (
     'static syntax only: a bound site is not proved to run, to be reached or to be displayed',
-    'a localization table passed to another function, stored in a global or a table field, or '
-    'reached through a computed name is not followed',
+    'a localization table passed to another function, stored in a global or a table field, '
+    'reached through a computed name, or returned by a function other than the exact seam '
+    'accessor shape described for this seam (a local function never assigned again, without '
+    'parameters or a nested function, whose every return is nil or the seam itself, called '
+    'without an argument, one level only) is not followed',
     'map dispatch is accepted only in the exact guarded shape described for this seam',
     'result flow is may-flow and flow-insensitive: field values follow table identity only '
     'through constructors, unassigned local aliases and local-function or pcall arguments in '
@@ -3842,34 +3859,96 @@ class _Resolver:
                 self.expr(child, scopes)
 
 
-def _path(node, loose=False, depth=0, env=False):
+def _path(node, loose=False, depth=0, env=False, accessor=True):
     """The dotted Nexus path an expression names ('Nexus',
     'Nexus.Localization', ...) through the global Nexus, literal fields and
     local aliases, else None. An alias that is assigned again names no path;
     loose=True ignores that, to tell a broken alias of a path apart from an
     unrelated name. env=True also reads _G.Nexus as Nexus, for assignment
     targets only (a mutation is never hidden behind _G; no consumer is
-    accepted through it)."""
+    accepted through it). A call names a path only as the call of a seam
+    accessor (_seam_accessor), and then only Nexus.Localization itself;
+    accessor=False refuses every call, so that an accessor is never read
+    through another one."""
     if depth > 64:
         return None
     kind = node.kind
     if kind == 'paren':
-        return _path(node.expr, loose, depth + 1, env)
+        return _path(node.expr, loose, depth + 1, env, accessor)
     if kind == 'name':
         binding = node.binding
         if binding is None:
             return 'Nexus' if node.value == 'Nexus' else None
         if binding.kind != 'local' or binding.value is None or (binding.assigned and not loose):
             return None
-        return _path(binding.value, loose, depth + 1, env)
+        return _path(binding.value, loose, depth + 1, env, accessor)
     if kind == 'index':
         if env and node.key.kind == 'string' and node.key.value == 'Nexus' \
                 and _global_ref(node.obj) == _ENV:
             return 'Nexus'
-        base = _path(node.obj, loose, depth + 1, env)
+        base = _path(node.obj, loose, depth + 1, env, accessor)
         if base is not None and node.key.kind == 'string' and node.key.value is not None:
             return base + '.' + node.key.value
+    if kind == 'call' and accessor:
+        return _seam_accessor(node, loose, depth + 1, env)
     return None
+
+
+def _seam_accessor(call, loose, depth, env):
+    """Nexus.Localization when call is the call of a seam accessor, else
+    None. A seam accessor is a local function (local function f, or local
+    f = function) that is never assigned again, is no method, takes no
+    parameter and no ..., holds no nested function, ends with a return
+    statement, and whose every return statement gives exactly one value
+    that is either the literal nil or names Nexus.Localization itself by
+    the rules of _path without this one (the global path or a local alias
+    never assigned again), at least one of them the seam. The call passes
+    no argument. Its value is then the seam table as read while the
+    accessor runs, or nil: a local declared with it (as the first value of
+    that call) is the same kind of name as a local alias declared at that
+    place. Exactly one level: a return that is itself a call, or an alias
+    declared with a call, is refused, so there is no chain and no
+    recursion. loose=True ignores an accessor or an inner alias that is
+    assigned again, as for an alias; every other condition stays.
+
+    The last statement is checked first, so a function that does not end
+    with such a return costs no walk of its body."""
+    callee = call.func
+    if call.args or callee.kind != 'name':
+        return None
+    binding = callee.binding
+    if binding is None or binding.kind not in ('local', 'localfunction') \
+            or binding.value is None or binding.value.kind != 'function' \
+            or (binding.assigned and not loose):
+        return None
+    func = binding.value
+    if func.params or func.vararg or func.method or not func.body \
+            or func.body[-1].kind != 'return':
+        return None
+
+    def returned(stmt):
+        """True: the seam; False: the literal nil; None: anything else."""
+        if len(stmt.exprs) != 1:
+            return None
+        value = stmt.exprs[0]
+        if value.kind == 'constant' and value.value == 'nil':
+            return False
+        if _path(value, loose, depth, env, False) == _LOCALIZATION:
+            return True
+        return None
+
+    if returned(func.body[-1]) is None:
+        return None
+    seam = False
+    for node in _descendants(func.body):
+        if node.kind == 'function':
+            return None
+        if node.kind == 'return':
+            result = returned(node)
+            if result is None:
+                return None
+            seam = seam or result
+    return _LOCALIZATION if seam else None
 
 
 def _seam_method(path):
@@ -3956,7 +4035,9 @@ class _UnitScan:
     def find_wrappers(self, localfunctions):
         """A local function is a wrapper when a consumer-method call on a
         receiver in its own body takes one of its parameters, never
-        assigned, as the key. Through a reassigned alias it is no wrapper;
+        assigned, as the key. The receiver is the seam path, a local alias
+        of it or a local declared with the call of a seam accessor (_path,
+        _seam_accessor). Through a reassigned alias it is no wrapper;
         the walk reports that call as unresolved. Whether the wrapper
         returns that result is proved when a receipt links the units."""
         for binding in localfunctions:
@@ -4215,7 +4296,9 @@ class _UnitScan:
     def dispatch(self, node, wrapper, arg, ctx):
         """A wrapper(MAP[v], ...) call: checked here for its local shape and
         preceding guards; its dispatcher and output chain are proved when a
-        receipt links the units."""
+        receipt links the units. The guard of the call indexes MAP itself or
+        a parallel table with exactly MAP's keys (parallel_guard); every
+        other condition is the same for both."""
         mapping, variable = arg.obj.binding, arg.key.binding
         entries = _literal_map(mapping, True)
         if entries is None:
@@ -4224,6 +4307,7 @@ class _UnitScan:
                                 % arg.obj.value)
             return
         reason, shadow, frames = None, {}, _frames(ctx)
+        pairs_read = False
         start = max(index for index, entry in enumerate(frames) if entry[0] == 'function')
         _, func, funcstat = frames[start]
         tail = frames[start + 1:]
@@ -4234,18 +4318,32 @@ class _UnitScan:
             reason = 'the call is not the return of an if MAP[v] then ... end in a function body'
         else:
             cond, returned = statement.clauses[0][0], tail[1][1][tail[1][2]]
-            if not (cond.kind == 'index' and cond.obj.kind == 'name'
-                    and cond.obj.binding is mapping and cond.key.kind == 'name'
-                    and cond.key.binding is variable and returned.kind == 'return'
-                    and len(returned.exprs) == 1 and returned.exprs[0] is node):
+            # The guard indexes a local table by the dispatch variable and
+            # the call is its sole return. The table is the map itself, or a
+            # parallel table (parallel_guard) that passes for the same codes.
+            shaped = (cond.kind == 'index' and cond.obj.kind == 'name'
+                      and cond.key.kind == 'name' and cond.key.binding is variable
+                      and returned.kind == 'return' and len(returned.exprs) == 1
+                      and returned.exprs[0] is node)
+            parallel = shaped and cond.obj.binding is not mapping \
+                and cond.obj.binding is not None and cond.obj.binding.kind == 'local' \
+                and cond.obj.binding.value is not None and cond.obj.binding.value.kind == 'table'
+            pairs_read = self.parallel_guard(cond.obj.binding, entries) if parallel else False
+            if not shaped or (cond.obj.binding is not mapping and not parallel):
                 reason = 'the call is not the sole return guarded by the same MAP[v]'
+            elif pairs_read is None:
+                reason = ('%s is not a read-only local table of literal strings with exactly '
+                          'the keys of %s' % (cond.obj.value, arg.obj.value))
             elif not _unassigned_until(variable, func, tail[0][2]):
                 reason = ('the dispatch variable is not a local of this function left unassigned '
                           'up to the dispatch')
             elif funcstat is None or funcstat.method is not None \
                     or funcstat.target.kind != 'index' or funcstat.target.obj.kind != 'name':
                 reason = 'the dispatch is not in a function T.Name of a module table'
-        iterated = False
+        # A parallel guard read by a for-in pairs header keeps the condition
+        # of every such guard: the global pairs stays unassigned (the linker
+        # refuses the chain otherwise).
+        iterated = pairs_read is True
         if reason is None:
             for earlier in func.body[:tail[0][2]]:
                 guard = _guard(earlier, variable)
@@ -4253,7 +4351,7 @@ class _UnitScan:
                     codes = _literal_map(guard.binding, False)
                     if codes is None:
                         codes = _literal_map(guard.binding, False, self.iterated)
-                        iterated = codes is not None
+                        iterated = iterated or codes is not None
                     if codes is None:
                         reason = '%s is not a read-only local table of literal keys' % guard.value
                         break
@@ -4268,6 +4366,27 @@ class _UnitScan:
         self.candidates.append({'node': node, 'wrapper': wrapper, 'map': mapping,
                                 'entries': entries, 'shadow': shadow, 'func': func,
                                 'funcstat': funcstat, 'iterated': iterated})
+
+    def parallel_guard(self, binding, entries):
+        """A guard 'if GUARD[v] then return wrapper(MAP[v], ...) end' over a
+        second table: GUARD must be a read-only local table of literal string
+        keys and literal string values (_literal_map: never assigned, only
+        indexed, or iterated by a for-in pairs header), and its keys must be
+        exactly the keys of MAP (entries). Every value is then a string, so
+        truthy, and no other key has a value: the guard passes for exactly
+        the codes MAP holds, as 'if MAP[v]' does, and MAP[v] is the literal
+        value of an entry whenever it passes. A key of GUARD that MAP lacks
+        (MAP[v] could be nil), a key of MAP that GUARD lacks (an entry that
+        is never dispatched) and a value that is no literal string are
+        refused. False: accepted with no pairs iteration; True: accepted,
+        GUARD being iterated by pairs (the chain then needs the global pairs
+        unassigned); None: refused."""
+        rows, iterated = _literal_map(binding, True), False
+        if rows is None:
+            rows, iterated = _literal_map(binding, True, self.iterated), True
+        if rows is None or {code for code, _ in rows} != {code for code, _ in entries}:
+            return None
+        return iterated
 
 
 _STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callstat', 'do',
@@ -7123,20 +7242,43 @@ class _Linker:
 
     def prove(self, roots_by_key):
         """{key: {id(root): outputs}} for the roots of each key whose value
-        reaches an output, under the every-definition rule of that key."""
-        proofs = {}
+        reaches an output, under the every-definition rule of that key.
+
+        Several keys can have the same single root (the entries of one map
+        dispatch share its call node). Their searches are the same query:
+        search(roots) with one root, no allowed set and no stop reads only
+        its root, the linked units (fixed once the linker is built) and
+        memos whose entries are written once and never changed or dropped
+        (output_memo, receiver_memo, field_cache and each flow's
+        object_memo). An entry is provisional only while it is computed,
+        and no search runs inside such a computation, so every entry the
+        first search of a query read or wrote is final when the query comes
+        again. The key is no input of it. A repeat therefore finds the same
+        sinks and writes nothing, so the sinks of such a query are kept for this one
+        call, under the root node itself and the identity of its flow, and
+        used again for a later key with that same root and flow. Nothing is
+        kept between calls, no other search is shared (several roots, the
+        per-root searches under allowed, a forced single_root_replay,
+        wrapper_returns), and the output rows are built anew for each key."""
+        proofs, single = {}, {}
         for key, roots in roots_by_key.items():
             proofs[key] = {}
             if not roots:
                 continue        # a search from no root reaches nothing
-            allowed, sinks = self.search(roots)
             if len(roots) == 1 and not self.single_root_replay:
                 # One root: its own search under the key's every-definition
-                # rule is the search just made (allowed is its reached
-                # fixpoint), so its sinks are those sinks.
+                # rule is that one search (allowed is its reached fixpoint),
+                # so its sinks are those sinks.
+                root, flow = roots[0]
+                query = (root, id(flow))
+                if query in single:
+                    sinks = single[query]
+                else:
+                    sinks = single[query] = self.search(roots)[1]
                 if sinks:
-                    proofs[key][id(roots[0][0])] = self.outputs(sinks)
+                    proofs[key][id(root)] = self.outputs(sinks)
                 continue
+            allowed, sinks = self.search(roots)
             for root in roots:
                 _, sinks = self.search([root], allowed)
                 if sinks:
