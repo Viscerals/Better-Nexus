@@ -174,8 +174,16 @@ This file has two parts.
   created and before a choice is decided; `OrbAdapter.Spend` immediately before
   `ConfirmSpend`; `OrbAdapter.Select` after validation and again immediately
   before `SelectPerk`. `Spend` and `Select` return `REJECTED` with the boundary
-  status `CLIENT_CONTRACT`. A refused start leaves ordinary Auto, the Orb
-  ownership, the balance and every choice unchanged. A refused choice pauses
+  status `CLIENT_CONTRACT`. A start refused by the preflight, or by `Confirm`'s
+  check immediately before the switch, leaves ordinary Auto, the Orb ownership,
+  the balance and every choice unchanged; a client that is already refused when
+  the player starts is always refused there. One narrow race remains: the
+  switch to Auto OFF and `Acquire`'s own fresh read run other code, so if the
+  provider markers or the specialization field appear only after `Confirm`'s
+  check, `OrbAdapter.Acquire` refuses after ordinary Auto has already been
+  switched off. Auto then stays off until the player turns it on again; no
+  ownership is taken, no receipt is created, and no Orb or choice is sent. A
+  refused choice pauses
   the run and keeps the receipt and its counted spend with no selection attempt
   recorded; the player's own choice settles it through the existing result
   path. Recovery authority, budgets and the read-only recovery requests are

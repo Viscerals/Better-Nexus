@@ -36,12 +36,21 @@ does not take a visible memory card either. The game's own Orb and choice
 windows stay available. A client with neither marker and no specialization
 field is the older provider, and the path above applies unchanged.
 
-The refusal comes before any side effect:
+The refusal comes before any side effect, with the one exception named in the
+first item:
 
 - Readiness, Prepare, Start and Confirm refuse in the preflight. Confirm reads
   the admission again immediately before ordinary Automation is switched off.
-  Ordinary Automation, ownership, the balance and the choices stay as they
-  were. `OrbAdapter.Acquire` keeps its own check.
+  For a refusal at either of these points, ordinary Automation, ownership, the
+  balance and the choices stay as they were. A client that is already refused
+  when the player starts is always refused there.
+  `OrbAdapter.Acquire` keeps its own check, which runs after the switch. One
+  narrow race therefore remains: switching ordinary Automation off and
+  Acquire's own fresh read run other code, so if the provider markers or the
+  specialization field appear only after Confirm's check, Acquire refuses after
+  ordinary Automation has already been switched off. Automation then stays off
+  until the player turns it on again. No ownership is taken, no receipt is
+  created, and no Orb or choice is sent.
 - Resume toward a next spend is refused in `OrbAdapter.Rebind`, before ordinary
   Automation is switched off.
 - Resume of a kept receipt whose three-card offer is open is refused before
@@ -253,7 +262,8 @@ all-source review, run limit, optional recycling, Start/single-step, separate
 fixed Pause and Resume during a run, Stop, Recheck, and Help. Start is never
 implicit. Missing Orb APIs disable only this feature. So does a refused client
 admission (see Client admission): Start is not offered, and ordinary Automation
-is left as it was. Once a Wishlist is assigned and the Orb state is readable,
+is left as it was (Client admission names the one race in which a start that
+was offered is refused after the switch). Once a Wishlist is assigned and the Orb state is readable,
 the window gives the admission reason. Local Store/ownership
 capability readiness is required; Community preparation is not a prerequisite.
 
