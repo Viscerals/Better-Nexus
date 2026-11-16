@@ -2061,6 +2061,20 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         M.RefreshAssociations()
                     end,
                 } or nil
+                -- D7-S3: this chooser was opened over an empty Saved Build
+                -- slot (no Saved Build shown, so no question is asked). If
+                -- one has been saved into that slot since, a click here
+                -- would assign to a Saved Build the player was never shown
+                -- and, with Auto ON, never asked about: nothing is assigned,
+                -- this chooser closes and the next one names that build.
+                if numbered and emptySlot and M.SavedBuildIdentity(active) ~= nil then
+                    M.SayTargetChanged({changed = function()
+                        HideWishlistPicker()
+                        M.RefreshAssociations()
+                    end})
+                    GuideAssign(numbered, active, false, "target_changed", cSnapshot, origin)
+                    return
+                end
                 if cSnapshot.lockEvidenceStatus=="unavailable" and Nexus.WishlistEditor
                     and Nexus.WishlistEditor.ResolveAndAssignWishlist then
                     -- A Wishlist without lock evidence: its role choice (the

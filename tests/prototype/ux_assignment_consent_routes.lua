@@ -804,4 +804,205 @@ C.scenario('E12 D7 role picker after an editor candidate answer: Saved Build A r
  C.guard(Auto() and spends==0,'E12: Auto stays ON; nothing is spent')
 end)
 
+-- D7-S3: a numbered target that cannot be identified when the assignment is
+-- started (an empty or missing Saved Build slot) starts no role choice and no
+-- role picker. A Saved Build saved into that slot afterwards receives nothing
+-- without a fresh choice and, with Auto ON, its confirmation. EXPECT here
+-- fails on the pin 143b3ab5 by design: there the default mode confirmed the
+-- roles for the empty target, the role picker then waited unbound, and its
+-- Confirm assigned to whatever the slot held by then, unasked. The populated
+-- controls are C2, C5, C9, E4b and E11; the first-run controls are F1 and F2.
+local EMPTY_REASON='empty or unavailable'
+local function EmptyA(rows) rows[1]={name=BUILD_A,verified=true,echoes={}} end
+local function MissingA(rows) rows[1]=nil end
+local function PopulatedA(rows) rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=1}}} end
+-- Whatever a waiting role picker would do if the player now confirmed it.
+local function ConfirmIfWaiting()
+ if not RolePickerShown() then return end
+ if NexusWishlistRoleUseOwned then NexusWishlistRoleUseOwned:Click() end
+ if NexusWishlistRoleConfirm and NexusWishlistRoleConfirm:IsEnabled() then NexusWishlistRoleConfirm:Click() end
+end
+-- One D7-S3 case. `button(tag)` finds the route's control for the Wishlist
+-- without lock evidence; `manual` is the role mode; `unset` empties slot 1.
+local function UnidentifiedTarget(tag,manual,unset,button)
+ Boot({manual=manual})
+ TurnAutoOn()
+ ServerNow(unset)
+ local control=button(tag)
+ local saved=Saved()
+ Zero()
+ local p
+ local said=Heard(function() p=Press(control) end)
+ print('OBSERVED',tag..' calls='..Desc()..' said='..said..' picker='..tostring(RolePickerShown()))
+ C.guard(p==nil and H.popup==nil,tag..': no Auto-ON question is asked for a slot that holds no Saved Build')
+ C.expect(Roles()==0 and Writes()==0 and Saved()==saved,
+  tag..': no role choice is confirmed and nothing is assigned for the unidentified target',Desc())
+ C.expect(not RolePickerShown(),tag..': no role picker is opened to wait on it')
+ C.expect(said:find(EMPTY_REASON,1,true)~=nil,tag..': the player is told the slot is empty or unavailable',said)
+ -- A Saved Build is saved into slot 1 afterwards.
+ ServerNow(PopulatedA)
+ Zero()
+ ConfirmIfWaiting()
+ print('OBSERVED',tag..' after the slot was populated: calls='..Desc())
+ C.expect(Roles()==0 and Writes()==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+  tag..': the Saved Build that appeared in the slot receives no role choice and no assignment',Desc())
+ -- A fresh choice for it asks first (Auto ON), and only its answer assigns.
+ control=button(tag..' again')
+ Zero()
+ local again=Press(control)
+ C.expect(again~=nil and again.arg1==EVIDENCE and again.arg2==TARGET_A and Writes()==0,
+  tag..': choosing again asks the Auto-ON question, naming Saved Build A',again and tostring(again.arg2) or 'no confirmation')
+ if not again then return end
+ Accept(again)
+ ConfirmIfWaiting()
+ C.expect(Roles()==1 and Wrote('SetLoadoutWishlist',1)==1 and Stored(1)~=nil and Stored(1).name==EVIDENCE and Stored(2)==nil,
+  tag..': only that answer confirms the roles and assigns Saved Build A',Desc())
+ C.guard(Auto() and spends==0,tag..': Auto stays ON; nothing is spent')
+end
+local function JournalRow(tag) return ChooserRow(tag,EVIDENCE,true) end
+local function EditorRow(tag) return (EditorCandidate(tag,EVIDENCE)) end
+
+C.scenario('S3a D7-S3 Journal, current-lock default: an empty Saved Build slot starts no role choice; a build saved into it later gets nothing unasked',function()
+ UnidentifiedTarget('S3a',false,EmptyA,JournalRow)
+end)
+C.scenario('S3b D7-S3 Journal, manual role mode: a missing Saved Build slot opens no role picker; a build saved into it later gets nothing unasked',function()
+ UnidentifiedTarget('S3b',true,MissingA,JournalRow)
+end)
+C.scenario('S3c D7-S3 editor candidate, current-lock default: a missing Saved Build slot starts no role choice; a build saved into it later gets nothing unasked',function()
+ UnidentifiedTarget('S3c',false,MissingA,EditorRow)
+end)
+C.scenario('S3d D7-S3 editor candidate, manual role mode: an empty Saved Build slot opens no role picker; a build saved into it later gets nothing unasked',function()
+ UnidentifiedTarget('S3d',true,EmptyA,EditorRow)
+end)
+
+C.scenario('S3e D7-S3 Journal: a chooser left open over an empty slot assigns nothing to a Saved Build saved into it meanwhile',function()
+ Boot()
+ TurnAutoOn()
+ ServerNow(EmptyA)
+ local button=ChooserRow('S3e',PLAIN,false)
+ local saved=Saved()
+ -- A Saved Build is saved into slot 1 while the chooser stays open.
+ ServerNow(PopulatedA)
+ C.setup(NexusWishlistOnlyPicker:IsShown() and button~=nil and button:IsVisible(),
+  'S3e: fixture: the chooser opened over the empty slot is still open')
+ Zero()
+ local p
+ local said=Heard(function() p=Press(button) end)
+ print('OBSERVED','S3e calls='..Desc()..' said='..said)
+ C.expect(Writes()==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+  'S3e: the click assigns nothing to the Saved Build that was never shown or asked about',Desc())
+ C.expect(p==nil and Refused(said) and not NexusWishlistOnlyPicker:IsShown(),
+  'S3e: the stale chooser closes and the player is told to choose again',said)
+ button=ChooserRow('S3e again',PLAIN,false)
+ Zero()
+ local again=Press(button)
+ C.expect(again~=nil and again.arg1==PLAIN and again.arg2==TARGET_A and Writes()==0,
+  'S3e: choosing again asks the Auto-ON question, naming Saved Build A',again and tostring(again.arg2) or 'no confirmation')
+ if not again then return end
+ Accept(again)
+ C.expect(Wrote('SetLoadoutWishlist',1)==1 and Writes()==1 and Stored(1)~=nil and Stored(1).name==PLAIN,
+  'S3e: only that answer assigns Saved Build A',Desc())
+end)
+
+C.scenario('F1 D7-S3 control, Journal first run, manual role mode: slot 0 still opens the role picker and sets the first-run target',function()
+ Boot({active=0,manual=true})
+ TurnAutoOn()
+ local button=ChooserRow('F1',EVIDENCE,true)
+ Zero()
+ local p=Press(button)
+ C.guard(p==nil and H.popup==nil and RolePickerShown() and Writes()==0,
+  'F1: no confirmation; the role picker waits and nothing is written',Desc())
+ ConfirmIfWaiting()
+ print('OBSERVED','F1 calls='..Desc())
+ C.guard(Roles()==1 and Wrote('SetFirstRunWishlist')==1 and Stored('first')~=nil and Stored(1)==nil and Stored(2)==nil
+  and not RolePickerShown(),'F1: its Confirm sets the first-run target and no Saved Build',Desc())
+end)
+
+C.scenario('F2 D7-S3 control, editor candidate first run, current-lock default: slot 0 still confirms roles and sets the first-run target',function()
+ Boot({active=0})
+ TurnAutoOn()
+ local button=EditorCandidate('F2',EVIDENCE)
+ Zero()
+ local p=Press(button)
+ RepeatIfOpen()
+ print('OBSERVED','F2 calls='..Desc())
+ C.guard(p==nil and H.popup==nil and Roles()==1 and Wrote('SetFirstRunWishlist')==1 and Stored('first')~=nil
+  and Stored(1)==nil and Stored(2)==nil,'F2: the first-run target is set without a confirmation',Desc())
+end)
+
+-- D7-S4: the Saved Build that was named is gone, empty or unreadable at the
+-- role Confirm. Gone or empty: nothing is written, the picker closes and a
+-- new choice is required. Unreadable: nothing is written while it is
+-- unknown and the picker stays open with its existing message (retained,
+-- bounded retry); a later Confirm must prove the original identity again
+-- before any role or assignment, and a changed identity always closes the
+-- picker for a new choice. All GUARD: the pin already behaves so.
+C.scenario('S4 D7-S4 role Confirm over a gone, empty or unreadable Saved Build: no write while unknown; only the same identity is assigned',function()
+ Boot({manual=true})
+ TurnAutoOn()
+ local world=H.Clone(H.perks.serverBuildSlots)
+ local function Restore() H.perks.serverBuildSlots=H.Clone(world);H.Notify();A.Poll();H.Advance(1) end
+ -- The chooser asked, the player answered, the role picker waits.
+ local function Waiting(tag)
+  local button=ChooserRow(tag,EVIDENCE,true)
+  Zero()
+  local p=Press(button)
+  C.setup(p~=nil,tag..': fixture: the click asks first')
+  if not p then return false end
+  Accept(p)
+  C.setup(RolePickerShown() and Writes()==0,tag..': fixture: after the answer the role picker waits',Desc())
+  if not RolePickerShown() then return false end
+  NexusWishlistRoleUseOwned:Click()
+  return true
+ end
+ for _,case in ipairs({{'gone',MissingA},{'empty',EmptyA}}) do
+  local tag='S4 '..case[1]
+  if not Waiting(tag) then return end
+  local saved=Saved()
+  ServerNow(case[2])
+  C.setup(RolePickerShown(),tag..': fixture: the role picker is still open')
+  local said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+  print('OBSERVED',tag..' calls='..Desc()..' said='..said)
+  C.guard(Roles()==0 and Writes()==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+   tag..': Confirm writes no role choice and no assignment',Desc())
+  C.guard(Refused(said) and not RolePickerShown(),tag..': the role picker closes and the player is told to choose again',said)
+  Restore()
+ end
+ -- Unreadable, then readable again as ANOTHER Saved Build.
+ local tag='S4 unreadable then changed'
+ if not Waiting(tag) then return end
+ local saved=Saved()
+ H.perks.serverBuildSlots=nil
+ local said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ print('OBSERVED',tag..' unreadable: calls='..Desc()..' said='..said..' message='..RolePickerMessage())
+ C.guard(Roles()==0 and Writes()==0 and Saved()==saved,tag..': while the Saved Builds are unreadable nothing is written',Desc())
+ C.guard(RolePickerShown() and RolePickerMessage()~='' and said:find(CHANGED,1,true)==nil,
+  tag..': the role picker stays open with its message (retained retry)',RolePickerMessage())
+ H.perks.serverBuildSlots=H.Clone(world)
+ ServerNow(function(rows) rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=2}}} end)
+ C.setup(RolePickerShown(),tag..': fixture: the role picker is still open')
+ said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ print('OBSERVED',tag..' readable: calls='..Desc()..' said='..said)
+ C.guard(Roles()==0 and Writes()==0 and Saved()==saved and Stored(1)==nil,
+  tag..': the retry over a changed Saved Build writes no role choice and no assignment',Desc())
+ C.guard(Refused(said) and not RolePickerShown(),tag..': a changed identity closes the picker for a new choice',said)
+ Restore()
+ -- Unreadable, then readable again as the SAME Saved Build.
+ tag='S4 unreadable then same'
+ if not Waiting(tag) then return end
+ saved=Saved()
+ H.perks.serverBuildSlots=nil
+ said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ C.guard(Roles()==0 and Writes()==0 and Saved()==saved and RolePickerShown(),
+  tag..': while the Saved Builds are unreadable nothing is written and the picker stays open',Desc())
+ Restore()
+ C.setup(RolePickerShown(),tag..': fixture: the role picker is still open')
+ said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ print('OBSERVED',tag..' readable: calls='..Desc()..' said='..said)
+ C.guard(Roles()==1 and Wrote('SetLoadoutWishlist',1)==1 and Writes()==2 and Stored(1)~=nil and Stored(1).name==EVIDENCE
+  and Stored(2)==nil and not RolePickerShown() and said:find(CHANGED,1,true)==nil,
+  tag..': the retry over the same Saved Build confirms the roles and assigns it, once',Desc())
+ C.guard(Auto() and spends==0,'S4: Auto stays ON; nothing is spent')
+end)
+
 C.finish('(B2/NB3: every Auto-ON assignment route asks before any role or assignment write; NB1 no timing promise; NB4 fail-closed and accept-once)')

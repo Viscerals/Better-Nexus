@@ -604,8 +604,10 @@ function RolePicker.Accept()
         -- renamed while this picker waited). Then no role is confirmed and
         -- nothing is assigned: the picker closes and the player chooses
         -- again, for what the slot holds now.
+        -- A numbered destination without a target was never identified: it
+        -- fails closed the same way (no role, no assignment), never open.
         local target=state.target
-        if target and not RolePicker.TargetHolds(target) then
+        if state.activeSlot>0 and not (target and RolePicker.TargetHolds(target)) then
             GuideNote("assign",{origin="rolepicker",destination=state.activeSlot,
                 ok=false,reason="target_changed",guide=state.guide})
             RolePicker.Hide()
@@ -807,9 +809,11 @@ function M.ResolveAndAssignWishlist(candidate, activeSlot, guide, binding)
     -- binding (optional): the Saved Build its caller showed the player
     -- ({slot, identity}, JournalTab.AssignWithConsent's). A numbered target
     -- without one is bound here, to what its slot holds at this call (the
-    -- editor's candidates arrive straight from their own check of it). A
-    -- role picker that then waits confirms no role and assigns nothing unless
-    -- that Saved Build is still the one in the slot (RolePicker.Accept).
+    -- editor's candidates arrive straight from their own check of it), and
+    -- refused here when that cannot be identified. So every role picker for
+    -- a numbered target carries one; it confirms no role and assigns nothing
+    -- unless that Saved Build is still the one in the slot
+    -- (RolePicker.Accept). Slot 0, the first-run target, has none.
     local slot=tonumber(activeSlot) or 0
     local target=nil
     if slot>0 then
@@ -823,11 +827,23 @@ function M.ResolveAndAssignWishlist(candidate, activeSlot, guide, binding)
                 return false,"target_changed"
             end
             target=binding
-        elseif journal and type(journal.SavedBuildIdentity)=="function" then
-            -- Unreadable or empty now: nothing to bind; the assignment's own
-            -- refusals answer as before.
-            local identity=journal.SavedBuildIdentity(slot)
-            if identity then target={slot=slot,identity=identity} end
+        else
+            -- D7-S3: a numbered target that cannot be identified now (empty,
+            -- missing or unreadable) starts nothing: no role choice, no role
+            -- picker that could wait until a Saved Build appears in that
+            -- slot, no assignment. It is refused here with the assignment's
+            -- own reason for such a slot, said in chat (the callers do not
+            -- show a return value).
+            local identity=journal and type(journal.SavedBuildIdentity)=="function"
+                and journal.SavedBuildIdentity(slot) or nil
+            if not identity then
+                local reason="that loadout slot is empty or unavailable"
+                GuideNote("assign",{origin="editor",destination=slot,ok=false,
+                    reason=reason,guide=guide})
+                print("|cffff6060Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason)))
+                return false,reason
+            end
+            target={slot=slot,identity=identity}
         end
     end
     local resolved,status,_,why=Adapter.ResolveWishlistEvidence(candidate)
