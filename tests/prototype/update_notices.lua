@@ -352,6 +352,63 @@ Boot({label='test.007-abcdef0',channel='public-test'})
 assert(Nexus.ReleaseIdentity().test==nil and Nexus.ReleaseIdentity().channel=='internal','a padded label states no test number, as in the tools')
 print('PASS padded label')
 
+-- 13. Native test.163039: the status popup opened through Options > Open
+-- Settings > Notices stayed behind Nexus Options (both DIALOG strata), which
+-- hid its explanation, address box and Close. The real Settings row runs the
+-- real Panel.ShowUpdateStatus. The client returns the shown popup frame, or
+-- nil when no dialog is free; the harness returns its own record, so here the
+-- show is wrapped to that client contract around the real harness show.
+Boot(PUBLIC27);Ready()
+do
+ local SW=assert(Nexus.SettingsWindow,'the Settings window module')
+ local harnessShow=StaticPopup_Show
+ local mode='frame'
+ StaticPopup_Show=function(which,a,b,data)
+  if mode=='nil' then return nil end
+  local record=harnessShow(which,a,b,data)
+  record.frame:Show()
+  return record.frame
+ end
+ -- The row by the menu words the Settings window shows (colour codes removed).
+ local function Row()
+  local want=(Nexus.Updates.Status().menu:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''))
+  for i,row in ipairs(SW.Rows('notices'))do if row.text==want then return i,row.text end end
+ end
+ assert(SW.Show('notices') and SW.IsShown(),'Nexus Options opens on Notices')
+ local index,text=Row()
+ assert(index,'the Notices category lists the status row: '..tostring(Nexus.Updates.Status().menu))
+ local dismissed=NexusDB.updateDismissed
+ popup=nil
+ assert(SW.Activate(index,text),'the status row runs its own action')
+ assert(popup and popup.which=='NEXUS_UPDATE_RELEASES' and popup.url=='https://github.com/Viscerals/Better-Nexus/releases',
+  'the version popup is shown with the local Releases address')
+ assert(popup.text==Nexus.Updates.Status().detail,'its status wording is the Updates detail, unchanged')
+ assert(H.popup.editBox:GetText()==popup.url,'its address box holds the address')
+ assert(not SW.IsShown(),'Nexus Options gives way to the shown popup')
+ assert(NexusDB.updateDismissed==dismissed,'the give-way writes no saved state')
+ assert(SW.Show() and SW.IsShown() and SW.Activate(index,text) and not SW.IsShown(),
+  'Options > Open Settings returns to Notices, and its status row works again')
+ -- No free dialog: nothing is shown, so Nexus Options stays open.
+ assert(SW.Show() and SW.IsShown())
+ mode='nil';popup=nil
+ assert(SW.Activate(index,text) and popup==nil,'with no free dialog nothing is shown')
+ assert(SW.IsShown(),'and Nexus Options stays open')
+ -- A failing show still raises as before, and Nexus Options stays open.
+ StaticPopup_Show=function() error('synthetic show failure') end
+ assert(not pcall(SW.Activate,index,text),'a failing show is not swallowed')
+ assert(SW.IsShown(),'and Nexus Options stays open after it')
+ -- A return that is not a shown frame (the harness record) changes nothing.
+ StaticPopup_Show=harnessShow
+ assert(SW.Activate(index,text) and SW.IsShown(),'a return that is not a shown frame leaves Nexus Options open')
+ -- Another popup does not hide Nexus Options.
+ StaticPopupDialogs.NEXUS_TEST_OTHER={text='other',button1='OK'}
+ StaticPopup_Show('NEXUS_TEST_OTHER')
+ assert(SW.IsShown(),'another popup leaves Nexus Options open')
+ SW.Hide()
+ assert(#H.actions==0,'no gameplay action')
+end
+print('PASS the status popup is not left behind Nexus Options')
+
 -- 12. Old peers. The published test.9027 decoder rule is the same ValidVersion: prove it accepts the new announcement.
 Boot(PUBLIC27);Ready()
 assert(Nexus.SyncInternals and Deliver(request28,'OldPeerCheck'),'request with +test metadata is a valid request')

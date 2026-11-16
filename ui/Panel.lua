@@ -1940,7 +1940,8 @@ function M.SetupFacts()
 end
 
 -- Read-only. Opening it marks the shown target as seen, so its chat notice is
--- not repeated. It changes nothing else.
+-- not repeated. It changes nothing else, except that a shown Nexus Options
+-- window gives way to the shown popup (below).
 function M.ShowUpdateStatus()
     local updates = Nexus.Updates
     if not (updates and updates.Status) then return false end
@@ -1953,7 +1954,27 @@ function M.ShowUpdateStatus()
         dialog.text = "%s\n\n" .. (LT("panel.popup.releases_copy_address"):gsub("%%", "%%%%"))
         dialog.button1 = LT("panel.popup.close")
     end
-    StaticPopup_Show("NEXUS_UPDATE_RELEASES", status.detail, status.url)
+    local popup = StaticPopup_Show("NEXUS_UPDATE_RELEASES", status.detail, status.url)
+    -- Native test.163039 (Options > Open Settings > Notices > the status
+    -- row): Nexus Options and this popup share the DIALOG strata, and the
+    -- Options window drew over the popup's explanation, address box and
+    -- Close. So a shown Nexus Options window gives way through its own
+    -- SettingsWindow.Hide, only after the client returned this popup's
+    -- frame and that frame is shown. StaticPopup_Show returns nil when no
+    -- dialog is free: Options then stays open. Its category and page are
+    -- kept, so Options > Open Settings opens Notices again. The pooled
+    -- popup frame, every strata and level, and every other popup are not
+    -- changed. Display only; each foreign call is protected.
+    local kind = type(popup)
+    if kind == "table" or kind == "userdata" then
+        local okShown, shown = pcall(function() return popup:IsShown() end)
+        local settings = Nexus.SettingsWindow
+        if okShown and (shown == true or shown == 1) and type(settings) == "table"
+            and type(settings.IsShown) == "function" and type(settings.Hide) == "function" then
+            local okOpen, open = pcall(settings.IsShown)
+            if okOpen and open then pcall(settings.Hide) end
+        end
+    end
     if status.candidate and updates.Dismiss then updates.Dismiss() end
     -- Seeing the unverified hint is enough: it is not announced again this
     -- session. This dismissal is session state and writes no saved data.
