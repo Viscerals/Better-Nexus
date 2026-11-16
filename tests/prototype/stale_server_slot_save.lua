@@ -47,6 +47,28 @@ local function boot(saved,slots)
  return h
 end
 local H=boot()
+-- Revision 6 (updated-client compatibility, full-CI finding): GameAdapter.
+-- UploadWishlist replaces an existing server Wishlist (slot > 0) only when
+-- the current slot list shows that destination in full; a missing one is
+-- refused ("stale_slot") and starts no spacing. Slot 103 is not in this
+-- fixture's list, so the spacing setup names it as a known synthetic Wishlist
+-- mirror (above the declared slots, unverified, the spacer's own Echoes) for
+-- that one real upload and then puts the list back exactly as it was. The
+-- spacing window is the production one, opened by that real upload; nothing
+-- is stubbed and no timestamp is set.
+local function KnownSlotUpload(upload,slot,name,echoes)
+ local created=H.perks.serverBuildSlots==nil
+ if created then H.perks.serverBuildSlots={} end
+ local slots=H.perks.serverBuildSlots
+ local prior=slots[slot]
+ local rows={}
+ for i,e in ipairs(echoes) do rows[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks or 1,locked=false} end
+ slots[slot]={name=name,verified=false,echoes=rows}
+ local ok,why=upload(slot,name,echoes)
+ slots[slot]=prior
+ if created then H.perks.serverBuildSlots=nil end
+ return ok,why
+end
 -- M3: the editor's actions are named by their effect; a legacy label also
 -- finds the action with that default intent (new label first, then legacy).
 local LABELS={['Create Wishlist']={'Create & assign','Create unassigned','Create Wishlist'},
@@ -154,7 +176,7 @@ end
 -- 4. The slot is reused while the save waits on the upload spacing.
 open()
 do
- check(Nexus.GameAdapter.UploadWishlist(103,'W16-SPACER',{{spellId=200768,quality=0,stacks=1}})==true,'fixture: a recent upload starts the spacing window')
+ check(KnownSlotUpload(Nexus.GameAdapter.UploadWishlist,103,'W16-SPACER',{{spellId=200768,quality=0,stacks=1}})==true,'fixture: a recent upload starts the spacing window')
  local before=snapshot()
  button('Save Wishlist'):Click();H.AcceptPopup()
  check(Nexus.WishlistEditor.IsApplyPending()==true,'precondition: the save waits for the spacing')
@@ -260,7 +282,15 @@ do
  ok,why=A.UploadWishlist(102,NAME,planRows,{[token]=true})
  check(ok==false and why=='stale_slot' and #H.actions==before,'the adapter refuses a slot that shows nothing too: '..tostring(why))
  H.Advance(4)
- check(A.UploadWishlist(102,NAME,planRows)==true and #H.actions==before+1,'a caller that names no identity is unchanged')
+ -- Revision 7 (updated-client contract): naming no identity does not skip the
+ -- destination guard; a slot that shows nothing is still refused before the
+ -- host call, and the refusal starts no spacing window.
+ ok,why=A.UploadWishlist(102,NAME,planRows)
+ check(ok==false and why=='stale_slot' and #H.actions==before,
+  'a caller that names no identity is refused for a slot that shows nothing: '..tostring(why))
+ -- The earlier positive control, on a destination the slot list shows in full.
+ setMirror(102,row(NAME,planRows))
+ check(A.UploadWishlist(102,NAME,planRows)==true and #H.actions==before+1,'a caller that names no identity is unchanged for a known destination')
  H.Advance(4)
  check(A.UploadWishlist(0,'W16-CREATE',planRows,{[token]=true})==true,'the create sentinel 0 is never checked')
 end

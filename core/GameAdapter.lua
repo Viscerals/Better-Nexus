@@ -5901,11 +5901,16 @@ function A.ServerWishlistTokenFor(name, echoes)
     return ServerSlotToken(tostring(name or "Nexus"), echoes)
 end
 
--- `expected` (optional): a set of tokens an editor accepts for an EXISTING slot
--- (slot > 0). The slot is read again immediately before the host call; a slot
--- that shows anything else, or nothing, is refused ("stale_slot") and nothing is
--- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
--- no set keeps the earlier behavior.
+-- Slot 0 creates a new Wishlist and its destination is never checked. Any slot
+-- above 0 replaces an EXISTING server Wishlist, so (updated client) it is sent
+-- only when the current slot list shows that row in full and the row refuses
+-- no Echo: an unreadable list, a missing row or a row read only in part is
+-- "stale_slot", and a row with refusals (or an incoming refused entry) is
+-- "refused_entries"; nothing is sent and the spacing clock does not start.
+-- `expected` (optional): a set of tokens an editor accepts for that existing
+-- slot. The slot is read again immediately before the host call; a slot that
+-- shows anything else is refused ("stale_slot") and nothing is sent. A caller
+-- that passes no set is checked only as above.
 function A.UploadWishlist(slot, name, echoes, expected)
     -- Session pause transitions at admission (issue #171): a Pause, or a Pause
     -- and Resume, inside a later callback is seen even when it is over.

@@ -46,6 +46,28 @@ local function boot(saved,slots,active)
  return h
 end
 local H=boot()
+-- Revision 6 (updated-client compatibility, full-CI finding): GameAdapter.
+-- UploadWishlist replaces an existing server Wishlist (slot > 0) only when
+-- the current slot list shows that destination in full; a missing one is
+-- refused ("stale_slot") and starts no spacing. Slot 103 is not in this
+-- fixture's list, so the spacing setup names it as a known synthetic Wishlist
+-- mirror (above the declared slots, unverified, the spacer's own Echoes) for
+-- that one real upload and then puts the list back exactly as it was. The
+-- spacing window is the production one, opened by that real upload; nothing
+-- is stubbed and no timestamp is set.
+local function KnownSlotUpload(upload,slot,name,echoes)
+ local created=H.perks.serverBuildSlots==nil
+ if created then H.perks.serverBuildSlots={} end
+ local slots=H.perks.serverBuildSlots
+ local prior=slots[slot]
+ local rows={}
+ for i,e in ipairs(echoes) do rows[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks or 1,locked=false} end
+ slots[slot]={name=name,verified=false,echoes=rows}
+ local ok,why=upload(slot,name,echoes)
+ slots[slot]=prior
+ if created then H.perks.serverBuildSlots=nil end
+ return ok,why
+end
 -- M3: the editor's actions are named by their effect; a legacy label also
 -- finds the action with that default intent (new label first, then legacy).
 local LABELS={['Create Wishlist']={'Create & assign','Create unassigned','Create Wishlist'},
@@ -238,7 +260,7 @@ end
 reopen({echoes={{spellId=200767,quality=0,stacks=1,locked=false}}})
 do
  local rolled={{spellId=201172,quality=0,stacks=1,locked=false}}
- check(Nexus.GameAdapter.UploadWishlist(103,'W15-SPACER',rolled)==true,'fixture: a recent upload starts the spacing window')
+ check(KnownSlotUpload(Nexus.GameAdapter.UploadWishlist,103,'W15-SPACER',rolled)==true,'fixture: a recent upload starts the spacing window')
  local before=snapshot()
  editViaPicker()
  button('Save Wishlist'):Click();H.AcceptPopup()

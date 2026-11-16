@@ -23,6 +23,28 @@
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('wishlist_create_once')
 local H,A,writes,spends
+-- Revision 6 (updated-client compatibility, full-CI finding): GameAdapter.
+-- UploadWishlist replaces an existing server Wishlist (slot > 0) only when
+-- the current slot list shows that destination in full; a missing one is
+-- refused ("stale_slot") and starts no spacing. Slot 103 is not in this
+-- fixture's list, so the spacing setup names it as a known synthetic Wishlist
+-- mirror (above the declared slots, unverified, the spacer's own Echoes) for
+-- that one real upload and then puts the list back exactly as it was. The
+-- spacing window is the production one, opened by that real upload; nothing
+-- is stubbed and no timestamp is set.
+local function KnownSlotUpload(upload,slot,name,echoes)
+ local created=H.perks.serverBuildSlots==nil
+ if created then H.perks.serverBuildSlots={} end
+ local slots=H.perks.serverBuildSlots
+ local prior=slots[slot]
+ local rows={}
+ for i,e in ipairs(echoes) do rows[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks or 1,locked=false} end
+ slots[slot]={name=name,verified=false,echoes=rows}
+ local ok,why=upload(slot,name,echoes)
+ slots[slot]=prior
+ if created then H.perks.serverBuildSlots=nil end
+ return ok,why
+end
 local E1={{spellId=201172,quality=0,stacks=1}}
 local E2={{spellId=201175,quality=0,stacks=1}}
 local E6={{spellId=201173,quality=0,stacks=1}}
@@ -337,7 +359,7 @@ end)
 
 C.scenario('R6 a Create waiting for the spacing guard is sent exactly once',function()
  Boot({active=2,slots=World()})
- C.setup(A.UploadWishlist(103,'Spacer',H.Clone(EF))==true,'R6: fixture: an earlier upload starts the spacing window')
+ C.setup(KnownSlotUpload(A.UploadWishlist,103,'Spacer',H.Clone(EF))==true,'R6: fixture: an earlier upload starts the spacing window')
  Name('Spaced plan');ClickCatalog(201175)
  local p=Click()
  C.setup(p~=nil,'R6: fixture: Create asks for confirmation')
