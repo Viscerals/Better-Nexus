@@ -604,4 +604,204 @@ C.scenario('N3 one confirmation assigns at most once (a repeated answer writes n
  C.expect(Writes()==1,'N3: the same answer delivered again calls no writer',Desc())
 end)
 
+-- D7 (reviews D7-S1/S2, F-1/F-2): the editor's candidate question and every
+-- role picker that waits after an assignment was started are bound to the
+-- Saved Build that was named (its slot, name and contents), not to the slot
+-- number, the active slot or the name alone. Saved over, renamed, gone, empty
+-- or unreadable at the answer or at the role Confirm: no role choice is
+-- confirmed, nothing is assigned, and the player is told to choose again.
+-- EXPECT here fails on the pin 6950edb3 by design (the editor passed no
+-- binding; the role picker compared the selected slot number only); GUARD
+-- holds on both. Oracles as above, plus the chat line. No native claim.
+local CHANGED='That Saved Build changed or could not be read'
+local OTHER={{spellId=200088,quality=0,stacks=1},{spellId=200087,quality=3,stacks=1}}
+local function Refused(said)
+ return said:find(CHANGED,1,true)~=nil and said:find('Nothing was assigned',1,true)~=nil
+  and said:find('choose again',1,true)~=nil
+end
+-- The game now reports other Saved Build rows (fresh tables, as a re-send).
+local function ServerNow(change)
+ local rows=H.Clone(H.perks.serverBuildSlots)
+ change(rows)
+ H.perks.serverBuildSlots=rows;H.Notify();A.Poll();H.Advance(1)
+end
+
+C.scenario('E7 D7 editor candidate: Saved Build A was replaced while the question waited: nothing is assigned; asking again assigns',function()
+ Boot()
+ TurnAutoOn()
+ local button=EditorCandidate('E7',PLAIN)
+ local saved=Saved()
+ Zero()
+ local p=Press(button)
+ C.setup(p~=nil and p.arg2==TARGET_A,'E7: fixture: the candidate asks first, naming Saved Build A')
+ if not p then return end
+ -- Another build is saved over the active slot 1; slot 1 stays active.
+ ServerNow(function(rows) rows[1]={name='Saved Build C',verified=true,echoes=H.Clone(OTHER)} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','E7 calls='..Desc()..' said='..said)
+ C.expect(Writes()==0 and resolves==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+  'E7: the answer for the replaced Saved Build calls no writer and stores nothing',Desc())
+ C.expect(Refused(said),'E7: it says the Saved Build changed, that nothing was assigned and to choose again',said)
+ C.guard(Auto() and spends==0,'E7: Auto stays ON; nothing is spent')
+ -- A fresh question names what slot 1 holds now, and its answer assigns it.
+ button=EditorCandidate('E7b',PLAIN)
+ Zero()
+ local again=Press(button)
+ print('OBSERVED','E7b confirmation='..tostring(Asked(again)))
+ C.expect(again~=nil and again~=p and again.arg1==PLAIN and again.arg2=="Saved Build 'Saved Build C'",
+  'E7b: asking again names the Saved Build the slot holds now',again and tostring(again.arg2) or 'no confirmation')
+ if not again then return end
+ Accept(again)
+ C.expect(Wrote('SetLoadoutWishlist',1)==1 and Writes()==1 and Stored(1)~=nil and Stored(1).name==PLAIN and Stored(2)==nil,
+  'E7b: the fresh answer assigns the Wishlist to slot 1, once',Desc())
+end)
+
+C.scenario('E8 D7 editor candidate: the same slot and name with other contents is not the Saved Build that was asked about',function()
+ Boot()
+ TurnAutoOn()
+ local button=EditorCandidate('E8',PLAIN)
+ local saved=Saved()
+ Zero()
+ local p=Press(button)
+ C.setup(p~=nil,'E8: fixture: the candidate asks first')
+ if not p then return end
+ -- Saved over under the same name: its one Echo gained a stack.
+ ServerNow(function(rows) rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=2}}} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','E8 calls='..Desc()..' said='..said)
+ C.expect(Writes()==0 and resolves==0 and Saved()==saved and Stored(1)==nil,
+  'E8: an equal name and slot do not stand in for the Saved Build: nothing is written',Desc())
+ C.expect(Refused(said),'E8: the player is told to choose again',said)
+ C.guard(Auto(),'E8: Auto stays ON')
+end)
+
+C.scenario('E10 D7 editor candidate: Saved Build A gone, empty, unreadable or renamed at the answer: nothing is assigned',function()
+ Boot()
+ TurnAutoOn()
+ local world=H.Clone(H.perks.serverBuildSlots)
+ local function Restore() H.perks.serverBuildSlots=H.Clone(world);H.Notify();A.Poll();H.Advance(1) end
+ local cases={
+  {'gone',function() ServerNow(function(rows) rows[1]=nil end) end},
+  {'empty',function() ServerNow(function(rows) rows[1]={name=BUILD_A,verified=true,echoes={}} end) end},
+  -- No Saved Build data at all at the moment of the answer.
+  {'unreadable',function() H.perks.serverBuildSlots=nil end},
+  -- Last: on the pin this one assigns, which would end the cases after it.
+  {'renamed',function() ServerNow(function(rows) rows[1].name='Saved Build A2' end) end},
+ }
+ for _,case in ipairs(cases) do
+  local tag='E10 '..case[1]
+  local button=EditorCandidate(tag,PLAIN)
+  local saved=Saved()
+  Zero()
+  local p=Press(button)
+  C.setup(p~=nil and p.arg2==TARGET_A,tag..': fixture: the candidate asks first, naming Saved Build A')
+  if not p then return end
+  case[2]()
+  local said=Heard(function() Accept(p) end)
+  print('OBSERVED',tag..' calls='..Desc()..' said='..said)
+  C.expect(Writes()==0 and resolves==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil and Refused(said),
+   tag..': no writer is called, nothing is stored and the player is told to choose again',said..' / '..Desc())
+  Restore()
+ end
+ C.guard(Auto() and spends==0,'E10: Auto stays ON; nothing is spent')
+end)
+
+C.scenario('E11 D7 control, editor candidate: the same Saved Build A re-sent and another slot changed still assigns it',function()
+ Boot()
+ TurnAutoOn()
+ local button=EditorCandidate('E11',PLAIN)
+ Zero()
+ local p=Press(button)
+ C.setup(p~=nil,'E11: fixture: the candidate asks first')
+ if not p then return end
+ -- Saved Build A arrives again in fresh tables; Saved Build B is saved over.
+ ServerNow(function(rows)
+  rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=1}}}
+  rows[2]={name='Saved Build B2',verified=true,echoes=H.Clone(OTHER)}
+ end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','E11 calls='..Desc()..' said='..said)
+ C.guard(Wrote('SetLoadoutWishlist',1)==1 and Writes()==1 and Stored(1)~=nil and Stored(1).name==PLAIN and Stored(2)==nil
+  and said:find(CHANGED,1,true)==nil,'E11: the unchanged named Saved Build A is assigned, once, and no change is reported',Desc())
+ C.guard(Auto() and spends==0,'E11: Auto stays ON; nothing is spent')
+end)
+
+C.scenario('C8 D7 role picker after the Journal answer: Saved Build A saved over under its name, or renamed, before Confirm: no role, no assignment',function()
+ Boot({manual=true})
+ TurnAutoOn()
+ local world=H.Clone(H.perks.serverBuildSlots)
+ local function Restore() H.perks.serverBuildSlots=H.Clone(world);H.Notify();A.Poll();H.Advance(1) end
+ local cases={
+  {'same name, other contents',function(rows) rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=2}}} end},
+  {'renamed',function(rows) rows[1].name='Saved Build A2' end},
+ }
+ for _,case in ipairs(cases) do
+  local tag='C8 '..case[1]
+  local button=ChooserRow(tag,EVIDENCE,true)
+  local saved=Saved()
+  Zero()
+  local p=Press(button)
+  C.setup(p~=nil,tag..': fixture: the click asks first')
+  if not p then return end
+  Accept(p)
+  C.setup(RolePickerShown() and Writes()==0,tag..': fixture: after the answer the role picker waits; nothing is written',Desc())
+  -- The Saved Build that was named changes while the role picker waits.
+  ServerNow(case[2])
+  C.setup(RolePickerShown(),tag..': fixture: the role picker is still open')
+  NexusWishlistRoleUseOwned:Click()
+  local said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+  print('OBSERVED',tag..' calls='..Desc()..' said='..said..' picker='..tostring(RolePickerShown()))
+  C.expect(Roles()==0 and Writes()==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+   tag..': Confirm writes no role choice and no assignment',Desc())
+  C.expect(Refused(said) and not RolePickerShown(),
+   tag..': the role picker closes and the player is told to choose again',said)
+  Restore()
+ end
+ C.guard(Auto() and spends==0,'C8: Auto stays ON; nothing is spent')
+end)
+
+C.scenario('C9 D7 control, role picker after the Journal answer: the same Saved Build A re-sent before Confirm is assigned',function()
+ Boot({manual=true})
+ TurnAutoOn()
+ local button=ChooserRow('C9',EVIDENCE,true)
+ Zero()
+ local p=Press(button)
+ C.setup(p~=nil,'C9: fixture: the click asks first')
+ if not p then return end
+ Accept(p)
+ C.setup(RolePickerShown() and Writes()==0,'C9: fixture: after the answer the role picker waits',Desc())
+ -- Saved Build A arrives again in fresh tables, unchanged.
+ ServerNow(function(rows) rows[1]={name=BUILD_A,verified=true,echoes={{spellId=200086,quality=2,stacks=1}}} end)
+ C.setup(RolePickerShown(),'C9: fixture: the role picker is still open')
+ NexusWishlistRoleUseOwned:Click()
+ local said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ print('OBSERVED','C9 calls='..Desc()..' said='..said)
+ C.guard(Roles()==1 and Wrote('SetLoadoutWishlist',1)==1 and Writes()==2 and Stored(1)~=nil and Stored(1).name==EVIDENCE
+  and Stored(2)==nil and not RolePickerShown() and said:find(CHANGED,1,true)==nil,
+  'C9: the unchanged named Saved Build A gets its roles confirmed and the Wishlist assigned, once',Desc())
+ C.guard(Auto(),'C9: Auto stays ON')
+end)
+
+C.scenario('E12 D7 role picker after an editor candidate answer: Saved Build A replaced before Confirm: no role, no assignment',function()
+ Boot({manual=true})
+ TurnAutoOn()
+ local button=EditorCandidate('E12',EVIDENCE)
+ local saved=Saved()
+ Zero()
+ local p=Press(button)
+ C.setup(p~=nil and p.arg2==TARGET_A,'E12: fixture: the role-pending candidate asks first, naming Saved Build A')
+ if not p then return end
+ Accept(p)
+ C.setup(RolePickerShown() and Writes()==0,'E12: fixture: after the answer the role picker waits; nothing is written',Desc())
+ ServerNow(function(rows) rows[1]={name='Saved Build C',verified=true,echoes=H.Clone(OTHER)} end)
+ C.setup(RolePickerShown(),'E12: fixture: the role picker is still open')
+ NexusWishlistRoleUseOwned:Click()
+ local said=Heard(function() NexusWishlistRoleConfirm:Click() end)
+ print('OBSERVED','E12 calls='..Desc()..' said='..said..' picker='..tostring(RolePickerShown()))
+ C.expect(Roles()==0 and Writes()==0 and Saved()==saved and Stored(1)==nil and Stored('first')==nil,
+  'E12: Confirm writes no role choice and no assignment',Desc())
+ C.expect(Refused(said) and not RolePickerShown(),'E12: the role picker closes and the player is told to choose again',said)
+ C.guard(Auto() and spends==0,'E12: Auto stays ON; nothing is spent')
+end)
+
 C.finish('(B2/NB3: every Auto-ON assignment route asks before any role or assignment write; NB1 no timing promise; NB4 fail-closed and accept-once)')

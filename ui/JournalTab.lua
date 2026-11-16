@@ -225,6 +225,13 @@ local function SayTargetChanged(binding)
     if type(binding) == "table" and type(binding.changed) == "function" then pcall(binding.changed) end
 end
 
+-- The same identity, check and refusal for the editor's candidates and its
+-- role picker (ui/WishlistEditor.lua), which wait for the player as well: one
+-- definition of "the Saved Build that was shown" for every assignment route.
+M.SavedBuildIdentity = SavedBuildIdentity
+M.SavedBuildHolds = TargetHolds
+M.SayTargetChanged = SayTargetChanged
+
 -- One assignment the player chose. `assign` performs it (and every role
 -- choice it starts) for the target captured when the player chose it. A
 -- numbered, non-empty target with Auto selected asks first; the first-run
@@ -234,13 +241,19 @@ end
 -- performs it once; an accept after the character's saved data changed
 -- assigns nothing. `binding` (optional: {slot, identity, changed}) is the
 -- Saved Build the caller showed the player (SavedBuildIdentity of the read
--- its name came from). With one, the question is asked only while that slot
--- still holds that Saved Build, and an accept assigns only while it still
--- does; otherwise nothing is assigned, the player is told to choose again
--- and `changed` (optional) is called. Which Saved Build is active is not
--- part of it. Returns true when it asked, false when it assigned at once,
--- nil and a reason when it refused.
+-- its name came from). With one, nothing is asked or assigned (with Auto ON
+-- or OFF) unless that slot still holds that Saved Build, and an accept
+-- assigns only while it still does; otherwise nothing is assigned, the
+-- player is told to choose again and `changed` (optional) is called. Which
+-- Saved Build is active is not part of it. Returns true when it asked,
+-- false when it assigned at once, nil and a reason when it refused.
 function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign, binding)
+    -- Before anything else: a display left open over a Saved Build that was
+    -- saved over assigns nothing under the old name, whatever Auto is.
+    if binding ~= nil and not TargetHolds(binding) then
+        SayTargetChanged(binding)
+        return nil, "target_changed"
+    end
     if not numbered or not M.AutoSelected() then
         assign()
         return false
@@ -249,10 +262,6 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign, bindin
         or type(StaticPopupDialogs[ASSIGN_POPUP]) ~= "table" then
         print("|cffff6060Nexus:|r " .. T("journal.chat.consent_unavailable"))
         return nil, "consent_unavailable"
-    end
-    if binding ~= nil and not TargetHolds(binding) then
-        SayTargetChanged(binding)
-        return nil, "target_changed"
     end
     local owner, answered = OwnerKeyNow(), false
     AssignDialogText(StaticPopupDialogs[ASSIGN_POPUP], wishlistName, targetLabel)
@@ -2057,10 +2066,12 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     -- A Wishlist without lock evidence: its role choice (the
                     -- current-lock default or the role picker) and the
                     -- assignment it ends in wait for the same Auto-ON
-                    -- confirmation; Cancel writes neither.
+                    -- confirmation; Cancel writes neither. The binding goes on
+                    -- with it: a role picker that waits again checks the same
+                    -- Saved Build before it confirms roles or assigns.
                     local asked, why = M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
                         HideWishlistPicker()
-                        Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0,origin)
+                        Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0,origin,binding)
                     end, binding)
                     if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
                     return

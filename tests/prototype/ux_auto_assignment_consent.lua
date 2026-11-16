@@ -613,4 +613,40 @@ C.scenario('A18 D7 a chooser left open over a replaced Saved Build asks nothing 
  C.guard(Writes()==0 and Facts()==facts and Auto(),'A18: nothing is assigned; Auto stays ON',Facts())
 end)
 
+-- Review F-5: the same identity also covers the click that assigns at once.
+-- With Auto OFF no question waits, but a chooser left open still shows the
+-- Saved Build it was opened for. EXPECT fails on the pin 6950edb3 by design
+-- (the click wrote the captured slot and the line named the old build). The
+-- unchanged-target control with Auto OFF is A7.
+C.scenario('A19 F-5 Auto OFF: a chooser left open over a replaced Saved Build assigns nothing under the old name; choosing again assigns the current one',function()
+ Boot()
+ C.setup(not Auto() and OpenPicker(),'A19: fixture: Auto is OFF and the chooser is open for Saved Build 2 (Fire PvE)')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil,'A19: fixture: the chooser lists W-Free')
+ if not row then return end
+ local facts,settings=Facts(),Settings()
+ -- Slot 2 is saved over while the chooser stays open.
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ C.setup(NexusWishlistOnlyPicker:IsShown() and row:IsVisible(),'A19: fixture: the chooser is still open on its captured target')
+ H.popup=nil
+ local said=Heard(function() row.nameButton:Click() end)
+ print('OBSERVED','A19 said='..said..' facts='..Facts())
+ C.expect(H.popup==nil and Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'A19: the click for the replaced Saved Build calls no writer and stores nothing',Facts())
+ C.expect(Refused(said) and not NexusWishlistOnlyPicker:IsShown(),
+  'A19: the player is told to choose again and the stale chooser is closed',said)
+ -- Choosing again assigns at once, to what the slot holds now, as Auto OFF does.
+ C.setup(OpenPicker(),'A19b: fixture: the chooser is opened again')
+ row=PickerRow('W-Free')
+ C.setup(row~=nil,'A19b: fixture: the chooser lists W-Free')
+ if not row then return end
+ H.popup=nil
+ said=Heard(function() row.nameButton:Click() end)
+ print('OBSERVED','A19b said='..said..' facts='..Facts())
+ C.expect(H.popup==nil and writes.SetLoadoutWishlist==1 and Writes()==1 and Stored(2)~=nil and Stored(2).name=='W-Free'
+  and said:find("'W-Free' is now the Wishlist for Saved Build 'Frost PvP'",1,true)~=nil,
+  'A19b: one more click assigns W-Free to the current Saved Build 2 without a question and names it',said)
+ C.guard(not Auto() and Settings()==settings and Creates()==0 and spends==0,'A19: Auto stays OFF; no setting, upload or spend')
+end)
+
 C.finish('(Save & assign names its captured destination and Auto\'s existing consequence; cancel/stale/Save changes write none; the Auto-ON picker asks first)')

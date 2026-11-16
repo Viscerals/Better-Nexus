@@ -539,6 +539,22 @@ function RolePicker.UseOwned(automatic)
     return count>0 and total-count>0 and total-count<=79 and count<=6
 end
 
+-- D7: the numbered Saved Build an assignment was started for, as the Journal
+-- defines it (JournalTab.SavedBuildIdentity: slot, name and contents; the
+-- slot number or the name alone identifies nothing). `target` is
+-- {slot, identity}; it holds only while that slot still reads as that
+-- Saved Build. Unreadable, gone or empty never holds.
+function RolePicker.TargetHolds(target)
+    local journal=Nexus.JournalTab
+    return journal~=nil and type(journal.SavedBuildHolds)=="function"
+        and journal.SavedBuildHolds(target)==true
+end
+-- The Journal's own refusal line for it (and its stale chooser, if any).
+function RolePicker.RefuseChangedTarget(target)
+    local journal=Nexus.JournalTab
+    if journal and type(journal.SayTargetChanged)=="function" then journal.SayTargetChanged(target) end
+end
+
 function RolePicker.Accept()
     local state=RolePicker.state
     if not state then return false end
@@ -582,6 +598,18 @@ function RolePicker.Accept()
         end
         if (wishlistController.SelectedSavedBuild(slots) or 0)~=state.activeSlot then
             RolePicker.Message(T("editor.status.role_loadout_changed"))
+            return false
+        end
+        -- The same slot can hold another Saved Build by now (saved over or
+        -- renamed while this picker waited). Then no role is confirmed and
+        -- nothing is assigned: the picker closes and the player chooses
+        -- again, for what the slot holds now.
+        local target=state.target
+        if target and not RolePicker.TargetHolds(target) then
+            GuideNote("assign",{origin="rolepicker",destination=state.activeSlot,
+                ok=false,reason="target_changed",guide=state.guide})
+            RolePicker.Hide()
+            RolePicker.RefuseChangedTarget(target)
             return false
         end
     end
@@ -734,7 +762,8 @@ function RolePicker.Begin(entries,context)
     -- No modal frame is constructed on the normal automatic-current-lock path.
     local state={kind=context.kind,name=context.name,rows=rows,page=1,
         class=context.class,loadoutSlot=context.loadoutSlot,
-        assign=context.assign,activeSlot=context.activeSlot,guide=context.guide}
+        assign=context.assign,activeSlot=context.activeSlot,guide=context.guide,
+        target=context.target}
     if context.candidate then
         state.candidate={slot=context.candidate.slot,name=context.candidate.name,
             key=context.candidate.key,lockEvidenceStatus="unavailable",echoes={},
@@ -772,14 +801,40 @@ function M.UnresolvedRoleHint()
         and "editor.status.hint_choose_locked_targets" or "editor.status.hint_use_current_locks")
 end
 
-function M.ResolveAndAssignWishlist(candidate, activeSlot, guide)
+function M.ResolveAndAssignWishlist(candidate, activeSlot, guide, binding)
     -- guide (optional, passive): the guided setup origin its caller took as
     -- the player started this operation; it is only carried to the result.
+    -- binding (optional): the Saved Build its caller showed the player
+    -- ({slot, identity}, JournalTab.AssignWithConsent's). A numbered target
+    -- without one is bound here, to what its slot holds at this call (the
+    -- editor's candidates arrive straight from their own check of it). A
+    -- role picker that then waits confirms no role and assigns nothing unless
+    -- that Saved Build is still the one in the slot (RolePicker.Accept).
+    local slot=tonumber(activeSlot) or 0
+    local target=nil
+    if slot>0 then
+        local journal=Nexus.JournalTab
+        if type(binding)=="table" then
+            -- A caller's binding is checked once more before anything starts.
+            if tonumber(binding.slot)~=slot or not RolePicker.TargetHolds(binding) then
+                GuideNote("assign",{origin="editor",destination=slot,ok=false,
+                    reason="target_changed",guide=guide})
+                RolePicker.RefuseChangedTarget(binding)
+                return false,"target_changed"
+            end
+            target=binding
+        elseif journal and type(journal.SavedBuildIdentity)=="function" then
+            -- Unreadable or empty now: nothing to bind; the assignment's own
+            -- refusals answer as before.
+            local identity=journal.SavedBuildIdentity(slot)
+            if identity then target={slot=slot,identity=identity} end
+        end
+    end
     local resolved,status,_,why=Adapter.ResolveWishlistEvidence(candidate)
     if status=="evidence-pending" then
         return RolePicker.Begin(resolved.echoes,{kind="existing",name=resolved.name,
             candidate=resolved,loadoutSlot=tonumber(activeSlot),assign=true,
-            activeSlot=tonumber(activeSlot) or 0,guide=guide})
+            activeSlot=tonumber(activeSlot) or 0,guide=guide,target=target})
     end
     if status~="actionable" then return false,why end
     local first=tonumber(activeSlot)==0
@@ -798,6 +853,11 @@ end
 -- only after Assign, and only while the active Saved Build is still the one
 -- named. Cancel changes nothing; Auto is never changed here. Auto OFF, the
 -- first-run target and an empty or unknown Saved Build keep their behaviour.
+-- D7: the question is bound to the Saved Build it names (its slot, name and
+-- contents, from the row the name is read from here). Answered after that
+-- slot was saved over, renamed, emptied or became unreadable, it assigns
+-- nothing and the player is told to choose again; the active-slot refusal
+-- below is kept and comes after it.
 -- Returns what the consent call returned, or what `perform` returned.
 function M.ConfirmCandidateAssignment(candidate, perform)
     local adapter = Adapter or Nexus.GameAdapter
@@ -823,6 +883,8 @@ function M.ConfirmCandidateAssignment(candidate, perform)
     end
     local label = DisplayUntrusted(row.name, 1024, false)
     if not label or label == "" then label = tostring(active) end
+    local binding = type(journal.SavedBuildIdentity) == "function"
+        and {slot = active, identity = journal.SavedBuildIdentity(active, row)} or nil
     return journal.AssignWithConsent(name, TF("editor.value.saved_build_quoted", {name = label}), true, function()
         local now = adapter and adapter.Slots and adapter.Slots()
         if type(now) ~= "table" or tonumber(now.activeSlot) ~= active then
@@ -830,7 +892,7 @@ function M.ConfirmCandidateAssignment(candidate, perform)
             return
         end
         return perform()
-    end)
+    end, binding)
 end
 
 function M.ImportEBH1String(text, chosenName)
