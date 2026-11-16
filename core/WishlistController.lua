@@ -2335,6 +2335,20 @@ function Controller.New(options)
     -- it, it was removed or emptied, or it could not be identified when the
     -- editor opened. Nothing is uploaded for it, and the save is never
     -- redirected to another slot. Returns the slot and "missing" or "replaced".
+    -- Updated client (Fable R1): a server Wishlist that refuses Echoes has no
+    -- identity token, because the adapter cannot represent it in full (its
+    -- refused entries are kept apart on the slot row, `row.refused`). A
+    -- missing token is then not "the slot is empty": the adapter's own slot
+    -- row says the Wishlist is there and refuses Echoes. A read that fails is
+    -- no such proof and keeps the earlier "missing".
+    local function RowRefusesEchoes(slot)
+        if not (Adapter and type(Adapter.Slots) == "function") then return false end
+        local ok, slots = pcall(Adapter.Slots)
+        local rows = ok and type(slots) == "table" and slots.bySlot or nil
+        local row = type(rows) == "table" and rows[slot] or nil
+        return type(row) == "table" and type(row.refused) == "table" and #row.refused > 0
+    end
+
     local function StaleServerSlot()
         local context = state.editingContext
         local slot = context and tonumber(context.slot)
@@ -2349,7 +2363,24 @@ function Controller.New(options)
         local current = Adapter.ServerWishlistSlotToken(slot)
         if current ~= nil and context.mirrorTokens[current] then return nil end
         if current ~= nil then context.slotContradicted = true end
+        if current == nil and RowRefusesEchoes(slot) then return slot, "refused" end
         return slot, current == nil and "missing" or "replaced"
+    end
+
+    -- Fable R1: the true reason for a Wishlist that refuses Echoes. The editor
+    -- holds only its wanted Echoes, so a save from here would send them alone
+    -- and remove the refusals. The slot is loaded; reopening it changes
+    -- nothing, so no reopen remedy is offered. Nothing is uploaded, assigned
+    -- or removed; the server Wishlist, its name and its refusals stay as they are.
+    local function NotSavedRefusedEntries(slot)
+        notify("|cffff6060Nexus:|r Not saved: server Wishlist slot " .. tostring(slot)
+            .. " refuses some Echoes. The Nexus editor shows only its wanted Echoes and cannot keep "
+            .. "those refusals, so saving it from Nexus would remove those refusals. Nothing was uploaded "
+            .. "or assigned, and your edits are kept. Change this Wishlist in the game's Echo Journal instead.")
+        if M._RecordSwitchRefusal then M._RecordSwitchRefusal("save wishlist", "SERVER_SLOT_REFUSED_ENTRIES", {
+            detail = "the server Wishlist refuses Echoes the editor cannot represent",
+            mirrorSlot = slot,
+        }) end
     end
 
     local function NotSavedStaleSlot(slot, why)
@@ -2569,6 +2600,11 @@ function Controller.New(options)
             return false, "destination_empty"
         end
         local staleSlot, staleWhy = StaleServerSlot()
+        if staleSlot and staleWhy == "refused" then
+            state.applyRetry = nil
+            NotSavedRefusedEntries(staleSlot)
+            return false, "refused_entries"
+        end
         if staleSlot then
             state.applyRetry = nil
             NotSavedStaleSlot(staleSlot, staleWhy)
@@ -3177,6 +3213,11 @@ function Controller.New(options)
             return nil, "destination_empty"
         end
         local staleSlot, staleWhy = StaleServerSlot()
+        if staleSlot and staleWhy == "refused" then
+            state.applyConfirmation = nil
+            NotSavedRefusedEntries(staleSlot)
+            return nil, "refused_entries"
+        end
         if staleSlot then
             state.applyConfirmation = nil
             NotSavedStaleSlot(staleSlot, staleWhy)

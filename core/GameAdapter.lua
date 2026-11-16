@@ -4222,9 +4222,12 @@ local function ReadSlots()
                     end
                     if id and e.avoid ~= nil and e.avoid ~= false then
                         -- Updated client: a Wishlist row's refused Echo
-                        -- (avoid). It is never a target: it is kept apart, and
-                        -- the row is not a complete role source, so no
-                        -- candidate, token or Nexus write is made from it.
+                        -- (avoid). It is never a target: it is kept apart
+                        -- (row.refused) and the row is not a complete role
+                        -- source, so it has no identity token and no Nexus
+                        -- upload replaces it. The Wishlist list still shows
+                        -- the row's wanted Echoes; the editor names the
+                        -- refusals at Save (Fable R1, WishlistController).
                         refused[#refused + 1] = {spellId = id, stacks = tonumber(e.stacks) or 1,
                             quality = tonumber(e.quality)}
                         roleSourceValid = false

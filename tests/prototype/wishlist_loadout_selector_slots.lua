@@ -230,9 +230,12 @@ do
  assert(ok==true and sent==1,'control: a readable destination is replaced: '..tostring(why))
  print('PASS updated client: refused intent is retained, never overwritten, and unreadable destinations are refused')
 end
--- Updated client (third review, player wording): the editor's real save path
--- reports the adapter's refused_entries refusal. The reason stays that stable
--- machine token; the player sees what it means, never the token itself.
+-- Updated client (third review, player wording): when the adapter's upload
+-- itself returns refused_entries (stubbed here on a newly imported draft),
+-- the controller keeps that stable machine token as its reason and the
+-- player sees what it means, never the token. The real trigger -- a server
+-- Wishlist with wanted and refused Echoes opened in the editor -- is covered
+-- with the real adapter in stale_server_slot_save.lua section 10 (Fable R1).
 do
  Nexus=nil;NexusDB=nil;SlashCmdList=nil
  local FH=dofile('tests/prototype/harness.lua')
