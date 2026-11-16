@@ -3176,6 +3176,13 @@ function M.Pump(passive)
                 if p.ambiguous then pause("The spend outcome is now visible. Review the offer and press Resume, or resolve it manually.");return end
                 local unstableSelect=worldUnstableReason()
                 if unstableSelect then pause(unstableSelect);return end
+                -- Updated client or specialization draw (OrbAdapter.ClientAdmission):
+                -- no automatic Orb choice. Checked before a decision is made or
+                -- recorded, so the receipt gains no selection attempt and its
+                -- spend stays counted; the player's own choice in the game
+                -- settles it from the matching result, as before.
+                local admittedSelect,selectWhy=B.ClientAdmission()
+                if not admittedSelect then pause(selectWhy);return end
                 local decisionState={catalog=s.catalog,granted=copy(s.granted),locked=s.locked}
                 local original,afterRemoval={},{}
                 for k,n in pairs(p.before) do original[k]=n;afterRemoval[k]=n end
@@ -3270,6 +3277,10 @@ function M.Pump(passive)
         if Nexus.GameAdapter.RivalDetected() then pause("Another Echo picker is active. Disable it before continuing.");return end
         local unstableSpend=worldUnstableReason()
         if unstableSpend then pause(unstableSpend);return end
+        -- Updated client (OrbAdapter.ClientAdmission): no next Orb. Checked
+        -- before a receipt exists; B.Spend reads it again at the host boundary.
+        local admittedSpend,spendWhy=B.ClientAdmission()
+        if not admittedSpend then pause(spendWhy);return end
         local source
         local safe=P.Sources(run.targets,s,run.excluded)
         for _,r in ipairs(safe) do if r.key==run.recycleKey then source=r;break end end

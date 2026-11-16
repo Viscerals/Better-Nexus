@@ -367,6 +367,45 @@ function O.Read(mode)
         selectInFlight=tonumber(pe.Perks.pendingSelectSpellId)}
     return s
 end
+-- Updated-client Orb admission (W3). Memory only: rawget on the game's own
+-- ProjectEbonhold, PerkService and Perks tables; no getter, metamethod or
+-- client callout, so the same check can be repeated at a send boundary with
+-- nothing able to run between it and the host call.
+--
+-- Every Echo choice, an Orb draw included, reaches the client through one
+-- parser. On the updated provider (recognized, as on the ordinary path, by its
+-- loadout readers GetServerActiveDesign / WantsMoreOfEcho) that parser:
+--   * marks a memory card with flag 3 and drops a fourth card before it
+--     publishes the choice, so three ordinary-looking cards do not show that
+--     no memory card was offered;
+--   * keeps Perks.currentSpecDraw while the shown draw is a specialization
+--     draw. That draw is not an Orb choice, and the Orb service's pending
+--     count does not say which draw is on the table.
+-- The admitted client source does not say whether an Orb draw can carry
+-- either, and nothing readable binds the shown cards to the Orb that was
+-- spent. So no Orb spend and no Orb choice is admitted on the updated
+-- provider, and none while the specialization field is present on any
+-- provider. The older provider keeps its earlier admission. Nothing here
+-- touches the game's own Orb or choice windows.
+-- Returns true, or false, the reason text and a fixed code.
+local CLIENT_SPEC="The game's Echo choice data reports a specialization draw, which is not an Orb choice. No Orb or choice was sent. Use the game's own Orb and choice windows."
+local CLIENT_UPDATED="Orb mode cannot act with this game client: Nexus cannot verify that an Orb offer has no memory card or specialization draw. No Orb or choice was sent. Use the game's own Orb and choice windows."
+local CLIENT_UNREADABLE="The game's Echo choice state cannot be read. No Orb or choice was sent."
+function O.ClientAdmission()
+    local pe=_G.ProjectEbonhold
+    if type(pe)~="table" then return false,CLIENT_UNREADABLE,"unreadable" end
+    local svc,perks=rawget(pe,"PerkService"),rawget(pe,"Perks")
+    if type(svc)~="table" or type(perks)~="table" then return false,CLIENT_UNREADABLE,"unreadable" end
+    -- Any value: a marker of the wrong type is not proof of the older provider.
+    if rawget(svc,"GetServerActiveDesign")~=nil or rawget(svc,"WantsMoreOfEcho")~=nil then
+        return false,CLIENT_UPDATED,"updated_client"
+    end
+    -- Without those readers the field still belongs to a parser that draws
+    -- specializations. Any value: a malformed field is still that field. The
+    -- parser keeps it after the draw is answered, until its next choice.
+    if rawget(perks,"currentSpecDraw")~=nil then return false,CLIENT_SPEC,"spec_draw" end
+    return true
+end
 function O.SameContext(a,b) return same(a,b) end
 -- Pure scalar display check; no game getters, observers or reconciliation.
 -- Other eligibility facts are the last complete Pump observation. Resume reads
@@ -395,6 +434,9 @@ function O.Rebind(token,expected)
         or fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then
         return nil,"The original owner or a pending action prevents resuming."
     end
+    -- Resuming toward a next spend: not on a client where none is admitted.
+    local admitted,why=O.ClientAdmission()
+    if not admitted then return nil,why end
     ownerContext=fresh.context;return true
 end
 -- Observe native manual settlement without replacing any game handler.
@@ -562,6 +604,10 @@ function O.Acquire(s)
     if fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then return nil,"Resolve the current Echo action first." end
     if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
     if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
+    -- Last, after every callout above: no run starts on a client where no Orb
+    -- action is admitted, so no receipt or ownership is created for it.
+    local admitted,why=O.ClientAdmission()
+    if not admitted then return nil,why end
     owner={};ownerContext=fresh.context;selection=nil
     watchChoices(ownerContext.svc)
     return owner,fresh
@@ -626,6 +672,10 @@ function O.Spend(token,key,expected,guard)
     -- typed return event; diagnostics never authorize or cancel this crossing.
     -- A Pause, or a Pause and Resume, raised by the guard or a read above
     -- still stops it here, before the host.
+    -- The client admission is read here, after the last read and guard, so a
+    -- provider or draw that changed inside one of them still spends nothing.
+    local admitted,clientWhy=O.ClientAdmission()
+    if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
     boundary("host_call",s)
@@ -638,6 +688,10 @@ function O.Select(token,index,expectedBoard,id,guard)
     local mark=pauseMark()
     local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
     if not s then return nil,"REJECTED",err,code end
+    -- Before any card is considered: the truthful reason on a client or draw
+    -- where no Orb choice is admitted. Read again at the host boundary below.
+    local admitted,clientWhy=O.ClientAdmission()
+    if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
         if c and other.spellId==id and other.quality~=c.quality then
@@ -661,6 +715,10 @@ function O.Select(token,index,expectedBoard,id,guard)
     -- The boundary sink runs other code: a pause it raised still stops the
     -- choice before the host. The journal then shows pick_call with no pick
     -- outcome, followed by the caller's select_rejected.
+    -- The guard and the boundary sink ran other code as well: the client
+    -- admission is read once more, immediately before the host.
+    admitted,clientWhy=O.ClientAdmission()
+    if not admitted then selfSelecting=false;return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     if crossed(mark) then selfSelecting=false;return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     selfSelecting=false

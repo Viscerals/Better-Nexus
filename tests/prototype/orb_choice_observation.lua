@@ -236,4 +236,177 @@ do
  end
  print('PASS updated client: specialization draw and memory card refuse automatic admission; ordinary actions unavailable: '..tostring(reason))
 end
+-- W3, Orb admission on the updated client. Every Echo choice reaches the client
+-- through one parser, an Orb draw included. On the updated provider that parser
+-- marks a memory card (flag 3), drops a fourth card before it publishes the
+-- choice and keeps Perks.currentSpecDraw on a specialization draw; nothing
+-- readable binds the shown cards to the Orb that was spent. Orb mode therefore
+-- starts nothing, spends nothing and chooses nothing there, nor while the
+-- specialization field is present on any provider, and the older provider keeps
+-- its admission (positive controls). Real TOC, OrbAdapter and OrbRuntime;
+-- synthetic services only. No assertion above is changed.
+do
+ local function Design() return 0 end
+ local function Wants() return false end
+ local TARGET={{spellId=410002,quality=2,stacks=2}}
+ local OFFER={{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}}
+ -- The same three Echoes with the updated parser's memory card fields.
+ local MEMORY_FIRST={{spellId=410002,quality=2,isGuaranteed=true,memoryRemaining=1},{spellId=410003,quality=0},{spellId=410004,quality=3}}
+ local MEMORY_LAST={{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3,isGuaranteed=true,memoryRemaining=1}}
+ -- name, installer(PerkService, Perks), the fixed admission code
+ local CASES={
+  {'updated provider (GetServerActiveDesign)',function(svc) svc.GetServerActiveDesign=Design end,'updated_client'},
+  {'updated provider (WantsMoreOfEcho)',function(svc) svc.WantsMoreOfEcho=Wants end,'updated_client'},
+  {'provider marker of the wrong type',function(svc) svc.GetServerActiveDesign=0 end,'updated_client'},
+  {'initial specialization draw',function(_,perks) perks.currentSpecDraw={chosen=0} end,'spec_draw'},
+  {'later specialization draw',function(_,perks) perks.currentSpecDraw={chosen=2} end,'spec_draw'},
+  {'malformed specialization field',function(_,perks) perks.currentSpecDraw='S' end,'spec_draw'},
+  {'updated provider showing a specialization draw',function(svc,perks) svc.WantsMoreOfEcho=Wants;perks.currentSpecDraw={chosen=2} end,'updated_client'},
+ }
+ local function Clear(svc,perks)
+  svc.GetServerActiveDesign=nil;svc.WantsMoreOfEcho=nil;perks.currentSpecDraw=nil
+ end
+
+ -- World 1: the adapter boundary itself (Acquire, Spend, Select), one owner.
+ local H=S.Fresh()
+ H.OrbPlan(TARGET)
+ local O=Nexus.GameAdapter.Orbs
+ local svc,perks=ProjectEbonhold.PerkService,ProjectEbonhold.Perks
+ for _,case in ipairs(CASES) do
+  case[2](svc,perks)
+  local token,why=O.Acquire(assert(O.Read()))
+  local owned=O.IsOwned()
+  if token then O.Release(token) end
+  Clear(svc,perks)
+  assert(token==nil and owned==false and type(why)=='string' and why~='',
+   case[1]..': Orb mode took ownership of a run on a client where no Orb action is admitted')
+ end
+ local token,fresh=O.Acquire(assert(O.Read()))
+ assert(token and type(fresh)=='table' and O.IsOwned(),
+  'legacy positive control: the older provider still starts Orb mode: '..tostring(fresh))
+ local key
+ for k,n in pairs(fresh.granted) do if n>0 and (not key or k<key) then key=k end end
+ assert(key,'fixture: one rolled Echo copy is available as the Orb source')
+ for _,case in ipairs(CASES) do
+  case[2](svc,perks)
+  local ok,kind,why,code=O.Spend(token,key,fresh)
+  Clear(svc,perks)
+  assert(ok==nil and kind=='REJECTED' and H.Count('orb-spend')==0,
+   case[1]..': an Orb spend reached the game')
+  assert(code=='CLIENT_CONTRACT' and type(why)=='string' and why:find('No Orb or choice was sent',1,true),
+   case[1]..': the spend refusal names the client contract')
+ end
+ -- Boundary drift: the provider marker, or the specialization field, appears
+ -- inside the final guard, after the fresh read; the host is not called.
+ for _,drift in ipairs({CASES[2],CASES[5]}) do
+  local ok,kind,_,code=O.Spend(token,key,fresh,function() drift[2](svc,perks);return true end)
+  Clear(svc,perks)
+  assert(ok==nil and kind=='REJECTED' and H.Count('orb-spend')==0 and code=='CLIENT_CONTRACT',
+   drift[1]..' installed inside the final guard reached ConfirmSpend')
+ end
+ local spent,spendKind=O.Spend(token,key,fresh,function() return true end)
+ assert(spent==true and spendKind=='SUBMITTED' and H.Count('orb-spend')==1,
+  'legacy positive control: the older provider still sends exactly one Orb')
+ H.O.charges=H.O.charges-1;H.O.offer=true
+ H.Board(OFFER)
+ local boardKey=assert(O.Read()).boardKey
+ for _,case in ipairs(CASES) do
+  case[2](svc,perks)
+  local ok,kind,why,code=O.Select(token,1,boardKey,410002)
+  Clear(svc,perks)
+  assert(ok==nil and kind=='REJECTED' and H.Count('take')==0,
+   case[1]..': an automatic Orb choice reached SelectPerk')
+  assert(code=='CLIENT_CONTRACT' and type(why)=='string' and why:find('No Orb or choice was sent',1,true),
+   case[1]..': the choice refusal names the client contract')
+ end
+ -- A visible memory card is no authority for an Orb choice either: neither
+ -- the card itself nor another card is taken; a trimmed list (the plain
+ -- three-card OFFER above) is not proof that no memory card was offered.
+ for _,memory in ipairs({{'the visible memory card',MEMORY_FIRST},{'a card beside the memory card',MEMORY_LAST}}) do
+  svc.GetServerActiveDesign=Design
+  H.Board(memory[2])
+  local ok,kind,_,code=O.Select(token,1,assert(O.Read()).boardKey,410002)
+  Clear(svc,perks)
+  assert(ok==nil and kind=='REJECTED' and H.Count('take')==0 and code=='CLIENT_CONTRACT',
+   'updated provider: '..memory[1]..' was taken as an Orb choice')
+ end
+ H.Board(OFFER)
+ for _,drift in ipairs({CASES[1],CASES[4]}) do
+  local ok,kind,_,code=O.Select(token,1,boardKey,410002,function() drift[2](svc,perks);return true end)
+  Clear(svc,perks)
+  assert(ok==nil and kind=='REJECTED' and H.Count('take')==0 and code=='CLIENT_CONTRACT',
+   drift[1]..' installed inside the final guard reached SelectPerk')
+ end
+ local picked,pickKind=O.Select(token,1,boardKey,410002,function() return true end)
+ assert(picked==true and pickKind=='SUBMITTED' and H.Count('take')==1,
+  'legacy positive control: the older provider still sends exactly one Orb choice')
+ assert(H.Count('orb-spend')==1,'the refusals and the controls sent one Orb in all')
+ -- The classifier itself: fixed codes, and an unreadable Perks table refuses.
+ assert(O.ClientAdmission()==true,'older provider, no specialization field: admitted')
+ for _,case in ipairs(CASES) do
+  case[2](svc,perks)
+  local admitted,why,code=O.ClientAdmission()
+  Clear(svc,perks)
+  assert(admitted==false and code==case[3] and type(why)=='string',case[1]..': admission code '..tostring(code))
+ end
+ ProjectEbonhold.Perks=nil
+ local admitted,_,code=O.ClientAdmission()
+ ProjectEbonhold.Perks=perks
+ assert(admitted==false and code=='unreadable','an unreadable Perks table is not the older provider')
+ O.Release(token)
+
+ -- World 2: the real runtime. The older provider starts and spends one Orb;
+ -- the updated marker then appears before its offer.
+ local M
+ H,M=S.Fresh()
+ O=Nexus.GameAdapter.Orbs
+ svc,perks=ProjectEbonhold.PerkService,ProjectEbonhold.Perks
+ H.OrbPlan(TARGET);H.Approve(3,false)
+ assert(H.Count('orb-spend')==1 and M.Status().running,
+  'legacy positive control: an approved run on the older provider requests one Orb')
+ svc.WantsMoreOfEcho=Wants
+ H.O.charges=H.O.charges-1;H.O.offer=true
+ H.Board(OFFER)
+ M.Pump()
+ local status=M.Status()
+ assert(H.Count('take')==0,'updated provider: the runtime sent an automatic Orb choice')
+ assert(status.state=='PAUSED' and status.pending and not status.running and status.spent==1,
+  'the refused choice pauses the run and keeps the confirmed spend and its receipt')
+ assert(status.reason==select(2,O.ClientAdmission()),'the pause reason is the client admission reason')
+ local receipt=Nexus.Store.State().orbRefinement.pending
+ assert(receipt and receipt.spendConfirmed and not receipt.selectionAttempted
+  and not receipt.selectionRefused and receipt.selectedKey==nil,
+  'no selection attempt or proposed Echo is recorded for a choice that was never admitted')
+ M.Resume();M.Pump()
+ assert(H.Count('take')==0 and H.Count('orb-spend')==1 and M.Status().state=='PAUSED',
+  'Resume on the updated provider sends no choice and no second Orb')
+ -- The same receipt under a specialization draw on a provider without the readers.
+ svc.WantsMoreOfEcho=nil;perks.currentSpecDraw={chosen=2}
+ M.Resume();M.Pump()
+ assert(H.Count('take')==0 and H.Count('orb-spend')==1 and M.Status().state=='PAUSED',
+  'a specialization draw is not chosen as an Orb offer')
+ -- Positive control on the same receipt: the older contract is admitted again.
+ perks.currentSpecDraw=nil
+ M.Resume();M.Pump()
+ assert(H.Count('take')==1 and H.Count('orb-spend')==1,
+  'legacy positive control: the same receipt is chosen once on the older provider')
+ -- The next Orb: the marker appears before the result settles the first.
+ svc.GetServerActiveDesign=Design
+ H.Result(410002,2)
+ for _=1,3 do M.Pump() end
+ status=M.Status()
+ assert(H.Count('orb-spend')==1 and not status.pending,
+  'updated provider: the settled run requested a second Orb')
+ M.Pause()
+ local resumed,resumeWhy=M.Resume()
+ assert(not resumed and type(resumeWhy)=='string' and H.Count('orb-spend')==1,
+  'updated provider: Resume toward a next spend is refused and sends nothing')
+ svc.GetServerActiveDesign=nil
+ H.now=H.now+3.1
+ M.Resume();M.Pump()
+ assert(H.Count('orb-spend')==2 and H.Count('take')==1,
+  'legacy positive control: the same run spends its next single Orb on the older provider')
+ M.Stop()
+ print('PASS W3 updated-client Orb admission: no start, spend or choice on the updated provider or a specialization draw; older provider unchanged')
+end
 print('PASS orb_choice_observation')
