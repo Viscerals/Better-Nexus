@@ -132,6 +132,36 @@ local function NamedSoulAsh()
     return text and text:match("^%d[%d,]*$") or false
 end
 
+-- The multiplier from the HUD's own named field: the provider's
+-- multiplierText, else the root frame's field of that name. The updated
+-- client keeps that field (hidden off the row) beside other "+N%" texts such
+-- as catchupText, so a scan of every text could take another percentage.
+-- nil: neither names such a field and both were read, so the earlier text
+-- scan applies. false: unknown -- the field holds no plain signed percentage,
+-- or a read failed and the root names no field either (an unreadable
+-- provider is not an absent one; no percentage is taken from other text).
+local function NamedGain()
+    local providerOk, field = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local ui = type(pe) == "table" and pe.PlayerRunUI or nil
+        local elements = type(ui) == "table" and type(ui.GetUIElements) == "function"
+            and ui.GetUIElements() or nil
+        return type(elements) == "table" and elements.multiplierText or nil
+    end)
+    if not providerOk then field = nil end
+    local rootOk = true
+    if field == nil and rootFrame then
+        rootOk, field = pcall(function() return rootFrame.multiplierText end)
+        if not rootOk then field = nil end
+    end
+    if field == nil then
+        if providerOk and rootOk then return nil end
+        return false
+    end
+    local text = SafeText(field)
+    return text and Strip(text):match("^([%+%-]%d+%%)$") or false
+end
+
 -- `namedAsh` (NamedSoulAsh): the named field's balance, false when the named
 -- field holds no balance, nil when there is none and the texts are scanned.
 -- #126: the texts give the Soul Ash balance, its multiplier and the raw text
@@ -139,11 +169,18 @@ end
 -- as a literal Normal and is repainted on its own schedule, and numbers,
 -- Roman numerals, multipliers, levels and tooltips beside it confirm nothing.
 -- mode and tier are left unknown here; ReadDifficulty supplies them.
-local function ParseSummary(texts, namedAsh)
+local function ParseSummary(texts, namedAsh, namedGain)
     local clean = Strip(table.concat(texts or {}, "  "))
 
-    local gain = clean:match("([%+%-]%d+%%)")
-        or clean:match("[Mm]ultiplier%s*[:%-]?%s*([%+%-]?%d+%%)")
+    -- The HUD's named multiplier field decides when it exists (NamedGain);
+    -- the text scan is used only without one.
+    local gain
+    if namedGain ~= nil then
+        gain = namedGain or nil
+    else
+        gain = clean:match("([%+%-]%d+%%)")
+            or clean:match("[Mm]ultiplier%s*[:%-]?%s*([%+%-]?%d+%%)")
+    end
 
     local ash
     if namedAsh ~= nil then
@@ -207,7 +244,35 @@ local function ReadDifficulty()
         if type(isKnown) ~= "function" or type(getCurrent) ~= "function" then
             return nil
         end
-        if isKnown() ~= true then return nil end
+        -- Updated client: inside an instance run at another tier than the
+        -- player's own, GetInstanceDifficulty answers that tier (nil
+        -- otherwise). The content's tier is then shown, never the player's
+        -- own; an instance tier this reader cannot show is unknown. A raised
+        -- read is unknown too (the whole read is protected). nil is not
+        -- proof of the own tier inside an instance: the client documents
+        -- that after a /reload there it answers nil until the next map change
+        -- (hardmode_service.lua 46-50), so inside an instance (IsInInstance,
+        -- the client's own query) nil is unknown; outside one, the content
+        -- runs at the player's own tier and the earlier read applies. An
+        -- older service without this reader is read exactly as before. The
+        -- readiness gate is consulted first on every read, as before.
+        local known = isKnown()
+        local getInstance = service.GetInstanceDifficulty
+        if getInstance ~= nil then
+            if type(getInstance) ~= "function" then return nil end
+            local instance = getInstance()
+            if instance ~= nil then
+                if type(instance) ~= "number" or instance ~= instance
+                    or instance ~= math.floor(instance) or instance < 1 or instance > 6 then
+                    return nil
+                end
+                return instance
+            end
+            if type(IsInInstance) ~= "function" then return nil end
+            local inside = IsInInstance()
+            if inside ~= nil and inside ~= false then return nil end
+        end
+        if known ~= true then return nil end
         local current = getCurrent()
         if type(current) ~= "number" or current ~= current
             or current ~= math.floor(current) or current < 1 or current > 6 then
@@ -336,9 +401,25 @@ local function PanelFacts()
     return facts
 end
 
+-- Updated client: the stock widget's bar now shows the Reaper gauge
+-- (ProjectEbonhold.Reaper; a default until the server's first push, see
+-- Reaper.received) or a Death contract's hourglass and time left
+-- (ProjectEbonhold.Contracts). The Nexus HUD replaces neither and claims no
+-- gauge, so while either source exists the stock widget is not taken away
+-- (and one already taken is given back). A failed read counts as present.
+local function NativeBracketPresent()
+    local ok, present = pcall(function()
+        local pe = _G.ProjectEbonhold
+        if type(pe) ~= "table" then return false end
+        return rawget(pe, "Reaper") ~= nil or rawget(pe, "Contracts") ~= nil
+    end)
+    return not ok or present == true
+end
+
 local function ReplacementAvailable()
     local facts = PanelFacts()
     return facts ~= nil and facts.ready == true and facts.wanted == true
+        and not NativeBracketPresent()
 end
 
 -- Whether the replacement is positively GONE, which is a stronger statement
@@ -350,6 +431,7 @@ end
 local function ReplacementGone()
     local facts = PanelFacts()
     return facts == nil or facts.committed ~= true or facts.wanted == false
+        or NativeBracketPresent()
 end
 
 -- Whether the stock widget should be standing aside for the Nexus HUD. Both
@@ -507,7 +589,7 @@ end
 -- ReadDifficulty alone, and Intensity from its own data and constants.
 local function BuildSummary()
     if not rootFrame then FindFrames() end
-    local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
+    local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh(), NamedGain())
     summary.mode, summary.tier = ReadDifficulty()
     summary.intensity, summary.intensityLevel, summary.intensityMax,
         summary.intensityThresholds = ReadIntensity()

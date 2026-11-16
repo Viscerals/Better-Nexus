@@ -53,6 +53,13 @@ local function guard(ok,label,observed) return Record('guard',ok and true or fal
 local NATIVE={MAX_INTENSITY=475,INTENSITY_LEVEL_1=75,INTENSITY_LEVEL_2=200,
  INTENSITY_LEVEL_3=275,INTENSITY_LEVEL_4=400,INTENSITY_LEVEL_5=475}
 -- Every field ServerStatus may read from the foreign tables in this file.
+-- Versioned addition (updated client, wow.export 0.2.19 capture of
+-- hardmode_service.lua 46-60): the service may publish one more zero-argument
+-- passive reader, GetInstanceDifficulty (the tier of a foreign-tier instance,
+-- nil otherwise). Its field is read on every service to learn whether this
+-- provider has it; on the older provider modelled by every pre-existing case
+-- the field is absent and nothing is called (Part 1c below counts calls).
+-- No other field is added; nothing is written.
 local ALLOWED={
  ['ProjectEbonhold.HardmodeService']=true,
  ['ProjectEbonhold.PlayerRunUI']=true,
@@ -60,6 +67,7 @@ local ALLOWED={
  ['ProjectEbonhold.HardmodeButton']=true,
  ['HardmodeService.IsDifficultyKnown']=true,
  ['HardmodeService.GetCurrentDifficulty']=true,
+ ['HardmodeService.GetInstanceDifficulty']=true,
 }
 
 -- Synthetic producer model of the supplied state facts. Its two passive
@@ -67,7 +75,7 @@ local ALLOWED={
 -- this test, as the server and the game window would drive them.
 local function Producer(o)
  o=o or {}
- local p={current=1,known=false,draft=nil,worldRequests=0,knownCalls=0,getterCalls=0,extraArgs=0}
+ local p={current=1,known=false,draft=nil,worldRequests=0,knownCalls=0,getterCalls=0,extraArgs=0,instanceCalls=0}
  if o.nilCurrent then p.current=nil elseif o.current~=nil then p.current=o.current end
  if o.nilKnown then p.known=nil elseif o.known~=nil then p.known=o.known end
  p.api={}
@@ -85,6 +93,14 @@ local function Producer(o)
    return p.current
   end
  end
+  -- The updated provider only (o.fresh): the instance tier reader.
+  if o.fresh then
+   function p.api.GetInstanceDifficulty(...)
+    p.instanceCalls=p.instanceCalls+1;p.extraArgs=p.extraArgs+select('#',...)
+    if o.instanceThrows then error('synthetic instance reader raises') end
+    return o.instance
+   end
+  end
  -- A nonempty current-data body sets the cache (malformed to 1) and known.
  function p.CurrentDataReply(body)
   if type(body)=='string' and body~='' then p.current=tonumber(body) or 1;p.known=true end
@@ -304,6 +320,9 @@ Add('GUARD','no HUD root with an unknown service -> unknown',Expected(nil),'noth
 
 local function RunCase(c)
  for _,path in ipairs({'cold GetSummary','scanner'}) do
+  -- The client's own instance query, present only in the updated-provider
+  -- cases that state it (Part 1c); absent everywhere else, as before.
+  IsInInstance=c.inInstance~=nil and function() return c.inInstance end or nil
   local p=c.producer and Producer(c.producer) or nil
   local h=Host({producer=p,noService=c.noService,serviceValue=c.serviceValue,noRoot=c.noRoot,compact=c.compact})
   if c.draft then h.ShowDraft(c.draft) end
@@ -319,10 +338,45 @@ local function RunCase(c)
    expect(p.knownCalls>=1,label..': the readiness gate is consulted on this read',p.knownCalls)
   end
   if p then guard(p.extraArgs==0,label..': the service functions are called with zero arguments',p.extraArgs) end
+  if p and not c.producer.fresh then
+   guard(p.instanceCalls==0 and p.api.GetInstanceDifficulty==nil,
+    label..': the older provider has no instance reader and none is called',p.instanceCalls)
+  end
+  if p and c.producer.fresh then
+   guard(p.instanceCalls==1,label..': the updated provider\'s instance reader is called once per read',p.instanceCalls)
+  end
   Independent(h,s,label,c.noRoot)
   Passive(h,label)
+  IsInInstance=nil
  end
 end
+----------------------------------------------------------------------------
+-- Part 1c (versioned: updated provider, 2026-11 capture). The content's tier
+-- inside a foreign-tier instance is the instance tier, never the player's own;
+-- nil from the instance reader is not proof of the own tier inside an
+-- instance (the client's own note: after a /reload there it answers nil until
+-- the next map change), so there it is unknown; outside an instance the own
+-- confirmed tier applies exactly as before. Every pre-existing case above
+-- keeps the older provider and its results.
+----------------------------------------------------------------------------
+Add('EXPECT','updated: own HC1, instance tier 4 -> HC3',Expected(4),'the foreign instance tier is shown, not the own tier',
+ {producer={current=2,known=true,fresh=true,instance=4}})
+Add('EXPECT','updated: unknown own tier, instance tier 3 -> HC2',Expected(3),'the instance tier is the content tier even before the own tier is known',
+ {producer={current=1,known=false,fresh=true,instance=3}})
+for _,v in ipairs({{'7',7},{'0',0},{'1.5',1.5},{'string 4','4'},{'NaN',0/0}}) do
+ Add('EXPECT','updated: instance tier '..v[1]..' -> unknown',Expected(nil),'an instance tier outside a finite integer 1..6 is unknown, never the own tier',
+  {producer={current=3,known=true,fresh=true,instance=v[2]}})
+end
+Add('EXPECT','updated: instance reader raises -> unknown',Expected(nil),'a raising instance reader is unknown, never the own tier',
+ {producer={current=3,known=true,fresh=true,instanceThrows=true}})
+Add('EXPECT','updated: no instance tier inside an instance -> unknown',Expected(nil),'the reload gap inside an instance is unknown, not the own HC2',
+ {producer={current=3,known=true,fresh=true,instance=nil},inInstance=1})
+Add('EXPECT','updated: no instance tier, instance query missing -> unknown',Expected(nil),'without the client instance query the own tier is not claimed',
+ {producer={current=3,known=true,fresh=true,instance=nil}})
+Add('EXPECT','updated: no instance tier outside an instance -> HC2',Expected(3),'outside an instance the own confirmed tier applies',
+ {producer={current=3,known=true,fresh=true,instance=nil},inInstance=false})
+Add('EXPECT','updated: outside an instance, own tier unconfirmed -> unknown',Expected(nil),'outside an instance the readiness gate still applies',
+ {producer={current=3,known=false,fresh=true,instance=nil},inInstance=false})
 for _,c in ipairs(CASES) do RunCase(c) end
 
 ----------------------------------------------------------------------------
@@ -487,7 +541,11 @@ H=F.Reload(Install('Normal',{current=1,known=true}));Settle(H)
 Rendered(H,'C9 reload explicit known1 Normal','GUARD','Normal',nil)
 local bad={}
 for _,entry in ipairs(consumerReads) do
- if entry~='HardmodeService.IsDifficultyKnown' and entry~='HardmodeService.GetCurrentDifficulty' then bad[#bad+1]=entry end
+ -- Versioned (see ALLOWED): the instance reader's field is read to learn
+ -- whether the provider has it; the older provider here has none, so only the
+ -- two passive service functions are ever called.
+ if entry~='HardmodeService.IsDifficultyKnown' and entry~='HardmodeService.GetCurrentDifficulty'
+  and entry~='HardmodeService.GetInstanceDifficulty' then bad[#bad+1]=entry end
 end
 expect(#consumerReads>0,'C: the real boot consults the hardmode service',#consumerReads)
 guard(#bad==0,'C: only the two passive service functions are read through the real boot',table.concat(bad,','))

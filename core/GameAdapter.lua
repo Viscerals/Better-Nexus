@@ -4196,7 +4196,7 @@ local function ReadSlots()
     for slot, s in pairs(raw) do
         if type(s) == "table" then
             projectionStatus.slots.slots = projectionStatus.slots.slots + 1
-            local echoes = {}
+            local echoes, refused = {}, {}
             local roleSourceValid = type(s.echoes) == "table"
             if type(s.echoes) == "table" then
                 -- Keep the existing slot projection, but do not derive roles
@@ -4220,7 +4220,15 @@ local function ReadSlots()
                         or (e.quality ~= nil and NonNegativeInteger(e.quality) == nil) then
                         roleSourceValid = false
                     end
-                    if id then
+                    if id and e.avoid ~= nil and e.avoid ~= false then
+                        -- Updated client: a Wishlist row's refused Echo
+                        -- (avoid). It is never a target: it is kept apart, and
+                        -- the row is not a complete role source, so no
+                        -- candidate, token or Nexus write is made from it.
+                        refused[#refused + 1] = {spellId = id, stacks = tonumber(e.stacks) or 1,
+                            quality = tonumber(e.quality)}
+                        roleSourceValid = false
+                    elseif id then
                         if not catRead then cat, catRead = A.Catalog(), true end
                         echoes[#echoes + 1] = {
                             spellId = id, stacks = tonumber(e.stacks) or 1,
@@ -4241,6 +4249,7 @@ local function ReadSlots()
                 echoes = echoes,
                 suspectParse = (s.verified and #echoes == 0) and true or false,
                 roleSourceValid = roleSourceValid,
+                refused = #refused > 0 and refused or nil,
             }
         end
     end
@@ -5096,7 +5105,128 @@ function A.OrbBlockReason(subject)
     return nil
 end
 
+-- Updated client (wow.export 0.2.19 capture, 3.3.5 / 12340). Every read
+-- below is memory only (rawget on the client's own Perks table and its rows;
+-- no metamethod, service or client callout), so the same reads can be made
+-- again at a send boundary. Fields of the ledger (main-chunk local limit).
+--
+-- The choice parser keeps Perks.currentSpecDraw = {chosen = n} while the
+-- shown draw is a specialization draw, nil on an ordinary draw. chosen 0
+-- chooses the run's specialization; the game never auto-accepts it, and
+-- Nexus never acts on it. "choosing": chosen is 0, or the field is present
+-- but chosen is not a positive whole number (fail closed). "spec" (and the
+-- chosen value): a draw of the specialization already chosen. nil: no such
+-- field, or no readable Perks table.
+ledger.SpecDrawOf = function(perks)
+    if type(perks) ~= "table" then return nil end
+    local draw = rawget(perks, "currentSpecDraw")
+    if draw == nil then return nil end
+    local chosen = type(draw) == "table" and rawget(draw, "chosen") or nil
+    if type(chosen) == "number" and chosen >= 1 and chosen < math.huge
+        and chosen == math.floor(chosen) then
+        return "spec", chosen
+    end
+    return "choosing"
+end
+ledger.SpecDraw = function() return (ledger.SpecDrawOf(PerksTbl())) end
+ledger.SPEC_REASON = "the specialization choice is left to the player"
+ledger.MEMORY_GIVEN_UP = "the memory card would be given up"
+ledger.MEMORY_UNKNOWN = "the memory card state is not known; the choice is left to the player"
+-- The updated provider: flag 3 (isGuaranteed) is the MEMORY card, an Echo of
+-- the live loadout's engraved build; taking another card gives it up for the
+-- rest of the climb. It is recognized by its new loadout readers
+-- (GetServerActiveDesign, WantsMoreOfEcho). An older provider keeps the
+-- historical guaranteed-card meaning, and the memory rules do not apply.
+ledger.MemoryCardContract = function()
+    local svc = PS()
+    if type(svc) ~= "table" then return false end
+    return type(rawget(svc, "GetServerActiveDesign")) == "function"
+        or type(rawget(svc, "WantsMoreOfEcho")) == "function"
+end
+-- The visible memory card of a published choice: its spellId, false when the
+-- choice shows none, nil when the choice is not a readable table.
+ledger.ChoiceMemory = function(ch)
+    if type(ch) ~= "table" then return nil end
+    for i = 1, #ch do
+        local c = rawget(ch, i)
+        if type(c) == "table" and rawget(c, "isGuaranteed") then
+            return rawget(c, "spellId") or "?"
+        end
+    end
+    return false
+end
+-- What the admitted updated-client source cannot establish (independent
+-- Spec reviews of revisions 1 and 2):
+--   * whether a memory card is offered but hidden: the client drops a fourth
+--     card before it publishes currentChoice (perks_service.lua 188-190; the
+--     same lines are in the October source) and the memory card's wire order
+--     is not proven. The live rows' memoryTotal/memoryRemaining are parser
+--     defaults when absent and carry no binding to the current draw, so no
+--     cached value is taken as proof that nothing is hidden;
+--   * whether the game's own automatic pick is armed: its timer keeps the card
+--     it chose at the parse and re-checks neither its option nor the
+--     highlighted Wishlist when it fires (83-92, 197-225); no handle, state or
+--     ordering of it is readable, and the current design proves nothing about
+--     a design that armed it earlier.
+-- So on the updated provider Nexus admits exactly one automatic choice
+-- action: a Take of the memory card that the published choice shows (taking
+-- it gives nothing up; both Selects take the client's one Select latch).
+-- Every other automatic Take, and every Reroll, Banish and Freeze, is
+-- unavailable there, with a stated reason; the game's own manual choice UI is
+-- not touched. The older provider keeps its earlier admission.
+ledger.UPDATED_UNAVAILABLE = "automatic rolling is not available with this game client; the choice is left to the player"
+-- The whole updated-client admission of one automatic choice action, memory
+-- only (rawget on the published choice). `spellId`: the card a Take would
+-- select (nil for the gate and for Reroll/Banish/Freeze). `sending`: at a send
+-- boundary an unreadable choice refuses. Returns true, or false and a reason.
+ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
+    if ledger.SpecDrawOf(perks) == "choosing" then return false, ledger.SPEC_REASON end
+    if not contract then return true end
+    local ch = type(perks) == "table" and rawget(perks, "currentChoice") or nil
+    local visible = ledger.ChoiceMemory(ch)
+    if visible == nil or (type(ch) == "table" and #ch == 0) then
+        if sending then return false, "the game's selection state cannot be read" end
+        if kind == "gate" then return true end
+        return false, ledger.UPDATED_UNAVAILABLE
+    end
+    if kind == "take" then
+        if not visible then return false, ledger.MEMORY_UNKNOWN end
+        if visible ~= spellId then return false, ledger.MEMORY_GIVEN_UP end
+        return true
+    end
+    if kind == "gate" then
+        -- The gate stays open only for the one admitted action.
+        if visible then return true end
+        return false, ledger.MEMORY_UNKNOWN
+    end
+    return false, ledger.UPDATED_UNAVAILABLE
+end
+-- Admission of a Banish, Freeze or Reroll. On the updated provider none is
+-- admitted (above). On the older provider: the choice admission and, at a
+-- send boundary, no Select pending in the game. Memory only.
+ledger.MutationAdmission = function(perks, contract, kind, sending)
+    if contract then return false, ledger.UPDATED_UNAVAILABLE end
+    local admitted, why = ledger.ChoiceAdmission(perks, contract, nil, kind, sending)
+    if not admitted then return false, why end
+    if sending and (type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil) then
+        return false, "a selection is pending in the game"
+    end
+    return true
+end
+-- The admission state as one comparable string, for the leveling choice key.
+ledger.AdmissionKey = function()
+    local state, chosen = ledger.SpecDrawOf(PerksTbl())
+    return "spec:" .. tostring(state or "none") .. ":" .. tostring(chosen or "")
+        .. "|contract:" .. (ledger.MemoryCardContract() and "updated" or "legacy")
+end
+
 function A.OrdinaryBoardAllowed()
+    -- The specialization choice belongs to the player; on the updated
+    -- provider only a Take of a visible memory card stays admissible
+    -- (ChoiceAdmission). Memory-only reads; the game's own UI is not
+    -- touched, so the player's manual choice stays available.
+    local admitted, why = ledger.ChoiceAdmission(PerksTbl(), ledger.MemoryCardContract(), nil, "gate")
+    if not admitted then return false, why end
     if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
         return false, A.OrbBlockReason("Ordinary rolling")
             or "Orb refinement owns the current action; ordinary rolling is paused"
@@ -5142,7 +5272,10 @@ ledger.LevelingChoiceKey = function(ch)
                 c.isGuaranteed and "G" or "-", c.justFrozen and "J" or "-"}, ":")
         end
     end
-    return tostring(#ch) .. "|" .. table.concat(parts, ",")
+    -- Updated client (independent Spec P1): the key binds the specialization
+    -- draw and the memory authority too, so a change to either with the same
+    -- card IDs refuses at raw2, raw3 and the final mirror.
+    return tostring(#ch) .. "|" .. table.concat(parts, ",") .. "|" .. ledger.AdmissionKey()
 end
 
 -- R5: the WHOLE raw choice as the leveling pick's selector input, or nil.
@@ -5151,6 +5284,13 @@ end
 -- the whole board (never a filtered valid subset). Cards keep raw order.
 ledger.LevelingStrictCards = function(ch)
     if type(ch) ~= "table" or #ch ~= 3 or ch[4] ~= nil then return nil end
+    -- Updated client: a specialization draw (either kind) is not three
+    -- ordinary offers, and neither is a board with the memory card.
+    if ledger.SpecDraw() ~= nil then return nil end
+    local memory = ledger.MemoryCardContract()
+    -- The updated provider admits no leveling pick: its only admitted action
+    -- is a Take of a visible memory card, which is not an ordinary offer.
+    if memory then return nil end
     local cards = {}
     for i = 1, 3 do
         local c = ch[i]
@@ -5158,6 +5298,7 @@ ledger.LevelingStrictCards = function(ch)
         local id, q = c.spellId, c.quality
         if type(id) ~= "number" or id ~= math.floor(id) or id < 1 or id >= math.huge then return nil end
         if type(q) ~= "number" or q ~= math.floor(q) or q < 0 or q > 4 then return nil end
+        if memory and c.isGuaranteed then return nil end
         cards[i] = {spellId = id, observedQuality = q, quality = q,
             isFrozen = c.isFrozen and true or false, isCarried = c.isCarried and true or false,
             isGuaranteed = c.isGuaranteed and true or false, justFrozen = c.justFrozen and true or false}
@@ -5244,6 +5385,9 @@ function A.Take(spellId, expect)
     -- Session pause transitions at admission (issue #171): a Pause, or a Pause
     -- and Resume, inside a later callback is seen even when it is over.
     local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    -- Updated client: which provider contract this Take is admitted under,
+    -- decided once (field reads only) and used again at the send boundary.
+    local memoryContract = ledger.MemoryCardContract()
     -- Leveling pick (R4C): assignment projection revision (every real
     -- assignment setter advances it through MarkWishlistProjectionDirty) and
     -- owner at entry; compared again after the last callback-capable read.
@@ -5275,6 +5419,10 @@ function A.Take(spellId, expect)
         if board.cards[i].spellId == spellId then found = board.cards[i]; foundIndex = i; break end
     end
     if not found then return false, "not on board" end
+    do
+        local admitted, why = ledger.ChoiceAdmission(PerksTbl(), memoryContract, spellId, "take")
+        if not admitted then return false, why end
+    end
     local svc = PS()
     -- The count before the Select is sent: the only later proof of its grant
     -- is the mirror rising above this.
@@ -5401,6 +5549,18 @@ function A.Take(spellId, expect)
             return false, "leveling_offer_changed"
         end
     end
+    -- Updated client (independent Spec P1): the specialization draw, the
+    -- visible memory card and the memory authority once more, after every
+    -- callback above (granted reads, verify, owner, level, final, pause),
+    -- from memory only; no callout separates this read from the Select. A
+    -- leveling pick also refuses any specialization draw here.
+    do
+        local perksSend = PerksTbl()
+        if type(perksSend) ~= "table" then return false, "the game's selection state cannot be read" end
+        if expect ~= nil and ledger.SpecDrawOf(perksSend) ~= nil then return false, "leveling_offer_changed" end
+        local admitted, why = ledger.ChoiceAdmission(perksSend, memoryContract, spellId, "take", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
@@ -5445,8 +5605,13 @@ function A.Banish(index0)
     -- Session pause transitions at admission (issue #171): a Pause, or a Pause
     -- and Resume, inside a later callback is seen even when it is over.
     local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "banish")
+        if not admitted then return false, why end
+    end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
@@ -5473,6 +5638,12 @@ function A.Banish(index0)
     -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
     if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
         or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the whole admission once
+    -- more after Charges and every other callout, memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "banish", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.BanishPerk, clientIndex0)
     selfCalling = false
@@ -5489,6 +5660,7 @@ function A.Reroll()
     -- Session pause transitions at admission (issue #171): a Pause, or a Pause
     -- and Resume, inside a later callback is seen even when it is over.
     local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
@@ -5505,6 +5677,13 @@ function A.Reroll()
     local used = d and NonNegativeInteger(d.usedRerolls)
     local total = d and NonNegativeInteger(d.totalRerolls)
     local board = A.Board()
+    -- Updated client: what a reroll does to the memory card is not stated by
+    -- the client source, so Nexus does not reroll a board that shows one, or
+    -- one whose memory state is not proven (ChoiceAdmission).
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "reroll")
+        if not admitted then return false, why end
+    end
     local attributable = used ~= nil and total ~= nil
         and board ~= nil and board.idSignature ~= nil
         -- A prior player/rival reroll can have advanced the board before its
@@ -5516,6 +5695,14 @@ function A.Reroll()
     -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
     if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
         or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the same admission at the
+    -- send boundary, after Charges, RawRunData and Board (whose catalog reads
+    -- can run other code), from the raw published choice -- never the flags
+    -- the projection copied earlier. Memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "reroll", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.RequestReroll)
     selfCalling = false
@@ -5587,8 +5774,13 @@ function A.Freeze(index0)
     -- Session pause transitions at admission (issue #171): a Pause, or a Pause
     -- and Resume, inside a later callback is seen even when it is over.
     local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "freeze")
+        if not admitted then return false, why end
+    end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
@@ -5614,6 +5806,12 @@ function A.Freeze(index0)
     -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
     if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
         or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the whole admission once
+    -- more after UnitLevel, Horizon, Board and Charges, memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "freeze", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.FreezePerk, clientIndex0)
     selfCalling = false
@@ -5722,6 +5920,11 @@ function A.UploadWishlist(slot, name, echoes, expected)
     local catalog = A.Catalog and A.Catalog()
     for i = 1, #echoes do
         local e = echoes[i]
+        -- Updated client: a refused Echo (avoid) cannot travel in this upload,
+        -- which sends every entry as wanted. Refused; nothing is sent.
+        if type(e) == "table" and e.avoid ~= nil and e.avoid ~= false then
+            return false, "refused_entries"
+        end
         local id = type(e) == "table" and tonumber(e.spellId)
         local copies = type(e) == "table" and tonumber(e.stacks or 1)
         if not id or id <= 0 or id == math.huge or id ~= math.floor(id)
@@ -5749,6 +5952,19 @@ function A.UploadWishlist(slot, name, echoes, expected)
     for _, e in pairs(bySpell) do clean[#clean + 1] = e end
     table.sort(clean, function(a, b) return a.spellId < b.spellId end)
     if #clean == 0 then return false, "no valid echoes" end
+    -- Updated client (independent Spec P1): an existing server Wishlist is
+    -- replaced only when its current row is read in full. An unreadable slot
+    -- list (nil, a throw, a non-table), a missing row or a row that could not
+    -- be read in full is "stale_slot"; a row that refuses Echoes is
+    -- "refused_entries" (this upload would erase the refusals). Nothing is sent.
+    if (tonumber(slot) or 0) > 0 then
+        local okSlots, current = pcall(A.Slots)
+        local rows = okSlots and type(current) == "table" and current.bySlot or nil
+        local row = type(rows) == "table" and rows[tonumber(slot)] or nil
+        if type(row) ~= "table" then return false, "stale_slot" end
+        if type(row.refused) == "table" and #row.refused > 0 then return false, "refused_entries" end
+        if row.roleSourceValid == false then return false, "stale_slot" end
+    end
     if type(expected) == "table" and (tonumber(slot) or 0) > 0 then
         local current = A.ServerWishlistSlotToken(slot)
         if current == nil or not expected[current] then return false, "stale_slot" end
@@ -6127,14 +6343,17 @@ local function SlotsFingerprint(raw, maxSlots)
             local idPart, stackPart = NumberPart(spellId), NumberPart(stacks)
             if not idPart or not stackPart or not IntegerAtLeast(spellId, 1)
                 or not IntegerAtLeast(stacks, 1)
-                or (entry.locked ~= nil and type(entry.locked) ~= "boolean") then
+                or (entry.locked ~= nil and type(entry.locked) ~= "boolean")
+                or (entry.avoid ~= nil and type(entry.avoid) ~= "boolean") then
                 return nil, "slots:echo"
             end
             local lockPart = entry.locked == nil and "?"
                 or (entry.locked and "1" or "0")
-            echoParts[#echoParts + 1] = table.concat({
-                idPart, stackPart, lockPart,
-            }, ":")
+            -- Updated client: a Wishlist row's refused Echo (avoid). An entry
+            -- without the field keeps its earlier fingerprint exactly.
+            local parts = {idPart, stackPart, lockPart}
+            if entry.avoid ~= nil then parts[4] = entry.avoid and "A" or "a" end
+            echoParts[#echoParts + 1] = table.concat(parts, ":")
         end
         table.sort(echoParts)
         rows[#rows + 1] = table.concat({

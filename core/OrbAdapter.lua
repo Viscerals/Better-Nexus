@@ -320,9 +320,14 @@ function O.Read(mode)
         -- during source loss. Keep its group/requirement metadata, but require
         -- a matching live entry before this row can authorize an Orb action.
         local g=tonumber(row.groupId)
-        local gated=(tonumber(row.requiredSpell) or 0)~=0
+        -- Updated client: a talent gate (talentSpell) is a real requirement
+        -- too, so it stays gated here; the raw entry carries either gate in
+        -- its requiredSpell field.
+        local tomeGate,talentGate=tonumber(row.requiredSpell) or 0,tonumber(row.talentSpell) or 0
+        local gate=tomeGate~=0 and tomeGate or talentGate
+        local gated=gate~=0
         local metadataKnown=type(raw)=="table"
-            and tonumber(raw.requiredSpell or 0)==(tonumber(row.requiredSpell) or 0)
+            and tonumber(raw.requiredSpell or 0)==gate
             and tonumber(raw.groupId or 0)==(tonumber(row.groupId) or 0)
         local learned=not gated or (discoveryKnown and (discovered[id]~=nil or observed[id]==true))
         local mask=tonumber(row.classMask or (raw and raw.classMask)) or 0

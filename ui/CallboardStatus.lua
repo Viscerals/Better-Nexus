@@ -252,6 +252,84 @@ local function ReadCurrentObjectives()
     return type(list) == "table" and list or nil
 end
 
+-- Updated client (wow.export 0.2.19 capture, callboard_service.lua 51-65,
+-- 180-302): the ObjectivesService is gone; the board the server sent is
+-- ProjectEbonhold.Callboard.board, with quests {questId, title, objectives,
+-- state, done, max, ...} (state 1 = accepted, 2 = complete) and
+-- Callboard.enabled false while the realm has no board. Used only when no
+-- ObjectivesService exists (an older provider keeps its own path). Read
+-- passively under protection; nothing is requested, accepted or claimed.
+-- Smallest truthful choice, never an arbitrary one:
+--   * an unreadable or disabled board, a malformed quest row, an accepted or
+--     complete quest without a positive ID or a title, or two of them with
+--     the same ID: no objective;
+--   * with the tracker's title: the one accepted or complete quest of that
+--     normalized title (two of the same title: none);
+--   * without it: the only accepted or complete quest, if there is exactly one.
+-- The board's rewards are for the player's own tier and are not mapped onto
+-- the per-difficulty reward rows; so no reward row is invented, and the
+-- stock reward bag keeps its alpha and mouse (JustifiedStock, RewardsUsable).
+-- The identity of the board the provider publishes now: its table and its
+-- enabled flag. The provider replaces the board table on every push and sets
+-- board = nil, enabled = false when the realm has none, so a cached summary
+-- made from another board identity is rebuilt before it is returned (second
+-- Spec review: a board refusal is never answered from an earlier board).
+local cachedBoardKey = nil
+local function BoardKey()
+    local ok, key = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local callboard = type(pe) == "table" and pe.Callboard or nil
+        if type(callboard) ~= "table" then return "none" end
+        return tostring(callboard.board) .. "|" .. tostring(callboard.enabled)
+    end)
+    return ok and key or "unreadable"
+end
+
+-- Second value: whether the board decides (the provider publishes a
+-- Callboard table, or reading it raised). A deciding board that names no
+-- objective is a refusal: the caller keeps no earlier objective for it.
+local BOARD_STATES = {[1] = true, [2] = true}
+local function BoardObjective(trackerTitle)
+    local present = false
+    local ok, chosen = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local callboard = type(pe) == "table" and pe.Callboard or nil
+        present = type(callboard) == "table"
+        if not present or callboard.enabled == false then return nil end
+        local board = callboard.board
+        local quests = type(board) == "table" and board.quests or nil
+        if type(quests) ~= "table" then return nil end
+        local candidates, ids = {}, {}
+        for i = 1, #quests do
+            local quest = quests[i]
+            if type(quest) ~= "table" then return nil end
+            if BOARD_STATES[quest.state] then
+                local id = PositiveId(quest.questId)
+                local title = type(quest.title) == "string" and Strip(quest.title) or ""
+                if id <= 0 or title == "" or ids[id] then return nil end
+                ids[id] = true
+                local blurb = type(quest.objectives) == "string" and Strip(quest.objectives) or ""
+                candidates[#candidates + 1] = {title = title, questId = id,
+                    objectiveText = blurb ~= "" and blurb or nil}
+            end
+        end
+        if trackerTitle then
+            local match = nil
+            for _, candidate in ipairs(candidates) do
+                if NormalizeTitle(candidate.title) == trackerTitle then
+                    if match then return nil end
+                    match = candidate
+                end
+            end
+            return match
+        end
+        return #candidates == 1 and candidates[1] or nil
+    end)
+    if not ok then return nil, true end
+    if type(chosen) ~= "table" then return nil, present end
+    return chosen, true
+end
+
 -- The quest-log row of this objective, and whether the log holds its title
 -- under another known positive quest ID. Such a row is another quest: its
 -- progress and ID are never this objective's, and while it is there a
@@ -1015,6 +1093,34 @@ local function ResolveObjective()
     local trackerTitle = trackerObj and NormalizeTitle(trackerObj.title) or nil
     if trackerTitle == "" then trackerTitle = nil end
 
+    -- Updated client: the Callboard board stands in only where no
+    -- ObjectivesService exists at all, and a deciding board is applied before
+    -- the stock reward bag's retained objective (third Spec review): a bag
+    -- the old tracker still shows never overrides a disabled, empty,
+    -- malformed or ambiguous current board. Without a Callboard table the
+    -- earlier order (active objective, bag, list, remembered) is unchanged.
+    if not ObjectivesService() then
+        local fromBoard, decides = BoardObjective(trackerTitle)
+        if fromBoard then
+            local snap = Remember(fromBoard)
+            if snap then
+                local useLines = nil
+                if trackerTitle and NormalizeTitle(snap.title) == trackerTitle then
+                    useLines = trackerLines
+                end
+                return snap, useLines, "board"
+            end
+        end
+        -- Second Spec review: a deciding board that names none (disabled,
+        -- empty, ambiguous, malformed or unreadable) stays a refusal. The
+        -- objective remembered from an earlier board is dropped, never
+        -- revived from the tracker text or the quest log.
+        if decides then
+            remembered = nil
+            return nil, nil, nil
+        end
+    end
+
     local active, activeSource = ReadActiveObjective()
     if type(active) == "table" and QuestTitle(active) then
         local snap = Remember(active)
@@ -1171,6 +1277,7 @@ local function CallboardSourcePresent()
 end
 
 local function RefreshNow()
+    cachedBoardKey = BoardKey()
     local summary = BuildSummary()
     if type(summary) ~= "table" then
         pcall(PublishStock, nil)
@@ -1313,7 +1420,9 @@ function M.Init()
 end
 
 function M.GetSummary()
-    if cachedSignature == "" then
+    local boardKey = BoardKey()
+    if cachedSignature == "" or boardKey ~= cachedBoardKey then
+        cachedBoardKey = boardKey
         local summary = BuildSummary()
         if type(summary) == "table" then
             cachedSummary = summary

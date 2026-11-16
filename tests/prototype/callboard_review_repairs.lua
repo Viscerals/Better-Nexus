@@ -539,4 +539,82 @@ do
  Nexus.CallboardStatus.GetSummary=realSummary
 end
 
+-- Updated client (2026-11 capture; second Spec review and Root
+-- probe_callboard_transition.lua): with no ObjectivesService, the board the
+-- provider publishes (ProjectEbonhold.Callboard.board.quests, state 1
+-- accepted / 2 complete, Callboard.enabled) is the objective source. A board
+-- that names no single objective is a refusal in the same session: the
+-- objective remembered from an earlier board is not revived from the tracker
+-- text, and the stock tracker is given back exactly.
+do
+ local CB=Nexus.CallboardStatus
+ local priorService=ProjectEbonhold.ObjectivesService
+ ProjectEbonhold.ObjectivesService=nil
+ GetNumQuestLogEntries=function() return 0 end
+ local function Board(quests,enabled)
+  ProjectEbonhold.Callboard={enabled=enabled~=false,board=quests and {quests=quests} or nil}
+ end
+ local function Q(id,title,state) return {questId=id,title=title,state=state,objectives='Open it',done=0,max=1} end
+ Board(nil);AdvanceScan();CB.PublishCoverage()
+ local baseAlpha,baseMouse=tracker.alpha,tracker.mouse
+ check(CB.GetSummary().observed~=true,'board: no board, no objective')
+ Board({Q(601,'One More Door',1)});AdvanceScan()
+ local s=CB.GetSummary()
+ check(s.observed==true and s.questId==601 and s.title=='One More Door',
+  'board: the accepted quest the tracker shows is the objective')
+ Board({Q(601,'One More Door',1),Q(602,'Another Errand',2),Q(604,'Old Errand',3)});AdvanceScan()
+ s=CB.GetSummary()
+ check(s.observed==true and s.questId==601,'board: the tracker title selects among several accepted or complete quests')
+ check(#(s.rewards or {})==0,'board: no reward row is invented from the board')
+ for _,case in ipairs({
+  {'disabled',function() Board({Q(601,'One More Door',1)},false) end},
+  {'empty',function() Board({}) end},
+  {'no board',function() Board(nil) end},
+  {'duplicate title',function() Board({Q(601,'One More Door',1),Q(603,'One More Door',1)}) end},
+  {'duplicate id',function() Board({Q(601,'One More Door',1),Q(601,'Another Errand',1)}) end},
+  {'malformed row',function() Board({Q(601,'One More Door',1),'bad row'}) end},
+  {'another quest only',function() Board({Q(602,'Another Errand',1)}) end},
+  {'unreadable',function()
+    ProjectEbonhold.Callboard=setmetatable({},{__index=function() error('synthetic board raise') end})
+   end},
+ }) do
+  Board({Q(601,'One More Door',1)});AdvanceScan()
+  check(CB.GetSummary().observed==true,'board '..case[1]..': fixture first observes the valid board')
+  case[2]()
+  check(CB.GetSummary().observed~=true,'board '..case[1]..': the same session does not revive the remembered objective')
+  AdvanceScan()
+  check(CB.GetSummary().observed~=true,'board '..case[1]..': nor does the next scan')
+  CB.PublishCoverage()
+  check(tracker.alpha==baseAlpha and tracker.mouse==baseMouse,'board '..case[1]..': the stock tracker keeps its own alpha and mouse')
+ end
+ -- Third Spec review (Root probe_callboard_bag_precedence): a reward bag the
+ -- old tracker still shows, holding the earlier objective, never overrides a
+ -- deciding current board.
+ local priorBag=otf.rewardBagFrame
+ otf:Show()
+ otf.rewardBagFrame={objectiveData={questId=601,title='One More Door'}}
+ for _,case in ipairs({
+  {'disabled',function() Board({Q(601,'One More Door',1)},false) end},
+  {'empty',function() Board({}) end},
+  {'malformed row',function() Board({Q(601,'One More Door',1),'bad row'}) end},
+  {'duplicate title',function() Board({Q(601,'One More Door',1),Q(603,'One More Door',1)}) end},
+ }) do
+  Board({Q(601,'One More Door',1)});AdvanceScan()
+  check(CB.GetSummary().observed==true,'bag '..case[1]..': fixture first observes the valid board')
+  case[2]()
+  check(CB.GetSummary().observed~=true,'bag '..case[1]..': the retained reward bag does not override the current board')
+  AdvanceScan()
+  check(CB.GetSummary().observed~=true,'bag '..case[1]..': nor after the next scan')
+ end
+ -- Legacy control: with no Callboard table at all the reward bag keeps its
+ -- earlier place as an objective source.
+ ProjectEbonhold.Callboard=nil
+ AdvanceScan()
+ local legacy=CB.GetSummary()
+ check(legacy.observed==true and legacy.questId==601,'bag legacy control: without a board the shown reward bag is still read')
+ otf.rewardBagFrame=priorBag
+ ProjectEbonhold.Callboard=nil
+ ProjectEbonhold.ObjectivesService=priorService
+ AdvanceScan()
+end
 print('PASS callboard_review_repairs '..checks)

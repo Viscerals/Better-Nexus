@@ -155,4 +155,85 @@ assert(status.state=='STOPPED' and not status.running and view.choicePresence=='
  'a deliberate Orb Stop does not resolve an ordinary open choice')
 assert(H.Count('orb-spend')==0 and H.Count('take')==0,
  'observing and preparing a report sends no Orb or choice')
+-- Updated client (2026-11 capture): Root probes probe_spec_admission.lua and
+-- probe_spec_drift.lua, and the second Spec review. On the updated provider
+-- (GetServerActiveDesign present) the specialization choice is the player's,
+-- and the only automatic choice action Nexus admits is a Take of the memory
+-- card (flag 3) the published choice shows: a hidden fourth memory card and
+-- an armed native automatic pick cannot be observed, so every other Take and
+-- every Reroll, Banish and Freeze is unavailable there. Real TOC, adapter
+-- Take/Reroll/Banish/Freeze and Board; synthetic services only.
+do
+ local function FreshBoot(level)
+  Nexus=nil;NexusDB=nil;SlashCmdList=nil
+  local FH=dofile('tests/prototype/harness.lua')
+  FH.playerLevel=level or 10
+  FH.service.GetServerMaxSlots=function() return 10 end
+  FH.service.GetServerActiveDesign=function() return 0 end
+  FH.perks.serverActiveSlot=1
+  FH.perks.serverActiveDesign=0
+  FH.perks.serverBuildSlots={[1]={name='Live',verified=true,memoryTotal=3,memoryRemaining=0,echoes={}}}
+  ProjectEbonhold.OrbService={IsStateKnown=function() return true end,GetCharges=function() return 0 end,
+   IsOfferPending=function() return false end,RequestCharges=function() end}
+  FH.Boot()
+  return FH
+ end
+ local function Sent(FH,kind) local n=0;for _,a in ipairs(FH.actions) do if a[1]==kind then n=n+1 end end;return n end
+ local ORDINARY={{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200003,quality=3}}
+ local MEMORY={{spellId=200001,quality=1,isGuaranteed=true},{spellId=200002,quality=2},{spellId=200003,quality=3}}
+ -- The initial specialization draw (chosen 0): no Take (Root probe), no Reroll.
+ local FH=FreshBoot(10)
+ FH.Board(ORDINARY)
+ FH.perks.currentSpecDraw={chosen=0}
+ FH.perks.pendingSelectSpellId=nil
+ local accepted,reason=Nexus.GameAdapter.Take(200001)
+ assert(accepted==false,'initial specialization reached SelectPerk instead of refusing automatic admission')
+ assert(Sent(FH,'take')==0,'specialization must not be selected')
+ accepted=Nexus.GameAdapter.Reroll()
+ assert(accepted==false and Sent(FH,'reroll')==0,'no reroll on the specialization choice')
+ assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses the specialization choice')
+ FH.perks.currentSpecDraw={chosen=2}
+ assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses a specialization draw')
+ -- Ordinary offers on the updated provider: no automatic action at all, even
+ -- with live rows that look settled (cached rows are no draw authority).
+ FH=FreshBoot(20)
+ FH.Board(ORDINARY)
+ for _,try in ipairs({
+  {'take',function() return Nexus.GameAdapter.Take(200002) end},
+  {'reroll',function() return Nexus.GameAdapter.Reroll() end},
+  {'banish',function() return Nexus.GameAdapter.Banish(0) end},
+  {'freeze',function() return Nexus.GameAdapter.Freeze(0) end},
+ }) do
+  local ok,why=try[2]()
+  assert(ok==false and Sent(FH,try[1])==0,'updated provider: an ordinary '..try[1]..' is unavailable: '..tostring(why))
+ end
+ assert(Nexus.GameAdapter.Board().strictObservation==false,'updated provider: the leveling pick is unavailable')
+ -- The memory card: another card is refused; the card itself is the positive
+ -- control; no Reroll on that board.
+ FH=FreshBoot(20)
+ FH.Board(MEMORY)
+ accepted=Nexus.GameAdapter.Take(200002)
+ assert(accepted==false and Sent(FH,'take')==0,'taking another card would give up the memory card')
+ accepted=Nexus.GameAdapter.Reroll()
+ assert(accepted==false and Sent(FH,'reroll')==0,'no reroll on a memory board')
+ assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses a memory board')
+ accepted=Nexus.GameAdapter.Take(200001)
+ assert(accepted==true and Sent(FH,'take')==1,'positive control: the memory card itself stays admitted')
+ -- Root probe_spec_drift on the admitted path: the specialization draw, or a
+ -- cleared memory flag, installed inside the granted read after admission is
+ -- refused at the send boundary (the only remaining Take path).
+ for _,drift in ipairs({
+  {'specialization draw',function(P) P.currentSpecDraw={chosen=0} end},
+  {'memory flag cleared',function(P) P.currentChoice[1].isGuaranteed=false end},
+ }) do
+  FH=FreshBoot(20)
+  FH.Board(MEMORY)
+  FH.perks.pendingSelectSpellId=nil
+  local oldGranted=FH.service.GetGrantedPerks
+  FH.service.GetGrantedPerks=function(...) drift[2](FH.perks);FH.service.GetGrantedPerks=oldGranted;return oldGranted(...) end
+  accepted=Nexus.GameAdapter.Take(200001)
+  assert(accepted==false and Sent(FH,'take')==0,drift[1]..' installed inside a callout reached SelectPerk')
+ end
+ print('PASS updated client: specialization draw and memory card refuse automatic admission; ordinary actions unavailable: '..tostring(reason))
+end
 print('PASS orb_choice_observation')

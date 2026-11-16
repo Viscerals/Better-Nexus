@@ -449,6 +449,11 @@ function Controller.New(options)
         refused = "the server refused the change (are you in a state that allows editing your build?)",
         ["no echoes"] = "there are no echoes in your pending list",
         ["no valid echoes"] = "none of the pending echoes look valid",
+        -- Updated client: the adapter's refused_entries (the server Wishlist
+        -- refuses some Echoes, or the draft carries a refusal). The reason
+        -- stays the stable machine token; the player reads what it means.
+        refused_entries = "this server Wishlist refuses some Echoes, and saving it from Nexus would remove those refusals; "
+            .. "nothing was saved -- change it in the game's Echo Journal instead",
     }
     -- Save intents (UX-03). Save changes uploads the plan: an opened plan
     -- keeps the assignment it already has in step, and a new plan is saved
