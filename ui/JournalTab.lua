@@ -157,6 +157,74 @@ local function OwnerKeyNow()
     return ok and owner or nil
 end
 
+-- What one numbered Saved Build is, as one comparable string: its slot, its
+-- name as the game reports it and everything it holds (every Echo with its
+-- stacks, quality and lock state, every refused Echo, and whether the game's
+-- list was complete), in an order that does not depend on the game's. nil
+-- when that cannot be read or the Saved Build holds nothing: an unknown
+-- target is never equal to anything. A slot number or a name alone
+-- identifies nothing (the same slot can be saved over, with the same name).
+-- `row` is the adapter's row for that slot when the caller already holds
+-- the read it belongs to; without one the adapter is read now. Read only.
+local function SavedBuildIdentity(slot, row)
+    slot = tonumber(slot)
+    if not slot or slot < 1 then return nil end
+    if row == nil then
+        local adapter = Nexus.GameAdapter
+        if not (adapter and type(adapter.Slots) == "function") then return nil end
+        local ok, slots = pcall(adapter.Slots)
+        if not ok or type(slots) ~= "table" or type(slots.bySlot) ~= "table" then return nil end
+        row = slots.bySlot[slot]
+    end
+    if type(row) ~= "table" or type(row.name) ~= "string"
+        or type(row.echoes) ~= "table" or #row.echoes == 0 then
+        return nil
+    end
+    local function Parts(list)
+        local parts = {}
+        for i = 1, #list do
+            local echo = list[i]
+            local id = type(echo) == "table" and tonumber(echo.spellId) or nil
+            if not id then return nil end
+            parts[i] = string.format("%.0f:%s:%s:%s", id, tostring(tonumber(echo.stacks)),
+                tostring(tonumber(echo.quality)), tostring(echo.locked))
+        end
+        table.sort(parts)
+        return table.concat(parts, ",")
+    end
+    local held = Parts(row.echoes)
+    local refused = ""
+    if row.refused ~= nil then
+        refused = type(row.refused) == "table" and Parts(row.refused) or nil
+    end
+    if not held or not refused then return nil end
+    -- The name is length-prefixed: no name can imitate another field.
+    return table.concat({string.format("%.0f", slot), #row.name .. ":" .. row.name,
+        tostring(row.roleSourceValid), held, refused}, "|")
+end
+
+-- Whether the Saved Build a question represents (`binding.identity`, taken
+-- with the name the player was shown) is still what its slot holds now. A
+-- binding without a readable identity never holds.
+local function TargetHolds(binding)
+    return type(binding) == "table" and type(binding.identity) == "string"
+        and SavedBuildIdentity(binding.slot) == binding.identity
+end
+
+-- The refusal for a represented Saved Build that changed or cannot be read.
+-- English only, with no catalog key: it takes the route the adapter's own
+-- unlisted refusal reasons take to chat (UserText.Recognized, as supplied).
+local TARGET_CHANGED = "That Saved Build changed or could not be read after you chose it. "
+    .. "Nothing was assigned. Open the Wishlist list and choose again."
+local function SayTargetChanged(binding)
+    local userText = Nexus.UserText
+    local shown = userText and type(userText.Recognized) == "function"
+        and userText.Recognized(TARGET_CHANGED) or TARGET_CHANGED
+    print("|cffff6060Nexus:|r " .. tostring(shown))
+    -- The caller's stale display (its chooser) is its own to close.
+    if type(binding) == "table" and type(binding.changed) == "function" then pcall(binding.changed) end
+end
+
 -- One assignment the player chose. `assign` performs it (and every role
 -- choice it starts) for the target captured when the player chose it. A
 -- numbered, non-empty target with Auto selected asks first; the first-run
@@ -164,9 +232,15 @@ end
 -- assignment itself. When the confirmation cannot be shown, nothing is
 -- assigned (never assigned unasked while Auto is selected). One accept
 -- performs it once; an accept after the character's saved data changed
--- assigns nothing. Returns true when it asked, false when it assigned at
--- once, nil and a reason when it refused.
-function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
+-- assigns nothing. `binding` (optional: {slot, identity, changed}) is the
+-- Saved Build the caller showed the player (SavedBuildIdentity of the read
+-- its name came from). With one, the question is asked only while that slot
+-- still holds that Saved Build, and an accept assigns only while it still
+-- does; otherwise nothing is assigned, the player is told to choose again
+-- and `changed` (optional) is called. Which Saved Build is active is not
+-- part of it. Returns true when it asked, false when it assigned at once,
+-- nil and a reason when it refused.
+function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign, binding)
     if not numbered or not M.AutoSelected() then
         assign()
         return false
@@ -176,6 +250,10 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
         print("|cffff6060Nexus:|r " .. T("journal.chat.consent_unavailable"))
         return nil, "consent_unavailable"
     end
+    if binding ~= nil and not TargetHolds(binding) then
+        SayTargetChanged(binding)
+        return nil, "target_changed"
+    end
     local owner, answered = OwnerKeyNow(), false
     AssignDialogText(StaticPopupDialogs[ASSIGN_POPUP], wishlistName, targetLabel)
     StaticPopup_Show(ASSIGN_POPUP, wishlistName, targetLabel, {assign = function()
@@ -183,6 +261,10 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
         answered = true
         if OwnerKeyNow() ~= owner then
             print("|cffff6060Nexus:|r " .. T("journal.chat.owner_changed"))
+            return
+        end
+        if binding ~= nil and not TargetHolds(binding) then
+            SayTargetChanged(binding)
             return
         end
         assign()
@@ -1813,7 +1895,10 @@ end
 -- `loadoutName` is the raw value handed on to the editor unchanged;
 -- `loadoutLabel` is what the picker shows for it (the same name, or the
 -- reviewed text for a code-owned placeholder such as "Saved Build N").
-local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel)
+-- `targetIdentity` is SavedBuildIdentity of the numbered, non-empty Saved
+-- Build that name was read from (nil for any other target): what an Auto-ON
+-- confirmation started here is bound to.
+local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel, targetIdentity)
     loadoutLabel = loadoutLabel or tostring(loadoutName or "")
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
@@ -1956,6 +2041,17 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 -- The guide request this operation began under, taken now, before
                 -- any confirmation or role choice, and carried to every result.
                 local origin = GuideOrigin(numbered, active, cSnapshot)
+                -- The Saved Build this chooser showed, for a confirmation that
+                -- waits: answered after that slot was saved over, renamed,
+                -- emptied or became unreadable, it assigns nothing and this
+                -- chooser (which still names the old one) closes.
+                local binding = numbered and not emptySlot and {
+                    slot = active, identity = targetIdentity,
+                    changed = function()
+                        HideWishlistPicker()
+                        M.RefreshAssociations()
+                    end,
+                } or nil
                 if cSnapshot.lockEvidenceStatus=="unavailable" and Nexus.WishlistEditor
                     and Nexus.WishlistEditor.ResolveAndAssignWishlist then
                     -- A Wishlist without lock evidence: its role choice (the
@@ -1965,7 +2061,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     local asked, why = M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
                         HideWishlistPicker()
                         Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0,origin)
-                    end)
+                    end, binding)
                     if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
                     return
                 end
@@ -1998,7 +2094,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     print("|cff4dff80Nexus:|r " .. TF("journal.chat.assigned", {wishlist = shownName, target = target},
                         "'" .. shownName .. "' is now the Wishlist for " .. target
                         .. ". No Saved Build was changed or activated."))
-                end)
+                end, binding)
                 if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
             end
             local function OpenWishlistEditorOnly()
@@ -2186,7 +2282,9 @@ local function RefreshAssociationRows()
     host.selector:SetScript("OnClick", function(self)
         if wishlistPicker and wishlistPicker:IsShown() then HideWishlistPicker(); return end
         local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
-        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel)
+        -- The identity comes from the row this strip's name was read from.
+        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel,
+            not firstRun and SavedBuildIdentity(active, activeRow) or nil)
     end)
     host.newWishlist:SetScript("OnClick", function()
         HideWishlistPicker()
