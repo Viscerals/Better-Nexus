@@ -376,7 +376,26 @@ C.scenario('A02 first-run Create, label and Save',function()
  print('OBSERVED','A02 context='..line)
  C.guard(line:find('Saved Build: ',1,true)~=nil and not line:find('Assigned to:',1,true),
   'A02: the header keeps its Saved Build wording and claims no assignment',line)
- C.guard(line:find('first-run target',1,true)~=nil,'A02: the opened first-run plan is labelled as the first-run target',line)
+ -- The editor shows a routine first-run State on its row hover, not as a
+ -- visible State cell: the shown Saved Build cell says none is in use, and
+ -- the row's own hover names the first-run target.
+ local headerRow=NexusEditorFrame and NexusEditorFrame._destinationRow
+ local headerTip=''
+ if type(headerRow)=='table' and type(headerRow.hits)=='table' then
+  local lines={}
+  for _,hit in ipairs(headerRow.hits) do
+   local enter=type(hit)=='table' and hit.kind and hit:IsVisible() and hit:GetScript('OnEnter')
+   if enter then
+    for _,l in ipairs((V.TooltipLines(function() enter(hit) end))) do lines[#lines+1]=V.Plain(l) end
+    local leave=hit:GetScript('OnLeave');if leave then pcall(leave,hit) end
+   end
+  end
+  headerTip=table.concat(lines,'\n')
+ end
+ print('OBSERVED','A02 context hover='..headerTip:gsub('\n',' / '))
+ C.guard((line:find('first-run target',1,true)~=nil or line:find('Saved Build: None in use',1,true)~=nil)
+  and headerTip:find('first-run target',1,true)~=nil,
+  'A02: the opened first-run plan is labelled as the first-run target (shown Saved Build none in use, row hover names the first-run target)',line..' || '..headerTip)
  SaveClick(201174)
  asked=Asked()
  C.guard(asked and asked:find('first-run target for '..CHARACTER,1,true),'A02: the Save confirmation names the first-run target',asked)
@@ -601,17 +620,28 @@ end)
 -- editor's existing quiet refresh. Geometry is the offline font model of
 -- layout_geometry_support, not native measurement.
 local G=dofile('tests/prototype/layout_geometry_support.lua')
--- The four cells of a real destination row as shown (plain text), and each
--- way one is not: not visible, wider than its own width, outside the row or
--- overlapping another cell (one line: horizontal extents).
+-- The cells of the real editor destination row as shown (plain text), and
+-- each way one is not: not visible, wider than its own width, outside the
+-- row or overlapping another cell (one line: horizontal extents). The
+-- editor presentation shows the character, Saved Build and Wishlist cells,
+-- and the State cell only for a warning: a routine State cell is hidden
+-- (texts[4] '') together with its hover area, and the third result is true.
+-- Its fact is then read from the row's own hover by the caller, never from
+-- this helper. Every shown cell is checked as before. (Every caller passes
+-- the editor's row; the Play header's own checks do not use this helper.)
 local function RowCells(row)
  local texts,bad,rects={},{},{}
  local width=row:GetWidth()
+ local stateHidden=false
  if #row.cells~=4 then bad[#bad+1]=#row.cells..' cells' end
  for i=1,4 do
   local c=row.cells[i]
   texts[i]=''
-  if type(c)~='table' or c.kind~='FontString' or not c:IsVisible() or (c:GetText() or '')=='' then
+  if i==4 and type(c)=='table' and c.kind=='FontString' and not c:IsVisible() then
+   stateHidden=true
+   local hit=type(row.hits)=='table' and row.hits[4]
+   if type(hit)~='table' or hit:IsVisible() then bad[#bad+1]='cell4 hidden but its hover area shown' end
+  elseif type(c)~='table' or c.kind~='FontString' or not c:IsVisible() or (c:GetText() or '')=='' then
    bad[#bad+1]='cell'..i..' not shown'
   else
    texts[i]=V.Plain(c:GetText())
@@ -630,7 +660,24 @@ local function RowCells(row)
    end
   end
  end
- return texts,bad
+ return texts,bad,stateHidden
+end
+-- Every line the row's own visible hover areas write (OnEnter, then
+-- OnLeave), plain, one per line.
+local function RowHover(row)
+ local lines={}
+ for _,hit in ipairs(type(row.hits)=='table' and row.hits or {}) do
+  local enter=type(hit)=='table' and hit.kind and hit:IsVisible() and hit:GetScript('OnEnter')
+  if enter then
+   for _,l in ipairs((V.TooltipLines(function() enter(hit) end))) do lines[#lines+1]=V.Plain(l) end
+   local leave=hit:GetScript('OnLeave');if leave then pcall(leave,hit) end
+  end
+ end
+ return table.concat(lines,'\n')
+end
+-- The value of the hover's "State:" line (lower case), '' when it has none.
+local function StateLine(tip)
+ return ('\n'..V.Plain(tip or ''):lower()):match('\nstate:%s*([^\n]*)') or ''
 end
 
 C.scenario('the editor destination row keeps naming the captured Saved Build Six',function()
@@ -641,15 +688,21 @@ C.scenario('the editor destination row keeps naming the captured Saved Build Six
  C.expect(has,'R-ED: the editor shows its destination row of cells')
  if not has then return end
  local function Shown(tag)
-  local t,bad=RowCells(row)
+  local t,bad,hidden=RowCells(row)
   local all=table.concat(t,' / ')
-  print('OBSERVED','R-ED '..tag..' row='..all)
-  C.expect(#bad==0,'R-ED '..tag..': four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
+  local tip=RowHover(row)
+  print('OBSERVED','R-ED '..tag..' row='..all..' hover='..tip:gsub('\n',' / '))
+  C.expect(#bad==0,'R-ED '..tag..': the shown cells (character, Saved Build, Wishlist; State only as a warning) each fit their own width, disjoint inside the row',table.concat(bad,'; '))
+  -- Captured: on a shown State cell, or (routine State hidden) on the
+  -- hover's State line, which also keeps Six (slot 6) and never slot 1.
+  local captured=(not hidden and t[4]:find('Captured',1,true))
+   or (hidden and StateLine(tip):find('^captured')~=nil
+    and tip:find('Saved Build: Six (slot 6)',1,true)~=nil and not tip:find('slot 1)',1,true))
   C.expect(t[1]:find(CHARACTER,1,true) and V.Names(t[2],'Six')
    and (t[2]:find('slot 6)',1,true) or (t[2]:find('#6',1,true) and not t[2]:find('#6%d')))
-   and t[3]:find('W-Six',1,true) and t[4]:find('Captured',1,true)
+   and t[3]:find('W-Six',1,true) and captured
    and not V.Names(all,'One') and not t[2]:find('slot 1)',1,true) and not t[2]:find('#1',1,true),
-   'R-ED '..tag..': it shows '..CHARACTER..', the captured Six (slot 6), W-Six and Captured, never One',all)
+   'R-ED '..tag..': it shows '..CHARACTER..', the captured Six (slot 6) and W-Six, Captured on its State cell or row hover, never One',all..' || '..tip)
  end
  Shown('opened')
  H.perks.serverActiveSlot=1;H.Notify();A.Poll();H.Advance(1)
@@ -1012,15 +1065,20 @@ C.scenario('B2 first-run row keeps its captured first-run target at font scale 2
   C.expect(present,tag..': the editor shows its destination row')
   if not present then return end
   C.guard(row:GetWidth()==972,tag..': the destination row keeps its 972 px width',row:GetWidth())
-  local texts,bad=RowCells(row)
+  local texts,bad,hidden=RowCells(row)
   local shown=table.concat(texts,' / ')
   local detail=shown..' | '..table.concat(bad,'; ')
   print('OBSERVED',tag..' double row='..detail)
-  C.expect(#bad==0,tag..': the four cells are shown, fit and stay apart at font scale 2',detail)
+  C.expect(#bad==0,tag..': the shown cells (character, Saved Build, Wishlist; State only as a warning) fit and stay apart at font scale 2',detail)
+  -- The captured first-run target: on a shown State cell as before, or,
+  -- with the routine State hidden, on the State line of the row's own
+  -- hover; never the bare C:1 minimum on the row.
   local cue=texts[4]
-  C.expect(shown:find('first-run target',1,true) and cue:find('first-run target',1,true)
-   and (cue:find('^Captured') or cue:find('^C:')),
-   tag..': the row keeps the captured first-run target (Captured or C: cue), not C:1',detail)
+  local state=StateLine(Hover(row))
+  C.expect(not shown:find('C:1',1,true) and ((not hidden and shown:find('first-run target',1,true)
+   and cue:find('first-run target',1,true) and (cue:find('^Captured') or cue:find('^C:')))
+   or (hidden and state:find('^captured; first%-run target')~=nil)),
+   tag..': the row keeps the captured first-run target (Captured or C: cue, on its State cell or row hover), not C:1',detail..' || state='..state)
   C.expect((texts[1]:find('^Character:') or texts[1]:find('^C:')) and texts[1]:find(CHARACTER,1,true)
    and (texts[2]:find('^Saved Build') or texts[2]:find('^B:')) and texts[2]:find('None',1,true)
    and (texts[3]:find('^Wishlist') or texts[3]:find('^W:')) and NameShown(texts[3],name),
@@ -1136,16 +1194,18 @@ do
  local function Row(tag,kinds,bad)
   local row=NexusEditorFrame and NexusEditorFrame:IsVisible() and NexusEditorFrame._destinationRow
   if not C.expect(type(row)=='table' and type(row.cells)=='table','Origins '..tag..': the editor shows its destination row') then return end
-  local t,why=RowCells(row)
+  local t,why,hidden=RowCells(row)
   local line=table.concat(t,' / ')
-  C.expect(#why==0,'Origins '..tag..': the four cells are shown whole inside the row',line..' ('..table.concat(why,'; ')..')')
-  if #row.cells~=4 or t[1]=='' or t[2]=='' or t[3]=='' or t[4]=='' then return end
+  C.expect(#why==0,'Origins '..tag..': the shown cells (character, Saved Build, Wishlist; State only as a warning) are whole inside the row',line..' ('..table.concat(why,'; ')..')')
+  if #row.cells~=4 or t[1]=='' or t[2]=='' or t[3]=='' or (t[4]=='' and not hidden) then return end
+  -- A routine State cell is hidden: the shown Saved Build cell then selects
+  -- the meaning, and the hover check below requires its whole State words.
   local kind
   for _,k in ipairs(kinds) do
-   if In(t[2],WORDS[k].build,'saved build') and In(t[4],WORDS[k].state,'state') then kind=k end
+   if In(t[2],WORDS[k].build,'saved build') and (hidden or In(t[4],WORDS[k].state,'state')) then kind=k end
   end
   C.expect(kind~=nil and not Captures(line) and not Mentions(line,bad),
-   'Origins '..tag..': the shown Saved Build and State cells read '..table.concat(kinds,' or ')
+   'Origins '..tag..': the shown Saved Build cell (and a shown State cell) read '..table.concat(kinds,' or ')
    ..' with no capture cue and no Saved Build it did not capture',line)
   local tip,n,raised=Hover(row)
   local w,low=WORDS[kind or kinds[1]],tip:lower()
@@ -1259,7 +1319,7 @@ do
   local row=NexusEditorFrame and NexusEditorFrame._destinationRow
   local s={t={'','','',''},bad={'no destination row'},tip=''}
   if type(row)=='table' and type(row.cells)=='table' then
-   s.t,s.bad=RowCells(row)
+   s.t,s.bad,s.hidden=RowCells(row)
    local lines={}
    if row:IsVisible() and type(row.hits)=='table' then
     for _,h in ipairs(row.hits) do
@@ -1276,8 +1336,10 @@ do
   return s
  end
  local function Shows(kind,tag,s,want)
-  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and Is(s.t[4],want.state,'state'),
-   tag..': the shown Saved Build and State cells read '..want.label,s.detail)
+  -- A routine State cell is hidden: its words are then required on the
+  -- row hover by the next check; a shown State cell must read them.
+  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and (s.hidden or Is(s.t[4],want.state,'state')),
+   tag..': the shown Saved Build cell (and a shown State cell) read '..want.label,s.detail)
   C[kind](Has(s.tip,want.tip[1]) and Has(s.tip,want.tip[2]) and not s.tip:find('shown as captured earlier',1,true),
    tag..': the row hover, read once shown, discloses '..want.label..', not captured',(s.tip:gsub('\n',' / ')))
  end
@@ -1477,13 +1539,14 @@ do
    local function Held(tag,known)
     Ed.Refresh()
     local s=Read()
-    local state=V.Plain(s.t[4]):lower()
+    -- The State cell when shown; a routine (hidden) one on the row hover.
+    local state=s.hidden and StateLine(s.tip) or V.Plain(s.t[4]):lower()
     state=state:match('^state:%s*(.-)$') or state
     local claimsActive=state=='c:+' or state=='captured: active'
      or (state:find('^captured; active')~=nil and state:find('^captured; active state')==nil)
     C.guard(#s.bad==0 and Is(s.t[2],{'Six (slot 6)','#6 Six'},'saved build')
      and (state:find('^captured[;:]')~=nil or state:find('^c:')~=nil) and not claimsActive and Ctx().loadoutSlot==6,
-     tag..': the shown cells keep the captured Saved Build Six (slot 6), captured, never active or retargeted',s.detail)
+     tag..': the shown cells keep the captured Saved Build Six (slot 6), captured (State cell or row hover), never active or retargeted',s.detail..' || state='..state)
     C.guard(Has(s.tip,{'saved build','six (slot 6)'}) and s.tip:find('shown as captured earlier',1,true)~=nil,
      tag..': the row hover, read once shown, discloses Six (slot 6) as captured',(s.tip:gsub('\n',' / ')))
     Person(tag,s,known)
@@ -1555,7 +1618,7 @@ do
   if type(row)~='table' or type(row.cells)~='table' then
    C.expect(false,'S6 '..tag..': the editor shows its destination row');return nil
   end
-  local t,bad=RowCells(row)
+  local t,bad,hidden=RowCells(row)
   local lines,n,raised={},0,nil
   if #bad==0 and row:IsVisible() then
    local hits=type(row.hits)=='table' and (rawget(row.hits,'kind') and {row.hits} or row.hits) or {}
@@ -1574,6 +1637,7 @@ do
   local tip=table.concat(lines,'\n')
   return {ok=#bad==0 and n>0 and raised==nil,tip=tip,build=Value(t[2],{'saved build','b'}),
    wishlist=Value(t[3],{'wishlist','w'}),state=Value(t[4],{'state','s'}),
+   stateHidden=hidden,tipState=StateLine(tip),
    detail=table.concat(t,' | ')..(#bad>0 and (' bad='..table.concat(bad,'; ')) or '')
     ..' || '..(raised or (tip:gsub('\n',' / ')))}
  end
@@ -1609,11 +1673,11 @@ do
   local s=Read(tag)
   if not s then return end
   local w=WORDS[want]
-  C[kind](s.ok and OneOf(s.build,w.build) and OneOf(s.state,w.state)
+  C[kind](s.ok and OneOf(s.build,w.build) and (s.stateHidden or OneOf(s.state,w.state))
    and s.tip:find(w.tip[1],1,true)~=nil and s.tip:find(w.tip[2],1,true)~=nil
    and not s.tip:find('shown as captured earlier',1,true) and not s.tip:find('holds no echoes',1,true)
    and not V.Names(s.tip,ALPHA),
-   'S6 '..tag..': the shown Saved Build and State cells, then the row hover, read '..w.label
+   'S6 '..tag..': the shown Saved Build cell (and a shown State cell), then the row hover, read '..w.label
     ..', with nothing captured, empty or named Alpha',s.detail)
  end
  -- The captured draft: the cells and the hover keep Alpha (slot 1) as
@@ -1628,11 +1692,15 @@ do
    and ctx.loadoutName==ALPHA and not Ctrl().IsEditing(),
    'S6 '..tag..': the draft keeps its captured Saved Build Alpha (slot 1), shown and disclosed as captured',
    s.detail..' ctx='..(type(ctx)=='table' and (tostring(ctx.loadoutSlot)..'/'..tostring(ctx.loadoutName)) or 'none'))
-  local st,wl=s.state,s.wishlist
+  -- The State cell when shown; a routine (hidden) one on the row hover. An
+  -- empty Saved Build is a warning: its State cell must be shown, and its
+  -- empty words are read from that visible cell only.
+  local st,wl=((s.stateHidden and not empty) and s.tipState or s.state),s.wishlist
   local said=st:find('empty',1,true)~=nil or st:find('no echoes',1,true)~=nil or st=='c:0'
   local refused=wl:find('no valid assignment',1,true)~=nil or wl:find('^refused')~=nil or wl=='!'
   local told=s.tip:find('holds no echoes',1,true)~=nil
-  C[kind](s.ok and (st:find('^captured')~=nil or st:find('^c:')~=nil) and said==empty and refused==empty and told==empty,
+  C[kind](s.ok and (not empty or not s.stateHidden)
+   and (st:find('^captured')~=nil or st:find('^c:')~=nil) and said==empty and refused==empty and told==empty,
    'S6 '..tag..': the captured state '..(empty and 'is empty and the Wishlist refused' or 'claims no empty Saved Build and no refusal')
     ..', in the cells and the hover',s.detail)
  end
@@ -1737,7 +1805,7 @@ do
   local row=NexusEditorFrame and NexusEditorFrame._destinationRow
   local s={t={'','','',''},bad={'no destination row'},tip=''}
   if type(row)=='table' and type(row.cells)=='table' then
-   s.t,s.bad=RowCells(row)
+   s.t,s.bad,s.hidden=RowCells(row)
    local lines={}
    if row:IsVisible() and type(row.hits)=='table' then
     for _,h in ipairs(row.hits) do
@@ -1754,8 +1822,10 @@ do
   return s
  end
  local function Shows(kind,tag,s,want)
-  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and Is(s.t[4],want.state,'state'),
-   tag..': the shown Saved Build and State cells read '..want.label,s.detail)
+  -- A routine State cell is hidden: its words are then required on the
+  -- row hover by the next check; a shown State cell must read them.
+  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and (s.hidden or Is(s.t[4],want.state,'state')),
+   tag..': the shown Saved Build cell (and a shown State cell) read '..want.label,s.detail)
   C[kind](Has(s.tip,want.tip[1]) and Has(s.tip,want.tip[2]) and not s.tip:find('shown as captured earlier',1,true),
    tag..': the row hover, read once shown, discloses '..want.label..', not captured',(s.tip:gsub('\n',' / ')))
  end
@@ -1812,7 +1882,8 @@ do
    local s=Read()
    local token=P.destinationSessionRevision
    C.setup(ValidRev(token) and #s.bad==0 and Is(s.t[1],{CHARACTER},'character')
-    and Is(s.t[2],FIRST.build,'saved build') and Is(s.t[4],FIRST.state,'state'),
+    and Is(s.t[2],FIRST.build,'saved build')
+    and ((s.hidden and Has(s.tip,FIRST.tip[2])) or (not s.hidden and Is(s.t[4],FIRST.state,'state'))),
     'F4: fixture: the row holds the current first-run facts and '..CHARACTER..' at a valid revision',tostring(token)..' '..s.detail)
    local others,w0,u0,auto,facts=Others(),Writes(),(Uploads()),Auto(),Facts()
    restore[#restore+1]=function() if type(P.Show)=='function' then P.Show() end end
@@ -1824,7 +1895,7 @@ do
    s=Read()
    local advanced=ValidRev(token) and ValidRev(left) and left==token+1
    C.setup(advanced and (n.refresh or 0)==f0 and #s.bad==0 and Is(s.t[1],{CHARACTER},'character')
-    and Is(s.t[4],FIRST.state,'state'),
+    and ((s.hidden and Has(s.tip,FIRST.tip[2])) or (not s.hidden and Is(s.t[4],FIRST.state,'state'))),
     'F4: fixture: the real leave published the next revision and no editor refresh or row update ran since',
     tostring(token)..' -> '..tostring(left)..' refreshes='..((n.refresh or 0)-f0)..' '..s.detail)
    if not advanced then return end

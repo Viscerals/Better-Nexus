@@ -235,11 +235,23 @@ local rr=G.Rect(row,f)
 check(rr[1]<=34+0.5 and rr[3]>=f:GetWidth()-34-0.5,'E6: the destination row spans the content width '..G.Text(rr))
 check(row.cells and #row.cells==4,'E6: the four destination cells are the shared row\'s own')
 local loadout=Find(f.children,function(c) return c.kind=='Button' and c:IsVisible() and Plain(c:GetText()):find('Saved Build: ',1,true)==1 end)
-for _,cell in ipairs(row.cells) do
- local cr=G.Rect(cell,f)
- check(G.Inside(cr,rr,0.5),'E6: each cell lies inside the row')
- check(G.Apart(cr,G.Rect(loadout,f)),'E6: a cell stays clear of the selector row')
+-- The editor shows the character, Saved Build and Wishlist cells, and the
+-- State cell only for a warning; a routine State cell is hidden with its
+-- hover area (its fact is on the row's hover), so it takes no room or mouse.
+-- Every shown cell is measured as before.
+local shownCells=0
+for i,cell in ipairs(row.cells) do
+ if i==4 and not cell:IsShown() then
+  check(not row.hits[4]:IsShown(),'E6: a hidden State cell hides its hover area too')
+ else
+  if i<=3 then check(cell:IsShown(),'E6: cell '..i..' (character, Saved Build or Wishlist) is shown') end
+  if cell:IsShown() then shownCells=shownCells+1 end
+  local cr=G.Rect(cell,f)
+  check(G.Inside(cr,rr,0.5),'E6: each cell lies inside the row')
+  check(G.Apart(cr,G.Rect(loadout,f)),'E6: a cell stays clear of the selector row')
+ end
 end
+check(shownCells>=3,'E6: the character, Saved Build and Wishlist cells are shown ('..shownCells..')')
 local switch=NexusWishlistEditorSwitchButton
 local editing=Plain(switch:GetText())
 check(editing:find('^Editing: ')~=nil,'E6 fixture: a saved Wishlist is open for editing: '..editing)

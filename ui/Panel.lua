@@ -133,8 +133,10 @@ local function LC(value) return Nexus.Localization.Count(value) end
 -- its width and height. The do block keeps these locals out of the main
 -- chunk's scope and out of EnsureFrame.
 --
--- M.CreateDestinationRow(parent[, firstText]) -> row
+-- M.CreateDestinationRow(parent[, firstText[, options]]) -> row
 --   row: a new Frame, child of parent, not anchored.
+--   options.presentation "editor": the editor presentation below; any
+--   other options (or none) keep the default fit.
 --   row.cells: the four FontStrings, created once. cells[1] is firstText
 --   when given (it keeps its font); the others are row children in the
 --   LayoutMetrics normal font.
@@ -184,6 +186,23 @@ local function LC(value) return Nexus.Localization.Count(value) end
 -- Below the whole floors (a slot token alone included) the cells stay
 -- disjoint in the row and the client shortens them, the state last; the
 -- tooltip keeps every full line.
+--
+-- Editor presentation (the Plan / Wishlist Editor header): every shown
+-- cell reads "Label: value" with the formatter's own label, and no cue,
+-- compact code or minimum marker is shown. A Wishlist whose assignment is
+-- not stated (captured or not known) shows its display-safe name alone,
+-- with no assignment word; a stated assignment and a Wishlist mode keep
+-- their value words, and the refusal of an empty Saved Build shows its
+-- compact words, the refusal first ("Refused: name"). An unavailable
+-- Wishlist shows its named words whole when they fit, else the
+-- formatter's words for an unavailable Wishlist without a name, so the
+-- warning is never cut away with the name. The state cell
+-- is shown only for a warning (a preview, or a Saved Build that is empty
+-- or not available right now); otherwise it is hidden with its hover area.
+-- While the shown cells do not fit whole, they share the row (the
+-- narrowest first) and a longer value is cut at a display character with
+-- "..."; its label is never cut. The hover keeps every full
+-- DestinationFields line, including the captured and assignment facts.
 ------------------------------------------------------------------------
 do
     local DEST_MIN_HEIGHT, DEST_GAP, DEST_SLACK, DEST_LEAD = 17, 4, 1, 3
@@ -637,6 +656,137 @@ do
         return texts, widths, offsets
     end
 
+    -- Editor presentation (see the policy above): the shown cells as
+    -- {index, prefix, value}, from the formatter's records and the
+    -- descriptor's codes only; nothing is parsed out of a worded value.
+    local DEST_STATED = {assigned = true, unassigned = true, unavailable = true, restoring = true}
+
+    local function DestEditorEntries(descriptor, fields)
+        local d = type(descriptor) == "table" and descriptor or {}
+        local entries = {}
+        for index = 1, 4 do
+            local label = SafeText(fields[index].label)
+            entries[index] = {index = index, prefix = label ~= "" and (label .. ": ") or "",
+                value = SafeText(fields[index].value)}
+        end
+        local refused = d.kind == "savedBuild" and d.empty and true or false
+        local mode = type(d.wishlistMode) == "string" and d.wishlistMode ~= ""
+        if refused then
+            -- The refusal word first ("Refused: name"), so a cut keeps it.
+            entries[3].value = SafeText(fields[3].compact or fields[3].value)
+        elseif not mode and not DEST_STATED[d.wishlistState] then
+            local safeName = Nexus.UserText.SafeName
+            local name = type(safeName) == "function" and safeName(d.wishlist) or nil
+            if type(name) == "string" and name ~= "" then entries[3].value = name end
+        elseif not mode and d.wishlistState == "unavailable" then
+            -- The named value puts the warning after the name, so a cut
+            -- would lose it. The formatter's own words for an unavailable
+            -- Wishlist without a name stand in whole when the named value
+            -- does not fit; the hover keeps the name.
+            local plain = SafeText(DestFields({wishlistState = "unavailable"})[3].value)
+            if plain ~= "" and plain ~= entries[3].value then entries[3].whole = plain end
+        end
+        local warning = d.preview == true
+            or (d.kind == "savedBuild" and (d.empty or d.unavailable) and true or false)
+        if not warning then entries[4] = nil end
+        return entries
+    end
+
+    -- An editor cell cut to limit: its label whole, then the longest value
+    -- prefix that fits, cut at a display character (DestUnitEnds), trailing
+    -- spaces dropped, with "..."; at least one character of the value.
+    local function DestEditorCut(cell, entry, limit, memo, fallback)
+        local ends = DestUnitEnds(entry.value)
+        if #ends <= 1 then
+            local text = entry.prefix .. entry.value
+            return text, DestMeasure(cell, text, memo, fallback)
+        end
+        local function Shown(units)
+            return entry.prefix .. (entry.value:sub(1, ends[units]):gsub(" +$", "")) .. DEST_ELLIPSIS
+        end
+        local low, high, best = 2, #ends - 1, 1
+        while low <= high do
+            local middle = math.floor((low + high) / 2)
+            if DestMeasure(cell, Shown(middle), memo, fallback) <= limit then
+                best, low = middle, middle + 1
+            else
+                high = middle - 1
+            end
+        end
+        local text = Shown(best)
+        return text, DestMeasure(cell, text, memo, fallback)
+    end
+
+    -- Editor cell texts, widths and left offsets by cell index (nil for a
+    -- hidden cell). Whole while the shown cells fit; else they share the
+    -- room, the narrowest first, each cut only when wider than its share.
+    -- Below the cut floors the boxes narrow, the last first, so the cells
+    -- stay disjoint inside the row and the client shortens them.
+    local function DestEditorFit(layout, cells, entries, width)
+        local count = #entries
+        local gap = count > 1
+            and math.max(0, math.min(DEST_GAP, math.floor((width - count) / (count - 1)))) or 0
+        local budget = width - (count - 1) * gap
+        local fallback = (layout.ConservativeText((layout.RuntimeMetrics())))
+        local shown, sizes, memos, total = {}, {}, {}, 0
+        for position = 1, count do
+            local entry = entries[position]
+            memos[position] = {}
+            shown[position] = entry.prefix .. entry.value
+            sizes[position] = DestMeasure(cells[entry.index], shown[position],
+                memos[position], fallback)
+            total = total + sizes[position]
+        end
+        if total > budget then
+            local order = {}
+            for position = 1, count do order[position] = position end
+            table.sort(order, function(a, b)
+                if sizes[a] ~= sizes[b] then return sizes[a] < sizes[b] end
+                return a < b
+            end)
+            local remaining = budget
+            for rank = 1, count do
+                local position = order[rank]
+                local share = math.floor(remaining / (count - rank + 1))
+                if sizes[position] > share then
+                    local entry, cell = entries[position], cells[entries[position].index]
+                    if entry.whole then
+                        -- A warning that must stay visible: its whole words
+                        -- (see DestEditorEntries), cut only when even they
+                        -- do not fit.
+                        entry = {index = entry.index, prefix = entry.prefix, value = entry.whole}
+                        local text = entry.prefix .. entry.value
+                        local size = DestMeasure(cell, text, memos[position], fallback)
+                        if size <= share then
+                            shown[position], sizes[position] = text, size
+                        else
+                            shown[position], sizes[position] = DestEditorCut(cell, entry, share,
+                                memos[position], fallback)
+                        end
+                    else
+                        shown[position], sizes[position] = DestEditorCut(cell, entry, share,
+                            memos[position], fallback)
+                    end
+                end
+                remaining = remaining - sizes[position]
+            end
+        end
+        local used = 0
+        for position = 1, count do used = used + sizes[position] end
+        for position = count, 1, -1 do
+            if used <= budget then break end
+            local cut = math.min(used - budget, sizes[position] - 1)
+            sizes[position], used = sizes[position] - cut, used - cut
+        end
+        local texts, widths, offsets, x = {}, {}, {}, 0
+        for position = 1, count do
+            local index = entries[position].index
+            texts[index], widths[index], offsets[index] = shown[position], sizes[position], x
+            x = x + sizes[position] + gap
+        end
+        return texts, widths, offsets
+    end
+
     local function DestPart(parts, value)
         if value == nil then
             parts[#parts + 1] = "~"
@@ -646,8 +796,9 @@ do
         end
     end
 
-    -- Everything the row shows or discloses, from the formatter's output.
-    local function DestSemanticKey(fields, tooltip)
+    -- Everything the row shows or discloses, from the formatter's output
+    -- (and, for the editor presentation, its shown entries).
+    local function DestSemanticKey(fields, tooltip, entries)
         local parts = {}
         for index = 1, #fields do
             local field = fields[index]
@@ -659,6 +810,15 @@ do
         end
         DestPart(parts, #tooltip)
         for index = 1, #tooltip do DestPart(parts, tooltip[index]) end
+        if entries then
+            for position = 1, #entries do
+                local entry = entries[position]
+                DestPart(parts, entry.index)
+                DestPart(parts, entry.prefix)
+                DestPart(parts, entry.value)
+                DestPart(parts, entry.whole)
+            end
+        end
         return table.concat(parts, "/")
     end
 
@@ -677,10 +837,13 @@ do
         return table.concat(parts, "/")
     end
 
-    function M.CreateDestinationRow(parent, firstText)
+    function M.CreateDestinationRow(parent, firstText, options)
         if firstText ~= nil and (type(firstText) ~= "table"
             or type(firstText.SetText) ~= "function") then
             error("Nexus.Panel.CreateDestinationRow: firstText must be a FontString", 2)
+        end
+        if options ~= nil and type(options) ~= "table" then
+            error("Nexus.Panel.CreateDestinationRow: options must be a table", 2)
         end
         local layout = DestLayout()
         local row = CreateFrame("Frame", nil, parent)
@@ -697,6 +860,7 @@ do
             cells[index], hits[index] = cell, hit
         end
         row.cells, row.hits = cells, hits
+        if options and options.presentation == "editor" then row._nexusDestinationEditor = true end
         return row
     end
 
@@ -714,7 +878,9 @@ do
         height = math.max(DEST_MIN_HEIGHT, math.floor(height))
         local layout = DestLayout()
         local fields, tooltip = DestFields(descriptor)
-        local semantic = DestSemanticKey(fields, tooltip)
+        local editor = row._nexusDestinationEditor == true
+        local entries = editor and DestEditorEntries(descriptor, fields) or nil
+        local semantic = DestSemanticKey(fields, tooltip, entries)
         local geometry = DestGeometryKey(layout, cells, width, height)
         local view = row._nexusDestinationView
         if view and view.semantic == semantic and view.geometry == geometry then
@@ -726,21 +892,35 @@ do
             return false
         end
         row._nexusDestinationView = nil
-        local texts, widths, offsets = DestFit(layout, cells, fields, width)
+        local texts, widths, offsets
+        if editor then
+            texts, widths, offsets = DestEditorFit(layout, cells, entries, width)
+        else
+            texts, widths, offsets = DestFit(layout, cells, fields, width)
+        end
         local full = table.concat(tooltip, "\n")
         row:SetWidth(width)
         row:SetHeight(height)
         for index = 1, 4 do
             local cell = cells[index]
-            cell:SetText(texts[index])
-            cell:ClearAllPoints()
-            cell:SetPoint("LEFT", row, "LEFT", offsets[index], 0)
-            cell:SetWidth(widths[index])
-            cell:SetJustifyH("LEFT")
-            layout.OneLineLabel(cell, nil, height)
+            if texts[index] == nil then
+                -- Editor presentation only: a hidden cell (see above).
+                cell:SetText("")
+                cell:Hide()
+            else
+                cell:SetText(texts[index])
+                cell:ClearAllPoints()
+                cell:SetPoint("LEFT", row, "LEFT", offsets[index], 0)
+                cell:SetWidth(widths[index])
+                cell:SetJustifyH("LEFT")
+                layout.OneLineLabel(cell, nil, height)
+                if editor then cell:Show() end
+            end
             cell._nexusFullText = full
         end
-        for index = 1, 4 do hits[index]:Show() end
+        for index = 1, 4 do
+            if texts[index] == nil then hits[index]:Hide() else hits[index]:Show() end
+        end
         row._nexusDestinationView = {semantic = semantic, geometry = geometry,
             texts = texts, widths = widths, offsets = offsets}
         return true

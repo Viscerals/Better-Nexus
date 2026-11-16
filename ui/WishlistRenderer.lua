@@ -1540,10 +1540,14 @@ local function EnsureFrame()
     -- is placed in the header row, FullUIWorkspaces.ApplyHeader). It spans
     -- the content width (1040 less 34 on each side; it was 900), so the
     -- shared formatter can show more of the destination before shortening
-    -- (displayed item 6, #173). M.Refresh fills it.
+    -- (displayed item 6, #173). M.Refresh fills it. Its editor presentation
+    -- shows readable "Label: name" cells with no B:/W: cues or coded
+    -- markers and keeps the captured and assignment facts on its hover
+    -- (Panel.CreateDestinationRow); the descriptor and Save are unchanged.
     editContextText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     editContextText:SetJustifyH("LEFT")
-    frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText)
+    frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText,
+        {presentation = "editor"})
     frame._destinationRow:SetPoint("TOP", frame, "TOP", 0, -38)
     frame._destinationRow:SetSize(972, 18)
 
