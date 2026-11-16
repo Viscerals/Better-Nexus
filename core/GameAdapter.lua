@@ -4274,6 +4274,54 @@ function A.Slots()
     return AssignmentMeasure("assignment.slots", ReadSlots)
 end
 
+-- What one numbered Saved Build is, as one comparable string: its slot, its
+-- name as the game reports it and everything it holds (every Echo with its
+-- stacks, quality and lock state, every refused Echo, and whether the game's
+-- list was complete), in an order that does not depend on the game's. nil
+-- when that cannot be read or the Saved Build holds nothing: an unknown
+-- target is never equal to anything. A slot number or a name alone
+-- identifies nothing (the same slot can be saved over, with the same name).
+-- `row` is this adapter's row for that slot (A.Slots().bySlot[slot]) when the
+-- caller already holds the read it belongs to; without one the slots are
+-- read now. Read only. The one definition for every assignment route: the
+-- Echo Journal's question, the editor's candidates and role picker
+-- (ui/JournalTab.lua, ui/WishlistEditor.lua) and the editor's Save & assign
+-- (core/WishlistController.lua).
+function A.SavedBuildIdentity(slot, row)
+    slot = tonumber(slot)
+    if not slot or slot < 1 then return nil end
+    if row == nil then
+        local ok, slots = pcall(A.Slots)
+        if not ok or type(slots) ~= "table" or type(slots.bySlot) ~= "table" then return nil end
+        row = slots.bySlot[slot]
+    end
+    if type(row) ~= "table" or type(row.name) ~= "string"
+        or type(row.echoes) ~= "table" or #row.echoes == 0 then
+        return nil
+    end
+    local function Parts(list)
+        local parts = {}
+        for i = 1, #list do
+            local echo = list[i]
+            local id = type(echo) == "table" and tonumber(echo.spellId) or nil
+            if not id then return nil end
+            parts[i] = string.format("%.0f:%s:%s:%s", id, tostring(tonumber(echo.stacks)),
+                tostring(tonumber(echo.quality)), tostring(echo.locked))
+        end
+        table.sort(parts)
+        return table.concat(parts, ",")
+    end
+    local held = Parts(row.echoes)
+    local refused = ""
+    if row.refused ~= nil then
+        refused = type(row.refused) == "table" and Parts(row.refused) or nil
+    end
+    if not held or not refused then return nil end
+    -- The name is length-prefixed: no name can imitate another field.
+    return table.concat({string.format("%.0f", slot), #row.name .. ":" .. row.name,
+        tostring(row.roleSourceValid), held, refused}, "|")
+end
+
 -- NOTE: this is a READ (asks the server to re-send slot data), so it has
 -- its own throttle and deliberately does NOT touch lastBuildOpAt.
 -- Sharing that guard was a real bug (2026-07-24): the background loop

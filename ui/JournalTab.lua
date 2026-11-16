@@ -166,41 +166,12 @@ end
 -- identifies nothing (the same slot can be saved over, with the same name).
 -- `row` is the adapter's row for that slot when the caller already holds
 -- the read it belongs to; without one the adapter is read now. Read only.
+-- The definition is the adapter's (GameAdapter.SavedBuildIdentity), shared
+-- with the editor's Save & assign; without that adapter nothing is known.
 local function SavedBuildIdentity(slot, row)
-    slot = tonumber(slot)
-    if not slot or slot < 1 then return nil end
-    if row == nil then
-        local adapter = Nexus.GameAdapter
-        if not (adapter and type(adapter.Slots) == "function") then return nil end
-        local ok, slots = pcall(adapter.Slots)
-        if not ok or type(slots) ~= "table" or type(slots.bySlot) ~= "table" then return nil end
-        row = slots.bySlot[slot]
-    end
-    if type(row) ~= "table" or type(row.name) ~= "string"
-        or type(row.echoes) ~= "table" or #row.echoes == 0 then
-        return nil
-    end
-    local function Parts(list)
-        local parts = {}
-        for i = 1, #list do
-            local echo = list[i]
-            local id = type(echo) == "table" and tonumber(echo.spellId) or nil
-            if not id then return nil end
-            parts[i] = string.format("%.0f:%s:%s:%s", id, tostring(tonumber(echo.stacks)),
-                tostring(tonumber(echo.quality)), tostring(echo.locked))
-        end
-        table.sort(parts)
-        return table.concat(parts, ",")
-    end
-    local held = Parts(row.echoes)
-    local refused = ""
-    if row.refused ~= nil then
-        refused = type(row.refused) == "table" and Parts(row.refused) or nil
-    end
-    if not held or not refused then return nil end
-    -- The name is length-prefixed: no name can imitate another field.
-    return table.concat({string.format("%.0f", slot), #row.name .. ":" .. row.name,
-        tostring(row.roleSourceValid), held, refused}, "|")
+    local adapter = Nexus.GameAdapter
+    if not (adapter and type(adapter.SavedBuildIdentity) == "function") then return nil end
+    return adapter.SavedBuildIdentity(slot, row)
 end
 
 -- Whether the Saved Build a question represents (`binding.identity`, taken

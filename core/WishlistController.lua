@@ -1662,6 +1662,13 @@ function Controller.New(options)
             assignmentId=wishlist.assignmentId,
             loadoutSlot = tonumber(loadoutSlot),
             loadoutName = tostring(wishlist.loadoutName or ""),
+            -- Which Saved Build that slot holds now (its name and contents,
+            -- GameAdapter.SavedBuildIdentity; nil when it is empty or
+            -- unreadable): a save that would newly assign this Wishlist to it
+            -- must find the same one there (M._SavedBuildChanged).
+            savedBuildIdentity = tonumber(loadoutSlot) and Adapter
+                and type(Adapter.SavedBuildIdentity) == "function"
+                and Adapter.SavedBuildIdentity(loadoutSlot) or nil,
             -- What that Saved Build and the first-run plan hold now: a save
             -- does not undo a choice made after this (see TryApply).
             boundAssignment = tonumber(loadoutSlot) and Adapter
@@ -1716,7 +1723,12 @@ function Controller.New(options)
             pending, evidenceState, key = Adapter.GetLoadoutWishlistState(slot)
         end
         M.ResetNewWishlistDraft()
-        state.createTargetContext = {loadoutSlot = slot, loadoutName = name}
+        -- The Saved Build itself is captured with its slot and name, from the
+        -- same row (nil for an empty or missing one): see M._SavedBuildChanged.
+        state.createTargetContext = {loadoutSlot = slot, loadoutName = name,
+            savedBuildIdentity = type(row) == "table" and Adapter
+                and type(Adapter.SavedBuildIdentity) == "function"
+                and Adapter.SavedBuildIdentity(slot, row) or nil}
         if evidenceState == "evidence-pending" and type(pending) == "table"
             and type(key) == "string" and key ~= "" then
             state.awaitingWishlist = {
@@ -1740,7 +1752,11 @@ function Controller.New(options)
             and type(activeRow.echoes) == "table" and #activeRow.echoes > 0 then
             local name = tostring(activeRow.name or "")
             if name == "" then name = "Saved Build " .. tostring(active) end
-            state.createTargetContext = {loadoutSlot = active, loadoutName = name}
+            -- The Saved Build itself is captured with its slot and name, from
+            -- the same row: see M._SavedBuildChanged.
+            state.createTargetContext = {loadoutSlot = active, loadoutName = name,
+                savedBuildIdentity = Adapter and type(Adapter.SavedBuildIdentity) == "function"
+                    and Adapter.SavedBuildIdentity(active, activeRow) or nil}
         end
         -- Display-only origin, from the slots this begin already read: slot
         -- data not loaded is unknown, and so is a Saved Build those slots
@@ -2330,6 +2346,76 @@ function Controller.New(options)
         }) end
     end
 
+    -- D7 (N-4): a save that would give a numbered Saved Build a NEW Wishlist
+    -- is bound to the Saved Build itself, not to its slot number or name.
+    -- Returns that slot and the context that captured it, or nil when this
+    -- save newly assigns no numbered Saved Build: Save changes of a new plan,
+    -- the first-run target, an explicit Save changes that keeps the Saved
+    -- Build's own Wishlist, and the save of the Wishlist its Saved Build
+    -- already holds. That last one only refreshes an assignment the player
+    -- made for that slot; the Saved Build under it changes whenever Auto
+    -- saves a finished run there, and that never stops such a save.
+    function M._NewlyAssignedSavedBuild(intent, keepsAssignment)
+        local context = state.editingContext
+        if context then
+            local slot = tonumber(context.loadoutSlot)
+            if not slot or keepsAssignment or not M.SaveAssignsOpened() then return nil end
+            return slot, context
+        end
+        local target = state.createTargetContext
+        local slot = target and tonumber(target.loadoutSlot)
+        if not slot or intent ~= INTENT.SAVE_AND_ASSIGN then return nil end
+        return slot, target
+    end
+
+    -- Whether the Saved Build such a save would newly assign is no longer the
+    -- one that was bound: the one its context captured as the editor or the
+    -- draft began (slot, name and contents; GameAdapter.SavedBuildIdentity)
+    -- and the one its confirmation named when it was offered. A context that
+    -- captured none (an empty slot then) is bound by the confirmation alone;
+    -- a confirmation that could bind none proves nothing, so it has changed.
+    -- The direct payload API shows no confirmation: a context that captured
+    -- none leaves it to the existing guards. An adapter that cannot tell is
+    -- not treated as changed. Read only; checked before every upload (the
+    -- accept and each spaced retry) and again before the assignment writer.
+    function M._SavedBuildChanged(intent, keepsAssignment, guard)
+        local slot, context = M._NewlyAssignedSavedBuild(intent, keepsAssignment)
+        if not slot then return false end
+        if not (Adapter and type(Adapter.SavedBuildIdentity) == "function") then return false end
+        local captured = context.savedBuildIdentity
+        local confirmation = type(guard) == "table" and guard.confirmation or nil
+        local confirmed = nil
+        if type(confirmation) == "table" then
+            confirmed = confirmation.savedBuildIdentity
+            if captured == nil and confirmed == nil then return true end
+        end
+        if captured == nil and confirmed == nil then return false end
+        local current = Adapter.SavedBuildIdentity(slot)
+        if captured ~= nil and current ~= captured then return true end
+        if confirmed ~= nil and current ~= confirmed then return true end
+        return false
+    end
+
+    -- The refusal for it (the destination-changed notice), after which the
+    -- context names and is bound to the Saved Build its slot holds now: the
+    -- slot is kept, never another one, and "Review and save again" then
+    -- offers a new confirmation for that Saved Build. Nothing is rebound
+    -- while the slot is empty or unreadable.
+    function M._NotSavedSavedBuildChanged(intent, keepsAssignment)
+        notify("|cffff6060Nexus:|r Not saved: the destination named in the confirmation is not the one "
+            .. "this editor would use now (the active or selected Saved Build changed). Nothing was uploaded "
+            .. "or assigned; your edits are kept. Review and save again.")
+        local slot, context = M._NewlyAssignedSavedBuild(intent, keepsAssignment)
+        if not slot then return end
+        local slots = Adapter and Adapter.Slots and Adapter.Slots()
+        local row = type(slots) == "table" and type(slots.bySlot) == "table" and slots.bySlot[slot] or nil
+        local identity = type(row) == "table" and Adapter.SavedBuildIdentity(slot, row) or nil
+        if not identity then return end
+        local name = tostring(row.name or "")
+        if name == "" then name = "Saved Build " .. tostring(slot) end
+        context.loadoutName, context.savedBuildIdentity = name, identity
+    end
+
     -- The server Wishlist slot this save would overwrite, when it no longer
     -- shows what this editor opened or last uploaded: another Wishlist reused
     -- it, it was removed or emptied, or it could not be identified when the
@@ -2599,6 +2685,17 @@ function Controller.New(options)
             NotSavedEmptyDestination(emptySlot)
             return false, "destination_empty"
         end
+        -- D7 (N-4): a save that would newly assign a numbered Saved Build
+        -- must still find the Saved Build that was bound in that slot (not
+        -- only the slot number, a name or any Echoes). Saved over or renamed
+        -- since the context or the confirmation bound it: nothing is
+        -- uploaded or assigned and nothing stays queued. The accept and
+        -- every spaced retry pass here.
+        if M._SavedBuildChanged(intent, keepsAssignment, guard) then
+            state.applyRetry = nil
+            M._NotSavedSavedBuildChanged(intent, keepsAssignment)
+            return false, "destination_changed"
+        end
         local staleSlot, staleWhy = StaleServerSlot()
         if staleSlot and staleWhy == "refused" then
             state.applyRetry = nil
@@ -2721,6 +2818,13 @@ function Controller.New(options)
                 notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved without an assignment, as you chose. "
                     .. "The Saved Build this editor opened it for keeps its current Wishlist, and no first-run "
                     .. "target changed. To assign it, use Save & assign or the Wishlist selector in the Echo Journal.", {key = "editor.notify.saved_unassigned_opened", args = {name = tostring(name)}})
+            elseif M._SavedBuildChanged(intent, keepsAssignment, guard) and not EmptyDestination() then
+                -- The bound Saved Build was replaced during the upload call
+                -- itself (a host callback): no writer runs for the build
+                -- now in that slot. Reported as a refused assignment without
+                -- a guessed reason. A slot emptied meanwhile is the writer's
+                -- own refusal, as before.
+                associated, associationReason = false, nil
             elseif state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 -- The open editor's binding goes with the save (see the writer).
@@ -3212,6 +3316,15 @@ function Controller.New(options)
             NotSavedEmptyDestination(emptySlot)
             return nil, "destination_empty"
         end
+        -- D7 (N-4): no confirmation is offered under the name of a Saved
+        -- Build that is no longer the one this editor captured in that slot.
+        -- The context is bound to the one there now (see the refusal), so
+        -- the next attempt names it.
+        if M._SavedBuildChanged(intent, keepsAssignment, nil) then
+            state.applyConfirmation = nil
+            M._NotSavedSavedBuildChanged(intent, keepsAssignment)
+            return nil, "destination_changed"
+        end
         local staleSlot, staleWhy = StaleServerSlot()
         if staleSlot and staleWhy == "refused" then
             state.applyConfirmation = nil
@@ -3285,6 +3398,12 @@ function Controller.New(options)
             applyToken=ApplyPayloadToken(slot,name,echoes),
             intent=intent, explicit=explicit or nil, destinationKey=DestinationKey(destination),
             keepsAssignment=keepsAssignment == true or nil}
+        -- The numbered Saved Build this confirmation names, as its slot holds
+        -- it now (D7, N-4): the accept and a spaced retry must find it again
+        -- (M._SavedBuildChanged). nil for any other destination.
+        if destination.kind == "savedBuild" and Adapter and type(Adapter.SavedBuildIdentity) == "function" then
+            confirmation.savedBuildIdentity = Adapter.SavedBuildIdentity(destination.slot)
+        end
         state.applyConfirmation = confirmation
         data.confirmation = confirmation
         if state.candidateContext then

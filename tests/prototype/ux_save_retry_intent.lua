@@ -384,4 +384,67 @@ C.scenario('R8 a confirmed Save changes of the bound plan is refused before any 
  RefusedBeforeUpload('R8',said,facts,w,others,auto)
 end)
 
+-- D7 (N-4): a Save & assign of a new plan that waits for the spacing guard
+-- is still bound to the Saved Build its confirmation named. When that slot is
+-- saved over while the save waits, the retry uploads nothing, assigns nothing
+-- and leaves nothing queued. R9 EXPECT fails on the pin fccc12f5 by design
+-- (the retry compared the slot number, the assignment tokens and "holds
+-- Echoes" only); R10 is the unchanged-target control and holds on both.
+local function ClickCatalog(id)
+ for _,f in ipairs(H.frames)do if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId==id then f:Click();return true end end
+ error('visible catalog row absent: '..id)
+end
+-- A new plan for the active Saved Build 2 (Fire PvE), its Create & assign
+-- clicked and accepted inside the spacing window: the save waits.
+local function SpacedCreateAssign(tag,name)
+ Boot({active=2,slots=World()})
+ SlashCmdList.NEXUS('editor')
+ local target=Ctrl().CreateTargetContext() or {}
+ C.setup(target.loadoutSlot==2,tag..': fixture: the new draft captured Saved Build 2',tostring(target.loadoutSlot))
+ NexusWishlistNameInput:SetText(name);ClickCatalog(201175)
+ Nexus.WishlistEditor.Refresh()
+ C.setup(Label(ApplyButton())=='Create & assign',tag..': fixture: the Create & assign control',EditorLabels())
+ StartSpacing(tag)
+ Zero()
+ local p=Click(ApplyButton())
+ C.setup(p~=nil and type(p.data)=='table' and type(p.data.confirmation)=='table'
+  and p.data.confirmation.intent=='saveAndAssign' and p.data.confirmation.destinationKey=='savedBuild:2',
+  tag..': fixture: the Create & assign confirmation, bound to Saved Build 2')
+ Accept(p)
+ C.setup(Pending() and Uploads(0)==0,tag..': fixture: the accepted save waits for the spacing guard; nothing is sent yet',
+  'pending='..tostring(Pending())..' uploads='..Uploads(0))
+ return p
+end
+
+C.scenario('R9 N-4 a spaced Save & assign is refused before any upload when its Saved Build is saved over while it waits',function()
+ SpacedCreateAssign('R9','N4 retry')
+ local facts,w,others,auto=Facts(),Writes(),Others(),Auto()
+ -- Saved Build 2 is saved over under its own name while the save waits.
+ local rows=H.Clone(H.perks.serverBuildSlots)
+ rows[2]={name='Fire PvE',verified=true,echoes={{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}}
+ H.perks.serverBuildSlots=rows
+ local said=Heard(function() H.Notify();A.Poll();H.Advance(5) end)
+ print('OBSERVED','R9 uploads='..Uploads(0)..' writes='..Writes()..' facts='..Facts()..' said='..said)
+ C.expect(Uploads(0)==0,'R9: the new plan is not uploaded for the replaced Saved Build',Uploads(0))
+ C.guard(not Pending(),'R9: nothing stays queued')
+ C.expect(Facts()==facts and Writes()==w and Stored(2)==nil,'R9: no writer runs; Saved Build 2 is assigned nothing',Facts())
+ local r=Result()
+ C.expect(r~=nil and r.kind=='notSaved' and r.reason=='destination_changed' and r.intent=='saveAndAssign',
+  'R9: the result says not saved because the destination changed',Describe(r))
+ C.expect(said:find('Not saved',1,true)~=nil and said:find('Nothing was uploaded',1,true)~=nil,
+  'R9: the notice says nothing was uploaded or assigned',said)
+ C.guard(Others()==others and spends==0 and Auto()==auto,'R9: no other game action, spend or Auto change')
+end)
+
+C.scenario('R10 N-4 control: a spaced Save & assign whose Saved Build is re-sent unchanged uploads once and assigns it',function()
+ SpacedCreateAssign('R10','N4 same')
+ local rows=H.Clone(H.perks.serverBuildSlots)
+ rows[2]={name='Fire PvE',verified=true,echoes={{spellId=201175,quality=0,stacks=1}}}
+ H.perks.serverBuildSlots=rows
+ H.Notify();A.Poll();H.Advance(5)
+ print('OBSERVED','R10 uploads='..Uploads(0)..' facts='..Facts())
+ C.guard(Uploads(0)==1 and not Pending() and writes.SetLoadoutWishlistIdentity==1 and Stored(2)~=nil
+  and Stored(2).name=='N4 same' and Stored(3)==nil,'R10: the retry uploads once and assigns the unchanged Saved Build 2',Facts())
+end)
+
 C.finish('(B1: an explicit Save changes keeps its intent, destination and no-assignment effect through the spacing retry; legacy callers unchanged; the bound plan\'s Save changes is refused before upload when its assignment changes meanwhile)')
