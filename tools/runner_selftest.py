@@ -31,7 +31,12 @@ REGISTRY_PY = 'tools/tests/test_l10n_registry.py'
 GATE_PY = 'tools/tests/test_l10n_full_ui_gate.py'
 # The intended registry, written out here and never read from the runner: the expected counts
 # and lines below derive from this list.
-PYTHON_REGISTRY = [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, GATE_PY]
+PYTHON_REGISTRY = [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY,
+                   'tools/tests/test_l10n_registry_provenance.py',
+                   'tools/tests/test_l10n_registry_consumers.py',
+                   'tools/tests/test_l10n_registry_consumer_flow.py',
+                   'tools/tests/test_l10n_registry_consumer_cli.py',
+                   GATE_PY]
 REGISTERED = len(PYTHON_REGISTRY)
 PY_SCOPE = '(separate processes; not counted with the listed Lua tests)'
 
