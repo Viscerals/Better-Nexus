@@ -377,11 +377,28 @@ do
  assert(receipt and receipt.spendConfirmed and not receipt.selectionAttempted
   and not receipt.selectionRefused and receipt.selectedKey==nil,
   'no selection attempt or proposed Echo is recorded for a choice that was never admitted')
+ -- W3 revision 2: Resume of this kept receipt, with its offer open, is refused
+ -- by the same client admission before any side effect (ordinary Auto OFF,
+ -- the receipt, the run state), not started and then paused again.
+ local function AutoNow() local stats=Nexus.RecomputeStats();return stats and stats.autoEnabled end
+ local function ResumeRefused(name)
+  local autoBefore,reasonBefore=AutoNow(),M.Status().reason
+  local resumedNow,why=M.Resume()
+  local after=M.Status()
+  assert(not resumedNow and why==select(2,O.ClientAdmission()),
+   name..': Resume was not refused with the client admission reason: '..tostring(why))
+  assert(AutoNow()==autoBefore and after.state=='PAUSED' and after.pending and not after.running
+   and after.reason==reasonBefore and after.spent==1,
+   name..': a refused Resume changed ordinary Auto, the run state or the kept receipt')
+  assert(H.Count('take')==0 and H.Count('orb-spend')==1,name..': a refused Resume sent an Orb or a choice')
+ end
+ ResumeRefused('updated provider, offer open')
  M.Resume();M.Pump()
  assert(H.Count('take')==0 and H.Count('orb-spend')==1 and M.Status().state=='PAUSED',
   'Resume on the updated provider sends no choice and no second Orb')
  -- The same receipt under a specialization draw on a provider without the readers.
  svc.WantsMoreOfEcho=nil;perks.currentSpecDraw={chosen=2}
+ ResumeRefused('specialization draw, offer open')
  M.Resume();M.Pump()
  assert(H.Count('take')==0 and H.Count('orb-spend')==1 and M.Status().state=='PAUSED',
   'a specialization draw is not chosen as an Orb offer')

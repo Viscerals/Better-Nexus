@@ -809,6 +809,12 @@ local function preflight(automatic,m,display)
     if status.mode~="durable" then return nil,writeRefusal(status) end
     local unstable=worldUnstableReason()
     if unstable then return nil,unstable end
+    -- Client admission (OrbAdapter.ClientAdmission; memory only), before the
+    -- read and before any review: on a client where no Orb action is admitted,
+    -- Prepare, Start, Confirm and the window's readiness refuse here with that
+    -- reason, and nothing is read, approved or changed for the refusal.
+    local admitted,clientWhy=B.ClientAdmission()
+    if not admitted then return nil,clientWhy end
     local err;if not m then m,err=inspect();if not m then return nil,err end end
     if not entriesStillMatch(m.assignment) then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
     if m.progress.rolledMissing==0 then
@@ -1038,6 +1044,13 @@ function M.Confirm(token,representedHistory)
         or a.model.s.charges~=m.s.charges then approval=nil;return nil,"Echoes or resources changed while confirming. Review again." end
     if not sameValue(a.history,m.history) then approval=nil;return nil,RC.HISTORY_CHANGED end
     if a.historyToken and representedHistory~=a.historyToken then return nil,RC.HISTORY_REQUIRED end
+    -- The client admission once more, immediately before the first side effect
+    -- (ordinary Auto OFF): the preflight above read the game and ran other
+    -- code after its own check. A refusal here leaves ordinary Auto, the
+    -- ownership, the approval and every resource as they were. B.Acquire
+    -- keeps its own check for a change made while Auto is switched off.
+    local admitted,clientWhy=B.ClientAdmission()
+    if not admitted then return nil,clientWhy end
     local off,e=turnAutoOff();if not off then return nil,e end
     local tokenOwner,live=B.Acquire(m.s);if not tokenOwner then return nil,live end
     -- Observe from approved Confirm, so a pre-check framed send cannot be
@@ -3465,6 +3478,17 @@ function M.Resume()
         local rebound,reason=B.Rebind(run.token,s);if not rebound then return nil,reason end
         run.context=s.context;run.binding=binding(a);run.targets=targets;run.entries=copy(a.entries);run.name=a.name
         config.entries=copy(a.entries);config.name=a.name;run.targetChanged=nil;run.recycleKey=nil
+    end
+    -- A kept receipt whose three-card offer is open: the first step of the
+    -- resumed run would be its automatic choice, which the client admission
+    -- refuses (the pump pauses again with the same reason). Refuse before
+    -- ordinary Auto is switched off and before the receipt is touched.
+    -- Narrow on purpose: without an open offer a resumed run only waits, and
+    -- its bounded recovery is unchanged; with one, the passive pump still
+    -- records the observed spend and settles the player's own choice.
+    if run.pending and s.offerPending and #s.board==3 and not s.hostPending then
+        local admitted,clientWhy=B.ClientAdmission()
+        if not admitted then return nil,clientWhy end
     end
     if run.pending and run.pending.ambiguous then
         if not run.pending.spendConfirmed then return nil,"The spend outcome remains unknown. No action will be repeated." end

@@ -18,6 +18,61 @@ Freeze, Banish and Reroll also require its known, not-pending state
 (`OrbAdapter.ServiceState`). Sync and Community transport are not repurposed
 as an Orb API.
 
+### Client admission
+
+Before any of the steps above, and again at each send, Orb mode reads
+`OrbAdapter.ClientAdmission()`. The read is memory only. It refuses when:
+
+- the game's `PerkService` holds a `GetServerActiveDesign` or a
+  `WantsMoreOfEcho` member (the updated provider; code `updated_client`);
+- neither is present but `Perks.currentSpecDraw` is (a specialization draw is
+  not an Orb choice; code `spec_draw`). The client keeps this field after the
+  draw is answered, until its next Echo choice;
+- `ProjectEbonhold`, `PerkService` or `Perks` is not a table (code
+  `unreadable`).
+
+On a refusal Orb mode starts nothing, spends nothing and chooses nothing. It
+does not take a visible memory card either. The game's own Orb and choice
+windows stay available. A client with neither marker and no specialization
+field is the older provider, and the path above applies unchanged.
+
+The refusal comes before any side effect:
+
+- Readiness, Prepare, Start and Confirm refuse in the preflight. Confirm reads
+  the admission again immediately before ordinary Automation is switched off.
+  Ordinary Automation, ownership, the balance and the choices stay as they
+  were. `OrbAdapter.Acquire` keeps its own check.
+- Resume toward a next spend is refused in `OrbAdapter.Rebind`, before ordinary
+  Automation is switched off.
+- Resume of a kept receipt whose three-card offer is open is refused before
+  ordinary Automation is switched off. Without an open offer a resumed run only
+  waits, and its bounded recovery is unchanged.
+- A running run pauses before a spend receipt is created and before a choice is
+  decided. A refused choice keeps the receipt and its counted spend, records no
+  selection attempt, and is settled by the player's own choice through the
+  existing result path.
+- `OrbAdapter.Spend` and `OrbAdapter.Select` read the admission immediately
+  before `ConfirmSpend` and `SelectPerk` and return `REJECTED` with the status
+  `CLIENT_CONTRACT`.
+
+Recovery authority, receipts, budgets and the read-only recovery requests are
+not changed or gated by this rule.
+
+Reference and limits. The rule comes from a static reading of one captured
+client: `perks_service.lua`, SHA-256
+`3303632eedb997f121b6ac5fa155bd6041b3f17190d71fb7c8b71dd670bd7c51`, and
+`orb_of_lost_memories.lua`, SHA-256
+`c08c0d096d8893a7969a974f63006a223e98179471ece9532cd3a6aad8930fe8`. An
+extraction made after the launcher changed two game archives holds the same
+bytes for both files. There, every Echo choice passes through one parser, Orb
+draws included. It marks a memory card (flag 3), drops a fourth card before it
+publishes the choice and records a specialization draw. The Orb service's
+pending value counts owed draws and does not identify the shown cards. It is
+not known whether the server sends a memory card, a specialization token or a
+four-card list in an Orb draw, in which order the game loads its archives, or
+how the server behaves. The older provider is recognized only by the absence of
+both markers and of the field. None of this is a native result.
+
 ## Targets and source selection
 
 Normalize exact `(spellId, quality, role)` copies, with no more than 79 rolled and
@@ -196,7 +251,10 @@ The bounded Orb window is opened by `/nexus orbs`, a main-menu entry, or Welcome
 It includes actual target selection, order controls, source approval/exclusion,
 all-source review, run limit, optional recycling, Start/single-step, separate
 fixed Pause and Resume during a run, Stop, Recheck, and Help. Start is never
-implicit. Missing Orb APIs disable only this feature. Local Store/ownership
+implicit. Missing Orb APIs disable only this feature. So does a refused client
+admission (see Client admission): Start is not offered, and ordinary Automation
+is left as it was. Once a Wishlist is assigned and the Orb state is readable,
+the window gives the admission reason. Local Store/ownership
 capability readiness is required; Community preparation is not a prerequisite.
 
 During a run (running, paused, at its maximum or with an operation pending) the

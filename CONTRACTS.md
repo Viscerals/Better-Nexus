@@ -147,6 +147,69 @@ This file has two parts.
   nothing. The separate live check requests the current choice and observes
   outgoing sends with a secure post-hook. That hook may change the global
   function identity; the original transport implementation is still invoked.
+- **Orb client admission.** `OrbAdapter.ClientAdmission()` decides whether Orb
+  mode may act on the loaded game client. It is memory only (`rawget` on
+  `ProjectEbonhold`, its `PerkService` and its `Perks`; no getter or callout)
+  and returns `true`, or `false`, a reason text and a fixed code:
+  - `updated_client`: `PerkService` holds a `GetServerActiveDesign` or a
+    `WantsMoreOfEcho` member of any type. These are the two updated-provider
+    markers that the ordinary path also reads.
+  - `spec_draw`: neither marker is present, but `Perks.currentSpecDraw` is,
+    with any value. The client keeps that field after the draw is answered,
+    until its next Echo choice.
+  - `unreadable`: `ProjectEbonhold`, `PerkService` or `Perks` is not a table.
+
+  On a refusal Orb mode starts nothing, spends nothing and chooses nothing; the
+  game's own Orb and choice windows are not touched. There is no positive
+  exception: a visible memory card (flag 3) is not taken either, and three
+  ordinary-looking cards are not proof that no memory card was offered. A
+  client with neither marker and no specialization field is the older provider
+  and keeps the Orb contract above.
+
+  Where it is read: `OrbRuntime` preflight (so `Prepare`, `Start`, `Confirm` and
+  the window's `canStart` / `startReason` give the same reason); `Confirm` once
+  more immediately before ordinary Auto is switched off; `OrbAdapter.Acquire`
+  and `Rebind`; `Resume` of a kept receipt whose three-card offer is open,
+  before ordinary Auto is switched off; the runtime before a spend receipt is
+  created and before a choice is decided; `OrbAdapter.Spend` immediately before
+  `ConfirmSpend`; `OrbAdapter.Select` after validation and again immediately
+  before `SelectPerk`. `Spend` and `Select` return `REJECTED` with the boundary
+  status `CLIENT_CONTRACT`. A refused start leaves ordinary Auto, the Orb
+  ownership, the balance and every choice unchanged. A refused choice pauses
+  the run and keeps the receipt and its counted spend with no selection attempt
+  recorded; the player's own choice settles it through the existing result
+  path. Recovery authority, budgets and the read-only recovery requests are
+  unchanged and are not gated by this rule.
+
+  Basis and limits. The rule rests on a static reading of one captured client:
+  `perks_service.lua` (SHA-256
+  `3303632eedb997f121b6ac5fa155bd6041b3f17190d71fb7c8b71dd670bd7c51`) and
+  `orb_of_lost_memories.lua` (SHA-256
+  `c08c0d096d8893a7969a974f63006a223e98179471ece9532cd3a6aad8930fe8`). A later
+  extraction, made after the launcher changed two game archives, holds the same
+  bytes for both. In that source every Echo choice, an Orb draw included,
+  passes through one parser that marks a memory card, drops a fourth card
+  before it publishes the choice and records a specialization draw, and the Orb
+  service's pending value is a count of owed draws that does not identify the
+  shown cards. Not established: whether the server ever sends a memory card, a
+  specialization token or a four-card list in an Orb draw; the order in which
+  the game loads its archives; any server behaviour. The older provider is
+  recognized only by the absence of both markers and of the field, so a client
+  that renames them would be read as the older provider. Offline evidence only;
+  no native result. The three refusal texts are English and uncatalogued.
+- **Auto Save, unavailable client.** `GameAdapter.Save` returns
+  `false, "save_unavailable"` when the `PerkService` table is present and has no
+  `SaveServerBuildSlot` member. Nothing is called, sent or timed for it. The
+  captured `perks_service.lua` named above exports no such member. The reason is
+  distinct from `"refused"` (the member exists and declined or failed, or no
+  service table is loaded) and from `"spacing"`. On `save_unavailable` the
+  automation sets one status, prints one notice and makes no further save
+  attempt for that level-80 visit: the memory-only flag
+  `save.unavailableVisit` is cleared when the level leaves 80 and at a run
+  boundary, never saved, and is not a success (`savedThisVisit`, the
+  verification fields and `lastSaveStatus` are not touched). An ordinary
+  refusal keeps its earlier handling. Whether the updated client offers a
+  manual save is not established. Offline evidence only.
 - **Attribution-only explicit exit.** A stopped receipt, restored or from the
   current session, may use that same checked Continue path when a fresh exact
   distinct chosen gain is actually owned and attribution alone prevents
