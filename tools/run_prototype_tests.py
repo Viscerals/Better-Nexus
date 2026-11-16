@@ -475,6 +475,14 @@ PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalo
 PYTHON_TESTS += ['tools/tests/test_l10n_parity.py']
 # Issue #147 R union: nonexecuting declaration parser of core/Localization.lua and the five-input registry-bound API and report v2.
 PYTHON_TESTS += ['tools/tests/test_l10n_registry.py']
+# Issue #147 R union, split from tools/tests/test_l10n_registry.py so that each file runs within
+# PYTHON_TEST_TIMEOUT_SECONDS (every class and test kept, each once): S7 provenance; S8 consumer
+# binding gate and controls C0-C19, C20-C38, and --consumers with _children and the state bounds.
+# Their shared non-test code is tools/tests/l10n_registry_support.py (not a test_*.py file).
+PYTHON_TESTS += ['tools/tests/test_l10n_registry_provenance.py',
+                 'tools/tests/test_l10n_registry_consumers.py',
+                 'tools/tests/test_l10n_registry_consumer_flow.py',
+                 'tools/tests/test_l10n_registry_consumer_cli.py']
 # Full visible-UI (#143-#148, #147): the final six-pack composition gate over the actual bytes, its runtime seam/receiver cross-check under LuaJIT and its synthetic controls (offline; native NOT_RUN).
 PYTHON_TESTS += ['tools/tests/test_l10n_full_ui_gate.py']
 # Wall-clock limit for one Python test process, read by tools/ci_check.py.

@@ -1072,11 +1072,14 @@ def runtime_check(root, model, paths=None, probes=RECEIVER_PROBES, luajit=None, 
     for row in lines[:-1]:
         rows.setdefault((row[0], row[1]), []).append(row[2:])
     unhex = lambda value: bytes.fromhex(value).decode('utf-8', 'replace')
+    # The admitted count of each unchanged pack, computed once for this call: in every run each
+    # pack but the run's own is the model's pack unchanged, and the model is not changed here.
+    counts = {}
     for run in runs:
         rid = run['id']
         entries = _run_entries(model, run)
         admitted = _admitted(model, entries) if _adopted(model, run['lang'], entries) else None
-        _compare_load(model, run, rows, problems)
+        _compare_load(model, run, rows, problems, counts, admitted)
         seen = {}
         for key, source, reason, text in rows.get(('R', rid), []):
             seen[key] = (source, None if reason == 'nil' else reason, unhex(text))
@@ -1093,10 +1096,7 @@ def runtime_check(root, model, paths=None, probes=RECEIVER_PROBES, luajit=None, 
                 problems.append(_problem('runtime-explicit-mismatch', rid, key, detail=repr(got)))
         for row in rows.get(('P', rid), []):
             problems.append(_problem('runtime-resolve-not-pure', rid, row[0]))
-        texts = {}
-        for key in model['active']:
-            if declarations[key]['kind'] in ('text', 'block'):
-                texts.setdefault(predict(model, key, admitted, False)[2], key)
+        texts = None    # _shown_texts of this run, built when a whole-text probe first needs it
         for probe_id, status, shown in rows.get(('X', rid), []):
             probe = next(probe for probe in probes if probe['id'] == probe_id)
             want = _probe_expected(model, probe, admitted)
@@ -1109,8 +1109,11 @@ def runtime_check(root, model, paths=None, probes=RECEIVER_PROBES, luajit=None, 
                 english = _probe_expected(model, probe, {})
                 if want != english and (english in got if segment else got == english):
                     code = 'receiver-not-localized'
-                elif not segment and got in texts and texts[got] != probe['key']:
-                    code = 'receiver-wrong-key'
+                elif not segment:
+                    if texts is None:
+                        texts = _shown_texts(model, admitted)
+                    code = ('receiver-wrong-key' if got in texts and texts[got] != probe['key']
+                            else 'receiver-mismatch')
                 else:
                     code = 'receiver-mismatch'
             source = (predict(model, probe['key'], admitted, False)[0]
@@ -1125,6 +1128,16 @@ def runtime_check(root, model, paths=None, probes=RECEIVER_PROBES, luajit=None, 
     return problems, evidence
 
 
+def _shown_texts(model, admitted):
+    """{text the seam shows: the first text or block key, in active order, that shows it} with
+    this admitted pack (None while English is active)."""
+    declarations, texts = model['declarations'], {}
+    for key in model['active']:
+        if declarations[key]['kind'] in ('text', 'block'):
+            texts.setdefault(predict(model, key, admitted, False)[2], key)
+    return texts
+
+
 def _adopted(model, product, entries):
     pack = model['packs'].get(product)
     name = pack.get('name') if pack else None
@@ -1132,8 +1145,11 @@ def _adopted(model, product, entries):
                 and len(entries) <= MAX_ENTRIES)
 
 
-def _compare_load(model, run, rows, problems):
-    """The base, pack and language load facts of one boot."""
+def _compare_load(model, run, rows, problems, counts=None, admitted=None):
+    """The base, pack and language load facts of one boot. counts, when given, holds the
+    admitted count of each pack that is not the run's own, filled on first use and reused by
+    the later runs of the same runtime_check over the same unchanged model; admitted, when
+    given, is _admitted of the run's own entries (its pack is adopted)."""
     rid = run['id']
     declarations, active, english = model['declarations'], model['active'], model['english']
     if len(english) > MAX_ENTRIES:
@@ -1149,7 +1165,14 @@ def _compare_load(model, run, rows, problems):
         entries = (_run_entries(model, run) if product == run['lang']
                    else (dict(pack['entries']) if pack else {}))
         if _adopted(model, product, entries):
-            count = len(_admitted(model, entries))
+            if product == run['lang'] and admitted is not None:
+                count = len(admitted)
+            elif product != run['lang'] and counts is not None:
+                if product not in counts:
+                    counts[product] = len(_admitted(model, entries))
+                count = counts[product]
+            else:
+                count = len(_admitted(model, entries))
             adopted += 1
             pack_rows.append([product, str(count), str(len(entries) - count)])
             names.append((product, pack['name']))
