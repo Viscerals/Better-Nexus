@@ -770,6 +770,16 @@ local save = {
     lastLevelSeen=nil,
     lastRunBoundaryGeneration=0,
     demotionsClearedThisSession=false,
+    -- The adapter reported that this game client has no build-save action
+    -- ("save_unavailable"). Set once per level-80 visit: the notice is said
+    -- once and StepSave sends no further save attempt until the level leaves
+    -- 80 or a run boundary resets it. Never a success: savedThisVisit, the
+    -- verification fields and lastSaveStatus are not touched. Memory only.
+    unavailableVisit=false,
+    unavailableStatus="Automatic saving is not available with this game client -- finished run not saved",
+    unavailableNotice="Automatic saving is not available with this game client. "
+        .. "This finished run was not saved and Nexus will not keep retrying; "
+        .. "your Saved Builds are unchanged.",
 }
 
 local statusLine = "loading"
@@ -3747,7 +3757,21 @@ local function StepSave(level, plan, slots, owned, static, locked)
             local wl = Adapter.Wishlist()
             local saveName = wl and tostring(wl.name or "") or ""
             if saveName == "" then saveName = incumbent.name or "Nexus" end
-            local saved = Adapter.Save(incumbent.slot, saveName)
+            if save.unavailableVisit then
+                -- Already reported this visit: no further attempt or notice.
+                SetStatus(save.unavailableStatus)
+                return
+            end
+            local saved, saveErr = Adapter.Save(incumbent.slot, saveName)
+            if not saved and saveErr == "save_unavailable" then
+                -- The game client has no save action (not a refused call):
+                -- say so once and stop. Nothing was sent or changed, and an
+                -- ordinary refusal keeps its retry below.
+                save.unavailableVisit = true
+                SetStatus(save.unavailableStatus)
+                Print(save.unavailableNotice)
+                return
+            end
             if saved then
                 -- send != success: SS-541 FAIL (combat/dead) is consumed
                 -- invisibly. Block re-save, but only CONFIRM after a fresh
@@ -3858,7 +3882,21 @@ local function StepSave(level, plan, slots, owned, static, locked)
                 if slots.bySlot[slot] == nil then target = slot; break end
             end
             if target then
+                if save.unavailableVisit then
+                    SetStatus(save.unavailableStatus)
+                    return
+                end
                 local saved, saveErr = Adapter.Save(target, "Nexus")
+                if not saved and saveErr == "save_unavailable" then
+                    -- No save action in this game client: the same single
+                    -- notice as the assigned path, and no manual-save
+                    -- instruction (whether the game still offers one is not
+                    -- established offline).
+                    save.unavailableVisit = true
+                    SetStatus(save.unavailableStatus)
+                    Print(save.unavailableNotice)
+                    return
+                end
                 if saved then
                     save.savedThisVisit = true
                     local lockedNow = Adapter.LockedOwned and Adapter.LockedOwned() or nil
@@ -3952,6 +3990,7 @@ local function ResetRunBoundary()
     save.observeIndex, save.observeReadyAt = 1, nil
     save.noChangeReportedVisit = false
     save.gateAuditedVisit = false
+    save.unavailableVisit = false
     fillerFishState.guaranteedId = nil
     fillerFishState.consecutive = 0
     fillerFishState.bracket = nil
@@ -3991,7 +4030,10 @@ local function HandleLevelTransition(level, boundaryGeneration)
         -- observed. Never let it suppress the first actionable board after a
         -- genuine progression transition.
         actionHold.externalUntil = 0
-        if level ~= 80 then save.savedThisVisit = false end
+        if level ~= 80 then
+            save.savedThisVisit = false
+            save.unavailableVisit = false
+        end
         save.lastLevelSeen = level
     end
     if Adapter.ExternalActionSeen() and not levelChanged then

@@ -5857,9 +5857,17 @@ function A.Save(slot, name)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if (UnitLevel("player") or 0) ~= 80 then return false, "not level 80" end
-    if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
+    -- Updated client: the service table is present but no longer exports
+    -- SaveServerBuildSlot. That absent capability is its own reason
+    -- ("save_unavailable"), read once here and never called, so a caller can
+    -- tell it from an ordinary refused call ("refused": the function exists
+    -- and declined or failed, or no service table is loaded yet) and from
+    -- spacing. Nothing is sent and no spacing window is started.
     local svc = PS()
-    local ok = svc and SafeCall(svc.SaveServerBuildSlot, slot, name)
+    local saveFn = svc and svc.SaveServerBuildSlot
+    if type(svc) == "table" and saveFn == nil then return false, "save_unavailable" end
+    if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
+    local ok = svc and SafeCall(saveFn, slot, name)
     if ok then lastBuildOpAt = GetTime(); return true end
     return false, "refused"
 end
