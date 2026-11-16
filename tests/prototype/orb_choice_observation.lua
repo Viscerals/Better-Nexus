@@ -381,10 +381,24 @@ do
  -- by the same client admission before any side effect (ordinary Auto OFF,
  -- the receipt, the run state), not started and then paused again.
  local function AutoNow() local stats=Nexus.RecomputeStats();return stats and stats.autoEnabled end
+ -- W3 revision 4 (Standards N-3): ordinary Auto is already OFF here (Confirm
+ -- switched it off, and the Auto command is refused while an Orb run holds),
+ -- so the unchanged-Auto comparison below is a state check only. It cannot
+ -- show that the refusal comes before the switch. The order is observed
+ -- directly instead: OrbRuntime's turnAutoOff looks
+ -- Nexus.DisableOrdinaryAutomation up at each call, and this forwarding
+ -- wrapper (every argument, return and error passes through) counts each
+ -- invocation without changing what the action does.
+ local autoOff={n=0,own=rawget(Nexus,'DisableOrdinaryAutomation'),original=Nexus.DisableOrdinaryAutomation}
+ assert(type(autoOff.original)=='function','fixture: the ordinary Auto turn-off action exists')
+ Nexus.DisableOrdinaryAutomation=function(...) autoOff.n=autoOff.n+1;return autoOff.original(...) end
  local function ResumeRefused(name)
   local autoBefore,reasonBefore=AutoNow(),M.Status().reason
+  local offBefore=autoOff.n
   local resumedNow,why=M.Resume()
   local after=M.Status()
+  assert(autoOff.n==offBefore,
+   name..': a refused Resume invoked the ordinary Auto turn-off action ('..tostring(autoOff.n-offBefore)..' call)')
   assert(not resumedNow and why==select(2,O.ClientAdmission()),
    name..': Resume was not refused with the client admission reason: '..tostring(why))
   assert(AutoNow()==autoBefore and after.state=='PAUSED' and after.pending and not after.running
@@ -404,9 +418,12 @@ do
   'a specialization draw is not chosen as an Orb offer')
  -- Positive control on the same receipt: the older contract is admitted again.
  perks.currentSpecDraw=nil
+ assert(autoOff.n==0,'no refused Resume of the kept receipt invoked the ordinary Auto turn-off action')
  M.Resume();M.Pump()
  assert(H.Count('take')==1 and H.Count('orb-spend')==1,
   'legacy positive control: the same receipt is chosen once on the older provider')
+ assert(autoOff.n==1,
+  'control: the admitted Resume of the kept receipt invokes the ordinary Auto turn-off action once ('..tostring(autoOff.n)..')')
  -- The next Orb: the marker appears before the result settles the first.
  svc.GetServerActiveDesign=Design
  H.Result(410002,2)
@@ -418,11 +435,16 @@ do
  local resumed,resumeWhy=M.Resume()
  assert(not resumed and type(resumeWhy)=='string' and H.Count('orb-spend')==1,
   'updated provider: Resume toward a next spend is refused and sends nothing')
+ assert(autoOff.n==1,'updated provider: the refused Resume toward a next spend invoked the ordinary Auto turn-off action')
  svc.GetServerActiveDesign=nil
  H.now=H.now+3.1
  M.Resume();M.Pump()
  assert(H.Count('orb-spend')==2 and H.Count('take')==1,
   'legacy positive control: the same run spends its next single Orb on the older provider')
+ assert(autoOff.n==2,
+  'control: the admitted Resume toward the next spend invokes the ordinary Auto turn-off action once ('..tostring(autoOff.n)..')')
+ rawset(Nexus,'DisableOrdinaryAutomation',autoOff.own)
+ assert(Nexus.DisableOrdinaryAutomation==autoOff.original,'the turn-off counter was removed')
  M.Stop()
  print('PASS W3 updated-client Orb admission: no start, spend or choice on the updated provider or a specialization draw; older provider unchanged')
 end
