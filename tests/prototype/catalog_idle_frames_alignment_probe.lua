@@ -232,6 +232,16 @@ local function Row(row)
  local count=C.Count();local countText=C.Count()
  local admitted=count==40 and C.RootState().state=='ROOT_ADMITTED' and C.RootState().candidate==false
  if not P.setup(admitted,L..'fixture: the saved catalog is admitted and idle: '..tostring(countText)) then
+  -- Failure-only, post-predicate snapshot: not the earlier short-circuit operands.
+  -- Do not advance frames or change the historical fixed-frame setup.
+  local root=Prep(C.RootState)
+  local startup=Prep(Nexus.StartupStatus)
+  emit(row,'setup_failure_snapshot',{{'count',count},{'countText',countText},
+   {'rootState',root.state},{'candidate',root.candidate},{'rootError',root.error},
+   {'countMatches',count==40},{'snapshotStateMatches',root.state=='ROOT_ADMITTED'},
+   {'snapshotCandidateIdle',root.candidate==false},{'startupState',startup.state},
+   {'startupError',startup.error},{'readyFrames',readyFrames},{'now',H.now},
+   {'phase','after_failed_predicate_before_alignment_frames'}})
   unmet('CATALOG_ADMITTED',countText);return
  end
  -- Original lines 22-33.
