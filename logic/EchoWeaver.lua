@@ -213,6 +213,12 @@ local LABELS = {
 
 local SOUVENIR_PLAYER = "souvenir: take it or draw three random Echoes; the choice is left to the player"
 EchoWeaver.SOUVENIR_PLAYER = SOUVENIR_PLAYER
+local SOUVENIR = {
+    REVEAL = "Give up the unneeded souvenir and reveal three Echoes (EchoWeaver)",
+    SENT = "souvenir given up; waiting for the three revealed Echoes",
+    SETTLE = "waiting for the game's own pick window to pass",
+}
+EchoWeaver.SOUVENIR = SOUVENIR
 
 -- Everything both policies read, built once per decision. Returns nil and a
 -- wait result when a required input is missing or incomplete: that refusal is
@@ -314,20 +320,49 @@ local function Prepare(state)
         local card=index and board.cards[index]
         local id=card and tonumber(card.spellId)
         if not id or card.selectable==false or (outstanding[id] or 0)<=0 then
+            if board.revealSent==true then return Wait(SOUVENIR.SENT) end
+            -- User requirement: an unneeded souvenir, shown alone (adapter
+            -- revealable), is given up for the three hidden Echoes while a
+            -- Wishlist target is still missing. Not when its Echo family
+            -- still has a missing target (another tier), its family is not
+            -- known, or nothing is missing: then the player decides.
+            local family=card and card.family
+            if family==nil and id and state.catalog and state.catalog.familyOf then
+                family=state.catalog.familyOf[id]
+            end
+            local familyOf=state.catalog and state.catalog.familyOf
+            local familyMissing=family==nil or type(familyOf)~="table"
+            if not familyMissing then
+                for other,n in pairs(outstanding) do
+                    if n>0 and (familyOf[other]==nil or familyOf[other]==family) then familyMissing=true end
+                end
+            end
+            local eligible=id and card.selectable~=false and #board.cards==1
+                and total>0 and not familyMissing
+            if eligible and board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
+            if eligible and board.revealable==true then
+                return nil,{type="reveal",spellId=card.spellId,index=index,
+                    reason=SOUVENIR.REVEAL,reasonCode="SOUVENIR_REVEAL",
+                    annotations=annotations,deltas=deltas,outstanding=total,planner="echoweaver"}
+            end
             return Wait(SOUVENIR_PLAYER)
         end
         return nil,{type="take",spellId=card.spellId,index=index,
             reason=LABELS.SELECT_OUTSTANDING_WISHLIST,reasonCode="SOUVENIR_NEEDED",
             annotations=annotations,deltas=deltas,outstanding=total,planner="echoweaver"}
     end
+    -- The three Echoes that answered Nexus's own souvenir reveal: chosen
+    -- from, never searched (no Banish, Freeze or Reroll).
+    local revealed=board.revealBound==true
+    if revealed and board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true
     return {state=state,requested=requested,outstanding=outstanding,total=total,choices=choices,
         frozenCount=frozenCount,annotations=annotations,deltas=deltas,charges=charges,trusted=trusted,
         catalog=state.catalog,
-        canBanish=trusted and state.allowBanish~=false and not refused.banish,
-        canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false,
-        canReroll=trusted and state.allowReroll~=false and not refused.reroll}
+        canBanish=trusted and state.allowBanish~=false and not refused.banish and not revealed,
+        canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false and not revealed,
+        canReroll=trusted and state.allowReroll~=false and not refused.reroll and not revealed}
 end
 
 -- The normalized input of the pure planner. The capability arguments let the

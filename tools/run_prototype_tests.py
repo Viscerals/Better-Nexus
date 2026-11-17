@@ -466,6 +466,8 @@ NAMES += ['l10n_hold_presentation']
 NAMES += ['l10n_long_paragraphs']
 # Souvenir stage (updated provider, flag 3 memory card shown alone or beside carried cards): a needed visible souvenir is taken; any other souvenir board is left to the player with a stated reason, never given up (no memory draw); older provider unchanged (synthetic; native NOT_RUN).
 NAMES += ['automation_souvenir_stage']
+# Souvenir reveal (user requirement 2026-11-17): an unneeded lone souvenir is given up once per draw (CS 349, empty body) and only the bound three-card reply is chosen from (Take only); wanted/native-wanted/ambiguous/held cases send nothing; delayed, wrong-shape and repeated replies; changes inside the reveal (synthetic; native NOT_RUN).
+NAMES += ['automation_souvenir_reveal']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

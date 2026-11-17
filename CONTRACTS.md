@@ -219,15 +219,84 @@ This file has two parts.
   pending action, horizon, lock sync) it returns a `take` of the souvenir only
   when exactly one card is flagged, that card is selectable and its exact
   spell ID is still outstanding (rolled plus counted locked copies
-  subtracted). Otherwise it waits with the reason `souvenir: take it or draw
-  three random Echoes; the choice is left to the player`: an unrequested,
-  owned, lock-covered or other-spell souvenir, two flagged cards, or a needed
-  carried card beside the souvenir (taking it would give the souvenir up).
-  Nexus never sends `REQUEST_PERK_MEMORY_DRAW` and never gives a souvenir up;
-  the game's own choice window is not touched. The Take keeps every existing
+  subtracted). An unneeded souvenir is given up for the three hidden Echoes
+  (souvenir reveal, below) when the board is `revealable` and a Wishlist
+  target is still missing. Otherwise it waits with the reason `souvenir: take
+  it or draw three random Echoes; the choice is left to the player`: nothing
+  missing, a souvenir whose Echo family still has a missing target or is not
+  known, a souvenir the game's own build asks for, two flagged cards, or a
+  carried card beside the souvenir (giving it up or taking another card
+  gives the souvenir up). The game's own choice window is not touched. The Take keeps every existing
   send guard (pending native Select, in-flight action, session pause, the
   final memory-only admission before `SelectPerk`). The older provider is
   unchanged (`memoryStage` is nil; a one-card board still waits).
+- **Souvenir reveal (updated provider; user requirement of 2026-11-17).**
+  Nexus sends `REQUEST_PERK_MEMORY_DRAW` only through
+  `GameAdapter.RevealMemory(spellId, expect)`, for an action `reveal` the
+  planner decides as above. It is a sacrifice, not a reroll: the souvenir is
+  lost for the climb. `Board()` marks a lone souvenir (exactly one published
+  card, flagged) `revealable` only when the request would not be refused at
+  once (`RevealSnapshot`: no Select, Reroll, Orb redraw, Banish or Freeze
+  pending, no specialization draw, `CS.REQUEST_PERK_MEMORY_DRAW == 349` and a
+  `sendToServer` function) and the game's `WantsMoreOfEcho(souvenir)` returns
+  no true value (a missing or thrown read refuses); `revealSent` when this draw was already given up.
+  `RevealMemory` sends nothing unless all of these hold again: the updated
+  provider, the ordinary gate (specialization, Orb), no session pause or
+  passive mode, nothing in flight and no reveal waiting, the lone souvenir
+  unchanged, `WantsMoreOfEcho` not true, the owned total readable, and this draw
+  (souvenir, pending draw count, owned total) not already given up. Then the
+  runtime's `verify` decides again on fresh reads (the Wishlist plan probed
+  again, board, rolled and locked ownership, level, horizon) and must again
+  return this reveal; a changed decision supersedes the intent and a fresh
+  decision follows. After it, memory only: the runtime's `final` (master Auto,
+  `autoPick == true`, this prepared intent, no pause, world hold or player
+  action), the pause epoch, nothing in flight, the same `Perks` table and the
+  same souvenir table, the same pending draw count. The request is
+  `sendToServer(349, "")`, once per draw for the session: the draw is marked
+  given up before the send, so a refused, failed or unanswered request is
+  never repeated. The reveal is in flight (`InFlight`) until a new choice or
+  `REVEAL_WINDOW` (10 s); the runtime intent stays on that board and is never
+  resent; the board then waits with `souvenir given up; waiting for the three
+  revealed Echoes`.
+  The first new choice is bound to the reveal (`revealBound`) only when it
+  arrives within the window, shows exactly three unflagged Echoes with valid
+  IDs, no Select or specialization draw is pending, and the pending draw count
+  and the owned total equal those of the request. Any other new choice ends
+  the reveal unbound, and the ordinary updated-provider admission applies
+  (nothing is chosen). On a bound board `ChoiceAdmission` admits a Take of one
+  of its three Echoes (entry and send boundary); Reroll, Banish and Freeze
+  stay refused, and the planner decides with no search (`canBanish`,
+  `canFreeze`, `canReroll` false): a needed Echo, else a filler.
+  The game's own auto-accept timer (`perks_service.lua`) is armed at a choice
+  parse with the card it chose, fires on the first frame after 0.18 s through
+  `Perks.SelectPerk` (refused only when a pick is pending or the card is not
+  on the current choice) and re-checks neither its option nor the Wishlist,
+  so switching the option off, as the existing Auto gate and solo-picker
+  lease do, does not cancel an armed timer. Nexus therefore reveals, and takes
+  from a revealed board, only after it has observed that exact choice table
+  for `CHOICE_SETTLE` (1 s; first observation is never before the parse):
+  `Board()` marks a younger one `revealSettling`, the planner waits with
+  `waiting for the game's own pick window to pass` and the runtime decides
+  again at the poll pace; `RevealMemory` (`reveal_not_settled`, superseded
+  and decided again) and the revealed-board `ChoiceAdmission` refuse it at
+  the send boundary. An armed timer has fired by then: its Select is pending
+  (every send boundary refuses) or it was refused. The bound is frame-time
+  based: a single frame spanning the whole settle time is not excluded, and
+  then only the pending-Select checks at the send boundaries separate the two
+  picks.
+  Basis and limits: static reading of the captured `perks.lua` (above;
+  `RequestMemoryDraw`, `PlayMemoryGiveUp`) and `projectebonhold.lua`
+  (`REQUEST_PERK_MEMORY_DRAW = 349`); no reply opcode, request ID or refusal
+  exists there, so the reply is inferred to be the next published choice
+  (`SEND_PLAYER_PERK_CHOICE`). The game's window is not told: it keeps
+  showing the souvenir until that reply, and a player click there in that
+  window is not excluded. A reload forgets the session's given-up draws. Not
+  established: the server's reply, refusal or timing, whether the reply can
+  carry carried cards or a fourth card, and the native window's state after a
+  reveal it did not start. Offline evidence only
+  (`tests/prototype/automation_souvenir_reveal.lua`, including a model of the
+  timer from the captured source); no native result. The new reasons are
+  English and uncatalogued.
 
   Basis and limits. A static reading of one captured client: `perks.lua`
   (SHA-256 `43e28daef02a1f95d344eaca880bde2ce1794a0e821113837c5bfc5d5b98b8a2`,
@@ -239,7 +308,10 @@ This file has two parts.
   fourth card, and the native timing of the client's own automatic pick.
   Offline evidence only (`tests/prototype/automation_souvenir_stage.lua`); no
   native result. The wait reason is English and uncatalogued (language work
-  deferred).
+  deferred). Live user diagnostic on test.9097-a8c00d3a (summary supplied by
+  the coordinator): two own Takes of needed souvenirs were proven granted, and
+  an unneeded souvenir waited; this is native evidence for the Take and the
+  hand-off of that build only.
 - **Auto Save, unavailable client.** `GameAdapter.Save` returns
   `false, "save_unavailable"` when the `PerkService` table is present and has no
   `SaveServerBuildSlot` member. Nothing is called, sent or timed for it. The

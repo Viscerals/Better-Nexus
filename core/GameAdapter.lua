@@ -894,6 +894,10 @@ function A.Board()
     pcall(A.ObserveChoiceRead,ok,ch,"adapter_board",not svc and "no_service" or type(getter)~="function" and "no_getter" or nil)
     if not ok then ch=nil end -- preserve SafeCall's original failed-read result
     if type(ch) ~= "table" or #ch == 0 then return nil end
+    -- A souvenir reveal waiting for its reply: binds the first new choice
+    -- that is its reply (ledger.RevealObserve), memory and bounded reads.
+    if ledger.reveal then pcall(ledger.RevealObserve, ch) end
+    if ledger.choiceSeen and ledger.choiceSeen[ch] == nil then ledger.choiceSeen[ch] = GetTime() end
     local cards, gi = {}, nil
     local sigParts = {}
     -- D-ROLL-01: the position in the client's choice array of each projected
@@ -956,10 +960,40 @@ function A.Board()
     -- offline only, no native result) the souvenir is shown alone or beside
     -- carried cards and the three random cards stay hidden until it is given
     -- up. Its absence proves nothing: a dropped fourth card can hide one.
+    local memoryStage = gi ~= nil and ledger.MemoryCardContract
+        and ledger.MemoryCardContract() == true or nil
+    -- Souvenir reveal (ledger.RevealMemory): revealSent, this lone souvenir
+    -- was already given up (one request per draw, never again); revealable,
+    -- a lone souvenir that has not been; revealBound, the three Echoes that
+    -- answered Nexus's own reveal; revealSettling, that choice has not been
+    -- observed for ledger.CHOICE_SETTLE yet (no reveal or Take before).
+    local revealSent, revealable, settling = nil, nil, nil
+    if memoryStage and #ch == 1 and #cards == 1 then
+        local r = ledger.reveal
+        if (r and rawequal(r.ref, ch)) or ledger.RevealDoneFor(ch) then
+            revealSent = true
+        elseif ledger.RevealSnapshot(PerksTbl(), cards[1].spellId) then
+            -- Revealable only where RevealMemory would not refuse at once:
+            -- the game's own build must not ask for the souvenir, and the
+            -- choice must have settled (else revealSettling).
+            local svc = PS()
+            local wants = svc and rawget(svc, "WantsMoreOfEcho")
+            local okW, wanted = false, nil
+            if type(wants) == "function" then okW, wanted = pcall(wants, cards[1].spellId) end
+            if okW and not wanted then
+                if ledger.ChoiceSettled(ch) then revealable = true else settling = true end
+            end
+        end
+    end
+    local bound = ledger.revealBound
+    if bound and not rawequal(bound.ref, ch) then bound = nil end
+    if bound and not ledger.ChoiceSettled(ch) then settling = true end
     return { cards = cards, guaranteedIndex = gi, signature = sig,
              idSignature = idSig,
-             memoryStage = gi ~= nil and ledger.MemoryCardContract
-                 and ledger.MemoryCardContract() == true or nil,
+             memoryStage = memoryStage,
+             revealSent = revealSent, revealable = revealable,
+             revealBound = bound and true or nil,
+             revealSettling = settling,
              strictObservation = ledger.LevelingStrictCards
                  and ledger.LevelingStrictCards(ch) ~= nil or false }
 end
@@ -5046,6 +5080,15 @@ local function ResolveInFlight()
             inFlightKind, inFlightSig = nil, nil
             boardDirty = true
         end
+    elseif inFlightKind == "reveal" then
+        -- No client flag exists for it: a new choice, or the reply window
+        -- passing, ends the wait. The draw stays given up either way.
+        local r = ledger.reveal
+        local ch = type(p) == "table" and rawget(p, "currentChoice") or nil
+        if not r or not rawequal(ch, r.ref) or GetTime() - r.at > ledger.REVEAL_WINDOW then
+            inFlightKind, inFlightSig = nil, nil
+            boardDirty = true
+        end
     else
         inFlightKind, inFlightSig = nil, nil
         boardDirty = true
@@ -5249,6 +5292,24 @@ ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
         if kind == "gate" then return true end
         return false, ledger.UPDATED_UNAVAILABLE
     end
+    -- The three Echoes that answered Nexus's own souvenir reveal: the
+    -- souvenir was just given up, so no hidden one is shown or dropped there
+    -- (ledger.RevealObserve). A Take of one of them is admitted. The game's
+    -- own auto-accept is held off by the existing Auto gate (AutoAllowed:
+    -- "client auto-accept re-enabled"), so its timer is not armed there.
+    local bound = ledger.revealBound
+    if visible == false and bound and rawequal(ch, bound.ref) then
+        if kind == "gate" then return true end
+        if kind == "take" then
+            if not ledger.ChoiceSettled(ch) then return false, ledger.SETTLE_REASON end
+            for i = 1, #ch do
+                local c = rawget(ch, i)
+                if type(c) == "table" and rawget(c, "spellId") == spellId then return true end
+            end
+            return false, "not on board"
+        end
+        return false, ledger.UPDATED_UNAVAILABLE
+    end
     if kind == "take" then
         if not visible then return false, ledger.MEMORY_UNKNOWN end
         if visible ~= spellId then return false, ledger.MEMORY_GIVEN_UP end
@@ -5272,6 +5333,106 @@ ledger.MutationAdmission = function(perks, contract, kind, sending)
         return false, "a selection is pending in the game"
     end
     return true
+end
+-- Souvenir reveal (user requirement 2026-11-17: an unneeded souvenir is given
+-- up and the three hidden Echoes are chosen from). Static reading of the
+-- captured client (CONTRACTS.md, souvenir stage): the client's own give-up
+-- sends ProjectEbonhold.sendToServer(CS.REQUEST_PERK_MEMORY_DRAW, "") with
+-- CS.REQUEST_PERK_MEMORY_DRAW = 349; the souvenir is then lost for the climb.
+-- No reply opcode or request ID exists; the reply is read as the next
+-- published choice. Its own give-up flag is a file local, not readable, and
+-- the game's window keeps showing the souvenir until that reply.
+ledger.REVEAL_CODE = 349
+-- Seconds within which a new choice may be the reply to Nexus's reveal.
+ledger.REVEAL_WINDOW = 10
+-- The game's own auto-accept timer (perks_service.lua) is armed at the
+-- choice parse, keeps the card it chose and re-checks neither its option nor
+-- the Wishlist; it fires on the first frame after 0.18 s. Switching the option
+-- off later does not cancel it. So a reveal, and a Take on a revealed board,
+-- wait until Nexus has observed that exact choice table for CHOICE_SETTLE: an
+-- armed timer has fired by then (setting pendingSelectSpellId, which every
+-- send boundary refuses, or being refused). First observation is never
+-- earlier than the parse, so the measured age is a lower bound.
+ledger.CHOICE_SETTLE = 1.0
+ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
+ledger.choiceSeen = setmetatable({}, { __mode = "k" })
+ledger.ChoiceSettled = function(ch)
+    local seen = type(ch) == "table" and ledger.choiceSeen[ch] or nil
+    return seen ~= nil and GetTime() - seen >= ledger.CHOICE_SETTLE
+end
+-- One reveal per souvenir draw, for the session: the souvenir, the pending
+-- draw count and the owned total identify a draw. Never cleared.
+ledger.revealDone = {}
+ledger.GrantedTotal = function()
+    local svc = PS()
+    local granted = svc and SafeCall(svc.GetGrantedPerks)
+    if type(granted) ~= "table" then return nil end
+    local n = 0
+    for _, entries in pairs(granted) do
+        if type(entries) == "table" then n = n + #entries end
+    end
+    return n
+end
+ledger.RevealKey = function(perks, ch, granted)
+    local c = type(ch) == "table" and rawget(ch, 1) or nil
+    if type(perks) ~= "table" or type(c) ~= "table" or type(granted) ~= "number" then return nil end
+    return tostring(rawget(c, "spellId")) .. ":" .. tostring(rawget(perks, "pendingRollsCount"))
+        .. ":" .. granted
+end
+-- Whether this lone souvenir's draw was already given up (bounded read).
+ledger.RevealDoneFor = function(ch)
+    local key = ledger.RevealKey(PerksTbl(), ch, ledger.GrantedTotal())
+    return key ~= nil and ledger.revealDone[key] == true
+end
+-- Memory only: the lone souvenir a reveal may give up, or nil and a reason.
+ledger.RevealSnapshot = function(perks, spellId)
+    if type(perks) ~= "table" then return nil, "the game's selection state cannot be read" end
+    if ledger.SpecDrawOf(perks) ~= nil then return nil, ledger.SPEC_REASON end
+    if rawget(perks, "pendingSelectSpellId") ~= nil then return nil, "a selection is pending in the game" end
+    for _, f in ipairs({"pendingReroll", "pendingOrbReroll", "pendingBanishIndex", "pendingFreezeIndex"}) do
+        if rawget(perks, f) ~= nil then return nil, "an action is pending in the game" end
+    end
+    local ch = rawget(perks, "currentChoice")
+    if type(ch) ~= "table" or #ch ~= 1 or rawget(ch, 2) ~= nil then return nil, "the souvenir is not shown alone" end
+    local c = rawget(ch, 1)
+    if type(c) ~= "table" or not rawget(c, "isGuaranteed") or rawget(c, "spellId") ~= spellId then
+        return nil, "the souvenir changed"
+    end
+    local pe = PE()
+    local cs = type(pe) == "table" and rawget(pe, "CS") or nil
+    if type(cs) ~= "table" or rawget(cs, "REQUEST_PERK_MEMORY_DRAW") ~= ledger.REVEAL_CODE
+        or type(rawget(pe, "sendToServer")) ~= "function" then
+        return nil, "the souvenir reveal is not available on this client"
+    end
+    return ch
+end
+-- The first new choice after Nexus's reveal is its reply only when it comes
+-- within the window, shows exactly three unflagged Echoes, no Select or
+-- specialization draw is pending, and the pending draw count and the owned
+-- total are those of the request. Then, and only then, it is bound. Any
+-- other new choice ends the reveal unbound (ordinary admission applies).
+ledger.RevealObserve = function(ch)
+    local r = ledger.reveal
+    if not r or rawequal(ch, r.ref) then return end
+    if type(ch) ~= "table" then
+        if GetTime() - r.at > ledger.REVEAL_WINDOW then ledger.reveal = nil end
+        return
+    end
+    ledger.reveal = nil
+    if GetTime() - r.at > ledger.REVEAL_WINDOW then return end
+    local perks = PerksTbl()
+    if type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil
+        or ledger.SpecDrawOf(perks) ~= nil then return end
+    if #ch ~= 3 or rawget(ch, 4) ~= nil then return end
+    for i = 1, 3 do
+        local c = rawget(ch, i)
+        if type(c) ~= "table" or rawget(c, "isGuaranteed") then return end
+        local id = rawget(c, "spellId")
+        if type(id) ~= "number" or id < 1 or id ~= math.floor(id) or id >= math.huge then return end
+    end
+    if rawget(perks, "pendingRollsCount") ~= r.rolls then return end
+    if ledger.GrantedTotal() ~= r.granted then return end
+    ledger.revealBound = { ref = ch, souvenir = r.spellId }
 end
 -- The admission state as one comparable string, for the leveling choice key.
 ledger.AdmissionKey = function()
@@ -5780,6 +5941,78 @@ function A.Reroll()
         return true
     end
     return false, "refused"
+end
+
+-- Gives up a lone souvenir that the caller decided is not needed, once per
+-- draw, by the request the client's own give-up sends (ledger.REVEAL_CODE).
+-- `expect.verify()` re-decides on fresh reads (it may call out) and
+-- `expect.final()` re-checks the caller's authority from memory; both must
+-- return true. Refused (nothing sent) unless: the updated provider, the
+-- ordinary gate (specialization, Orb), no pause, nothing in flight, no
+-- reveal waiting, the souvenir shown alone and unchanged, no Select or other
+-- client action pending, the captured request code, the game's own build
+-- does not ask for the souvenir (WantsMoreOfEcho false), the owned Echoes
+-- readable, and this draw not already given up. The last checks are memory
+-- only, after every callout. A send is never retried, even if it fails.
+function A.RevealMemory(spellId, expect)
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    if not ledger.MemoryCardContract() then return false, "the souvenir reveal needs the updated game client" end
+    local allowed, reason = A.OrdinaryBoardAllowed()
+    if not allowed then return false, reason end
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
+    if A.InFlight() then return false, "in flight" end
+    if ledger.reveal then return false, "a souvenir reveal is waiting for its reply" end
+    if type(expect) ~= "table" or type(expect.verify) ~= "function" or type(expect.final) ~= "function" then
+        return false, "the reveal authority is missing"
+    end
+    local perks = PerksTbl()
+    local ch, why = ledger.RevealSnapshot(perks, spellId)
+    if not ch then return false, why end
+    local svc = PS()
+    local wants = svc and rawget(svc, "WantsMoreOfEcho")
+    if type(wants) ~= "function" then return false, "the game's own build cannot be read" end
+    local okW, wanted = pcall(wants, spellId)
+    if not okW or wanted then return false, "the game's own build asks for this souvenir" end
+    local granted = ledger.GrantedTotal()
+    if granted == nil then return false, "the owned Echoes cannot be read" end
+    local rolls = rawget(perks, "pendingRollsCount")
+    local key = ledger.RevealKey(perks, ch, granted)
+    if not key or ledger.revealDone[key] then return false, "this souvenir was already given up" end
+    local okV, pass = pcall(expect.verify)
+    if not okV or pass ~= true then return false, "reveal_decision_changed" end
+    -- Memory only from here: no callout separates these checks from the send.
+    local okF, passF = pcall(expect.final)
+    if not okF or passF ~= true then return false, "the reveal authority changed" end
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    if A.InFlight() or ledger.reveal then return false, "in flight" end
+    local perksSend = PerksTbl()
+    if not rawequal(perksSend, perks) then return false, "the game's selection state changed" end
+    local chSend, whySend = ledger.RevealSnapshot(perksSend, spellId)
+    if not chSend then return false, whySend end
+    if not rawequal(chSend, ch) or rawget(perksSend, "pendingRollsCount") ~= rolls
+        or not ledger.MemoryCardContract() then
+        return false, "the souvenir changed"
+    end
+    -- A choice re-published with the same cards keeps the board signature,
+    -- so a prepared reveal can reach here on a table the game just parsed.
+    if not ledger.ChoiceSettled(ch) then return false, "reveal_not_settled" end
+    local send = rawget(PE(), "sendToServer")
+    ledger.revealDone[key] = true
+    ledger.reveal = { ref = ch, spellId = spellId, rolls = rolls, granted = granted, at = GetTime() }
+    inFlightKind, inFlightSig = "reveal", nil
+    selfCalling = true
+    local ok = pcall(send, ledger.REVEAL_CODE, "")
+    selfCalling = false
+    if not ok then
+        -- Whether anything left is unknown; the draw stays given up here.
+        ledger.reveal = nil
+        inFlightKind, inFlightSig = nil, nil
+        return false, "the souvenir reveal request failed; it is not retried"
+    end
+    boardDirty = true
+    return true
 end
 
 -- Session-only, read-only settlement of an own reroll. A fresh server run

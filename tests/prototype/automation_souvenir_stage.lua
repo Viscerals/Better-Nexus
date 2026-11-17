@@ -23,7 +23,10 @@
 --   * any other souvenir board (not requested, already owned, covered by a
 --     lock, a different spell of the wished family, two flagged cards) is left
 --     to the player with the stated souvenir reason, and nothing is sent;
---   * Nexus never gives the souvenir up (no memory draw request);
+--   * this fixture has no captured reveal request code and no game build
+--     reader (WantsMoreOfEcho), so no souvenir is revealable here and none
+--     is given up (no memory draw request); the reveal of an unneeded lone
+--     souvenir is tests/prototype/automation_souvenir_reveal.lua;
 --   * the existing guards still hold: a pending native pick and an Orb hold
 --     send nothing, and a souvenir flag that disappears after the Take is
 --     entered (before the native Select) is refused at the send boundary;
@@ -205,4 +208,4 @@ do
  check(d.type=='wait' and d.reason=='waiting for action confirmation','unit: a pending action waits first')
 end
 
-print('PASS souvenir stage: needed souvenir taken, others left to the player, never given up ('..checks..' checks)')
+print('PASS souvenir stage: needed souvenir taken, others left to the player, none given up without the reveal contract ('..checks..' checks)')

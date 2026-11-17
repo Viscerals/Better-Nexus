@@ -548,7 +548,7 @@ end
 
 local safeTokens = {
     actionTypes={
-        take=true,banish=true,freeze=true,reroll=true,wait=true,
+        take=true,banish=true,freeze=true,reroll=true,wait=true,reveal=true,
     },
     triggers={
         forced=true,dirty=true,deadlines=true,fallbacks=true,explicit=true,
@@ -3096,6 +3096,48 @@ actionHold.LevelingFinal = function(intent)
     if GetTime() < (tonumber(actionHold.externalUntil) or 0) then return "user acting" end
     return nil
 end
+-- Souvenir reveal (Adapter.RevealMemory). verify: decided again on fresh
+-- reads (the Wishlist plan probed again, the board, rolled and locked
+-- ownership, level and horizon); it must still be this souvenir's reveal.
+-- It may call out. final: memory only, the same authority as LevelingFinal
+-- without the leveling mode: master Auto, the exact autoPick, this prepared
+-- intent, no pause, no world hold, no player action.
+actionHold.RevealVerify = function(intent)
+    if type(intent) ~= "table" or type(intent.action) ~= "table" then return false end
+    local okS, static = pcall(StaticContext, true)
+    if not okS or type(static) ~= "table" or type(static.plan) ~= "table"
+        or static.plan.advisorOnly then return false end
+    local okB, fresh = pcall(Adapter.Board)
+    if not okB or type(fresh) ~= "table" or fresh.signature ~= intent.boardSignature then return false end
+    local okO, owned = pcall(Adapter.Owned)
+    if not okO or type(owned) ~= "table" or owned.synced ~= true then return false end
+    local locked = nil
+    if Adapter.LockedOwned then
+        local okL, l = pcall(Adapter.LockedOwned)
+        if not okL then return false end
+        locked = l
+    end
+    local okLevel, level = pcall(Adapter.Level)
+    local okH, horizon = pcall(Adapter.Horizon)
+    local okD, again = pcall(Policy.Decide, {board = fresh, owned = owned, locked = locked,
+        plan = static.plan, catalog = static.catalog, level = okLevel and level or nil,
+        horizon = okH and horizon or nil, ordinaryBoardAllowed = true,
+        params = DefaultProfile.params, charges = {}, rollingPolicy = actionHold.rolling.inForce})
+    return okD and type(again) == "table" and again.type == "reveal"
+        and tonumber(again.spellId) == intent.action.spellId
+end
+actionHold.RevealFinal = function(intent)
+    local settings = Store.Settings()
+    if type(settings) ~= "table" or settings.autoPick ~= true then return false end
+    if actionIntent ~= intent or intent.state ~= "prepared" then return false end
+    if sched.autoEnabled ~= true then return false end
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then return false end
+    if actionHold.worldLeaving or actionHold.worldPending ~= nil
+        or actionHold.worldSettleUntil ~= nil then return false end
+    if GetTime() < (tonumber(actionHold.externalUntil) or 0) then return false end
+    return true
+end
 
 
 local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
@@ -3537,6 +3579,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         end
         SetStatus(action.reason == "advisor"
             and "No wishlist set -- advisor only" or ("waiting: " .. tostring(action.reason)))
+        -- A souvenir or revealed choice not yet settled (Adapter.Board
+        -- revealSettling): decide again at the poll pace until it settles.
+        if board.revealSettling then RequestStepAt(GetTime() + cadence.poll) end
         return
     end
     SetStatus("L" .. level .. " -- " .. (action.reason or action.type))
@@ -3663,6 +3708,29 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             -- rejected freeze" until the player acted on it.
             FinishActionIntent("rejected", err or "adapter_refused", false)
             frozeThisBoard = board.signature   -- refused: do not retry this board
+        end
+    elseif immutable.type == "reveal" then
+        -- One request per souvenir draw (the adapter never sends it twice).
+        -- Accepted: its result is the next board (ResolveActionIntent).
+        -- Refused because the fresh decision changed: superseded, decided
+        -- afresh. Any other refusal keeps this board held; never resent.
+        MarkActionAttempt(immutable.type)
+        local ok, err = false, "souvenir reveal unavailable"
+        if Adapter.RevealMemory then
+            ok, err = Adapter.RevealMemory(immutable.spellId, {
+                verify = function() return actionHold.RevealVerify(intent) end,
+                final = function() return actionHold.RevealFinal(intent) end})
+        end
+        if ok then
+            lastDecision = immutable
+            MarkIntentSubmitted(intent)
+        elseif err == "reveal_decision_changed" or err == "reveal_not_settled" then
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
+        else
+            intent.mutationAttempted = true
+            if actionIntent == intent then FinishActionIntent("rejected", err or "adapter_refused", true) end
+            RequestStepAt(GetTime())
         end
     elseif immutable.type == "reroll" then
         MarkActionAttempt(immutable.type)
