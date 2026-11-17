@@ -965,8 +965,8 @@ function A.Board()
     -- Souvenir reveal (ledger.RevealMemory): revealSent, this lone souvenir
     -- was already given up (one request per draw, never again); revealable,
     -- a lone souvenir that has not been; revealBound, the three Echoes that
-    -- answered Nexus's own reveal; revealSettling, that choice has not been
-    -- observed for ledger.CHOICE_SETTLE yet (no reveal or Take before).
+    -- answered Nexus's own reveal; revealSettling, that choice is not yet
+    -- actionable (ledger.ChoiceActionable: no reveal or Take before).
     local revealSent, revealable, settling = nil, nil, nil
     if memoryStage and #ch == 1 and #cards == 1 then
         local r = ledger.reveal
@@ -981,13 +981,13 @@ function A.Board()
             local okW, wanted = false, nil
             if type(wants) == "function" then okW, wanted = pcall(wants, cards[1].spellId) end
             if okW and not wanted then
-                if ledger.ChoiceSettled(ch) then revealable = true else settling = true end
+                if ledger.ChoiceActionable(ch) then revealable = true else settling = true end
             end
         end
     end
     local bound = ledger.revealBound
     if bound and not rawequal(bound.ref, ch) then bound = nil end
-    if bound and not ledger.ChoiceSettled(ch) then settling = true end
+    if bound and not ledger.ChoiceActionable(ch) then settling = true end
     return { cards = cards, guaranteedIndex = gi, signature = sig,
              idSignature = idSig,
              memoryStage = memoryStage,
@@ -1533,6 +1533,8 @@ function A.RunBoundaryReset()
     ownedProjectionRevision = ownedProjectionRevision + 1
     pendingOwnPick, pendingOwnBaseline = nil, nil
     ownedGeneration = ownedGeneration + 1
+    -- A revealed board of the previous run is no admission in this one.
+    ledger.revealBound = nil
     ownedConfirmedGeneration = -1
     ownedRequestGeneration = -1
     ownedBaselineRef, ownedBaselineSig = nil, nil
@@ -5294,14 +5296,16 @@ ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
     end
     -- The three Echoes that answered Nexus's own souvenir reveal: the
     -- souvenir was just given up, so no hidden one is shown or dropped there
-    -- (ledger.RevealObserve). A Take of one of them is admitted. The game's
-    -- own auto-accept is held off by the existing Auto gate (AutoAllowed:
-    -- "client auto-accept re-enabled"), so its timer is not armed there.
+    -- (ledger.RevealObserve). A Take of one of them is admitted once that
+    -- choice is actionable (ledger.ChoiceActionable): the reply's own parse
+    -- may have armed the game's auto-accept timer, which the option and the
+    -- Auto gate do not cancel; the shared Select flag also separates the two
+    -- picks.
     local bound = ledger.revealBound
     if visible == false and bound and rawequal(ch, bound.ref) then
         if kind == "gate" then return true end
         if kind == "take" then
-            if not ledger.ChoiceSettled(ch) then return false, ledger.SETTLE_REASON end
+            if not ledger.ChoiceActionable(ch) then return false, ledger.SETTLE_REASON end
             for i = 1, #ch do
                 local c = rawget(ch, i)
                 if type(c) == "table" and rawget(c, "spellId") == spellId then return true end
@@ -5345,23 +5349,36 @@ end
 ledger.REVEAL_CODE = 349
 -- Seconds within which a new choice may be the reply to Nexus's reveal.
 ledger.REVEAL_WINDOW = 10
--- The game's own auto-accept timer (perks_service.lua) is armed at the
--- choice parse, keeps the card it chose and re-checks neither its option nor
--- the Wishlist; it fires on the first frame after 0.18 s. Switching the option
--- off later does not cancel it. So a reveal, and a Take on a revealed board,
--- wait until Nexus has observed that exact choice table for CHOICE_SETTLE: an
--- armed timer has fired by then (setting pendingSelectSpellId, which every
--- send boundary refuses, or being refused). First observation is never
--- earlier than the parse, so the measured age is a lower bound.
+-- The game's own auto-accept timer (perks_service.lua) is armed at a choice
+-- parse with the card it chose, adds each frame's elapsed time, and on the
+-- first frame its sum reaches 0.18 s calls Perks.SelectPerk, re-checking
+-- neither its option nor the Wishlist; switching the option off does not
+-- cancel it. A reveal sets no client flag, so a timer firing later in the
+-- same frame as Nexus's reveal would still pick the souvenir. Therefore a
+-- reveal, and a Take on a revealed board, act on a choice table only when it
+-- is actionable: observed for CHOICE_SETTLE (first observation is never
+-- before the parse) and on a frame strictly later than the first frame on
+-- which that held (GetTime() is constant within a frame). In that first
+-- frame the timer's summed elapsed time already covers the settle, so it has
+-- fired in or before that frame, and its Select is pending (every send
+-- boundary refuses) or it was refused. Assumed, not proven here: a shown
+-- frame's OnUpdate runs on every frame and its elapsed time tracks GetTime().
 ledger.CHOICE_SETTLE = 1.0
 ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
 ledger.choiceSeen = setmetatable({}, { __mode = "k" })
+ledger.choiceSettledAt = setmetatable({}, { __mode = "k" })
 ledger.ChoiceSettled = function(ch)
     local seen = type(ch) == "table" and ledger.choiceSeen[ch] or nil
-    return seen ~= nil and GetTime() - seen >= ledger.CHOICE_SETTLE
+    if seen == nil or GetTime() - seen < ledger.CHOICE_SETTLE then return false end
+    if ledger.choiceSettledAt[ch] == nil then ledger.choiceSettledAt[ch] = GetTime() end
+    return true
 end
--- One reveal per souvenir draw, for the session: the souvenir, the pending
--- draw count and the owned total identify a draw. Never cleared.
+ledger.ChoiceActionable = function(ch)
+    return ledger.ChoiceSettled(ch) and GetTime() > ledger.choiceSettledAt[ch]
+end
+-- One reveal per souvenir draw, for the session: the run (ownedGeneration,
+-- advanced at each run boundary), the souvenir, the pending draw count and
+-- the owned total identify a draw. Never cleared.
 ledger.revealDone = {}
 ledger.GrantedTotal = function()
     local svc = PS()
@@ -5376,8 +5393,8 @@ end
 ledger.RevealKey = function(perks, ch, granted)
     local c = type(ch) == "table" and rawget(ch, 1) or nil
     if type(perks) ~= "table" or type(c) ~= "table" or type(granted) ~= "number" then return nil end
-    return tostring(rawget(c, "spellId")) .. ":" .. tostring(rawget(perks, "pendingRollsCount"))
-        .. ":" .. granted
+    return tostring(ownedGeneration) .. ":" .. tostring(rawget(c, "spellId")) .. ":"
+        .. tostring(rawget(perks, "pendingRollsCount")) .. ":" .. granted
 end
 -- Whether this lone souvenir's draw was already given up (bounded read).
 ledger.RevealDoneFor = function(ch)
@@ -5997,7 +6014,7 @@ function A.RevealMemory(spellId, expect)
     end
     -- A choice re-published with the same cards keeps the board signature,
     -- so a prepared reveal can reach here on a table the game just parsed.
-    if not ledger.ChoiceSettled(ch) then return false, "reveal_not_settled" end
+    if not ledger.ChoiceActionable(ch) then return false, "reveal_not_settled" end
     local send = rawget(PE(), "sendToServer")
     ledger.revealDone[key] = true
     ledger.reveal = { ref = ch, spellId = spellId, rolls = rolls, granted = granted, at = GetTime() }

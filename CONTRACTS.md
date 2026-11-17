@@ -244,7 +244,8 @@ This file has two parts.
   provider, the ordinary gate (specialization, Orb), no session pause or
   passive mode, nothing in flight and no reveal waiting, the lone souvenir
   unchanged, `WantsMoreOfEcho` not true, the owned total readable, and this draw
-  (souvenir, pending draw count, owned total) not already given up. Then the
+  (the run's `ownedGeneration`, souvenir, pending draw count, owned total) not
+  already given up. Then the
   runtime's `verify` decides again on fresh reads (the Wishlist plan probed
   again, board, rolled and locked ownership, level, horizon) and must again
   return this reveal; a changed decision supersedes the intent and a fresh
@@ -272,18 +273,27 @@ This file has two parts.
   `Perks.SelectPerk` (refused only when a pick is pending or the card is not
   on the current choice) and re-checks neither its option nor the Wishlist,
   so switching the option off, as the existing Auto gate and solo-picker
-  lease do, does not cancel an armed timer. Nexus therefore reveals, and takes
-  from a revealed board, only after it has observed that exact choice table
-  for `CHOICE_SETTLE` (1 s; first observation is never before the parse):
-  `Board()` marks a younger one `revealSettling`, the planner waits with
-  `waiting for the game's own pick window to pass` and the runtime decides
-  again at the poll pace; `RevealMemory` (`reveal_not_settled`, superseded
-  and decided again) and the revealed-board `ChoiceAdmission` refuse it at
-  the send boundary. An armed timer has fired by then: its Select is pending
-  (every send boundary refuses) or it was refused. The bound is frame-time
-  based: a single frame spanning the whole settle time is not excluded, and
-  then only the pending-Select checks at the send boundaries separate the two
-  picks.
+  lease do, does not cancel an armed timer. The reveal sets no client flag:
+  a timer firing later in the same frame as Nexus's reveal would still pick
+  the souvenir. Nexus therefore reveals, and takes from a revealed board, only
+  on a choice table that is actionable (`ChoiceActionable`): observed for
+  `CHOICE_SETTLE` (1 s; first observation is never before the parse), and on
+  a frame strictly later than the first frame in which that held
+  (`GetTime()` is constant within a frame). In that first settled frame the
+  timer's summed elapsed time already covers the settle, so it fired in or
+  before that frame; by the next frame its Select is pending (every send
+  boundary refuses) or it was refused. `Board()` marks a choice that is not
+  yet actionable `revealSettling`, the planner waits with `waiting for the
+  game's own pick window to pass` and the runtime decides again at the poll
+  pace; `RevealMemory` (`reveal_not_settled`, superseded and decided again)
+  and the revealed-board `ChoiceAdmission` refuse it at the send boundary.
+  Assumed, not proven offline: a shown frame's `OnUpdate` runs on every frame
+  and its elapsed time tracks `GetTime()`. For the Take the client's shared
+  Select flag also separates the two picks in either order; for the reveal
+  only the frame rule does.
+  A run boundary (`RunBoundaryReset`) advances the run identity in the draw
+  key, so a later run's souvenir draw is not taken as given up, and ends any
+  revealed-board binding.
   Basis and limits: static reading of the captured `perks.lua` (above;
   `RequestMemoryDraw`, `PlayMemoryGiveUp`) and `projectebonhold.lua`
   (`REQUEST_PERK_MEMORY_DRAW = 349`); no reply opcode, request ID or refusal
@@ -295,7 +305,8 @@ This file has two parts.
   carry carried cards or a fourth card, and the native window's state after a
   reveal it did not start. Offline evidence only
   (`tests/prototype/automation_souvenir_reveal.lua`, including a model of the
-  timer from the captured source); no native result. The new reasons are
+  timer from the captured source and a single long frame with Nexus before
+  the timer); no native result. The new reasons are
   English and uncatalogued.
 
   Basis and limits. A static reading of one captured client: `perks.lua`

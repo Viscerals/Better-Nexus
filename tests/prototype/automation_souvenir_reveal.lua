@@ -120,7 +120,10 @@ ctx.H.Notify();ctx.H.Advance(2)
 -- A foreign Select latch holds it for 2 s, so the decision comes after the
 -- board has settled.
 ctx.H.perks.pendingSelectSpellId=A3
-Reply(ctx,{Card(Y),Card(A1),Card(A3)});ctx.H.Advance(2)
+Reply(ctx,{Card(Y),Card(A1),Card(A3)})
+-- Read while held, so the board is settled and actionable when released:
+-- only the binding (tied to its own board) then keeps it unchosen.
+Nexus.GameAdapter.Board();ctx.H.Advance(1.2);Nexus.GameAdapter.Board();ctx.H.Advance(.8)
 ctx.H.perks.pendingSelectSpellId=nil;ctx.H.Advance(5)
 check(ctx.selects==1 and #ctx.reveals==1,'a later unbound board is not chosen from: '..ctx.selects)
 
@@ -346,6 +349,111 @@ NativeArm(ctx,Z)
 Reply(ctx,{Card(A1),Card(X),Card(A2)})
 ctx.H.Advance(3)
 check(ctx.nativeRefused==1 and Takes(ctx,X)==1,'a timer for the given-up souvenir is refused; Nexus takes the needed Echo')
+
+-- 13. One long frame (adversarial order: Nexus's frames run before the
+-- timer's in every frame). After frames summing under 0.18 s, a single frame
+-- of 1.2 s makes the re-published souvenir settled for the first time. A
+-- reveal sent in that frame would be followed in the same frame by the
+-- timer's Select of the souvenir (the reveal sets no client flag).
+-- 13a. Adapter level: a caller acting in that very frame. RevealMemory admits
+-- a choice only on a frame strictly later than the first settled frame.
+do
+ local c=Boot({auto=false})
+ local A=Nexus.GameAdapter
+ local ok={verify=function() return true end,final=function() return true end}
+ c.H.perks.currentChoice={Souvenir(Z)}       -- a fresh parse of the souvenir
+ A.Board()                                   -- its first observation
+ check(A.Board().revealSettling==true,'adapter: the fresh souvenir is settling')
+ local caller=CreateFrame('Frame')           -- runs before the timer frame
+ caller:SetScript('OnUpdate',function(_,elapsed)
+  if elapsed>=1 and not c.called then
+   c.called=true;A.Board();c.first={A.RevealMemory(Z,ok)}
+  elseif c.called and not c.again then
+   c.again=true;A.Board();c.second={A.RevealMemory(Z,ok)}
+  end
+ end)
+ caller:Show()
+ NativeArm(c,Z)
+ c.H.Advance(.05,.05)
+ c.H.Advance(1.2,1.2)
+ check(c.called and c.first[1]==false and c.first[2]=='reveal_not_settled',
+  'adapter: no reveal in the first settled frame: '..tostring(c.first and c.first[2]))
+ check(c.nativeSelects==1 and #c.reveals==0,'adapter: the timer picked the souvenir in that frame; no reveal: '..#c.reveals)
+ c.H.Advance(.05,.05)
+ check(c.again and c.second[1]==false and #c.reveals==0,
+  'adapter: the next frame refuses too (the native pick is pending): '..tostring(c.second and c.second[2]))
+ caller:Hide()
+end
+-- 13b. Runtime level, the same frame shape. Layered: the runtime only
+-- prepares in the first settled frame (0.4 s beat) and supersedes a prepared
+-- intent when it reads an unsettled choice, so this passes on the earlier
+-- candidate too; it pins the end-to-end outcome.
+ctx=Boot({auto=false})
+SlashCmdList.NEXUS('auto')
+for _=1,200 do
+ if Prepared() or #ctx.reveals>0 then break end
+ ctx.H.Advance(.05)
+end
+check(Prepared() and #ctx.reveals==0,'long frame fixture: a reveal is prepared and not yet sent')
+ctx.H.perks.currentChoice={Souvenir(Z)};ctx.H.Notify()
+NativeArm(ctx,Z)
+ctx.H.Advance(.05,.05)
+check(#ctx.reveals==0 and (ctx.nativeSelects or 0)==0,'long frame fixture: nothing has fired yet')
+ctx.H.Advance(1.2,1.2)
+check(ctx.nativeSelects==1,'long frame: the native timer picked the souvenir in that frame')
+check(#ctx.reveals==0,'long frame: no reveal in the frame the choice first settled: '..#ctx.reveals)
+ctx.H.Advance(3)
+check(#ctx.reveals==0 and ctx.selects==0,'long frame: none later either (the native pick is pending)')
+-- The revealed board in one long frame: one pick only. Layered: the intent
+-- beat, the bound-Take settle and the shared Select flag each separate the
+-- two picks here (see the mutation record).
+ctx=Boot({})
+Reply(ctx,{Card(A1),Card(X),Card(A2)})
+NativeArm(ctx,A1)
+ctx.H.Advance(.05,.05)
+ctx.H.Advance(1.2,1.2)
+ctx.H.Advance(3)
+check(ctx.nativeSelects==1 and ctx.selects==0,'long frame on the revealed board: one pick: '
+ ..tostring(ctx.nativeSelects)..' '..ctx.selects)
+
+-- 14. The one-reveal-per-draw key names the run (adapter level). A souvenir
+-- draw with the same card, pending count and owned total in a later run is
+-- revealable again; in the same run it stays given up.
+local function DirectReveal(runBoundary)
+ local c=Boot({auto=false})
+ local A=Nexus.GameAdapter
+ local ok={verify=function() return true end,final=function() return true end}
+ A.Board();c.H.Advance(1.2);A.Board();c.H.Advance(.05)
+ check(A.Board().revealable==true,'direct: the souvenir is revealable')
+ check(A.RevealMemory(Z,ok)==true and #c.reveals==1,'direct: first reveal sent')
+ c.H.Advance(12)   -- no reply: the window passes
+ if runBoundary then A.RunBoundaryReset() end
+ c.H.perks.currentChoice={Souvenir(Z)}
+ A.Board();c.H.Advance(1.2);A.Board();c.H.Advance(.05)
+ return c,A.Board(),A.RevealMemory(Z,ok)
+end
+do
+ local c,board,sent=DirectReveal(false)
+ check(board.revealSent==true and board.revealable==nil and sent==false and #c.reveals==1,
+  'same run: the same draw stays given up and is not revealed again')
+ c,board,sent=DirectReveal(true)
+ check(board.revealSent==nil and board.revealable==true,'after a run boundary the draw is not marked given up')
+ check(sent==true and #c.reveals==2,'and it is revealed in the new run: '..#c.reveals)
+end
+
+-- A revealed board's binding does not survive a run boundary.
+do
+ local c=Boot({})
+ Reply(c,{Card(A1),Card(A2),Card(A3)})
+ check(Nexus.GameAdapter.Board().revealBound==true,'fixture: the reply is bound')
+ -- Hold the Take (a foreign Select latch) so the board stays shown.
+ c.H.perks.pendingSelectSpellId=A3
+ c.H.Advance(.05)
+ check(Nexus.GameAdapter.Board().revealBound==true,'fixture: still bound while held')
+ Nexus.GameAdapter.RunBoundaryReset()
+ check(Nexus.GameAdapter.Board().revealBound==nil,'a run boundary ends the binding')
+ c.H.perks.pendingSelectSpellId=nil
+end
 
 -- 11. Ordinary admission is unchanged: a three-card board that no reveal of
 -- Nexus produced is not chosen from on the updated provider.
