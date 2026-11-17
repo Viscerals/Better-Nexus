@@ -307,10 +307,14 @@ do
 end
 
 -- Reviews D7-S5 and N-5: the Save & assign confirmation names the Saved Build
--- it is bound to. Cases 9 and 11 fail on the pin da28a28d by design (the
--- confirmation showed the Journal's empty-slot placeholder, or the name the
--- chooser was opened with); case 10 holds on both. The confirmation's text is
--- the popup's second argument, as the client shows it.
+-- it is bound to. On the pin da28a28d only case 9 has an observed result: it
+-- fails there by design (the confirmation showed the Journal's empty-slot
+-- placeholder). This file stops at its first failed check, so cases 10 and 11
+-- never ran on that pin; their outcomes there are expected from reading the
+-- source, not executed: case 11 is expected to fail (the confirmation would
+-- show the name the chooser was opened with) and case 10 is expected to hold.
+-- The confirmation's text is the popup's second argument, as the client shows
+-- it.
 local function asked() return H.popup and tostring(H.popup.arg2 or '') or '' end
 local FILLED={{spellId=200767,quality=0,stacks=1,locked=false}}
 local OTHERFILL={{spellId=200767,quality=0,stacks=2,locked=false}}
