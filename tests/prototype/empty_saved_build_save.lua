@@ -306,5 +306,126 @@ do
  check(snapshot().loadoutWishlists[2]==nil,'and the writer still stores no association under the empty slot')
 end
 
+-- Reviews D7-S5 and N-5: the Save & assign confirmation names the Saved Build
+-- it is bound to. Cases 9 and 11 fail on the pin da28a28d by design (the
+-- confirmation showed the Journal's empty-slot placeholder, or the name the
+-- chooser was opened with); case 10 holds on both. The confirmation's text is
+-- the popup's second argument, as the client shows it.
+local function asked() return H.popup and tostring(H.popup.arg2 or '') or '' end
+local FILLED={{spellId=200767,quality=0,stacks=1,locked=false}}
+local OTHERFILL={{spellId=200767,quality=0,stacks=2,locked=false}}
+
+-- 9. D7-S5: the editor is opened over the empty slot (its old name still on
+-- it); a differently named build is then saved into it. The same editor still
+-- saves in one go, and its confirmation names the build now there.
+reopen({name='W15-OLD',echoes={}})
+do
+ editViaPicker(OTHER)
+ button('Save Wishlist'):Click()
+ check(H.popup==nil and #H.actions==0 and said('Saved Build 2 is empty'),'9: while the slot is empty nothing is offered or uploaded')
+ H.perks.serverBuildSlots[2]={name='W15-REAL',verified=false,echoes=H.Clone(FILLED)}
+ button('Save Wishlist'):Click()
+ check(H.popup and H.popup.which=='WISHLISTREALIZER_UPDATE_WISHLIST','9: once the slot has Echoes the same editor offers its confirmation')
+ local text=asked()
+ check(text:find('W15-REAL',1,true)~=nil,'9: the confirmation names the Saved Build now in the slot: '..text)
+ check(not text:find('Empty Saved Build slot',1,true) and not text:find('W15-OLD',1,true),
+  '9: and neither the empty-slot placeholder nor the old name: '..text)
+ H.AcceptPopup();H.Advance(4)
+ check(#H.actions==1 and H.actions[1][1]=='upload' and H.actions[1][2]==104,'9: the same draft saves with one upload')
+ check(snapshot().loadoutWishlists[2] and snapshot().loadoutWishlists[2].key=='201172:2','9: and is assigned to that Saved Build')
+end
+
+-- 10. Control: that formerly empty slot is saved over again, under the same
+-- name, after its confirmation was offered: refused, nothing uploaded, and
+-- the edited Wishlist is assigned nowhere.
+-- The whole Store row is not expected to stay equal here, unlike case 2. This
+-- fixture keeps a first-run plan, and the adapter hands a first-run plan to
+-- the active Saved Build once that build holds Echoes and has no assignment
+-- (GameAdapter.Wishlist, its one automatic hand-off: it writes that plan's
+-- record under the slot and clears the first-run record). In case 2 the slot
+-- holds Echoes from the boot, so that happened before its snapshot. Here the
+-- slot is filled after the editor opened, so it happens during this case,
+-- whether or not anything is saved. It is not the save: the save is refused
+-- and uploads nothing. So the proof is stated exactly: which Store fields
+-- differ, that they are only the two that hand-off owns, that the slot does
+-- not hold the edited plan, and that everything else in the row is equal.
+reopen({name='W15-OLD',echoes={}})
+do
+ editViaPicker(OTHER)
+ H.perks.serverBuildSlots[2]={name='W15-REAL',verified=false,echoes=H.Clone(FILLED)}
+ local before=snapshot()
+ check(type(before.firstRunWishlist)=='table' and before.firstRunWishlist.key=='201172:1',
+  '10: precondition: the first-run plan exists')
+ -- Equal values, with an absent one equal only to another absent one.
+ local function same(x,y)
+  if type(x)~='table' or type(y)~='table' then return x==y end
+  return T.Equal(x,y)
+ end
+ button('Save Wishlist'):Click()
+ check(H.popup and H.popup.which=='WISHLISTREALIZER_UPDATE_WISHLIST','10: precondition: the filled slot offers the confirmation')
+ H.perks.serverBuildSlots[2]={name='W15-REAL',verified=false,echoes=H.Clone(OTHERFILL)}
+ H.AcceptPopup()
+ check(#H.actions==0,'10: a build saved over during the confirmation is not uploaded to')
+ check(said('Not saved') and said('Nothing was uploaded'),'10: the refusal says nothing was uploaded or assigned')
+ H.Advance(4)
+ check(#H.actions==0,'10: and nothing is uploaded afterwards either')
+ local after=snapshot()
+ -- Every Store field that differs, by name (a Saved Build assignment by slot).
+ local changed={}
+ local function note(path) changed[#changed+1]=path end
+ local seen={}
+ for key in pairs(before) do seen[key]=true end
+ for key in pairs(after) do seen[key]=true end
+ for key in pairs(seen) do
+  if key=='loadoutWishlists' then
+   local a,b=type(before[key])=='table' and before[key] or {},type(after[key])=='table' and after[key] or {}
+   local slots={}
+   for slot in pairs(a) do slots[slot]=true end
+   for slot in pairs(b) do slots[slot]=true end
+   for slot in pairs(slots) do
+    if not same(a[slot],b[slot]) then note('loadoutWishlists['..tostring(slot)..']') end
+   end
+  elseif not same(before[key],after[key]) then note(tostring(key)) end
+ end
+ table.sort(changed)
+ local listed=table.concat(changed,', ')
+ rawPrint('OBSERVED','10 changed Store fields: '..(listed~='' and listed or 'none'))
+ for _,path in ipairs(changed) do
+  check(path=='loadoutWishlists[2]' or path=='firstRunWishlist',
+   '10: no Store field other than the first-run hand-off changed: '..listed)
+ end
+ local link=type(after.loadoutWishlists)=='table' and after.loadoutWishlists[2] or nil
+ check(link==nil or (type(link)=='table' and link.key==before.firstRunWishlist.key),
+  '10: slot 2 holds nothing, or the first-run plan as it was (its automatic hand-off): '
+   ..tostring(type(link)=='table' and link.key or link))
+ check(not (type(link)=='table' and (link.key=='201172:2' or link.name==OTHER)),
+  '10: the edited Wishlist is not assigned to the Saved Build that replaced the confirmed one')
+ check(link~=nil or same(before.firstRunWishlist,after.firstRunWishlist),
+  '10: without a hand-off the first-run plan is untouched')
+ check(link==nil or after.firstRunWishlist==nil or same(before.firstRunWishlist,after.firstRunWishlist),
+  '10: the first-run plan is either handed to slot 2 or untouched, never replaced')
+end
+
+-- 11. N-5: the chooser is opened for a populated Saved Build and left open;
+-- that slot is saved over; the chooser's edit control then opens the editor.
+-- Its confirmation names the build now there, which is the one it assigns.
+reopen({name='W15-A',echoes=H.Clone(FILLED)})
+do
+ journal()
+ NexusActiveWishlistSelector:Click()
+ local gear=pickerGear(OTHER)
+ H.perks.serverBuildSlots[2]={name='W15-B',verified=false,echoes=H.Clone(OTHERFILL)}
+ gear:Click()
+ selected(201172).plus:Click()
+ button('Save Wishlist'):Click()
+ check(H.popup and H.popup.which=='WISHLISTREALIZER_UPDATE_WISHLIST','11: precondition: the save offers its confirmation')
+ local text=asked()
+ check(text:find('W15-B',1,true)~=nil and not text:find('W15-A',1,true),
+  '11: the confirmation names the Saved Build now in the slot, not the one the chooser was opened for: '..text)
+ H.AcceptPopup();H.Advance(4)
+ check(#H.actions==1 and H.actions[1][1]=='upload' and H.actions[1][2]==104,'11: one upload')
+ check(snapshot().loadoutWishlists[2] and snapshot().loadoutWishlists[2].key=='201172:2','11: assigned to that Saved Build')
+end
+
 print=rawPrint
 print('PASS empty_saved_build_save: '..checks..' checks (picker gear, race after confirmation, populated and locked-only builds, first-run route, writers, new Wishlist, retry, controller)')

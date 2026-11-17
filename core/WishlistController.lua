@@ -1655,20 +1655,41 @@ function Controller.New(options)
         state.createTargetContext = nil
         state.awaitingWishlist = nil
         state.pendingSeeded = true
+        -- The Saved Build this editor is opened for: its identity and its
+        -- name are taken from ONE read of its slot, made here. The caller's
+        -- name can be older than that read (a Journal chooser left open over
+        -- a slot that was saved over or filled since), and a name from one
+        -- Saved Build must never stand beside the identity of another. So a
+        -- name the caller supplied is replaced by the name of the row the
+        -- identity is taken from. Without a readable Saved Build there (empty
+        -- or unreadable) no identity is captured and the caller's name is
+        -- kept until one is (M._BindReadableSavedBuild). A caller that
+        -- supplied no name keeps none: the destination is then named from
+        -- its slot whenever it is described (DestinationDescriptor).
+        local boundName, boundIdentity = tostring(wishlist.loadoutName or ""), nil
+        if tonumber(loadoutSlot) and Adapter and type(Adapter.SavedBuildIdentity) == "function" then
+            local slots = Adapter.Slots and Adapter.Slots()
+            local row = type(slots) == "table" and type(slots.bySlot) == "table"
+                and slots.bySlot[tonumber(loadoutSlot)] or nil
+            boundIdentity = type(row) == "table"
+                and Adapter.SavedBuildIdentity(tonumber(loadoutSlot), row) or nil
+            if boundIdentity and boundName ~= "" then
+                boundName = tostring(row.name or "")
+                if boundName == "" then boundName = "Saved Build " .. tostring(tonumber(loadoutSlot)) end
+            end
+        end
         state.editingContext = {
             slot = tonumber(wishlist.slot),
             name = tostring(wishlist.name or "Wishlist"),
             key = wishlist.key,
             assignmentId=wishlist.assignmentId,
             loadoutSlot = tonumber(loadoutSlot),
-            loadoutName = tostring(wishlist.loadoutName or ""),
+            loadoutName = boundName,
             -- Which Saved Build that slot holds now (its name and contents,
             -- GameAdapter.SavedBuildIdentity; nil when it is empty or
             -- unreadable): a save that would newly assign this Wishlist to it
             -- must find the same one there (M._SavedBuildChanged).
-            savedBuildIdentity = tonumber(loadoutSlot) and Adapter
-                and type(Adapter.SavedBuildIdentity) == "function"
-                and Adapter.SavedBuildIdentity(loadoutSlot) or nil,
+            savedBuildIdentity = boundIdentity,
             -- What that Saved Build and the first-run plan hold now: a save
             -- does not undo a choice made after this (see TryApply).
             boundAssignment = tonumber(loadoutSlot) and Adapter
@@ -2416,6 +2437,34 @@ function Controller.New(options)
         context.loadoutName, context.savedBuildIdentity = name, identity
     end
 
+    -- D7-S5: a context that captured no Saved Build (its slot was empty,
+    -- missing or unreadable then) is bound to the first one read there: its
+    -- identity AND its name, from one row, before a confirmation is worded or
+    -- a save is recorded. Until then the context held a name that belongs to
+    -- no Saved Build now in that slot (the emptied build's name, "Saved Build
+    -- N" or the Journal's placeholder). The slot is kept; a context that
+    -- already holds an identity is never rebound here (a replacement of a
+    -- captured Saved Build stays a refusal, M._SavedBuildChanged); and a
+    -- context opened without a name keeps none (it is named from its slot).
+    -- Nothing happens while the slot is still empty or unreadable, or for an
+    -- adapter that cannot tell.
+    function M._BindReadableSavedBuild()
+        local context = state.editingContext or state.createTargetContext
+        local slot = type(context) == "table" and tonumber(context.loadoutSlot) or nil
+        if not slot or context.savedBuildIdentity ~= nil then return end
+        if not (Adapter and type(Adapter.SavedBuildIdentity) == "function") then return end
+        local slots = Adapter.Slots and Adapter.Slots()
+        local row = type(slots) == "table" and type(slots.bySlot) == "table" and slots.bySlot[slot] or nil
+        local identity = type(row) == "table" and Adapter.SavedBuildIdentity(slot, row) or nil
+        if not identity then return end
+        context.savedBuildIdentity = identity
+        if tostring(context.loadoutName or "") ~= "" then
+            local name = tostring(row.name or "")
+            if name == "" then name = "Saved Build " .. tostring(slot) end
+            context.loadoutName = name
+        end
+    end
+
     -- The server Wishlist slot this save would overwrite, when it no longer
     -- shows what this editor opened or last uploaded: another Wishlist reused
     -- it, it was removed or emptied, or it could not be identified when the
@@ -3033,6 +3082,11 @@ function Controller.New(options)
     -- the retry that follows records one. Returns TryApply's own values.
     local function ApplyAndRecord(slot, name, echoes, guard)
         local trace = {}
+        -- D7-S5: the direct payload path shows no confirmation, so a
+        -- destination captured without a Saved Build is bound here instead,
+        -- before it is described for the result (a confirmed save was bound
+        -- when its confirmation was made; this is then a no-op).
+        M._BindReadableSavedBuild()
         local destination = DestinationDescriptor()
         local result = NewSaveResult(nil, nil, name, destination)
         -- The name the player typed, when a Create offered a copy name for it.
@@ -3316,6 +3370,10 @@ function Controller.New(options)
             NotSavedEmptyDestination(emptySlot)
             return nil, "destination_empty"
         end
+        -- D7-S5: a destination captured without a Saved Build takes the name
+        -- and identity of the one its slot holds now, before the destination
+        -- is described for this confirmation (M._BindReadableSavedBuild).
+        M._BindReadableSavedBuild()
         -- D7 (N-4): no confirmation is offered under the name of a Saved
         -- Build that is no longer the one this editor captured in that slot.
         -- The context is bound to the one there now (see the refusal), so
