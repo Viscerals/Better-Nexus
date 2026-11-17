@@ -211,9 +211,13 @@ local LABELS = {
     SETTLE_HELD_WANTED="Take the held wanted Echo instead of searching (EchoWeaver, experimental)",
 }
 
+local SOUVENIR_PLAYER = "souvenir: take it or draw three random Echoes; the choice is left to the player"
+EchoWeaver.SOUVENIR_PLAYER = SOUVENIR_PLAYER
+
 -- Everything both policies read, built once per decision. Returns nil and a
 -- wait result when a required input is missing or incomplete: that refusal is
--- the same for both policies.
+-- the same for both policies. A souvenir stage also returns nil and its whole
+-- decision (a Take of the needed souvenir, or a wait for the player).
 local function Prepare(state)
     local annotations, deltas = {}, {}
     local function Wait(reason) return nil, {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
@@ -222,7 +226,15 @@ local function Prepare(state)
     if not plan or plan.advisorOnly then return Wait("assign a Wishlist") end
     if not owned or (owned.synced ~= true and (tonumber(state.level) or 0)>1) then return Wait("unsynced") end
     if state.pending or state.pendingAction then return Wait("waiting for action confirmation") end
-    if not board or type(board.cards)~="table" or #board.cards~=3 then return Wait("waiting for three-card board") end
+    -- A souvenir stage (adapter memoryStage) shows fewer than three cards by
+    -- design; it is decided below, never waited on as a short board. Bound:
+    -- the captured client lays out at most three carried cards plus the
+    -- souvenir (CONTRACTS.md, souvenir stage).
+    local memoryStage = type(board)=="table" and board.memoryStage==true
+        and type(board.cards)=="table" and #board.cards>=1 and #board.cards<=4
+    if not board or type(board.cards)~="table" or (#board.cards~=3 and not memoryStage) then
+        return Wait("waiting for three-card board")
+    end
     if not Integer(state.horizon,0) then return Wait("waiting for pending-pick count") end
     local locked = state.locked
     -- Permanent locked ownership must be known before subtracting copies.
@@ -285,6 +297,28 @@ local function Prepare(state)
             or wanted and "wanted" or requested[id] and "target satisfied"
             or otherTier and "wrong quality" or "filler"
         deltas[i]=wanted and (100+(tonumber(c.quality) or 0)*2) or -15
+    end
+    if memoryStage then
+        -- Souvenir stage (updated provider). Taking any other card, or asking
+        -- for the three hidden random cards, gives the souvenir up for the
+        -- climb; Nexus never makes that sacrifice. The one automatic action
+        -- is a Take of exactly one visible souvenir that a Wishlist target
+        -- still needs; everything else is the player's choice.
+        local index
+        for i,c in ipairs(board.cards) do
+            if c.isGuaranteed==true then
+                if index then return Wait(SOUVENIR_PLAYER) end
+                index=i
+            end
+        end
+        local card=index and board.cards[index]
+        local id=card and tonumber(card.spellId)
+        if not id or card.selectable==false or (outstanding[id] or 0)<=0 then
+            return Wait(SOUVENIR_PLAYER)
+        end
+        return nil,{type="take",spellId=card.spellId,index=index,
+            reason=LABELS.SELECT_OUTSTANDING_WISHLIST,reasonCode="SOUVENIR_NEEDED",
+            annotations=annotations,deltas=deltas,outstanding=total,planner="echoweaver"}
     end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true

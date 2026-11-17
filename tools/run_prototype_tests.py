@@ -464,6 +464,8 @@ NAMES += ['l10n_ui_guide']
 NAMES += ['l10n_hold_presentation']
 # Global v4 amendment: nine long paragraphs (block / lines=true template) are complete above 256 bytes at their real receivers (extra list, Language menu/Settings/chat, Details, size, Orb mini, Auto confirmation line, context popup, import chat); invalid/missing fall back to exact English; English bytes; passive (synthetic; native NOT_RUN).
 NAMES += ['l10n_long_paragraphs']
+# Souvenir stage (updated provider, flag 3 memory card shown alone or beside carried cards): a needed visible souvenir is taken; any other souvenir board is left to the player with a stated reason, never given up (no memory draw); older provider unchanged (synthetic; native NOT_RUN).
+NAMES += ['automation_souvenir_stage']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

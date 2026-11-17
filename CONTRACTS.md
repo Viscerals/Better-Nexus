@@ -205,6 +205,41 @@ This file has two parts.
   recognized only by the absence of both markers and of the field, so a client
   that renames them would be read as the older provider. Offline evidence only;
   no native result. The three refusal texts are English and uncatalogued.
+- **Souvenir stage (updated provider).** On the updated provider (either
+  marker above) the ordinary path admits exactly one automatic choice action:
+  a `GameAdapter.Take` of the memory card (flag 3, `isGuaranteed`) that the
+  published choice shows. Every other Take, and every Reroll, Banish and
+  Freeze, is refused there (`ChoiceAdmission`, `MutationAdmission`); the gate
+  stays closed when no memory card is visible. `GameAdapter.Board()` sets
+  `memoryStage = true` when that provider shows a flagged card, `nil`
+  otherwise. Its absence proves nothing: a dropped fourth card can hide a
+  souvenir, so no visible flag never opens the ordinary actions. On a
+  `memoryStage` board (1 to 4 cards) `EchoWeaver.DecideNexus` does not wait
+  for three cards. After its usual gates (Orb hold, plan, ownership sync,
+  pending action, horizon, lock sync) it returns a `take` of the souvenir only
+  when exactly one card is flagged, that card is selectable and its exact
+  spell ID is still outstanding (rolled plus counted locked copies
+  subtracted). Otherwise it waits with the reason `souvenir: take it or draw
+  three random Echoes; the choice is left to the player`: an unrequested,
+  owned, lock-covered or other-spell souvenir, two flagged cards, or a needed
+  carried card beside the souvenir (taking it would give the souvenir up).
+  Nexus never sends `REQUEST_PERK_MEMORY_DRAW` and never gives a souvenir up;
+  the game's own choice window is not touched. The Take keeps every existing
+  send guard (pending native Select, in-flight action, session pause, the
+  final memory-only admission before `SelectPerk`). The older provider is
+  unchanged (`memoryStage` is nil; a one-card board still waits).
+
+  Basis and limits. A static reading of one captured client: `perks.lua`
+  (SHA-256 `43e28daef02a1f95d344eaca880bde2ce1794a0e821113837c5bfc5d5b98b8a2`,
+  the "Memory stage" comment and `LayoutMemoryStage`) and `perks_service.lua`
+  (the SHA-256 above: flag 3 parsing, the dropped fourth card). The wow.export
+  version of this extraction is not recorded, and whether this `perks.lua`
+  predates the launcher's archive change is not established. Not established:
+  the server's wire order of the souvenir, whether it can be the dropped
+  fourth card, and the native timing of the client's own automatic pick.
+  Offline evidence only (`tests/prototype/automation_souvenir_stage.lua`); no
+  native result. The wait reason is English and uncatalogued (language work
+  deferred).
 - **Auto Save, unavailable client.** `GameAdapter.Save` returns
   `false, "save_unavailable"` when the `PerkService` table is present and has no
   `SaveServerBuildSlot` member. Nothing is called, sent or timed for it. The

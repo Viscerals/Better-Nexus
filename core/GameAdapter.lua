@@ -949,8 +949,17 @@ function A.Board()
     end
     -- R5: whether the WHOLE raw choice is a strict three-card observation
     -- (the leveling pick refuses a filtered subset); other readers ignore it.
+    -- memoryStage: the updated provider's souvenir stage, a VISIBLE memory
+    -- card (flag 3), so the planner does not wait for three cards there. By a
+    -- static reading of one captured client (perks.lua SHA-256 43e28dae...,
+    -- "Memory stage"; perks_service.lua SHA-256 3303632e..., see CONTRACTS.md;
+    -- offline only, no native result) the souvenir is shown alone or beside
+    -- carried cards and the three random cards stay hidden until it is given
+    -- up. Its absence proves nothing: a dropped fourth card can hide one.
     return { cards = cards, guaranteedIndex = gi, signature = sig,
              idSignature = idSig,
+             memoryStage = gi ~= nil and ledger.MemoryCardContract
+                 and ledger.MemoryCardContract() == true or nil,
              strictObservation = ledger.LevelingStrictCards
                  and ledger.LevelingStrictCards(ch) ~= nil or false }
 end
