@@ -5,7 +5,10 @@ Nexus.StartupStatus=function()return {coreReady=false}end
 local count=#H.actions;local f=Nexus.OrbPanel.Show()
 local function closed(reason)
  H.AssertOrbLocked(f,reason)
- assert(not f.advanced:IsShown() and f:GetHeight()==445,reason..': incomplete Advanced controls exposed')
+ -- The closed-size panel: measured rows (OrbPanel flowBands), at most the
+ -- former 445; stale exact-445 pin updated by the finish pass (item D).
+ assert(not f.advanced:IsShown() and f:GetHeight()<=445 and f._bandsBottom~=nil and f._bandsBottom<=f:GetHeight(),
+  reason..': incomplete Advanced controls exposed')
  assert(not f.start:IsEnabled() and not f.stop:IsEnabled() and not f.assigned:IsEnabled(),reason..': main mutations exposed')
  assert(not f.clearExclusions:IsEnabled(),reason..': exclusion reset exposed')
  for _,row in ipairs(f.sourceRows)do assert(not row.exclude:IsEnabled(),reason..': source exclusion exposed')end

@@ -8,7 +8,7 @@ consistent input (must pass) and on inconsistent inputs (each must fail), then d
 It compares exit codes. It does not exercise --require-newer, because a CI checkout has no tags.
 """
 from __future__ import annotations
-import importlib.util, pathlib, re, shutil, subprocess, sys, tempfile, zipfile
+import importlib.util, pathlib, re, shutil, subprocess, sys, tempfile, warnings, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PY = sys.executable
@@ -196,6 +196,158 @@ def source_toc_checks() -> list:
     return problems
 
 
+TEXTURE = 'ui/Textures/NexusMinimap.tga'
+TEXTURE_MEMBER = 'Nexus/' + TEXTURE
+# A TGA 2.0 footer: valid in other TGA files, outside the exact admitted form.
+TGA_FOOTER = bytes(8) + b'TRUEVISION-XFILE.\0'
+
+
+def texture_variants(tga: bytes) -> list:
+    """Malformed copies of the committed texture, each wrong in one way."""
+    return [
+        ('a truncated minimap texture', tga[:-1]),
+        ('a minimap texture with a TGA footer', tga + TGA_FOOTER),
+        ('an RLE minimap texture header', tga[:2] + bytes([10]) + tga[3:]),
+        ('a bottom-left minimap texture', tga[:17] + bytes([0x08]) + tga[18:]),
+        ('a 24-bit minimap texture header', tga[:16] + bytes([24]) + tga[17:]),
+        ('a minimap texture with an image ID length', bytes([1]) + tga[1:]),
+        ('a minimap texture with a colour map', tga[:1] + bytes([1]) + tga[2:]),
+        ('a 32x64 minimap texture header', tga[:12] + bytes([32]) + tga[13:]),
+        ('a fully transparent minimap texture', tga[:18] + bytes(len(tga) - 18)),
+        ('a minimap texture with colour in a transparent pixel', tga[:18] + bytes([255, 0, 0, 0]) + tga[22:]),
+    ]
+
+
+def source_texture_checks() -> list:
+    """The packager admits exactly one image, the minimap texture, at its exact
+    path and in its exact form. It requires it, and refuses a malformed copy,
+    a case or path variant, any other image, a copy in the support component
+    and a Nexus.toc that would load it as code. Each refusal must name the
+    offending file, so a case cannot pass by failing for another reason."""
+    bp = load_build_package()
+    files = bp.committed_files()
+    tga = files.get(TEXTURE)
+    if tga is None or bp.texture_problems(tga, TEXTURE):
+        return [f'the committed tree has no valid {TEXTURE}: '
+                + '; '.join(bp.texture_problems(tga, TEXTURE))]
+    print(f'ok    the committed {TEXTURE} has the exact admitted form')
+    without = {n: d for n, d in files.items() if n != TEXTURE}
+    png = b'\x89PNG\r\n\x1a\n' + bytes(32)
+    cases = [('no minimap texture', without, TEXTURE)]
+    cases += [(what, dict(files, **{TEXTURE: bad}), TEXTURE) for what, bad in texture_variants(tga)]
+    for what, name, data, keep in (
+            ('the texture in a lower-case folder only', 'ui/textures/NexusMinimap.tga', tga, False),
+            ('the texture under a lower-case name only', 'ui/Textures/nexusminimap.tga', tga, False),
+            ('an upper-case suffix copy of the texture', 'ui/Textures/NexusMinimap.TGA', tga, True),
+            ('the texture misplaced in ui/', 'ui/NexusMinimap.tga', tga, True),
+            ('the texture under another runtime root', 'data/Textures/NexusMinimap.tga', tga, True),
+            ('an unrelated TGA beside the texture', 'ui/Textures/Other.tga', tga, True),
+            ('an unrelated PNG beside the texture', 'ui/Textures/NexusMinimap.png', png, True),
+            ('a copy of the texture in the support component', 'companion/NexusSupport/ui/Textures/NexusMinimap.tga', tga, True),
+            ('a texture at the support component root', 'companion/NexusSupport/NexusMinimap.tga', tga, True),
+            ('a traversal path to the texture', 'ui/Textures/../Textures/NexusMinimap.tga', tga, True)):
+        cases.append((what, dict(files if keep else without, **{name: data}), name))
+    toc = files['Nexus.toc']
+    cases.append(('a Nexus.toc that loads the texture as code',
+                  dict(files, **{'Nexus.toc': toc + b'\nui\\Textures\\NexusMinimap.tga\n'}),
+                  'Nexus.toc must not load a texture as code: ' + TEXTURE))
+    problems = []
+    for what, changed, needle in cases:
+        found = bp.check(changed)
+        if not any(needle in p for p in found):
+            problems.append(f'the package check does not refuse {what} (problems: {found})')
+        else:
+            print(f'ok    the package check refuses {what}')
+    return problems
+
+
+def texture_artifact_checks(public: pathlib.Path, label: str, expect) -> list:
+    """The release check inspects archives it did not build, so it applies the
+    same texture rule to the artefact: the intended member passes; a missing,
+    duplicated or malformed one, any other image and any path, case or
+    support-component variant fails, and the failure names that member."""
+    problems = []
+    with zipfile.ZipFile(public) as z:
+        names = z.namelist()
+        tga = z.read(TEXTURE_MEMBER) if names.count(TEXTURE_MEMBER) == 1 else None
+    if tga is None:
+        return [f'the public package does not hold {TEXTURE_MEMBER} exactly once']
+    if load_build_package().committed_files().get(TEXTURE) != tga:
+        problems.append(f'the packaged {TEXTURE_MEMBER} differs from HEAD')
+    dist = public.parent
+
+    def crafted(dirname, change=None, drop=False, extras=()):
+        target = dist / dirname / public.name
+        target.parent.mkdir()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')   # a deliberate duplicate member warns
+            with zipfile.ZipFile(public) as z, zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as out:
+                for item in z.infolist():
+                    data = z.read(item.filename)
+                    if item.filename == TEXTURE_MEMBER:
+                        if drop:
+                            continue
+                        if change:
+                            data = change(data)
+                    out.writestr(item, data)
+                for name, data in extras:
+                    out.writestr(name, data)
+        return target
+
+    def release_check(target):
+        done = subprocess.run([PY, 'tools/release_check.py', '--label', label, '--zip', str(target)],
+                              cwd=ROOT, capture_output=True, text=True)
+        return done.returncode, done.stdout + done.stderr
+
+    # Control: rewriting the archive with the texture unchanged still passes,
+    # so each refusal below comes from its one change.
+    code, report = release_check(crafted('texture-same'))
+    expect('a rewritten package with the intended minimap texture', code, True)
+    if code != 0:
+        problems.append('the intended texture is refused: ' + report.strip().replace('\n', ' | '))
+
+    png = b'\x89PNG\r\n\x1a\n' + bytes(32)
+    cases = [('texture-missing', 'a package without the minimap texture', {'drop': True}, TEXTURE_MEMBER),
+             ('texture-duplicate', 'a package with the minimap texture twice',
+              {'extras': ((TEXTURE_MEMBER, tga),)}, 'exactly once')]
+    for index, (what, bad) in enumerate(texture_variants(tga)):
+        cases.append((f'texture-bad-{index}', 'a package with ' + what, {'change': lambda d, bad=bad: bad},
+                      TEXTURE_MEMBER))
+    for dirname, what, name, data, drop in (
+            ('texture-lower-folder', 'the texture only in a lower-case folder', 'Nexus/ui/textures/NexusMinimap.tga', tga, True),
+            ('texture-lower-name', 'the texture only under a lower-case name', 'Nexus/ui/Textures/nexusminimap.tga', tga, True),
+            ('texture-upper-suffix', 'an upper-case suffix copy of the texture', 'Nexus/ui/Textures/NexusMinimap.TGA', tga, False),
+            ('texture-misplaced', 'the texture misplaced in Nexus/ui/', 'Nexus/ui/NexusMinimap.tga', tga, False),
+            ('texture-root', 'the texture at the Nexus/ root', 'Nexus/NexusMinimap.tga', tga, False),
+            ('texture-other-tga', 'an unrelated TGA', 'Nexus/ui/Textures/Other.tga', tga, False),
+            ('texture-png', 'an unrelated PNG', 'Nexus/ui/Textures/NexusMinimap.png', png, False),
+            ('texture-support', 'a copy of the texture in the support component', 'NexusSupport/ui/Textures/NexusMinimap.tga', tga, False),
+            ('texture-support-root', 'a texture at the support component root', 'NexusSupport/NexusMinimap.tga', tga, False)):
+        cases.append((dirname, 'a package with ' + what, {'drop': drop, 'extras': ((name, data),)}, name))
+    cases.append(('texture-traversal', 'a package with a traversal path to the texture',
+                  {'extras': (('Nexus/ui/Textures/../Textures/NexusMinimap.tga', tga),)}, 'escapes its folder'))
+    cases.append(('texture-toc', 'a package whose Nexus.toc loads the texture as code', {},
+                  'must not load a texture as code: ' + TEXTURE))
+    for dirname, what, options, needle in cases:
+        if dirname == 'texture-toc':
+            target = dist / dirname / public.name
+            target.parent.mkdir()
+            with zipfile.ZipFile(public) as z, zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as out:
+                for item in z.infolist():
+                    data = z.read(item.filename)
+                    if item.filename == 'Nexus/Nexus.toc':
+                        data = data + b'\nui\\Textures\\NexusMinimap.tga\n'
+                    out.writestr(item, data)
+        else:
+            target = crafted(dirname, **options)
+        code, report = release_check(target)
+        expect(what, code, False)
+        if code != 0 and needle not in report:
+            problems.append(f'{what} is refused, but the report does not name {needle}: '
+                            + report.strip().replace('\n', ' | '))
+    return problems
+
+
 def main() -> int:
     dist = ROOT / 'dist'
     if dist.exists():
@@ -305,6 +457,8 @@ def main() -> int:
                 failures.append('internal package is not marked internal')
         failures.extend(toc_version_checks(public, internal, label, other, version, commit, expect, rewrite))
         failures.extend(source_toc_checks())
+        failures.extend(source_texture_checks())
+        failures.extend(texture_artifact_checks(public, label, expect))
         failures.extend(decoder_bytes_checks())
     finally:
         shutil.rmtree(dist, ignore_errors=True)

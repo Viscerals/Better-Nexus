@@ -429,4 +429,98 @@ C.scenario('D12 a restoring assignment is not shown as nothing captured',functio
  C.guard(Link(1)=='W-Free','D12: Saved Build 1 keeps its assignment',Link(1))
 end)
 
+-- D13 (I-01): a shortened name never splits an escaped pipe pair. Display text
+-- doubles each literal pipe ("||", Identity.DisplaySafeText); a cut that keeps
+-- only the first pipe of a pair leaves a lone pipe before the "...". Every cut
+-- position of ASCII, 2-, 3- and 4-byte UTF-8, raw and already doubled pipes,
+-- through SafeName, SavedBuildLabel and the Status lines that cut a recorded
+-- Orb operation (60 characters) and an Auto note (200). Pipe-free names cut
+-- exactly as before; whole names and the DestinationFields cells stay whole and
+-- escaped once; the raw names a caller holds are unchanged. Pure projections
+-- of the booted UserText (the last scenario's boot); a display-string check,
+-- not a FontString or saved-data one.
+local function Paired(text)
+ if type(text)~='string' then return false end
+ for run in text:gmatch('|+') do if #run%2~=0 then return false end end
+ return true
+end
+local function Letters(text)
+ local out={}
+ for ch in text:gmatch('[\1-\127\194-\244][\128-\191]*') do out[#out+1]=ch end
+ return out
+end
+-- Independent expectation for a pipe-free name: the first n letters and "...".
+local function CutPlain(text,n)
+ local letters=Letters(text)
+ if #letters<=n then return text end
+ return table.concat(letters,'',1,n)..'...'
+end
+C.scenario('D13 I-01: a cut name never splits an escaped pipe pair, at every cut position',function()
+ local T,I=Nexus.UserText,Nexus.Identity
+ C.setup(T and type(T.SafeName)=='function' and type(T.SavedBuildLabel)=='function' and type(T.StatusLines)=='function'
+  and I and type(I.DisplaySafeText)=='function' and type(I.ValidUtf8)=='function','D13: fixture: the booted UserText and Identity')
+ if not (T and I) then return end
+ local plainBad,plainCases={},0
+ for _,plain in ipairs({'Alice','\195\137clair','\231\129\171\229\134\176',THREE..'x'..FOUR}) do
+  if T.SafeName(plain)~=plain then plainBad[#plainBad+1]='whole '..plain end
+  for n=1,#Letters(plain)+1 do
+   plainCases=plainCases+1
+   local got=T.SafeName(plain,n)
+   if got~=CutPlain(plain,n) or not I.ValidUtf8(got) then plainBad[#plainBad+1]=plain..' at '..n..': '..tostring(got) end
+  end
+ end
+ C.guard(plainCases==20 and #plainBad==0,'D13: a pipe-free name is cut at the same letter as before and is whole without a limit',table.concat(plainBad,'; '))
+ local raws={'ab|cd','\195\169clair|x','\231\129\171|\229\134\176',FOUR..'|'..FOUR,'ab||cd','|Alice','Alice|','A|B|C','|'}
+ local held={}
+ for i,raw in ipairs(raws) do held[i]=raw end
+ local split,shape,cases={},{},0
+ for _,raw in ipairs(raws) do
+  local full=I.DisplaySafeText(raw,1024,false)
+  if T.SafeName(raw)~=full then shape[#shape+1]='whole '..raw..': '..tostring(T.SafeName(raw)) end
+  local letters=Letters(full or '')
+  for n=1,#letters+1 do
+   cases=cases+1
+   local shown=T.SafeName(raw,n)
+   local label=T.SavedBuildLabel(2,raw,n)
+   if not (Paired(shown) and Paired(label) and I.ValidUtf8(shown) and I.ValidUtf8(label)) then
+    split[#split+1]=raw..' at '..n..': '..tostring(shown)
+   end
+   -- The kept text is the start of the whole display text: n letters, or n-1
+   -- when the n-th letter would be the first pipe of a pair; never more.
+   local kept=n>=#letters and shown or (type(shown)=='string' and shown:match('^(.*)%.%.%.$'))
+   local count=kept and #Letters(kept) or -1
+   local prefix=kept~=nil and full:sub(1,#kept)==kept
+   local fits=n>=#letters and kept==full
+    or count==n or (count==n-1 and letters[n]=='|' and letters[n+1]=='|')
+   if not (prefix and fits and label=="Saved Build '"..tostring(shown).."' (slot 2)") then
+    shape[#shape+1]=raw..' at '..n..': '..tostring(shown)
+   end
+  end
+ end
+ print('OBSERVED','D13 pipe cut cases='..cases..' split='..#split..' shape='..#shape)
+ C.expect(cases==63 and #split==0,'D13: no SafeName or SavedBuildLabel cut leaves a lone pipe or a broken letter',table.concat(split,'; '))
+ C.guard(#shape==0,'D13: each cut keeps the start of the whole display text, at most maxChars letters, and the label wording',
+  table.concat(shape,'; '))
+ -- The Status lines' own cuts: a recorded Orb operation and an Auto note
+ -- whose escaped pair straddles the 60- and 200-letter limits.
+ local operation=string.rep('a',59)..'|x'
+ local note=string.rep('b',199)..'|y'
+ local lines=T.StatusLines({auto=true,autoNote=note,syncMode='off',orb={pending=true,operation=operation}})
+ local status=table.concat(lines or {},'\n')
+ print('OBSERVED','D13 status lines='..status)
+ C.expect(Paired(status) and Has(status,"'"..string.rep('a',59).."...'") and Has(status,'not acting now: '..string.rep('b',199)..'...'),
+  'D13: the Status lines cut the Orb operation and the Auto note before the escaped pair, not inside it',status)
+ -- Whole names stay whole and escaped once; the caller's raw names are unchanged.
+ local descriptor={kind='savedBuild',slot=2,name='ab|cd',character='\195\137clair|x',
+  wishlist='Player|List',wishlistState='assigned',active=true}
+ local fields=T.DestinationFields(descriptor)
+ C.guard(fields[1].value=='\195\137clair||x' and fields[2].value=='ab||cd (slot 2)' and fields[3].value=='Player||List (assigned)',
+  'D13: the DestinationFields cells keep each whole name escaped once and its assignment meaning',
+  tostring(fields[1].value)..' / '..tostring(fields[2].value)..' / '..tostring(fields[3].value))
+ local same=descriptor.name=='ab|cd' and descriptor.character=='\195\137clair|x' and descriptor.wishlist=='Player|List'
+  and descriptor.wishlistState=='assigned' and operation==string.rep('a',59)..'|x' and note==string.rep('b',199)..'|y'
+ for i,raw in ipairs(raws) do if held[i]~=raw then same=false end end
+ C.guard(same,'D13: the raw Saved Build, player, Wishlist and recorded names a caller passed are unchanged')
+end)
+
 C.finish('(the panel names its destination and tells first-run, empty, unassigned and unavailable apart; captured editors are not redirected)')

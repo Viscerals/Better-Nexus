@@ -724,4 +724,112 @@ C.scenario('C2 locked roles through Assign now: cancel, changed Saved Build, con
  Close()
 end)
 
+-- D7 (N-4), the check after the upload: the Saved Build a Save & assign was
+-- bound to is replaced DURING the host's upload call, and the slot still holds
+-- Echoes. The upload was accepted and is never repeated; no assignment writer
+-- runs for the build now in that slot; the result is a partial one with no
+-- guessed reason, and Assign now leads to the Journal's own explicit choice
+-- for the Saved Build as it is now. The race is modelled at the host boundary
+-- only, as A05 does (the upload call); no product state is set directly.
+-- PU1/PU2 hold on dcad5fb3 and fail when that one branch is removed (REPORT:
+-- controlled removal M3); on the N-4 preimage fccc12f5 the writer assigned the
+-- replacement. PU3 is the control: the same Saved Build re-sent during the
+-- call is assigned as usual. The slot emptied during the call stays A05.
+local function ReplacedDuringUpload(tag,name,replacement)
+ Boot({active=2,slots=Worlds()})
+ SlashCmdList.NEXUS('editor')
+ C.setup(Ctrl().CreateTargetContext() and Ctrl().CreateTargetContext().loadoutSlot==2,tag..': fixture: draft captured Saved Build 2')
+ local before=State()
+ local upload=H.service.UploadServerBuildSlot
+ local calls=0
+ -- Host race: the server reports another Saved Build 2 while the upload is
+ -- in flight, so it is what the slot holds when the upload returns.
+ H.service.UploadServerBuildSlot=function(...)
+  local ok=upload(...)
+  calls=calls+1
+  local rows=H.Clone(H.perks.serverBuildSlots);rows[2]=H.Clone(replacement)
+  H.perks.serverBuildSlots=rows
+  return ok
+ end
+ NexusWishlistNameInput:SetText(name);ClickCatalog(201175)
+ button('Create Wishlist'):Click();C.setup(H.popup~=nil,tag..': fixture: Create asks for confirmation')
+ local said=Heard(function() H.AcceptPopup() end)
+ H.service.UploadServerBuildSlot=upload
+ C.setup(calls==1,tag..': fixture: the host upload call ran once and replaced Saved Build 2 inside it',calls)
+ return before,said
+end
+-- The upload was accepted once; nothing was assigned; a partial result with a
+-- neutral reason; then Assign now, the Journal and one explicit choice.
+local function PartialThenAssignNow(tag,name,replacement)
+ local before,said=ReplacedDuringUpload(tag,name,replacement)
+ local n,last=Uploads()
+ print('OBSERVED',tag..' said='..said..' uploads='..n..' writes='..Writes()..' facts='..Facts())
+ C.guard(n==before.uploads+1,tag..': exactly one upload',n)
+ C.expect(writes.SetLoadoutWishlistIdentity==0 and Writes()==before.writes,
+  tag..': no assignment writer runs for the Saved Build now in slot 2',Writes())
+ C.expect(Stored(2)==nil and Facts()==before.facts,tag..': nothing is assigned anywhere (no slot-1 or first-run fallback)',Facts())
+ C.expect(said:find('assignment failed',1,true)~=nil and not said:find('Wishlist saved',1,true)
+  and not said:find("assigned '",1,true) and not said:find('assignment failed (',1,true),
+  tag..': the notice says the assignment failed, with no success line and no reason code',said)
+ local row=ResultRow()
+ print('OBSERVED',tag..' row='..tostring(row))
+ C.expect(row~=nil and row:find('^Uploaded')~=nil and row:find('Not assigned',1,true)~=nil and V.Names(row,name)
+  and row:find('the assignment was refused',1,true)~=nil,
+  tag..': a persistent partial result: uploaded, not assigned, a neutral reason',row)
+ C.expect(row~=nil and not row:find('Assigned to',1,true) and not row:find('^Saved') and not row:find('_',1,true)
+  and not row:find('empty or not loaded',1,true),tag..': no full-success wording, no reason code and no empty-slot wording',row)
+ C.guard(not Nexus.WishlistEditor.IsApplyPending(),tag..': nothing stays queued')
+ local btn=AssignNowButton()
+ C.expect(row~=nil and btn~=nil,tag..': Assign now is offered as the safe next step')
+ if not btn then return end
+ -- The server lists the upload; the replaced Saved Build 2 is unchanged.
+ MirrorAt(108,last)
+ C.guard(ResultRow()==row,tag..': the partial result persists across refreshes',ResultRow())
+ local journal=JournalHost()
+ btn=AssignNowButton()
+ C.setup(btn~=nil,tag..': fixture: Assign now is still offered')
+ if not btn then return end
+ local mid=State()
+ btn:Click()
+ C.guard(not NexusEditorFrame:IsShown() and journal:IsShown(),tag..': Assign now opens the Journal for Saved Build 2')
+ C.guard(Uploads()==mid.uploads and Writes()==mid.writes and Facts()==mid.facts,tag..': opening it uploads and assigns nothing')
+ if not (_G.NexusActiveWishlistSelector and NexusActiveWishlistSelector:IsVisible()) then return end
+ if not (NexusWishlistOnlyPicker and NexusWishlistOnlyPicker:IsShown()) then NexusActiveWishlistSelector:Click() end
+ local pick=PickerRow(name)
+ C.setup(pick~=nil,tag..': fixture: the picker lists the uploaded '..name)
+ if not pick then return end
+ local receipt=V.Plain(Heard(function() pick.nameButton:Click() end))
+ print('OBSERVED',tag..' receipt='..receipt)
+ C.guard(Stored(2) and Stored(2).name==name and writes.SetLoadoutWishlist==1,
+  tag..': only the explicit choice in the Journal assigns '..name..' to Saved Build 2',Facts())
+ C.guard(receipt:find("'"..name.."' is now the Wishlist for Saved Build '"..replacement.name.."'",1,true)~=nil,
+  tag..': its receipt names the Saved Build as it is now',receipt)
+ C.guard(Uploads()==mid.uploads,tag..': the accepted upload is never repeated')
+ Quiet(tag,before)
+end
+
+C.scenario('PU1 N-4 the bound Saved Build is saved over under its own name during the upload: one upload, no writer, a partial result',function()
+ PartialThenAssignNow('PU1','PUsame',{name='Fire PvE',verified=true,
+  echoes={{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}})
+end)
+
+C.scenario('PU2 N-4 the bound Saved Build is replaced by another one during the upload: one upload, no writer, a partial result',function()
+ PartialThenAssignNow('PU2','PUother',{name='Frost PvP',verified=true,
+  echoes={{spellId=201172,quality=0,stacks=1},{spellId=201174,quality=0,stacks=1}}})
+end)
+
+C.scenario('PU3 N-4 control: the same Saved Build re-sent during the upload is assigned as usual',function()
+ local before,said=ReplacedDuringUpload('PU3','PUkept',{name='Fire PvE',verified=true,echoes=E2})
+ local n=Uploads()
+ print('OBSERVED','PU3 said='..said..' facts='..Facts())
+ C.guard(n==before.uploads+1 and writes.SetLoadoutWishlistIdentity==1 and Writes()==before.writes+1
+  and Stored(2) and Stored(2).name=='PUkept','PU3: one upload and the unchanged Saved Build 2 is assigned',Facts())
+ C.guard(said:find('Wishlist saved',1,true)~=nil and not said:find('assignment failed',1,true),
+  'PU3: the save reports success',said)
+ local row=ResultRow()
+ C.guard(row~=nil and row:find('^Saved')~=nil and not row:find('Not assigned',1,true),'PU3: a full result, not a partial one',row)
+ Quiet('PU3',before)
+ Close()
+end)
+
 C.finish('(persistent truthful save result; Assign now reuses the Journal picker and never uploads)')

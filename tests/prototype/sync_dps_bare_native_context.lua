@@ -378,8 +378,15 @@ if arg and arg[1] then
  run(true,completedFaults[selected]);return
 end
 local cfg={}
+-- The matched pair must run the same simulated schedule. run() reseeds
+-- math.random; the default harness profiler (debugprofilestop) reads real CPU
+-- time and paces startup slices, so the cold first boot could finish one 0.05 s
+-- update later and its request ID (from GetTime) differ. The supported
+-- one-slice-per-update pacing holds that input matched for both runs only.
+local restorePacing=dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local off=run(false,cfg)
 local on=run(true,cfg)
+restorePacing()
 for _,field in ipairs({'traffic','source','receiver','sourceStats','receiverStats'}) do
  if off[field]~=on[field] then
   local at=1

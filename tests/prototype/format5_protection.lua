@@ -127,6 +127,54 @@ do
  check(Nexus.Store.StateWriteStatus().carriedFrom==F.NAME,'early boot: the copy becomes possible after admission')
 end
 
+-- A-STATE-02: a supported format 2 in the middle of the bounded character
+-- walk. ReadStateV1 and UpdateStateV1 still return true but hand over the
+-- session row: no chars[owner] is created, no key enters the map the walk is
+-- resuming over, nothing durable changes, and the answer agrees with
+-- StateWriteStatus. After READY the write is durable as before and the
+-- earlier session-row write was never merged. One coordinator slice per
+-- update (the documented no-clock pacing) keeps the walk open between turns.
+do
+ local db=F.Database({version=2,mutate=function(d)
+  d.chars={}
+  for i=1,64 do d.chars[string.format('peer%02d@ebonhold',i)]=F.Row()end
+ end})
+ local mid
+ F.Boot(db,nil,function(H)
+  local W=Writer() -- this boot's Store owner
+  local real=debugprofilestop
+  NEXUS_TEST_NO_PROFILE_CLOCK=true;debugprofilestop=nil
+  local turns=0
+  while Nexus.StartupStatus().step~='store-characters' and turns<2000 do H.Advance(.05,.05);turns=turns+1 end
+  -- A few more single-slice walk pumps (the settings graph is charged first),
+  -- far fewer than 64 rows need: the walk is in progress over db.chars.
+  for _=1,6 do if Nexus.StartupStatus().step=='store-characters' then H.Advance(.05,.05) end end
+  mid={step=Nexus.StartupStatus().step,status=Nexus.Store.StateWriteStatus()}
+  local keys=0;for _ in pairs(NexusDB.chars)do keys=keys+1 end
+  local before=F.Serialize(NexusDB.chars)
+  local okRead,row=W.ReadStateV1()
+  mid.readRow=okRead==true and type(row)=='table' and not W.IsDurableStateRowV1(row)
+  mid.afterRead=NexusDB.chars[F.OWNER]==nil
+  mid.update=W.UpdateStateV1(function(r)r.preAdmissionProbe=true end)
+  local after=0;for _ in pairs(NexusDB.chars)do after=after+1 end
+  mid.same=F.Serialize(NexusDB.chars)==before and after==keys and NexusDB.chars[F.OWNER]==nil
+  mid.statusAfter=Nexus.Store.StateWriteStatus()
+  NEXUS_TEST_NO_PROFILE_CLOCK=nil;debugprofilestop=real
+ end)
+ check(mid.step=='store-characters','pre-admission fixture: the calls ran inside the character walk: '..tostring(mid.step))
+ check(mid.status.mode=='loading' and mid.status.reason=='lifecycle'
+  and mid.statusAfter.mode=='loading' and mid.statusAfter.reason=='lifecycle',
+  'pre-admission: StateWriteStatus reports loading before and after: '..tostring(mid.status.mode))
+ check(mid.readRow and mid.afterRead,'pre-admission ReadStateV1: true with the session row; no chars[owner] created')
+ check(mid.update==true and mid.same,'pre-admission UpdateStateV1: true, yet no row created, no key inserted and no durable change')
+ check(Nexus.StartupStatus().coreReady and NexusDB.chars[F.OWNER]==nil,'after READY: the pre-admission write was never persisted')
+ check(Nexus.Store.StateWriteStatus().mode=='durable','after READY: durable')
+ assert(Writer().UpdateStateV1(function(r)r.postReadyProbe=true end))
+ local owned=NexusDB.chars[F.OWNER]
+ check(type(owned)=='table' and owned.postReadyProbe==true and owned.preAdmissionProbe==nil
+  and Writer().IsDurableStateRowV1(owned),'after READY: the write creates the durable row; the session-row write is not merged')
+end
+
 -- A plain key with a realm suffix is never taken as this character's row.
 do
  local db=F.Database({mutate=function(d)d.chars['PrototypeTester-OtherRealm']=d.chars[F.NAME];d.chars[F.NAME]=nil end})

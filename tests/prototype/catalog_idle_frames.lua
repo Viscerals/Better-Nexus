@@ -131,6 +131,15 @@ print('IDLE_PREPARATION entered='..preparation.entered..' exited='..preparation.
  ..' directAdmissions='..preparation.admissionCalls..' committedInside='..tostring(preparation.committedInside)
  ..' offsetInside='..tostring(preparation.offsetInside)..' ticket='..tostring(ticket2.state)
  ..' windowReady='..tostring(Nexus.StartupStatus().syncGateCatalogReady))
+-- Failure path only (M5 queue, after the first full-run red at this check):
+-- the ticket's own scalar fields are printed before the unchanged assertion,
+-- so a red states how ticket2 settled. Nothing runs in the window or on a
+-- committed ticket; a table detail is named by its type, not walked.
+if ticket2.state~='committed' then
+ print('DIAGNOSTIC catalog_idle_frames ticket2 state='..tostring(ticket2.state)..' reason='..tostring(ticket2.reason)
+  ..' pumps='..tostring(ticket2.pumps)..' committed='..tostring(ticket2.committed)
+  ..' detail='..(type(ticket2.detail)=='table' and 'table' or tostring(ticket2.detail)))
+end
 check(preparation.entered==1 and preparation.exited==1,
  'fixture: the armed preparation wrapper entered and exited exactly once')
 check(owned and select(2,debug.getupvalue(runUpdate,storeIndex))==rawStore and preparation.ticket==nil

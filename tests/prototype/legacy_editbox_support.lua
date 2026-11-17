@@ -1,11 +1,14 @@
 -- Bounded legacy EditBox surface. The native 3.3.5 observation confirms that
 -- Button Enable/Disable/IsEnabled are absent, while focus/input APIs exist.
 -- GetName and GetObjectType are UIObject methods every native widget inherits.
+-- ClearAllPoints, like SetPoint and SetSize, is an inherited Region geometry
+-- method; the measured Orb flow re-anchors the maximum with it (OrbPanel
+-- flowBands place). It delegates to the harness's actual anchor clearing.
 -- Unlike the general harness, this fixture never invents unknown methods.
 return function(H)
  local create=CreateFrame
  local supported={GetName=true,GetObjectType=true,GetParent=true,SetScript=true,GetScript=true,HookScript=true,
-  SetSize=true,GetWidth=true,GetHeight=true,SetPoint=true,SetFrameLevel=true,
+  SetSize=true,GetWidth=true,GetHeight=true,ClearAllPoints=true,SetPoint=true,SetFrameLevel=true,
   SetAutoFocus=true,SetNumeric=true,SetMaxLetters=true,SetText=true,GetText=true,
   Show=true,Hide=true,IsShown=true,IsVisible=true,HasFocus=true,SetTextColor=true}
  function CreateFrame(kind,...)

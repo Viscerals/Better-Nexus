@@ -1,3 +1,5 @@
+-- EXPECT semantic replacement from accepted base bc5f4959, section 8: deliberate STOPPED
+-- stays STOPPED across loading rather than silently becoming a resumable pause.
 -- 035 part 1: a manual Echo pick is never lost from the record.
 --
 -- The 034 probes showed two ways a real pick on the recorded offer leaves no trace:
@@ -184,7 +186,7 @@ section('7 failed persistence',function()
  check(type(R.Saved().picks)=='table' and #R.Saved().picks==1,'the logout flush saves it')
 end)
 
--- 8. Loading screen and reentry (a live paused receipt).
+-- 8. Loading screen and reentry preserve a deliberately stopped live receipt.
 section('8 loading screen',function()
  local H,M,A,O=S.Fresh()
  local src,slots=S.SpendOfferNoChoice(H,M,A,O)
@@ -192,7 +194,7 @@ section('8 loading screen',function()
  local spent,limit,logSerial=before.spent,before.limit,before.logSerial
  local calls=R.Calls(H)
  R.Leaving(H)
- check(Nexus.OrbRuntime.Status().state=='PAUSED','the loading screen paused the run')
+ check(Nexus.OrbRuntime.Status().state=='STOPPED','the loading screen preserves deliberate Stop')
  R.Pick(H,410003)
  local e1=Entry(1)
  check(e1 and e1.ph=='l' and e1.id==410003,'a callback during the transition is kept, phase l')
@@ -206,7 +208,7 @@ section('8 loading screen',function()
  restore();S.Pass(H,M,A,1)
  local p=R.Saved()
  check(p.spent==spent and p.limit==limit and p.logSerial==logSerial and p.spendConfirmed==true,'the receipt, spent and limit are unchanged')
- check(Nexus.OrbRuntime.Status().state=='PAUSED' and select(2,Nexus.OrbRuntime.Resume())~=nil,'still paused; Resume refused')
+ check(Nexus.OrbRuntime.Status().state=='STOPPED' and select(2,Nexus.OrbRuntime.Resume())~=nil,'still stopped; Resume refused')
  check(calls.spend==0 and calls.nexusSelects()==0,'nothing was replayed')
  -- immediately after the reload the evidence is still there
  M=R.Reload(H)

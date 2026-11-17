@@ -5,6 +5,47 @@ local M = {}
 Nexus.Changelog = M
 
 local VERSION = "1.20.0-beta.1"
+-- Full UI localization (issues #143-#148): every visible word of this note
+-- comes from Nexus.Localization, looked up when the note is built. The
+-- colour codes, bullets and line breaks stay here, around the text, so a
+-- translation never holds markup. The English bytes are unchanged.
+local function T(key) return (Nexus.Localization.Text(key)) end
+-- The release note in display order: a heading, its bullet lines, and the
+-- closing statements. Code owns "|cffffd200", "- " and every line break.
+local NOTE_SECTIONS = {
+    {heading = "release_note.heading.assigned_wishlist_help", lines = {
+        "release_note.body.orb_same_wishlist",
+        "release_note.body.start_once_approves",
+        "release_note.body.targets_protected",
+        "release_note.body.help_seven_topics",
+    }},
+    {heading = "release_note.heading.optional_orb_refinement", lines = {
+        "release_note.body.target_change_pauses",
+        "release_note.body.close_keeps_run",
+        "release_note.body.unproven_completion_paused",
+    }},
+}
+local NOTE_CLOSING = {
+    "release_note.body.experimental_offline",
+    "release_note.body.real_resource_decision",
+}
+-- The note's complete text in the active language (display only).
+local function NoteText()
+    local out = {}
+    for index, section in ipairs(NOTE_SECTIONS) do
+        if index > 1 then out[#out + 1] = "\n\n" end
+        out[#out + 1] = "|cffffd200" .. T(section.heading) .. "|r"
+        for _, key in ipairs(section.lines) do
+            out[#out + 1] = "\n- " .. T(key)
+        end
+    end
+    out[#out + 1] = "\n"
+    for _, key in ipairs(NOTE_CLOSING) do
+        out[#out + 1] = "\n" .. T(key)
+    end
+    return table.concat(out)
+end
+M.NoteText = NoteText
 local RELEASE_KEY = "prototype-P1.6-assigned-orbs"
 local frame
 local shownThisSession = false
@@ -74,26 +115,14 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus prototype P1.6")
+    title:SetText(T("release_note.title.prototype_release"))
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Assigned Wishlist and visible Help|r
-- Orb mode uses the same assigned Wishlist as the main panel.
-- Enter a maximum and Start once to approve safe surplus copies and recycling.
-- Required rolled copies and future permanent targets remain protected.
-- Help retains seven topics with corrected text and navigation layering.
-
-|cffffd200Optional Orb refinement|r
-- Target changes pause the run. Resume retains its used and pending budget.
-- Close keeps an approved run active; main-panel Pause/Stop remain available.
-- Same-ID, same-quality results remain paused when completion cannot be proved.
-
-Experimental: native gameplay is not verified by offline tests.
-Real-resource Orb testing requires a separate user decision.]])
+    body:SetText(NoteText())
 
     -- The window is as tall as the measured note (a wider face wraps more
     -- lines), so the last line stays above the button.
@@ -105,7 +134,7 @@ Real-resource Orb testing requires a separate user decision.]])
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)
     close:SetPoint("BOTTOM", 0, 14)
-    close:SetText("Got it")
+    close:SetText(T("release_note.button.acknowledge"))
     close:SetScript("OnClick", function()
         MarkReleaseSeen()
         frame:Hide()

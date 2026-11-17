@@ -21,6 +21,28 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.Nameplate = M
 
+-- Full-UI localization (issues #143-#148): the code-owned words of the lines
+-- below resolve through Nexus.Localization when the tooltip is built (never
+-- cached at load); while the seam is absent or a key answers "unavailable"
+-- the exact English is shown. Player names, build titles, versions and
+-- numbers are data and are inserted unchanged.
+local function Say(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+local function SayF(key, args, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local text, source = localization.Format(key, args)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
 ------------------------------------------------------------------------
 -- Helpers
 ------------------------------------------------------------------------
@@ -32,17 +54,24 @@ local function FmtDps(dps)
     return tostring(math.floor(dps))
 end
 
+-- The rank as an ordinal. English chooses among four suffixes; the choice
+-- stays here (four keys, no plural or ordinal grammar in the seam).
 local function OrdinalSuffix(n)
     local m10, m100 = n % 10, n % 100
-    if m10 == 1 and m100 ~= 11 then return tostring(n) .. "st"
-    elseif m10 == 2 and m100 ~= 12 then return tostring(n) .. "nd"
-    elseif m10 == 3 and m100 ~= 13 then return tostring(n) .. "rd"
-    else return tostring(n) .. "th" end
+    local rank = tostring(n)
+    if m10 == 1 and m100 ~= 11 then return SayF("unit_tooltip.value.rank_st", {rank = rank}, rank .. "st")
+    elseif m10 == 2 and m100 ~= 12 then return SayF("unit_tooltip.value.rank_nd", {rank = rank}, rank .. "nd")
+    elseif m10 == 3 and m100 ~= 13 then return SayF("unit_tooltip.value.rank_rd", {rank = rank}, rank .. "rd")
+    else return SayF("unit_tooltip.value.rank_th", {rank = rank}, rank .. "th") end
 end
 
 -- Nexus's own badge line begins with this text. It is also the duplicate
--- marker: a name or guild line that merely contains "Nexus" is not it.
-local BADGE = "|cff7fd5ffNexus user|r"
+-- marker: a name or guild line that merely contains "Nexus" is not it. It is
+-- built once per augmentation in the shown language and the same value is
+-- both written and compared, so a translated badge keeps the check.
+local function Badge()
+    return "|cff7fd5ff" .. Say("unit_tooltip.label.nexus_user", "Nexus user") .. "|r"
+end
 
 local function IsCommunityAuthor(name)
     if not name or name == "" then return false end
@@ -83,6 +112,7 @@ local function AugmentUnitTooltip(tooltip)
     -- Avoid duplicate augmentation if another tooltip event fires for the same
     -- unit: only the tooltip's current lines count, and only the badge marks
     -- them, so a cleared and reused tooltip keeps nothing from its last unit.
+    local BADGE = Badge()
     for i = 1, (tooltip.NumLines and tooltip:NumLines() or 0) do
         local fs = _G[(tooltip:GetName() or "GameTooltip") .. "TextLeft" .. i]
         local text = fs and tostring(fs:GetText() or "") or ""
@@ -100,7 +130,8 @@ local function AugmentUnitTooltip(tooltip)
     if info then
         local rankStr  = OrdinalSuffix(info.rank)
         local dpsStr   = FmtDps(info.dps) or "?"
-        local catStr   = info.category == "lk" and "LK" or "Dummy"
+        local catStr   = info.category == "lk" and Say("unit_tooltip.value.category_lk", "LK")
+            or Say("unit_tooltip.value.category_dummy", "Dummy")
         local rawTitle = info.title and tostring(info.title) or nil
         local truncate = Nexus and Nexus.LayoutMetrics
             and Nexus.LayoutMetrics.Truncate
@@ -113,14 +144,19 @@ local function AugmentUnitTooltip(tooltip)
         local safeTitle = rawTitle and displayText
             and displayText(rawTitle, 120, false) or nil
         local buildStr = safeTitle and ("|cff888888" .. safeTitle .. "|r  ") or ""
-        tooltip:AddLine(
-            string.format("%s|cffffd200%s|r on leaderboard  |cff4dff80%s|r  %s",
-                buildStr, rankStr, dpsStr, catStr),
+        -- The build title prefix and the colours stay code-owned around the
+        -- translated sentence; rank, DPS and category arrive as slot values.
+        local rank, dps = "|cffffd200" .. rankStr .. "|r", "|cff4dff80" .. dpsStr .. "|r"
+        tooltip:AddLine(buildStr .. SayF("unit_tooltip.label.leaderboard_rank",
+                {rank = rank, dps = dps, category = catStr},
+                string.format("%s on leaderboard  %s  %s", rank, dps, catStr)),
             1, 1, 1, true)
     elseif isAuthor then
-        tooltip:AddLine("|cff888888Community build author|r", 1, 1, 1)
+        tooltip:AddLine("|cff888888" .. Say("unit_tooltip.label.build_author", "Community build author") .. "|r",
+            1, 1, 1)
     elseif peerInfo then
-        tooltip:AddLine("|cff888888Nexus user seen on the build-sharing network|r", 1, 1, 1)
+        tooltip:AddLine("|cff888888" .. Say("unit_tooltip.label.network_peer",
+            "Nexus user seen on the build-sharing network") .. "|r", 1, 1, 1)
     end
 
     -- Required: AddLine alone doesn't resize the tooltip on 3.3.5

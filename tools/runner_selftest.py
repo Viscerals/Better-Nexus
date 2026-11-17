@@ -1,21 +1,44 @@
 #!/usr/bin/env python3
-"""Fail-capable self-test of the per-test process timeouts in tools/run_prototype_tests.py
-and of the timing lines that tools/ci_check.py prints from the runner's report.
+"""Fail-capable self-test of the per-test process timeouts in tools/run_prototype_tests.py,
+of the timing lines that tools/ci_check.py prints from the runner's report, and of the
+registered Python tests that tools/ci_check.py checks and runs.
 
     python tools/runner_selftest.py
 
 It imports the runner and calls its main() with subprocess.run, shutil.which and the clock
 replaced by controlled stand-ins. No Lua runtime is started and nothing waits for a timeout:
 a timeout is a raised subprocess.TimeoutExpired, and elapsed time is a fake clock that each
-stand-in process advances. It calls tools/ci_check.py's main() with the runner replaced by a
-stand-in that writes a controlled report. Each case prints one "ok" line; any wrong result
-prints WRONG and the exit status is 1.
+stand-in process advances. It calls tools/ci_check.py's main() with every process replaced
+by a stand-in: the runner writes a controlled report (or none) and exits with a chosen code,
+and a registered Python test exits with a chosen code, times out or fails to start. No Python
+test file is run. The only real processes are tiny byte-emitter children of this interpreter
+(-c, at most 45 s each), which write known UTF-8 bytes to stdout and stderr and exit with a
+chosen code: one stands in for a Lua test process and one for the Lua runner process, and the
+captured output must decode to the expected text. Text capture that names no encoding is
+decoded as cp1252 at this test's process boundary, also under python -X utf8. Each case
+prints one "ok" line; any wrong result prints WRONG and the exit status is 1.
 """
 from __future__ import annotations
 import contextlib, importlib.util, io, json, pathlib, subprocess, sys, tempfile, types
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LONG = {'catalog_root_capacity': 120, 'sync_admission_traffic_acceptance': 120}
+# The registered Python tests, and the scope wording of tools/ci_check.py's Python lines.
+PY = 'tools/tests/test_l10n_inventory.py'
+CATALOG_PY = 'tools/tests/test_l10n_catalog.py'
+PARITY_PY = 'tools/tests/test_l10n_parity.py'
+REGISTRY_PY = 'tools/tests/test_l10n_registry.py'
+GATE_PY = 'tools/tests/test_l10n_full_ui_gate.py'
+# The intended registry, written out here and never read from the runner: the expected counts
+# and lines below derive from this list.
+PYTHON_REGISTRY = [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY,
+                   'tools/tests/test_l10n_registry_provenance.py',
+                   'tools/tests/test_l10n_registry_consumers.py',
+                   'tools/tests/test_l10n_registry_consumer_flow.py',
+                   'tools/tests/test_l10n_registry_consumer_cli.py',
+                   GATE_PY]
+REGISTERED = len(PYTHON_REGISTRY)
+PY_SCOPE = '(separate processes; not counted with the listed Lua tests)'
 
 
 def load_runner():
@@ -38,6 +61,7 @@ class FakeProcesses:
         self.elapsed = elapsed or {}
         self.now = 1000.0
         self.calls = []   # (test name, timeout keyword passed to subprocess.run)
+        self.commands = []   # every command passed to subprocess.run
 
     def monotonic(self) -> float:
         return self.now
@@ -45,6 +69,7 @@ class FakeProcesses:
     def run(self, command, **kwargs):
         name = pathlib.PurePosixPath(command[-1]).stem
         self.calls.append((name, kwargs.get('timeout')))
+        self.commands.append(list(command))
         self.now += self.elapsed.get(name, 0.5)
         outcome = self.outcomes.get(name, 0)
         if outcome == 'timeout':
@@ -99,29 +124,107 @@ def controlled_report(names, overrides: dict) -> dict:
     return {'schema': 'nexus-prototype-tests/1', 'runtime': 'LuaJIT', 'results': results}
 
 
-def run_ci_check(report: dict, *args: str):
-    """Call tools/ci_check.py main() with its runner replaced by one that writes `report`.
-    Return (exit status, stdout lines); an exception is returned as the exit status."""
+def load_ci_check():
+    """A fresh copy of tools/ci_check.py, so no stand-in leaks into the next case."""
     spec = importlib.util.spec_from_file_location('ci_check', ROOT / 'tools' / 'ci_check.py')
     ci = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ci)
+    return ci
 
-    def write_report(command, **kwargs):
-        pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
-        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
-    ci.subprocess = types.SimpleNamespace(run=write_report)
+
+def python_test_name(argument, root) -> str:
+    """The repository-relative POSIX path of a Python test process's script argument."""
+    try:
+        return pathlib.Path(argument).relative_to(root).as_posix()
+    except ValueError:
+        return str(argument)
+
+
+def ci_check_call(report: dict, *args: str, python=None, prepare=None, runner_exit=None):
+    """Call tools/ci_check.py main() with every process replaced by a stand-in.
+
+    The runner process writes `report`. Any other process is a registered Python test: python
+    maps its path to an exit code, 'timeout' (TimeoutExpired with partial bytes output, after
+    45.25 s) or 'launch' (FileNotFoundError); the default is exit 0 after 0.5 s. The clock is
+    fake and starts at 2000.0. prepare(ci) may change the module before main() runs. A report
+    of None makes the runner process write no report. The runner process prints 'runner out'
+    and 'runner err' and exits runner_exit; by default 0 when it writes a report and 1 when not.
+    Returns code (an exception is returned as the exit status), out (stdout lines), calls
+    ((command, keywords) of every process started, in order) and report (the --output file
+    afterwards, or None)."""
+    ci = load_ci_check()
+    outcomes = python or {}
+    calls = []
+    clock = [2000.0]
+    if runner_exit is None:
+        runner_exit = 1 if report is None else 0
+
+    def fake_run(command, **kwargs):
+        calls.append((list(command), kwargs))
+        if any(str(part).endswith('run_prototype_tests.py') for part in command):
+            if report is not None:
+                pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
+            return subprocess.CompletedProcess(command, runner_exit, stdout='runner out', stderr='runner err')
+        name = python_test_name(command[-1], ci.ROOT)
+        outcome = outcomes.get(name, 0)
+        if outcome == 'timeout':
+            clock[0] += 45.25
+            raise subprocess.TimeoutExpired(command, kwargs.get('timeout'), output=b'py partial out',
+                                            stderr=b'py partial err')
+        clock[0] += 0.5
+        if outcome == 'launch':
+            raise FileNotFoundError(2, 'stand-in launch failure')
+        return subprocess.CompletedProcess(command, outcome, stdout=f'{name} out', stderr=f'{name} err')
+    ci.subprocess = types.SimpleNamespace(run=fake_run, TimeoutExpired=subprocess.TimeoutExpired)
+    ci.time = types.SimpleNamespace(monotonic=lambda: clock[0])
     out = io.StringIO()
+    written = None
     with tempfile.TemporaryDirectory() as tmp:
+        output = pathlib.Path(tmp) / 'report.json'
         saved_argv = sys.argv
-        sys.argv = ['ci_check.py', '--output', str(pathlib.Path(tmp) / 'report.json'), *args]
+        sys.argv = ['ci_check.py', '--output', str(output), *args]
         try:
+            if prepare:
+                prepare(ci)
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
                 code = ci.main()
         except Exception as exc:
             code = f'raised {exc!r}'
         finally:
             sys.argv = saved_argv
-    return code, out.getvalue().splitlines()
+        if output.is_file():
+            try:
+                written = json.loads(output.read_text(encoding='utf-8'))
+            except ValueError:
+                written = None
+    return types.SimpleNamespace(code=code, out=out.getvalue().splitlines(), calls=calls, report=written)
+
+
+def run_ci_check(report: dict, *args: str):
+    """Call tools/ci_check.py main() with its runner replaced by one that writes `report` and every
+    registered Python test exiting 0. Return (exit status, stdout lines); an exception is returned
+    as the exit status."""
+    result = ci_check_call(report, *args)
+    return result.code, result.out
+
+
+def python_row(report) -> dict:
+    """The first Python test row that tools/ci_check.py added to its report, or {}."""
+    results = ((report or {}).get('python_tests') or {}).get('results') or [{}]
+    return results[0] if isinstance(results[0], dict) else {}
+
+
+def with_runner(python_tests=None, root=None):
+    """A prepare(ci) for ci_check_call: a fresh runner, optionally with other PYTHON_TESTS, and
+    optionally another repository root for the Python inventory."""
+    def prepare(ci):
+        runner = load_runner()
+        if python_tests is not None:
+            runner.PYTHON_TESTS = list(python_tests)
+        ci.runner_module = lambda: runner
+        if root is not None:
+            ci.ROOT = root
+    return prepare
 
 
 def main() -> int:
@@ -237,6 +340,7 @@ def main() -> int:
         'startup_budget': {'seconds': 40.75, 'timeout_seconds': None}, 'boot': {'seconds': 30.5},
         'orbs': {'seconds': 20.25}, 'transport': {'seconds': 3.0}}))
     unchanged = [f'inventory: {len(names)} listed tests',
+                 f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
                  'runtime: LuaJIT',
                  f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}',
                  'RESULT: no listed test failed; every listed test ran']
@@ -245,10 +349,15 @@ def main() -> int:
               'timing: startup_budget PASS 40.75 s (limit unknown s)',
               'timing: boot PASS 30.5 s (limit 45 s)',
               'timing: orbs PASS 20.25 s (limit 45 s)']
-    expect('ci_check prints the raised limits, then the five slowest, each test once, just before RESULT',
-           out == unchanged[:-1] + timing + unchanged[-1:], ' | '.join(out[-12:]))
-    expect('ci_check output without the timing lines is unchanged, exit 0',
-           [line for line in out if not line.startswith('timing: ')] == unchanged and code == 0, f'exit {code}')
+    python = [f'python: {path} PASS 0.5 s (limit 45 s)' for path in PYTHON_REGISTRY] + [
+              f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}']
+    expect('ci_check prints the raised limits, then the five slowest, each test once, then the lines of all'
+           ' registered Python tests in registry order, just before RESULT',
+           out == unchanged[:-1] + timing + python + unchanged[-1:], ' | '.join(out[-13:]))
+    expect('ci_check output without the timing and Python run lines is the Lua output plus the Python inventory'
+           ' line, exit 0',
+           [line for line in out if not line.startswith(('timing: ', 'python: '))] == unchanged and code == 0,
+           f'exit {code}')
 
     # 8. The same with a FAIL, a TIMEOUT, a missing seconds, a NOT_RUN row and a shard.
     shard = ['parse', 'boot', 'catalog_root_capacity', 'sync_admission_traffic_acceptance', 'orbs']
@@ -258,6 +367,7 @@ def main() -> int:
         'catalog_root_capacity': {'status': 'TIMEOUT', 'exit': None, 'seconds': 120.5, 'stdout': 'partial'},
         'sync_admission_traffic_acceptance': {'seconds': None}}), '--only', ','.join(shard))
     unchanged = [f'inventory: {len(names)} listed tests',
+                 f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
                  '--- parse: FAIL', 'parse out', 'parse err',
                  '--- catalog_root_capacity: TIMEOUT', 'partial', '',
                  'runtime: LuaJIT',
@@ -269,22 +379,410 @@ def main() -> int:
               'timing: sync_admission_traffic_acceptance PASS unknown s (limit 120 s)',
               'timing: parse FAIL 2.5 s (limit 45 s)',
               'timing: boot PASS 0.25 s (limit 45 s)']
-    expect('ci_check timing lines show TIMEOUT and FAIL rows and print a missing seconds as unknown',
-           out == unchanged[:-1] + timing + unchanged[-1:], ' | '.join(out[-12:]))
-    expect('ci_check output without the timing lines is unchanged: failure printing, counts, RESULT: FAILED, exit 1',
-           [line for line in out if not line.startswith('timing: ')] == unchanged and code == 1, f'exit {code}')
+    python = [f'python: NOT SELECTED in a shard (not run, not a pass): {path}' for path in PYTHON_REGISTRY]
+    expect('ci_check timing lines show TIMEOUT and FAIL rows and print a missing seconds as unknown;'
+           ' a shard prints every registered Python test as NOT SELECTED',
+           out == unchanged[:-1] + timing + python + unchanged[-1:], ' | '.join(out[-13:]))
+    expect('ci_check output without the timing and Python run lines is unchanged apart from the Python inventory'
+           ' line: failure printing, counts, RESULT: FAILED, exit 1',
+           [line for line in out if not line.startswith(('timing: ', 'python: '))] == unchanged and code == 1,
+           f'exit {code}')
 
-    # 9. A NOT_RUN row in a complete inventory is never a pass: RESULT FAILED, exit 1.
+    # 9. A NOT_RUN row in a complete inventory is never a pass: RESULT FAILED, exit 1. Every registered
+    # Python test still runs as a separate process and is counted apart from the Lua tests.
     code, out = run_ci_check(controlled_report(names, {'parse': {'status': 'NOT_RUN', 'reason': 'stand-in skip'}}))
-    expect('a NOT_RUN row is printed as NOT RUN and fails the check, exit 1',
-           'NOT RUN (not a pass): parse: stand-in skip' in out and out[-1] == 'RESULT: FAILED' and code == 1,
-           f'exit {code}, last {out[-1:]}')
+    expect(f'a NOT_RUN row is printed as NOT RUN and fails the check, exit 1; the {REGISTERED} Python tests stay'
+           ' separate',
+           'NOT RUN (not a pass): parse: stand-in skip' in out and out[-1] == 'RESULT: FAILED' and code == 1
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in out,
+           f'exit {code}, last {out[-2:]}')
+
+    # 10. The Python test registry: apart from NAMES, never passed to the Lua runtime, never counted there.
+    runner = load_runner()
+    registered = getattr(runner, 'PYTHON_TESTS', None)
+    expect(f'PYTHON_TESTS registers exactly {", ".join(PYTHON_REGISTRY[:-1])} then {PYTHON_REGISTRY[-1]}, apart'
+           ' from the Lua NAMES',
+           registered == PYTHON_REGISTRY and not set(registered) & set(runner.NAMES), f'PYTHON_TESTS={registered!r}')
+    expect('a Python test process gets 45 s',
+           getattr(runner, 'PYTHON_TEST_TIMEOUT_SECONDS', None) == 45,
+           f'PYTHON_TEST_TIMEOUT_SECONDS={getattr(runner, "PYTHON_TEST_TIMEOUT_SECONDS", None)!r}')
+    fake = FakeProcesses()
+    code, report, err = run_main(runner, fake)
+    not_lua = [c for c in fake.commands
+               if not (len(c) == 2 and c[1].startswith('tests/prototype/') and c[1].endswith('.lua'))]
+    expect('the runner passes only tests/prototype/*.lua files to the Lua runtime and counts only NAMES, exit 0',
+           not not_lua and len(fake.commands) == len(runner.NAMES) and counts(report) == (len(runner.NAMES), 0, 0)
+           and code == 0, f'non-Lua commands {not_lua[:3]}, counts {counts(report)}, exit {code}')
+    expect('the runner report lists the registered Python tests as run by ci_check, not by the runner',
+           report is not None and report.get('registered_python_tests') == PYTHON_REGISTRY
+           and 'not run or counted by this runner' in str(report.get('python_tests_scope', '')).lower(),
+           f'registered_python_tests={(report or {}).get("registered_python_tests")!r}')
+
+    # 11. ci_check's Python inventory: this checkout, then a missing, a duplicate, a malformed and an
+    # unregistered entry. Each is refused before any process starts. Each case keeps every default entry
+    # registered and present, so that only its intended problem arises.
+    check = getattr(load_ci_check(), 'check_python_inventory', None)
+    found = check(list(registered or [])) if callable(check) else 'tools/ci_check.py has no check_python_inventory'
+    expect('every tools/tests/test_*.py file in this checkout is registered, and every registered file exists',
+           found == [], f'{found}')
+    complete = controlled_report(names, {})
+    for case, tests, problem in (
+            ('a registered Python test without a file',
+             PYTHON_REGISTRY + ['tools/tests/test_stand_in_missing.py'],
+             'Python test listed but no file: tools/tests/test_stand_in_missing.py'),
+            ('a Python test registered twice', PYTHON_REGISTRY + [PY],
+             f'Python test listed more than once: {PY}'),
+            ('a registered entry outside tools/tests',
+             PYTHON_REGISTRY + ['../outside/test_stand_in.py'],
+             'Python test entry is not a tools/tests/test_*.py path: ../outside/test_stand_in.py')):
+        result = ci_check_call(complete, prepare=with_runner(python_tests=tests))
+        expect(f'{case} fails the inventory check: exit 1, nothing started',
+               result.code == 1 and result.calls == [] and f'INVENTORY PROBLEM: {problem}' in result.out,
+               f'exit {result.code}, {len(result.calls)} processes, {result.out[:4]}')
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        for rel in PYTHON_REGISTRY + ['tools/tests/test_stand_in_unregistered.py',
+                                      'tools/tests/nested/test_stand_in_nested.py', 'tools/tests/stand_in_helper.py']:
+            (base / rel).parent.mkdir(parents=True, exist_ok=True)
+            (base / rel).write_text('', encoding='utf-8')
+        result = ci_check_call(complete, prepare=with_runner(root=base))
+    problem = ('INVENTORY PROBLEM: Python test file not listed in PYTHON_TESTS of tools/run_prototype_tests.py'
+               ' (it would never run): tools/tests/nested/test_stand_in_nested.py,'
+               ' tools/tests/test_stand_in_unregistered.py')
+    expect('an unregistered tools/tests/test_*.py file, also in a subdirectory, fails the inventory check: exit 1,'
+           ' nothing started; a file not named test_*.py is not a test',
+           result.code == 1 and result.calls == [] and problem in result.out
+           and not any('stand_in_helper' in line for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, {result.out[:4]}')
+
+    # 12. --inventory-only checks both inventories and starts no test.
+    result = ci_check_call(complete, '--inventory-only')
+    expect('--inventory-only reports both inventories, starts no process and exits 0',
+           result.code == 0 and result.calls == [] and result.out == [
+               f'inventory: {len(names)} listed tests',
+               f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
+               'inventory check passed; no test was executed'],
+           f'exit {result.code}, {len(result.calls)} processes, {result.out}')
+
+    # 13. A complete run: the Lua runner once, then each registered Python test as its own process.
+    result = ci_check_call(complete)
+    commands = [command for command, _ in result.calls]
+    lua_command = commands[0] if commands else []
+    lua_ok = (len(lua_command) > 1 and str(lua_command[1]).endswith('run_prototype_tests.py')
+              and '--only' not in lua_command
+              and not any(marker in str(part) for part in lua_command
+                          for marker in (pathlib.PurePosixPath(path).stem for path in PYTHON_REGISTRY)))
+    py_calls = result.calls[1:] if len(result.calls) == 1 + len(PYTHON_REGISTRY) else []
+    expect('a complete run starts the Lua runner once, without --only or a Python test, then each registered'
+           ' Python test',
+           len(commands) == 1 + len(PYTHON_REGISTRY) and lua_ok, f'{len(commands)} processes: {[c[:2] for c in commands]}')
+    py_ok = len(py_calls) == len(PYTHON_REGISTRY) and all(
+        py_command == [sys.executable, '-B', str(ROOT / path)] and py_keywords.get('cwd') == ROOT
+        and py_keywords.get('timeout') == 45 and not py_keywords.get('shell')
+        and py_keywords.get('capture_output') is True
+        for path, (py_command, py_keywords) in zip(PYTHON_REGISTRY, py_calls))
+    expect('each registered Python test runs, in registry order, as [this interpreter, -B, its file] from the'
+           ' repository root, without a shell, with captured output and a 45 s limit',
+           py_ok, f'calls {py_calls}')
+    pyrep = (result.report or {}).get('python_tests') or {}
+    py_rows = [r for r in (pyrep.get('results') or []) if isinstance(r, dict)]
+    rows_ok = ([r.get('test') for r in py_rows] == PYTHON_REGISTRY
+               and all(r.get('status') == 'PASS' and r.get('exit') == 0 and r.get('seconds') == 0.5
+                       and r.get('timeout_seconds') == 45 for r in py_rows))
+    expect('all passing Python tests are PASS (exit 0, 0.5 s, limit 45 s) in the report and the output, counted'
+           f' {REGISTERED}/0 of {REGISTERED} registered; the Lua counts stay Lua-only, exit 0',
+           result.code == 0 and rows_ok and pyrep.get('selected') is True
+           and pyrep.get('registered') == PYTHON_REGISTRY
+           and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0)
+           and all(f'python: {path} PASS 0.5 s (limit 45 s)' in result.out for path in PYTHON_REGISTRY)
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in result.out
+           and f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}' in result.out
+           and result.out[-1:] == ['RESULT: no listed test failed; every listed test ran'],
+           f'exit {result.code}, rows {py_rows}, last {result.out[-4:]}')
+
+    # 14. A nonzero exit, a timeout and a launch failure of one Python test each fail the check, attributed
+    # to that named test; every other registered Python test still runs as its own process and passes in the
+    # same run. The first test fails in each way; then the registry test, which is no longer the last one,
+    # and the full visible-UI gate test, which is now last.
+    def failed_worker(case, path, outcome, status, seconds, exit_code, stdout, stderr, label):
+        result = ci_check_call(complete, python={path: outcome})
+        pyrep = (result.report or {}).get('python_tests') or {}
+        py_rows = [r for r in (pyrep.get('results') or []) if isinstance(r, dict)]
+        others = [p for p in PYTHON_REGISTRY if p != path]
+        rows_ok = [r.get('test') for r in py_rows] == PYTHON_REGISTRY and all(
+            (r.get('status'), r.get('exit'), r.get('seconds'), r.get('timeout_seconds'))
+            == ((status, exit_code, seconds, 45) if r.get('test') == path else ('PASS', 0, 0.5, 45))
+            for r in py_rows)
+        tail = [f'--- python {path}: {status}', stdout, stderr] + [
+            f'python: {p} {status} {seconds} s (limit 45 s)' if p == path else f'python: {p} PASS 0.5 s (limit 45 s)'
+            for p in PYTHON_REGISTRY] + [
+            f'python: passed {REGISTERED - 1}, failed 1, registered {REGISTERED} {PY_SCOPE}', 'RESULT: FAILED']
+        expect(f'{case} of {label} is {status}, printed and counted apart from the Lua tests while'
+               f' {", ".join(others[:-1])} and {others[-1]} still run and pass, exit 1',
+               result.code == 1 and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+               and result.out[-len(tail):] == tail
+               and f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}' in result.out
+               and rows_ok and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED - 1, 1),
+               f'exit {result.code}, last {result.out[-len(tail):]}, rows {py_rows}')
+
+    for case, outcome, status, seconds, exit_code, stdout, stderr in (
+            ('a nonzero exit', 1, 'FAIL', 0.5, 1, f'{PY} out', f'{PY} err'),
+            ('a timeout', 'timeout', 'TIMEOUT', 45.25, None, 'py partial out', 'py partial err'),
+            ('a launch failure', 'launch', 'LAUNCH_FAILED', 0.5, None, '',
+             'FileNotFoundError: [Errno 2] stand-in launch failure')):
+        failed_worker(case, PY, outcome, status, seconds, exit_code, stdout, stderr, 'the first Python test')
+    failed_worker('a nonzero exit', REGISTRY_PY, 1, 'FAIL', 0.5, 1, f'{REGISTRY_PY} out', f'{REGISTRY_PY} err',
+                  f'{REGISTRY_PY}, not the last Python test,')
+    failed_worker('a nonzero exit', GATE_PY, 1, 'FAIL', 0.5, 1, f'{GATE_PY} out', f'{GATE_PY} err',
+                  f'the last Python test {GATE_PY}')
+    failed_worker('a timeout', GATE_PY, 'timeout', 'TIMEOUT', 45.25, None, 'py partial out', 'py partial err',
+                  f'the last Python test {GATE_PY}')
+
+    # 14b. A complete run whose Lua report lacks one listed test is not complete, even with every registered
+    # Python test passing; with no runner report at all, no Python test is started.
+    result = ci_check_call(controlled_report([n for n in names if n != 'boot'], {}))
+    pyrep = (result.report or {}).get('python_tests') or {}
+    expect(f'a listed Lua test without a result row fails a complete run although all {REGISTERED} Python tests'
+           ' run and pass, exit 1',
+           result.code == 1 and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+           and f'passed {len(names) - 1}, failed 0, NOT RUN 0, no result row 1, listed {len(names)}' in result.out
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in result.out
+           and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0) and result.out[-1:] == ['RESULT: FAILED'],
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None)
+    expect('without a runner report no Python test starts and nothing is counted as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1
+           and result.out[-1:] == ['RESULT: the runner wrote no report; nothing is counted as passed']
+           and not any(line.startswith('python: ') for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+
+    # 14c. The Lua runner's own exit status counts apart from its report. A nonzero runner exit fails the check
+    # even when the report it wrote shows every listed test passed: the report is kept and records the exit, the
+    # runner's output and exit are printed, and no success RESULT line appears. Exit 0 alone is not enough: with
+    # no report the check still fails. 3221225794 is 0xC0000142, a Windows process-initialization failure.
+    success = 'RESULT: no listed test failed; every listed test ran'
+    no_report = 'RESULT: the runner wrote no report; nothing is counted as passed'
+    all_lua = f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}'
+
+    def runner_failed(runner_code):
+        return (f'LUA RUNNER FAILED: tools/run_prototype_tests.py exited {runner_code};'
+                ' the run is not accepted, whatever its report shows')
+
+    def runner_block(out, runner_code):
+        """The runner's exit and output tails, printed before the Lua summary as a failed test's are."""
+        block = [f'--- Lua runner: exit {runner_code}', 'runner out', 'runner err']
+        starts = [i for i in range(len(out)) if out[i:i + 3] == block]
+        return bool(starts) and 'runtime: LuaJIT' in out and starts[0] < out.index('runtime: LuaJIT')
+
+    for runner_code in (17, 1, 3221225794):
+        result = ci_check_call(complete, runner_exit=runner_code)
+        pyrep = (result.report or {}).get('python_tests') or {}
+        expect(f'a Lua runner exit {runner_code} after a complete all-PASS report fails the check: the exit and'
+               ' runner output are printed, the report is kept and records the exit, every registered Python test'
+               ' still runs, no success RESULT line, exit 1',
+               result.code == 1 and result.out[-2:] == [runner_failed(runner_code), 'RESULT: FAILED']
+               and success not in result.out and runner_block(result.out, runner_code) and all_lua in result.out
+               and (result.report or {}).get('lua_runner_exit') == runner_code
+               and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+               and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0),
+               f'exit {result.code}, lua_runner_exit {(result.report or {}).get("lua_runner_exit")!r},'
+               f' last {result.out[-3:]}')
+    result = ci_check_call(controlled_report(names, {'parse': {'status': 'FAIL', 'exit': 1, 'stdout': 'parse out',
+                                                               'stderr': 'parse err'}}), runner_exit=1)
+    expect('a Lua runner exit 1 with a FAIL row prints both the failed test and the runner failure, exit 1',
+           result.code == 1 and result.out[-2:] == [runner_failed(1), 'RESULT: FAILED']
+           and result.out[2:5] == ['--- parse: FAIL', 'parse out', 'parse err'] and runner_block(result.out, 1)
+           and f'passed {len(names) - 1}, failed 1, NOT RUN 0, no result row 0, listed {len(names)}' in result.out,
+           f'exit {result.code}, out {result.out[:8]}, last {result.out[-3:]}')
+    result = ci_check_call(controlled_report(['parse', 'boot'], {}), '--only', 'parse,boot', runner_exit=17)
+    expect('a Lua runner exit 17 after an all-PASS shard report fails the shard, which stays PARTIAL with every'
+           ' Python test NOT SELECTED and only the runner started, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.out[-2:] == [runner_failed(17), 'RESULT: FAILED']
+           and success not in result.out and runner_block(result.out, 17)
+           and 'PARTIAL: a shard was selected; this is not a complete run' in result.out
+           and all(f'python: NOT SELECTED in a shard (not run, not a pass): {path}' in result.out
+                   for path in PYTHON_REGISTRY),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None, runner_exit=17)
+    expect('a Lua runner exit 17 without a report prints the exit and runner output, starts no Python test and'
+           ' counts nothing as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.report is None
+           and result.out[-2:] == [runner_failed(17), no_report]
+           and 'runner out' in result.out and 'runner err' in result.out
+           and not any(line.startswith(('python: ', 'passed ')) for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None, runner_exit=0)
+    expect('control: a Lua runner exit 0 without a report still fails, starts no Python test, counts nothing as'
+           ' passed and reports no runner failure, exit 1',
+           result.code == 1 and len(result.calls) == 1 and result.report is None and result.out[-1:] == [no_report]
+           and not any(line.startswith(('python: ', 'passed ', 'LUA RUNNER FAILED')) for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(complete, runner_exit=0)
+    expect('control: a Lua runner exit 0 with a complete all-PASS report and every Python test passing stays a'
+           ' success without runner output or a runner failure line; the report records exit 0, exit 0',
+           result.code == 0 and result.out[-1:] == [success] and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+           and (result.report or {}).get('lua_runner_exit') == 0
+           and not any(line.startswith(('--- Lua runner', 'LUA RUNNER FAILED')) or line in ('runner out', 'runner err')
+                       for line in result.out),
+           f'exit {result.code}, lua_runner_exit {(result.report or {}).get("lua_runner_exit")!r},'
+           f' last {result.out[-3:]}')
+
+    # 15. A --only shard runs the selected Lua tests only; each Python test is NOT SELECTED, never a pass.
+    result = ci_check_call(controlled_report(['parse', 'boot'], {}), '--only', 'parse,boot')
+    pyrep = (result.report or {}).get('python_tests') or {}
+    expect('a --only shard starts only the Lua runner for the shard, prints every registered Python test as NOT'
+           ' SELECTED and stays PARTIAL, exit 0',
+           result.code == 0 and len(result.calls) == 1 and result.calls[0][0][-2:] == ['--only', 'parse,boot']
+           and all(f'python: NOT SELECTED in a shard (not run, not a pass): {path}' in result.out
+                   for path in PYTHON_REGISTRY)
+           and 'PARTIAL: a shard was selected; this is not a complete run' in result.out
+           and pyrep.get('selected') is False and pyrep.get('results') == [],
+           f'exit {result.code}, {len(result.calls)} processes, out {result.out[-4:]}, python_tests {pyrep}')
+
+    # 16. A registered entry must already be spelt canonically. A '.' segment or a repeated, leading or trailing
+    # '/' names the canonical file again; it is refused as malformed before any process starts, beside the
+    # canonical entry or alone. The traversal entry is a control, refused before and after this check. Here
+    # tools/tests holds only the canonical file, so the complete output of each case is known.
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        (base / PY).parent.mkdir(parents=True, exist_ok=True)
+        (base / PY).write_text('', encoding='utf-8')
+        lua_inventory = f'inventory: {len(names)} listed tests'
+        unlisted = ('INVENTORY PROBLEM: Python test file not listed in PYTHON_TESTS of tools/run_prototype_tests.py'
+                    f' (it would never run): {PY}')
+        result = ci_check_call(complete, '--inventory-only', prepare=with_runner(python_tests=[PY], root=base))
+        expect('control: the canonical entry alone passes the inventory check when tools/tests holds only that'
+               ' file, exit 0, nothing started',
+               result.code == 0 and result.calls == [] and result.out == [
+                   lua_inventory, f'python inventory: 1 registered Python test files {PY_SCOPE}',
+                   'inventory check passed; no test was executed'],
+               f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+        for entry in ('tools/tests/./test_l10n_inventory.py', 'tools//tests/test_l10n_inventory.py',
+                      './tools/tests/test_l10n_inventory.py', 'tools/tests/test_l10n_inventory.py/',
+                      'tools/tests/../test_l10n_inventory.py'):
+            malformed = f'INVENTORY PROBLEM: Python test entry is not a tools/tests/test_*.py path: {entry}'
+            result = ci_check_call(complete, prepare=with_runner(python_tests=[PY, entry], root=base))
+            expect(f'{entry} beside the canonical entry is refused as malformed, the only inventory problem:'
+                   ' exit 1, nothing started',
+                   result.code == 1 and result.calls == [] and result.out == [
+                       lua_inventory, f'python inventory: 2 registered Python test files {PY_SCOPE}', malformed],
+                   f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+            result = ci_check_call(complete, prepare=with_runner(python_tests=[entry], root=base))
+            expect(f'{entry} alone is refused as malformed and leaves the canonical file unregistered: exit 1,'
+                   ' nothing started',
+                   result.code == 1 and result.calls == [] and result.out == [
+                       lua_inventory, f'python inventory: 1 registered Python test files {PY_SCOPE}', malformed,
+                       unlisted],
+                   f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+
+    # UTF-8 capture at both capture seams. Tiny children of this interpreter write known UTF-8
+    # bytes (the continuation byte 0x81 in both streams) straight to stdout and stderr and exit
+    # with the stand-in's code; one stands in for a Lua test process, one for the Lua runner
+    # process. The capture keywords of the code under test reach subprocess.run unchanged, except
+    # that a child is bounded to 45 s and text capture that names no encoding decodes as cp1252
+    # at this boundary: a missing encoding fails on every host, also under python -X utf8, and an
+    # explicit encoding of the code under test wins. Nothing here sets an environment variable.
+    byte_out = b'diagnostic \xc5\x81\xc3\xb3d\xc5\xba'
+    byte_err = b'error \xe2\x82\xac \xc5\x81'
+    # The expected text, written as code points apart from the bytes above.
+    text_out = 'diagnostic Łódź'
+    text_err = 'error € Ł'
+    emitter = ('import sys; out, err, code = sys.argv[1:]; sys.stdout.buffer.write(bytes.fromhex(out));'
+               ' sys.stderr.buffer.write(bytes.fromhex(err)); sys.exit(int(code))')
+
+    def byte_child(stand_in, started: list):
+        """A subprocess.run for the code under test: stand_in keeps its bookkeeping and chooses the
+        exit code, then a real byte-emitter child runs with the caller's capture keywords."""
+        def run(command, **kwargs):
+            planned = stand_in(command, **kwargs)
+            forwarded = dict(kwargs)
+            if forwarded.get('encoding') is None and (forwarded.get('text') or forwarded.get('universal_newlines')
+                                                      or forwarded.get('errors') is not None):
+                forwarded['encoding'] = 'cp1252'
+            forwarded['timeout'] = min(45, forwarded.get('timeout') or 45)
+            started.append(forwarded.get('encoding'))
+            return subprocess.run([sys.executable, '-I', '-X', 'utf8=0', '-c', emitter, byte_out.hex(),
+                                   byte_err.hex(), str(planned.returncode)], **forwarded)
+        return run
+
+    started = []
+    direct = byte_child(lambda command, **kwargs: subprocess.CompletedProcess(command, 7), started)
+    try:
+        proc = direct(['stand-in'], capture_output=True)
+        raw = (proc.returncode, proc.stdout, proc.stderr)
+    except Exception as exc:
+        raw = f'raised {exc!r}'
+    expect('control: a byte child writes exactly the known bytes to stdout and stderr and exits with the'
+           ' stand-in code 7', raw == (7, byte_out, byte_err), f'got {raw!r}')
+    try:
+        proc = direct(['stand-in'], capture_output=True, encoding='utf-8')
+        explicit = (proc.returncode, proc.stdout, proc.stderr)
+    except Exception as exc:
+        explicit = f'raised {exc!r}'
+    expect('control: an explicit utf-8 of the caller wins at this boundary and decodes both streams to exactly'
+           ' the expected text', explicit == (7, text_out, text_err), f'got {explicit!r}')
+    # Without an encoding the cp1252 decoder refuses byte 0x81: subprocess.run raises on POSIX; on
+    # Windows its reader thread fails (reported on stderr, captured here) and leaves no output.
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            proc = direct(['stand-in'], capture_output=True, text=True)
+            legacy = (proc.returncode, proc.stdout, proc.stderr)
+        except UnicodeDecodeError:
+            legacy = 'UnicodeDecodeError'
+        except Exception as exc:
+            legacy = f'raised {exc!r}'
+    expect('control: text capture that names no encoding decodes as cp1252 at this boundary and cannot give'
+           ' the expected text',
+           started == [None, 'utf-8', 'cp1252'] and (legacy == 'UnicodeDecodeError' or (
+               isinstance(legacy, tuple) and legacy[0] == 7 and legacy[1:] != (text_out, text_err))),
+           f'got {legacy!r}, decoders {started!r}')
+
+    # The runner: one existing test, whose process is a byte child that exits 1.
+    runner = load_runner()
+    fake = FakeProcesses(outcomes={'parse': 1})
+    started = []
+    boundary = types.SimpleNamespace(run=byte_child(fake.run, started), monotonic=fake.monotonic)
+    try:
+        code, report, err = run_main(runner, boundary, '--only', 'parse')
+    except Exception as exc:   # a decoding error is a wrong result, never a pass
+        code, report, err = f'raised {exc!r}', None, ''
+    report = report or {}
+    row = (report.get('results') or [{}])[0]
+    expect('a Lua test whose process writes UTF-8 bytes and exits 1 is one FAIL row (exit 1, 0.5 s of 45 s)'
+           ' holding exactly the decoded stdout and stderr; one byte child ran instead of Lua, exit 1',
+           code == 1 and err == '' and fake.calls == [('parse', 45)] and len(started) == 1
+           and fake.commands == [['/stand-in/luajit', 'tests/prototype/parse.lua']]
+           and len(report.get('results') or []) == 1 and report.get('failed') == 1 and report.get('passed') == 0
+           and row.get('status') == 'FAIL' and row.get('exit') == 1 and row.get('seconds') == 0.5
+           and row.get('timeout_seconds') == 45 and row.get('stdout') == text_out and row.get('stderr') == text_err,
+           f'exit {code!r}, stdout {row.get("stdout")!r}, stderr {row.get("stderr")!r}, decoders {started!r},'
+           f' runner stderr {err.strip().splitlines()[-1:]!r}')
+
+    # tools/ci_check.py: its Lua runner process is a byte child that exits 17 and writes no report.
+    started = []
+    runner_exit_17 = ('LUA RUNNER FAILED: tools/run_prototype_tests.py exited 17; the run is not accepted,'
+                      ' whatever its report shows')
+    no_report_line = 'RESULT: the runner wrote no report; nothing is counted as passed'
+
+    def byte_runner(ci):
+        ci.subprocess.run = byte_child(ci.subprocess.run, started)
+
+    result = ci_check_call(None, prepare=byte_runner, runner_exit=17)
+    expect('a Lua runner whose process writes UTF-8 bytes, exits 17 and writes no report: ci_check prints'
+           ' exactly its decoded stdout and stderr, then the runner failure and the no-report result; one byte'
+           ' child ran, no Python test started and nothing counts as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1 and len(started) == 1 and result.report is None
+           and result.out[-4:] == [text_out, text_err, runner_exit_17, no_report_line]
+           and not any(line.startswith(('python: ', 'passed ')) or line in ('runner out', 'runner err')
+                       for line in result.out),
+           f'exit {result.code!r}, last {result.out[-4:]!r}, decoders {started!r}')
 
     if failures:
         print('RESULT: FAILED:', '; '.join(failures))
         return 1
-    print('RESULT: per-test timeouts, result rows, counts, exit status and ci_check timing lines behave as declared;'
-          ' no Lua runtime was started')
+    print('RESULT: per-test timeouts, result rows, counts, exit status, ci_check timing lines, the registered'
+          ' Python tests and the UTF-8 decoding of captured runner and ci_check output behave as declared; no'
+          ' Lua runtime or Python test file was started, only tiny byte-emitter children')
     return 0
 
 

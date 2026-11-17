@@ -54,8 +54,36 @@ local function EchoName(row, spellId, resolveSpell)
     return (comment:gsub(" %- %a+$", ""))
 end
 
+-- Updated client (wow.export 0.2.19 capture, perks_data.lua header and
+-- perks_service.lua 537, 822): a row's requiredSpell is taught by a Tome of
+-- Echo only when the row says isTome = true; otherwise it is a talent gate,
+-- and the game's tome switch refuses it. A database that marks any row
+-- isTome = true uses that contract: there, the normalized requiredSpell
+-- keeps only tome gates (the tome lever every consumer reads) and a talent
+-- gate is kept as talentSpell (a real requirement, never a tome). A database
+-- with no isTome mark at all (the older provider) normalizes exactly as
+-- before, with talentSpell 0, and keeps its earlier canonical text and hash.
+-- Only a row Materialize takes (a number spellId and a table with maxStack)
+-- decides the contract, so a row it skips can never change it, and the
+-- bounded row verifier (VerifyRow) sees every row that can.
+local function TomeContract(database)
+    for spellId, row in pairs(database) do
+        if type(spellId) == "number" and Number(spellId) ~= nil
+            and type(row) == "table" and row.maxStack and row.isTome == true then
+            return true
+        end
+    end
+    return false
+end
+local function Gates(row, tomeContract)
+    local required = Number(row.requiredSpell, 0)
+    if tomeContract and required ~= 0 and row.isTome ~= true then return 0, required end
+    return required, 0
+end
+
 local function MaterializeUnsafe(database, resolveSpell)
     if type(database) ~= "table" then error("PerkDatabase must be a table") end
+    local tomeContract = TomeContract(database)
 
     local spellIds = {}
     for spellId, row in pairs(database) do
@@ -69,6 +97,7 @@ local function MaterializeUnsafe(database, resolveSpell)
     local rows, groupCount = {}, {}
     for _, spellId in ipairs(spellIds) do
         local row = database[spellId]
+        local tomeGate, talentGate = Gates(row, tomeContract)
         local normalized = {
             spellId=spellId,
             name=EchoName(row, spellId, resolveSpell),
@@ -77,7 +106,12 @@ local function MaterializeUnsafe(database, resolveSpell)
             minLevel=Number(row.minLevel, 1),
             quality=Number(row.quality, 0),
             groupId=Number(row.groupId, 0),
-            requiredSpell=Number(row.requiredSpell, 0),
+            requiredSpell=tomeGate,
+            talentSpell=talentGate,
+            -- The row's own isTome mark, kept apart from its normalized gates
+            -- (third Spec review): a mark on a row whose requiredSpell is 0
+            -- changes no gate, yet it alone can decide the whole contract.
+            tomeMark=row.isTome == true,
         }
         rows[spellId] = normalized
         if normalized.groupId > 0 then
@@ -118,15 +152,26 @@ local function MaterializeUnsafe(database, resolveSpell)
         end
     end
 
-    local canonical = {"catalog-source-v1"}
+    -- The isTome contract has its own identity: its header names it and each
+    -- row adds its talent gate. The older text is unchanged.
+    local canonical = {tomeContract and "catalog-source-v2-istome" or "catalog-source-v1"}
     for _, spellId in ipairs(spellIds) do
         local row = rows[spellId]
-        canonical[#canonical + 1] = table.concat({
+        local parts = {
             Encode(row.spellId), Encode(row.name), Encode(row.maxStack),
             Encode(row.classMask), Encode(row.minLevel), Encode(row.quality),
             Encode(row.groupId), Encode(row.requiredSpell),
             Encode(row.requiredSpell ~= 0 and levers[row.requiredSpell].tomeName or nil),
-        })
+        }
+        -- Under the contract each row also states its own mark (fourth Root
+        -- check): a mark moved or removed between zero-gate rows changes no
+        -- gate, so without it the identity would stay equal and the atomic
+        -- check would keep the stale catalog. The older text has neither part.
+        if tomeContract then
+            parts[#parts + 1] = Encode(row.talentSpell)
+            parts[#parts + 1] = Encode(row.tomeMark)
+        end
+        canonical[#canonical + 1] = table.concat(parts)
     end
     canonical = table.concat(canonical)
 
@@ -137,6 +182,7 @@ local function MaterializeUnsafe(database, resolveSpell)
         familyName=familyName,
         levers=levers,
         rowCount=#spellIds,
+        tomeContract=tomeContract,
     }, canonical, HashText(canonical)
 end
 
@@ -163,7 +209,19 @@ local function VerifyRowUnsafe(catalog, spellId, row, resolveSpell)
     local published = catalog.rows[spellId]
     if type(published) ~= "table" then return false end
     if EchoName(row, spellId, resolveSpell) ~= published.name then return false end
-    local requiredSpell = Number(row.requiredSpell, 0)
+    -- The row is normalized under the contract the published catalog used.
+    -- Second Spec review: a first isTome mark added in place under a catalog
+    -- published without the contract changes the whole contract (every
+    -- talent gate, and the canonical identity), so that row does not verify
+    -- and the caller falls back to its atomic check and rebuild. A mark
+    -- removed or moved under the contract changes that row's gates below.
+    if catalog.tomeContract ~= true and row.isTome == true then return false end
+    -- Any change of the row's own mark (added, removed or moved, whatever its
+    -- gates) can change the contract, so it never verifies: the caller falls
+    -- back to its atomic check, which decides the contract again.
+    if (row.isTome == true) ~= (published.tomeMark == true) then return false end
+    local requiredSpell, talentSpell = Gates(row, catalog.tomeContract == true)
+    if not SameNumber(talentSpell, tonumber(published.talentSpell) or 0) then return false end
     if not (SameNumber(Number(row.maxStack, 1), published.maxStack)
         and SameNumber(Number(row.classMask, 0), published.classMask)
         and SameNumber(Number(row.minLevel, 1), published.minLevel)

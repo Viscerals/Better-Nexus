@@ -61,10 +61,90 @@ local NEUTRAL_CLASS_ICON = "Interface\\Icons\\INV_Misc_Note_01"
 local CLASS_ORDER = {"ALL","DEATHKNIGHT","DRUID","HUNTER","MAGE","PALADIN","PRIEST","ROGUE","SHAMAN","WARLOCK","WARRIOR"}
 local classFilter = "ALL"
 
+-- Full UI localization (issues #143-#148): every word this window shows
+-- comes from Nexus.Localization, looked up when it is shown. Player, realm
+-- and build names, DPS figures and durations are formatted here and
+-- inserted verbatim; colour codes, separators and line breaks stay in code.
+-- Class codes, CLASS_LABEL and every raw reason stay the values code reads
+-- and compares; only their display is looked up. English is unchanged.
+local function T(key) return (Nexus.Localization.Text(key)) end
+-- legacy: the exact English shown before, used only when a value is too
+-- long for the template, so the English output never changes.
+local function TF(key, args, legacy)
+    local text, source = Nexus.Localization.Format(key, args)
+    if source == "unavailable" and legacy ~= nil then return legacy end
+    return text
+end
+local CLASS_TEXT_KEY = {
+    DEATHKNIGHT="leaderboard.label.class_death_knight", DRUID="leaderboard.label.class_druid",
+    HUNTER="leaderboard.label.class_hunter", MAGE="leaderboard.label.class_mage",
+    PALADIN="leaderboard.label.class_paladin", PRIEST="leaderboard.label.class_priest",
+    ROGUE="leaderboard.label.class_rogue", SHAMAN="leaderboard.label.class_shaman",
+    WARLOCK="leaderboard.label.class_warlock", WARRIOR="leaderboard.label.class_warrior",
+}
+-- The shown name of a class code (nil for an unknown code).
+local function ClassText(class)
+    local key = CLASS_TEXT_KEY[class]
+    return key and T(key) or nil
+end
+-- The category's name inside a sentence or a record line.
+local function CategoryText(cat)
+    return T(cat == "lk" and "leaderboard.value.category_lk"
+        or "leaderboard.value.category_dummy")
+end
+-- Copy and Open refusal reasons produced in this file. The raw reason is
+-- the value code keeps and compares; a listed one is shown through its key.
+-- A reason from another owner (CandidateEvidence, Sync) is shown as it is.
+local REASON_KEYS = {
+    ["record is unavailable"]="leaderboard.reason.record_unavailable",
+    ["current build authority is unavailable"]="leaderboard.reason.build_authority_unavailable",
+    ["exact current build identity is unavailable"]="leaderboard.reason.current_identity_unavailable",
+    ["current build identity changed"]="leaderboard.reason.current_identity_changed",
+    ["record unavailable"]="leaderboard.reason.record_missing",
+    ["record categories disagree"]="leaderboard.reason.categories_disagree",
+    ["locked Echo evidence is unavailable"]="leaderboard.reason.locked_evidence_unavailable",
+    ["The rolled Echo list is still arriving"]="leaderboard.reason.echo_list_arriving",
+    ["The DPS record is missing its Echo-list identity"]="leaderboard.reason.record_missing_list_identity",
+    ["The DPS record no longer matches its recorded Echo list"]="leaderboard.reason.record_list_mismatch",
+    ["record categories disagree on resolved build identity"]="leaderboard.reason.categories_disagree_resolved",
+    ["record and catalog identities do not match"]="leaderboard.reason.record_catalog_mismatch",
+    ["record and catalog build IDs do not match"]="leaderboard.reason.record_catalog_id_mismatch",
+    ["record evidence is unavailable"]="leaderboard.reason.record_evidence_unavailable",
+    ["record evidence changed"]="leaderboard.reason.record_evidence_changed",
+    ["exact build identity is unavailable"]="leaderboard.reason.exact_identity_unavailable",
+    ["exact build identity revision is unavailable"]="leaderboard.reason.exact_revision_unavailable",
+    ["exact build identity changed; refresh the record"]="leaderboard.reason.exact_identity_changed",
+    ["record validation failed"]="leaderboard.reason.validation_failed",
+    ["Community Builds is unavailable"]="leaderboard.reason.community_builds_unavailable",
+}
+local function ReasonText(raw)
+    local key = type(raw) == "string" and REASON_KEYS[raw]
+    if key then return T(key) end
+    -- Full-UI remainder (v3): the Library's shared display words for the raw
+    -- reasons of CandidateEvidence and Sync (shown, never compared).
+    local internals = Nexus.CommunityInternals
+    local shown = internals and type(internals.ShownReason) == "function"
+        and type(raw) == "string" and internals.ShownReason(raw) or nil
+    if type(shown) == "string" then return shown end
+    return tostring(raw)
+end
+-- "Copy unavailable: <reason>" / "Open unavailable: <reason>".
+local function UnavailableText(which, raw)
+    local reason = ReasonText(raw)
+    if which == "copy" then
+        return TF("leaderboard.status.copy_unavailable", {reason=reason},
+            "Copy unavailable: " .. reason)
+    end
+    return TF("leaderboard.status.open_unavailable", {reason=reason},
+        "Open unavailable: " .. reason)
+end
+
 -- Shown in a detail view when the record's owner is not established (the
 -- name itself carries no provenance text). A statement about identity only:
 -- it says nothing about the record's Echoes, locked targets or DPS.
-local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
+local function OwnerNotEstablished()
+    return "|cff999999" .. T("leaderboard.status.owner_not_established") .. "|r"
+end
 
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     if type(Identity.DisplaySafeText) ~= "function" then return nil end
@@ -84,7 +164,7 @@ local function RowName(row, build)
     if raw == nil and type(build) == "table" then raw = build.author end
     local text = raw ~= nil and tostring(raw) or "?"
     return DisplayRemoteText(Identity.DisplayPlayer(text) or text,
-        1024, false) or "Unknown"
+        1024, false) or T("leaderboard.value.unknown_player")
 end
 
 -- Tooltip lines that tell same-name characters apart. A realm is shown as
@@ -94,13 +174,15 @@ local function IdentityLines(row)
     local owner = Identity.VerifiedOwnerKey(row)
     local realm = owner and owner:match("@(.+)$")
     if realm then
-        return {"Realm: " .. (DisplayRemoteText(realm, 96, false) or "unknown"),
-            "Owner verified"}
+        return {TF("leaderboard.tooltip.realm", {realm=DisplayRemoteText(realm, 96, false)
+                or T("leaderboard.value.realm_unknown")}),
+            T("leaderboard.tooltip.owner_verified")}
     end
     local stated = type(row.realm) == "string" and row.realm ~= ""
         and DisplayRemoteText(row.realm, 96, false) or nil
-    return {stated and ("Realm stated: " .. stated) or "Realm not stated",
-        "Owner identity not established"}
+    return {stated and TF("leaderboard.tooltip.realm_stated", {realm=stated})
+            or T("leaderboard.tooltip.realm_not_stated"),
+        T("leaderboard.tooltip.owner_not_established")}
 end
 
 -- Category, class, search, and explicit Show requests are user work. They
@@ -382,13 +464,11 @@ local function OrdinaryComplete(row)
     return ok and type(verdict) == "table" and verdict.complete == true
 end
 
+-- Issue #144 passivity: selecting a record only reads it; an incomplete
+-- record's build is not requested by the selection.
 local function SelectRow(row)
     selectedKey = RecordKey(row)
     if applySelection then applySelection(row) end
-    if row and row.buildId and not OrdinaryComplete(row)
-        and Nexus.Sync and Nexus.Sync.RequestLoadout then
-        Nexus.Sync.RequestLoadout(row.buildId)
-    end
 end
 
 local function GetRow(parent)
@@ -415,7 +495,7 @@ local function GetRow(parent)
                     GameTooltip:AddLine(line,0.75,0.75,0.75)
                 end
                 if self.classUnavailable then
-                    GameTooltip:AddLine("Class not supplied",0.75,0.75,0.75)
+                    GameTooltip:AddLine(T("leaderboard.tooltip.class_not_supplied"),0.75,0.75,0.75)
                 end
                 GameTooltip:Show()
             end)
@@ -535,16 +615,19 @@ end
 
 local function RolesRequestText(state, reason, name)
     if state == "pending" then
-        return "Requested the full build from " .. name
-            .. ". Waiting for the owner's reply..."
+        return TF("leaderboard.status.roles_requested", {name=name},
+            "Requested the full build from " .. name
+            .. ". Waiting for the owner's reply...")
     elseif state == "timeout" then
-        return "No reply with the locked Echo roles arrived. The owner may be"
-            .. " offline, or their Sync may be Off or Manual. You can request again."
+        return T("leaderboard.status.roles_no_reply")
     elseif state == "offline" or state == "refused" then
-        return "Request not sent: " .. tostring(reason or "unavailable") .. "."
+        -- The Sync owner's reason, in its display words when known.
+        local shown = reason and ReasonText(reason)
+            or T("leaderboard.value.reason_unavailable")
+        return TF("leaderboard.status.request_not_sent", {reason=shown},
+            "Request not sent: " .. shown .. ".")
     end
-    return "Copy unavailable: the locked Echo roles of this build were not"
-        .. " received. Request full build asks the owner for them."
+    return T("leaderboard.status.roles_not_received")
 end
 
 local function RecordEvidenceParts(parts, label, row)
@@ -727,9 +810,13 @@ local function CopyEvidence(row)
         return nil,currentReason or "record evidence is unavailable"
     end
     if current ~= selected then return nil,"record evidence changed" end
+    -- A real build title is data. Only a generated default is said in the
+    -- active language, once, when this new copy is made: the editor then
+    -- holds that name like any other (the player may edit it).
     local title=build and build.title
-        or (row.player and (tostring(row.player).."'s Loadout"))
-        or "Leaderboard Build"
+        or (row.player and TF("leaderboard.value.generated_player_loadout", {player=tostring(row.player)},
+            tostring(row.player).."'s Loadout"))
+        or T("leaderboard.value.generated_build")
     return CandidateEvidence.Build({
         title=title,
         ordinaryEchoes=row.echoes,
@@ -848,14 +935,14 @@ local function ApplyRolesState()
     local text = RolesRequestText(state, detail.rolesReason,
         RowName(detail.row, detail.row and detail.row.build))
     if detail.openReason then
-        text = text .. " Open unavailable: " .. tostring(detail.openReason)
+        text = text .. " " .. UnavailableText("open", detail.openReason)
     end
     SetDetailStatus(text)
     if state == "pending" then
-        detail.copy:SetText("Requesting...")
+        detail.copy:SetText(T("leaderboard.button.requesting"))
         detail.copy:Disable()
     else
-        detail.copy:SetText("Request full build")
+        detail.copy:SetText(T("leaderboard.button.request_full_build"))
         detail.copy:Enable()
     end
     -- Attach the poll only while a request is pending; clear it otherwise.
@@ -883,14 +970,14 @@ local function EnsureDetail(parent)
     local body=CreateFrame("Frame",nil,detail.bodyScroll); body:SetSize(287,1); detail.bodyScroll:SetScrollChild(body); detail.body=body
     detail.record=body:CreateFontString(nil,"OVERLAY","GameFontNormal"); detail.record:SetSize(305,42); detail.record:SetJustifyH("LEFT"); detail.record:SetJustifyV("TOP")
     detail.desc=body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.desc:SetSize(305,48); detail.desc:SetJustifyH("LEFT"); detail.desc:SetJustifyV("TOP")
-    detail.lockedTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.lockedTitle:SetText("LOCKED ECHOES")
+    detail.lockedTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.lockedTitle:SetText(T("leaderboard.heading.locked_echoes"))
     detail.lockedIcons={}
     for i=1,6 do
         local b=CreateFrame("Button",nil,body); b:SetSize(32,32); b.icon=b:CreateTexture(nil,"OVERLAY"); b.icon:SetAllPoints(b)
         b:SetScript("OnEnter",function(self) if self.tip then GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:SetHyperlink("spell:"..tostring(self.tip)); GameTooltip:Show() end end)
         b:SetScript("OnLeave",function() GameTooltip:Hide() end); b:Hide(); detail.lockedIcons[i]=b
     end
-    detail.echoTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.echoTitle:SetText("EXACT LOADOUT")
+    detail.echoTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.echoTitle:SetText(T("leaderboard.heading.exact_loadout"))
     detail.icons={}
     for i=1,80 do
         local b=CreateFrame("Button",nil,body); b:SetSize(22,22)
@@ -905,7 +992,7 @@ local function EnsureDetail(parent)
         GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:AddLine(tostring(detail.more:GetText() or ""),1,1,1,true); GameTooltip:Show()
     end)
     detail.moreHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
-    detail.copy=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.copy:SetSize(138,24); detail.copy:SetPoint("BOTTOMLEFT",14,14); detail.copy:SetText("Copy into Editor")
+    detail.copy=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.copy:SetSize(138,24); detail.copy:SetPoint("BOTTOMLEFT",14,14); detail.copy:SetText(T("leaderboard.button.copy_into_editor"))
     -- Keep ordinary and permanently locked evidence in separate immutable
     -- pools.  Neither ordering nor a shared spell ID may redefine its role.
     detail.copy:SetScript("OnClick",function()
@@ -927,19 +1014,19 @@ local function EnsureDetail(parent)
             detail.copyCandidate=nil
             detail.copyReason=tostring(reason or "record validation failed")
             detail.copy:Disable()
-            SetDetailStatus("Copy unavailable: "..detail.copyReason)
+            SetDetailStatus(UnavailableText("copy",detail.copyReason))
             return
         end
         local opened=Nexus.WishlistEditor.OpenForCandidate(validated)
         if opened~=false then M.Hide() end
     end)
-    detail.open=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.open:SetSize(138,24); detail.open:SetPoint("LEFT",detail.copy,"RIGHT",8,0); detail.open:SetText("Open Build")
+    detail.open=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.open:SetSize(138,24); detail.open:SetPoint("LEFT",detail.copy,"RIGHT",8,0); detail.open:SetText(T("leaderboard.button.open_build"))
     detail.open:SetScript("OnClick",function()
         local id,reason=ResolveOpenBuildId(detail.row)
         if not id or not (Nexus.CommunityBuilds
             and Nexus.CommunityBuilds.ShowBuild) then
             detail.openReason=tostring(reason or "Community Builds is unavailable")
-            SetDetailStatus("Open unavailable: "..detail.openReason)
+            SetDetailStatus(UnavailableText("open",detail.openReason))
             detail.open:Disable()
             return
         end
@@ -989,7 +1076,7 @@ RenderDetail = function(row)
     detail.openBuildId=nil
     detail.openReason=nil
     detail.rolesBuildId,detail.rolesState,detail.rolesReason=nil,nil,nil
-    detail.copy:SetText("Copy into Editor")
+    detail.copy:SetText(T("leaderboard.button.copy_into_editor"))
     if not row then
         for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open,detail.lockedTitle}) do x:Hide() end
         for _,b in ipairs(detail.lockedIcons) do b:Hide() end; for _,b in ipairs(detail.icons) do b:Hide() end
@@ -1000,30 +1087,33 @@ RenderDetail = function(row)
     for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open}) do x:Show() end
     local b=row.build or {}; local class=type(row.resolvedClass)=="string" and row.resolvedClass:upper() or nil; local c=CLASS_COLOR[class] or {0.8,0.8,0.8}
     detail.title:SetText(DisplayRemoteText(
-        b.title or "Recorded build",1024,false) or "Invalid title"); detail.title:SetTextColor(c[1],c[2],c[3]); detail.owner:SetText("by "..RowName(row, b)..(class and "" or " - Class not supplied"))
+        b.title or T("leaderboard.value.recorded_build"),1024,false) or T("leaderboard.value.invalid_title")); detail.title:SetTextColor(c[1],c[2],c[3])
+    local ownerName=RowName(row, b)
+    detail.owner:SetText(class and TF("leaderboard.label.by_owner",{name=ownerName})
+        or TF("leaderboard.label.by_owner_class_missing",{name=ownerName}))
     if row.category=="combined" then
-        detail.record:SetText("|cff4dff80Strongest "..DpsText(row.dps)
-            .." DPS|r\nAverage "..DpsText(row.average).."  •  Dummy "
-            ..DpsText(row.dummyDps).."  •  LK "..DpsText(row.lkDps))
+        detail.record:SetText("|cff4dff80"..TF("leaderboard.status.strongest_dps",{dps=DpsText(row.dps)})
+            .."|r\n"..TF("leaderboard.status.combined_breakdown",{average=DpsText(row.average),
+                dummy=DpsText(row.dummyDps),lk=DpsText(row.lkDps)}))
     else
         -- M4 (UX-14/LP-14): the record's real category and only the facts it
         -- carries (fight duration, level, recorded date); a missing or zero
         -- value is left out instead of reading as "Level 0" or a dash.
-        local label=row.category=="lk" and "Lich King" or "Training Dummy"
+        local label=CategoryText(row.category)
         local userText=Nexus.UserText
         local parts=userText and userText.RecordDetailParts and userText.RecordDetailParts({
             duration=row.duration,level=row.level,ts=row.ts}) or nil
-        local facts=parts and (#parts>0 and table.concat(parts,"  •  ") or "Duration, level and date not recorded")
-            or (DurationText(row.duration).."  •  Level "..tostring(tonumber(row.level) or 0))
-        detail.record:SetText("|cff4dff80"..DpsText(row.dps).." DPS|r  •  "..label.."\n"..facts)
+        local facts=parts and (#parts>0 and table.concat(parts,"  •  ") or T("leaderboard.status.record_facts_missing"))
+            or (DurationText(row.duration).."  •  "..TF("leaderboard.status.level",{level=tostring(tonumber(row.level) or 0)}))
+        detail.record:SetText("|cff4dff80"..TF("leaderboard.value.dps",{dps=DpsText(row.dps)}).."|r  •  "..label.."\n"..facts)
     end
     local displayDescription=DisplayRemoteText(
         b.description or "",4000,true,true)
     displayDescription=(displayDescription and displayDescription~="")
-        and displayDescription or "No build description provided."
+        and displayDescription or T("leaderboard.status.no_description")
     -- The row's name carries no provenance text; the detail says it.
     if row.publicIdentityVerified==false then
-        displayDescription=OWNER_NOT_ESTABLISHED.."\n"..displayDescription
+        displayDescription=OwnerNotEstablished().."\n"..displayDescription
     end
     detail.desc:SetText(displayDescription)
     local lockedResolution=ResolveRowLocked(row)
@@ -1033,7 +1123,8 @@ RenderDetail = function(row)
     -- Six icons fit the strip; a record can hold more locked rows (occupied
     -- records), and the heading counts the ones not drawn.
     local lockedMore=locked and #locked-#detail.lockedIcons or 0
-    detail.lockedTitle:SetText(lockedMore>0 and ("LOCKED ECHOES  +"..lockedMore.." more locked") or "LOCKED ECHOES")
+    detail.lockedTitle:SetText(lockedMore>0 and TF("leaderboard.heading.locked_echoes_more",{count=tostring(lockedMore)})
+        or T("leaderboard.heading.locked_echoes"))
     for i,btn in ipairs(detail.lockedIcons) do local e=locked and locked[i]; if e then btn.icon:SetTexture(SpellIcon(e.spellId)); btn.tip=e.spellId; btn:Show() else btn.tip=nil; btn:Hide() end end
     local echoes=row.echoes or b.echoes or {}; local shown=math.min(#echoes,#detail.icons); local total=0
     for _,e in ipairs(echoes) do total=total+(tonumber(e.stacks or e.count) or 1) end
@@ -1043,12 +1134,12 @@ RenderDetail = function(row)
     local openBuildId,openReason=ResolveOpenBuildId(row)
     detail.openBuildId,detail.openReason=openBuildId,openReason
     SetDetailStatus(copyReason and openReason
-            and ("Copy unavailable: "..tostring(copyReason)
-                .."; Open unavailable: "..tostring(openReason))
-        or copyReason and ("Copy unavailable: "..tostring(copyReason))
-        or openReason and ("Open unavailable: "..tostring(openReason))
-        or (#echoes==0 and "Exact loadout is still syncing."
-            or (tostring(total).." Echo slots")))
+            and (UnavailableText("copy",copyReason)
+                .."; "..UnavailableText("open",openReason))
+        or copyReason and UnavailableText("copy",copyReason)
+        or openReason and UnavailableText("open",openReason)
+        or (#echoes==0 and T("leaderboard.status.loadout_syncing")
+            or TF("leaderboard.status.echo_slots",{count=tostring(total)})))
     if candidate then detail.copy:Enable() else detail.copy:Disable() end
     if openBuildId then detail.open:Enable() else detail.open:Disable() end
     -- Only when the missing current roles are the reason: the resolver then
@@ -1078,16 +1169,65 @@ local function FindSelectedRow()
     return nil
 end
 
+-- The overflow cue (EnsureFrame): shown only while the list is longer than
+-- its view; the thumb's length and place follow the view's share and offset,
+-- and "More below" stays while rows lie below the view. Display only.
+local function UpdateScrollCue(visibleH)
+    local track, thumb, cue = frame and frame._scrollTrack, frame and frame._scrollThumb, frame and frame._scrollCue
+    if not (track and thumb and cue) then return end
+    if not (scrollMax and scrollMax > 0) then track:Hide(); thumb:Hide(); cue:Hide(); return end
+    local h = tonumber(visibleH) or 440
+    local size = math.max(12, math.floor(h * h / (h + scrollMax)))
+    local y = math.floor((h - size) * math.min(1, math.max(0, scrollValue / scrollMax)))
+    thumb:ClearAllPoints(); thumb:SetPoint("TOPLEFT", track, "TOPLEFT", 0, -y); thumb:SetHeight(size)
+    track:Show(); thumb:Show()
+    if scrollValue < scrollMax then cue:Show() else cue:Hide() end
+end
+
+-- #21 Stage A: what the last completed bind showed. A scroll whose window,
+-- published rows, category, selection and checked-out rows all still match
+-- only moves the ScrollFrame (setScrollValue has done that) and its cue. Any
+-- other change, a pending refresh or a failure rebinds as before.
+local boundRows = nil
+local BOUND_ROW_FIELDS = {
+    "rows", "active", "activeCount", "count", "visibleH", "first", "last",
+    "maxOffset", "category", "selected",
+}
+local function BoundRowsKey(virtual, visibleH)
+    return {
+        rows=currentRows, active=activeRows, activeCount=#activeRows,
+        count=#currentRows, visibleH=visibleH, first=virtual.first,
+        last=virtual.last, maxOffset=virtual.maxOffset, category=category,
+        selected=selectedKey or false,
+    }
+end
+local function SameBoundRows(virtual, visibleH)
+    if not boundRows or refreshDirty or #currentRows == 0 then return false end
+    if scrollValue ~= virtual.offset or scrollMax ~= virtual.maxOffset then return false end
+    local key = BoundRowsKey(virtual, visibleH)
+    for _, field in ipairs(BOUND_ROW_FIELDS) do
+        if key[field] ~= boundRows[field] then return false end
+    end
+    return true
+end
+
 local function BindRows(reason)
     if rowBinding then return end
     rowBinding = true
     local ok, err = pcall(function()
-        ReleaseRows()
         local rowHeight = ROW_H + 2
         local visibleH = math.max(100,
             (listScroll and listScroll:GetHeight()) or 458)
         local virtual = Nexus.VirtualList.Window(
             #currentRows, rowHeight, visibleH, scrollValue, 2)
+        if reason == "scroll" and SameBoundRows(virtual, visibleH) then
+            -- The bound rows stay; the cue and reported offset follow the view.
+            UpdateScrollCue(visibleH)
+            virtualStats.offset = virtual.offset
+            return
+        end
+        boundRows = nil
+        ReleaseRows()
         for index = virtual.first, virtual.last do
             local row = currentRows[index]
             local r = GetRow(listChild)
@@ -1109,16 +1249,16 @@ local function BindRows(reason)
             r.player:SetText(RowName(row))
             r.player:SetTextColor(c[1],c[2],c[3])
             local buildTitle=DisplayRemoteText(
-                tostring((row.build or {}).title or "Recorded build"),1024,false)
-                or "Invalid title"
-            r.build:SetText(buildTitle
-                ..(class and "" or " - Class not supplied"))
+                tostring((row.build or {}).title or T("leaderboard.value.recorded_build")),1024,false)
+                or T("leaderboard.value.invalid_title")
+            r.build:SetText(class and buildTitle
+                or TF("leaderboard.value.title_class_missing",{title=buildTitle},
+                    buildTitle.." - Class not supplied"))
+            r.dps:SetText("|cff4dff80"..TF("leaderboard.value.dps",{dps=DpsText(row.dps)}).."|r")
             if category=="combined" then
-                r.dps:SetText("|cff4dff80"..DpsText(row.dps).." DPS|r")
-                r.extra:SetText("Avg "..DpsText(row.average).."  •  Dummy "
-                    ..DpsText(row.dummyDps).."  •  LK "..DpsText(row.lkDps))
+                r.extra:SetText(TF("leaderboard.value.combined_row_breakdown",{average=DpsText(row.average),
+                    dummy=DpsText(row.dummyDps),lk=DpsText(row.lkDps)}))
             else
-                r.dps:SetText("|cff4dff80"..DpsText(row.dps).." DPS|r")
                 r.extra:SetText(DurationText(row.duration))
             end
             if RecordKey(row)==selectedKey then r.sel:Show() else r.sel:Hide() end
@@ -1126,6 +1266,7 @@ local function BindRows(reason)
         listChild:SetHeight(math.max(1,virtual.contentHeight))
         scrollMax, scrollValue = virtual.maxOffset, virtual.offset
         pcall(function() listScroll:SetVerticalScroll(scrollValue) end)
+        UpdateScrollCue(visibleH)
         virtualStats.results=#currentRows
         virtualStats.active=#activeRows
         virtualStats.peakActive=math.max(virtualStats.peakActive,#activeRows)
@@ -1141,9 +1282,11 @@ local function BindRows(reason)
         if reason=="scroll" then virtualStats.scrollBinds=virtualStats.scrollBinds+1
         elseif reason=="resize" then virtualStats.resizeBinds=virtualStats.resizeBinds+1
         else virtualStats.dataBinds=virtualStats.dataBinds+1 end
+        boundRows = BoundRowsKey(virtual, visibleH)
     end)
     rowBinding = false
     if not ok then
+        boundRows = nil
         pcall(ReleaseRows)
         virtualStats.active=0
         virtualStats.first,virtualStats.last=1,0
@@ -1181,18 +1324,37 @@ end
 local function EnsureFrame()
     if frame then return frame end
     frame=CreateFrame("Frame","NexusLeaderboardFrame",UIParent); frame:SetClampedToScreen(true); if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusLeaderboardFrame") end
-    frame:SetSize(980,640); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(55); frame:EnableMouse(true); frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
+    -- The workspaces' common width (Plan and Explore are 1040 too), so the
+    -- shared header stands at the same place in each.
+    frame:SetSize(Nexus.LayoutMetrics and Nexus.LayoutMetrics.WORKSPACE_WIDTH or 1040,640); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(55); frame:EnableMouse(true); frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart",function(self) self:StartMoving() end); frame:SetScript("OnDragStop",function(self) self:StopMovingOrSizing() end); frame:Hide()
     pcall(function() frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}}) end)
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
-    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText("Nexus — Leaderboard")
+    -- The workspace's own name, as its tab says (Records); the window used to
+    -- carry the older "Explore / Leaderboard" heading.
+    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText(T("leaderboard.title.records")); frame._title=title
     local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-6,-6)
-    local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
-    local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
-    local wish=MakeNavButton(frame,"Wishlists",92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
+    local builds=MakeNavButton(frame,T("leaderboard.button.nav_builds"),88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
+    local board=MakeNavButton(frame,T("leaderboard.button.nav_leaderboard"),102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200"..T("leaderboard.button.nav_leaderboard").."|r"); board:Disable()
+    local wish=MakeNavButton(frame,T("leaderboard.button.nav_wishlists"),92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
+    -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008);
+    -- Reference, at the top right clear of the centred title, is the manual's
+    -- Sharing page, which covers the Leaderboard. Like the other navigation
+    -- buttons each replaces this window, whose layer is above theirs; each
+    -- opens a page only.
+    frame._helpNav=MakeNavButton(frame,T("leaderboard.button.nav_help"),56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("sharing",M.Hide) end end)
+    frame._referenceNav=MakeNavButton(frame,T("leaderboard.button.nav_reference"),84); frame._referenceNav:SetPoint("TOPRIGHT",-40,-12); frame._referenceNav:SetScript("OnClick",function() if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("sharing",M.Hide) end end)
+    if Nexus.FullUIWorkspaces then
+        Nexus.FullUIWorkspaces.BindTabs(frame, "records", {
+            plan = wish, builds = builds, records = board,
+        }, function() if classMenu then classMenu:Hide() end end)
+        Nexus.FullUIWorkspaces.ApplyHeader(frame, frame, {
+            title=title, help=frame._helpNav, reference=frame._referenceNav,
+        })
+    end
 
     searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
-    local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText("Search player or build...")
+    local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText(T("leaderboard.placeholder.search"))
     searchBox:SetScript("OnEditFocusGained",function() ph:Hide() end); searchBox:SetScript("OnEditFocusLost",function(self) if self:GetText()=="" then ph:Show() end end)
 
     classBtn=CreateFrame("Button",nil,frame); classBtn:SetSize(150,22); classBtn:SetPoint("LEFT",searchBox,"RIGHT",10,0); SetBackdrop(classBtn,0.94)
@@ -1202,30 +1364,50 @@ local function EnsureFrame()
     for i,k in ipairs(CLASS_ORDER) do
         local rb=CreateFrame("Button",nil,classMenu); rb:SetSize(160,22); rb:SetPoint("TOPLEFT",5,-4-(i-1)*22)
         rb.bg=rb:CreateTexture(nil,"BACKGROUND"); rb.bg:SetAllPoints(rb); rb.bg:SetTexture(0.12,0.12,0.17,0); local t=rb:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); t:SetPoint("LEFT",9,0)
-        local c=CLASS_COLOR[k] or {1,0.82,0}; t:SetText(k=="ALL" and "All Classes" or CLASS_LABEL[k]); t:SetTextColor(c[1],c[2],c[3])
+        local c=CLASS_COLOR[k] or {1,0.82,0}; t:SetText(k=="ALL" and T("leaderboard.label.all_classes") or ClassText(k)); t:SetTextColor(c[1],c[2],c[3])
         rb:SetScript("OnEnter",function(self) self.bg:SetTexture(0.14,0.18,0.25,0.9) end); rb:SetScript("OnLeave",function(self) self.bg:SetTexture(0.12,0.12,0.17,0) end)
         rb:SetScript("OnClick",function() classFilter=k; classMenu:Hide(); selectedKey=nil; RefreshInteractive() end)
     end
     classBtn:SetScript("OnClick",function(self) if classMenu:IsShown() then classMenu:Hide() else classMenu:ClearAllPoints(); classMenu:SetPoint("TOPLEFT",self,"BOTTOMLEFT",0,-2); classMenu:Show() end end)
 
-    syncBtn=MakeNavButton(frame,"Sync Now",90); syncBtn:SetPoint("TOPRIGHT",-18,-50)
+    syncBtn=MakeNavButton(frame,T("leaderboard.button.sync_now"),90); syncBtn:SetPoint("TOPRIGHT",-18,-50)
     syncBtn:SetScript("OnClick",function()
         classMenu:Hide()
         local S=Nexus.Sync
         if not (S and type(S.RequestSync)=="function") then return end
         local ok,reason=S.RequestSync()
-        if ok==nil then print("|cff7fd5ffNexus:|r "..tostring(reason or "preparing sync data"))
-        elseif ok then print("|cff7fd5ffNexus:|r "..tostring(reason or "asking other players for their builds..."))
-        else print("|cffff6060Nexus:|r "..tostring(reason or "sync unavailable")) end
+        -- A reason is the Sync owner's, in its display words when known.
+        if ok==nil then print("|cff7fd5ffNexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.preparing_sync_data")))
+        elseif ok then print("|cff7fd5ffNexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.asking_for_builds")))
+        else print("|cffff6060Nexus:|r "..(reason and ReasonText(reason) or T("leaderboard.chat.sync_unavailable"))) end
         M.RefreshStatus()
     end)
-    dummyBtn=MakeTab(frame,"Training Dummy",118); dummyBtn:SetPoint("TOPLEFT",18,-82); dummyBtn:SetScript("OnClick",function() category="dummy"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
-    lkBtn=MakeTab(frame,"Lich King",100); lkBtn:SetPoint("LEFT",dummyBtn,"RIGHT",5,0); lkBtn:SetScript("OnClick",function() category="lk"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
-    combinedBtn=MakeTab(frame,"Both records",112); combinedBtn:SetPoint("LEFT",lkBtn,"RIGHT",5,0); combinedBtn:SetScript("OnClick",function() category="combined"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
+    -- The same Sync words as the Build Library's Sync Now and Help. Reading
+    -- the saved mode writes nothing; Off and Manual are SyncModePolicy's text.
+    syncBtn:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine(T("leaderboard.tooltip.sync_now_title"),1,1,1)
+        GameTooltip:AddLine(T("leaderboard.tooltip.sync_now_asks"),0.8,0.8,0.8,true)
+        local policy=Nexus.SyncModePolicy
+        local mode=policy and type(policy.Mode)=="function" and policy.Mode() or nil
+        local modeText=mode=="automatic" and T("leaderboard.tooltip.sync_automatic_sends")
+            -- The display sentence of the mode: SyncModePolicy.DisplayText when
+            -- that owner provides it, else its raw Text (unchanged English).
+            or mode and type(policy.DisplayText or policy.Text)=="function"
+                and (policy.DisplayText or policy.Text)(mode) or nil
+        if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
+        GameTooltip:AddLine(T("leaderboard.tooltip.sync_automatic_record_sends"),0.7,0.7,0.7,true)
+        GameTooltip:AddLine(T("leaderboard.tooltip.sync_sent_received_stored"),0.7,0.7,0.7,true)
+        GameTooltip:Show()
+    end)
+    syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    dummyBtn=MakeTab(frame,T("leaderboard.tab.training_dummy"),118); dummyBtn:SetPoint("TOPLEFT",18,-82); dummyBtn:SetScript("OnClick",function() category="dummy"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
+    lkBtn=MakeTab(frame,T("leaderboard.tab.lich_king"),100); lkBtn:SetPoint("LEFT",dummyBtn,"RIGHT",5,0); lkBtn:SetScript("OnClick",function() category="lk"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
+    combinedBtn=MakeTab(frame,T("leaderboard.tab.both_records"),112); combinedBtn:SetPoint("LEFT",lkBtn,"RIGHT",5,0); combinedBtn:SetScript("OnClick",function() category="combined"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     combinedBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:SetText("Both DPS records")
-        GameTooltip:AddLine("Requires Training Dummy and Lich King records. Ranked by the highest single eligible result; the displayed average does not set the rank.",1,1,1,true)
+        GameTooltip:SetText(T("leaderboard.tooltip.both_records_title"))
+        GameTooltip:AddLine(T("leaderboard.tooltip.both_records_rank"),1,1,1,true)
         GameTooltip:Show()
     end)
     combinedBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
@@ -1233,9 +1415,11 @@ local function EnsureFrame()
     countText=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); countText:SetPoint("TOPLEFT",18,-113); countText:SetSize(LIST_W,14); countText:SetJustifyH("LEFT")
 
     local head=CreateFrame("Frame",nil,frame); head:SetSize(LIST_W,22); head:SetPoint("TOPLEFT",18,-133); SetBackdrop(head,0.74)
-    local labels={{"#",8,30,"CENTER"},{"CHARACTER / LOADOUT",80,300,"LEFT"},{"RESULT",430,145,"RIGHT"}}
+    local labels={{T("leaderboard.column.rank"),8,30,"CENTER"},{T("leaderboard.column.character_loadout"),80,300,"LEFT"},{T("leaderboard.column.result"),430,145,"RIGHT"}}
     for _,x in ipairs(labels) do local t=head:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); t:SetPoint("LEFT",x[2],0); t:SetSize(x[3],14); t:SetJustifyH(x[4]); t:SetText(x[1]) end
-    local clip=CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,18); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
+    -- 440 units (eleven whole 40-unit rows at 640 high) above a line for the
+    -- overflow cue, so the list does not end in a half-cut row.
+    local clip=CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,42); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
     listScroll=CreateFrame("ScrollFrame",nil,clip); listScroll:SetAllPoints(clip); listScroll:EnableMouseWheel(true); listChild=CreateFrame("Frame",nil,listScroll); listChild:SetWidth(LIST_W); listChild:SetHeight(1); listScroll:SetScrollChild(listChild)
     setScrollValue=function(value,reason)
         value=tonumber(value)
@@ -1247,6 +1431,15 @@ local function EnsureFrame()
             renderRowsWindow(reason or "scroll")
         end
     end
+    -- A visible overflow cue beside the wheel-only list: a track and thumb in
+    -- the gap left of the detail pane, and "More below" under the list while
+    -- rows lie below the view (UpdateScrollCue). Display only.
+    local track=frame:CreateTexture(nil,"ARTWORK"); track:SetTexture(1,1,1,1); track:SetVertexColor(0.3,0.3,0.36,0.8)
+    track:SetPoint("TOPLEFT",clip,"TOPRIGHT",4,0); track:SetPoint("BOTTOMLEFT",clip,"BOTTOMRIGHT",4,0); track:SetWidth(4); track:Hide()
+    local thumb=frame:CreateTexture(nil,"OVERLAY"); thumb:SetTexture(1,1,1,1); thumb:SetVertexColor(1,0.82,0,0.85); thumb:SetWidth(4); thumb:Hide()
+    local cue=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); cue:SetPoint("TOPRIGHT",clip,"BOTTOMRIGHT",0,-6); cue:SetSize(260,12); cue:SetJustifyH("RIGHT")
+    cue:SetText(T("leaderboard.status.more_below")); cue:Hide()
+    frame._scrollTrack,frame._scrollThumb,frame._scrollCue=track,thumb,cue
     listScroll:SetScript("OnMouseWheel",function(_,d) setScrollValue(scrollValue-d*(ROW_H+2)*4,"scroll") end)
     listScroll:SetScript("OnSizeChanged",function()
         if renderRowsWindow and frame and frame:IsShown() and not rowBinding then
@@ -1363,7 +1556,7 @@ end
 function M.RefreshStatus()
     if not frame or not frame:IsShown() then return end
     local S=Nexus.Sync
-    syncBtn:SetText("Sync Now")
+    syncBtn:SetText(T("leaderboard.button.sync_now"))
     if S and S.GetLeaderboardSyncStatus then
         local state,waitSeconds,pending,work=S.GetLeaderboardSyncStatus(); work=type(work)=="table" and work or {}; local receiving=tonumber(work.receiving) or 0
         -- Preparation is a session outcome, not a transport queue state. Read it
@@ -1372,13 +1565,18 @@ function M.RefreshStatus()
         -- must not keep the temporary preparation label.
         local stats=state=="syncing" and type(S.Stats)=="function" and S.Stats() or nil
         local preparing=type(stats)=="table" and stats.preparingRequest==true
-        if state=="throttled" then statusText:SetText("|cffffcc55Sync resumes in "..tostring(waitSeconds).."s|r")
+        if state=="throttled" then statusText:SetText("|cffffcc55"..TF("leaderboard.status.sync_resumes_in",{seconds=tostring(waitSeconds)}).."|r")
         elseif preparing then
-            syncBtn:SetText("Preparing shared data...")
-            statusText:SetText("|cff7fd5ffPreparing sync data...|r")
-        elseif state=="syncing" then statusText:SetText("|cff4dff80Syncing"..(receiving>0 and (" • "..receiving.." receiving") or "...").."|r")
-        elseif state=="cleaning" then statusText:SetText("|cffffcc55Removing expired requests...|r")
-        elseif state=="sending" then statusText:SetText("|cff4dff80Sending queued Nexus work...|r")
+            syncBtn:SetText(T("leaderboard.button.preparing_shared_data"))
+            statusText:SetText("|cff7fd5ff"..T("leaderboard.status.preparing_sync_data").."|r")
+        -- "receiving" only from the count of inbound transfers in flight
+        -- (ux_status_composition); its English line is also the fallback.
+        elseif state=="syncing" then statusText:SetText("|cff4dff80"..(receiving>0
+                and TF("leaderboard.status.syncing_receiving",{count=Nexus.Localization.Count(receiving)},
+                    "Syncing • "..receiving.." receiving")
+                or T("leaderboard.status.syncing")).."|r")
+        elseif state=="cleaning" then statusText:SetText("|cffffcc55"..T("leaderboard.status.removing_expired_requests").."|r")
+        elseif state=="sending" then statusText:SetText("|cff4dff80"..T("leaderboard.status.sending_queued_work").."|r")
         else statusText:SetText("|cff888888"..LeaderboardScope().."|r") end
     else statusText:SetText("|cff888888"..LeaderboardScope().."|r") end
     -- Anchored at its right edge, the button widens left for a longer label.
@@ -1397,7 +1595,7 @@ function M.RefreshData()
     end
     local tabs={{dummyBtn,"dummy"},{lkBtn,"lk"},{combinedBtn,"combined"}}
     for _,v in ipairs(tabs) do if category==v[2] then v[1].active:Show() else v[1].active:Hide() end; v[1].text:SetTextColor(category==v[2] and 1 or 0.82, category==v[2] and 0.82 or 0.82, category==v[2] and 0 or 0.82) end
-    classBtn.text:SetText(classFilter=="ALL" and "All Classes" or CLASS_LABEL[classFilter] or classFilter)
+    classBtn.text:SetText(classFilter=="ALL" and T("leaderboard.label.all_classes") or ClassText(classFilter) or classFilter)
     local nextRows, nextSummary, rowsError = Rows()
     if type(nextRows) ~= "table" then
         refreshDirty = true
@@ -1406,9 +1604,9 @@ function M.RefreshData()
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
             if interactivePending and countText then
-                local label=category=="lk" and "Lich King"
-                    or (category=="dummy" and "Training Dummy" or "Both records")
-                countText:SetText("Loading "..label.." records...")
+                countText:SetText(T(category=="lk" and "leaderboard.status.loading_lk_records"
+                    or (category=="dummy" and "leaderboard.status.loading_dummy_records"
+                    or "leaderboard.status.loading_both_records")))
             end
             M.RefreshStatus()
             return false, "pending"
@@ -1430,8 +1628,11 @@ function M.RefreshData()
         and nextSummary.rowByKey or nil
     local selected=FindSelectedRow()
     if not selected and selectedKey then selectedKey=nil end
-    local label=category=="lk" and "Lich King" or (category=="dummy" and "Training Dummy" or "Both records")
-    countText:SetText(tostring(#currentRows).." ranked "..label..(category=="combined" and " • requires both records • ranked by strongest single DPS" or " records"))
+    -- The scope of what is listed: the best records known here, from the
+    -- shared records this client received (not a server-wide ranking).
+    countText:SetText(TF(category=="lk" and "leaderboard.status.ranked_lk_records"
+        or (category=="dummy" and "leaderboard.status.ranked_dummy_records"
+        or "leaderboard.status.ranked_both_records"),{count=tostring(#currentRows)}))
     renderRowsWindow=BindRows
     local bound, bindError = pcall(BindRows, "data")
     if not bound then
@@ -1450,12 +1651,16 @@ function M.RefreshData()
     end
     if #currentRows==0 then
         RenderDetail(nil)
-        detail.empty:SetText(category=="combined" and "No builds have both Training Dummy and Lich King records yet.\n\nBoth-record builds are ordered by their highest valid single DPS result. The displayed average does not determine this rank." or ("No "..label.." records are known yet.\n\nLeaderboard data syncs on login; Sync Now checks again."))
+        detail.empty:SetText(category=="combined"
+            and (T("leaderboard.body.no_both_records").."\n\n"..T("leaderboard.body.both_records_order"))
+            or (T(category=="lk" and "leaderboard.body.no_lk_records" or "leaderboard.body.no_dummy_records")
+                .."\n\n"..T("leaderboard.body.syncs_on_login")))
         if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
     else
         -- Rows are listed: an earlier category's "no records" instruction no
-        -- longer applies, so the unselected pane is blank, as on first open.
-        detail.empty:SetText("")
+        -- longer applies; with nothing selected the pane says what to do.
+        detail.empty:SetText(T("leaderboard.body.select_prompt"))
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
         RenderDetail(selected)
     end
     virtualStats.dataRefreshes=virtualStats.dataRefreshes+1
@@ -1503,6 +1708,9 @@ function M.MarkDataDirty()
 end
 
 function M.Init(adapter) Adapter=adapter end
+-- The detail pane with records listed and none selected: the English of
+-- leaderboard.body.select_prompt, kept for existing callers.
+M.SELECT_PROMPT="Select a record on the left to see its build, DPS and Echoes."
 function M.Show(mode)
     local community=Nexus.CommunityBuilds
     if community and type(community.WaitForStartup)=="function"

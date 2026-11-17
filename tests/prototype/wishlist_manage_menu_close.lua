@@ -131,13 +131,13 @@ Scenario('M2','the confirmation reachable after reopening',function()
  StaticPopup_Hide('NEXUS_FORGET_WISHLIST')
 end)
 
-Scenario('M3','the editor\'s own Leaderboard button',function()
+Scenario('M3','the editor\'s own Records button',function()
  if not Open('M3') then return end
- local board=V.Button(H,Editor(),'Leaderboard')
- C.setup(board~=nil,'M3: fixture: the editor\'s Leaderboard button exists')
+ local board=V.Button(H,Editor(),'Records')
+ C.setup(board~=nil,'M3: fixture: the editor\'s Records button exists')
  if not board then return end
  board:Click()
- C.setup(not Editor():IsShown(),'M3: fixture: the Leaderboard button closes the editor')
+ C.setup(not Editor():IsShown(),'M3: fixture: the Records button closes the editor')
  C.expect(not Shown(),'M3: the Manage list closes with the editor')
  if Nexus.Leaderboard.IsShown() then Nexus.Leaderboard.Hide() end
 end)
