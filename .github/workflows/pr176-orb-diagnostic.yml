@@ -1,0 +1,58 @@
+name: PR176 Orb checkpoint diagnostic
+
+# One branch-creation push only. No PR, schedule, dispatch, publication or retry loop.
+on:
+  push:
+    branches:
+      - diagnostic/pr176-orb-checkpoints-20261117-b
+permissions:
+  contents: read
+jobs:
+  targeted-diagnostic:
+    if: github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact diagnostic push
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Install existing CI runtime
+        timeout-minutes: 5
+        run: sudo apt-get update && sudo apt-get install --yes luajit
+      - name: Record source and runtime identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git rev-parse HEAD 'HEAD^{tree}'
+          git status --porcelain
+          cat /etc/os-release
+          uname -a
+          lscpu
+          python3 --version
+          luajit -v
+          dpkg-query -W luajit libluajit-5.1-2
+          sha256sum "$(command -v luajit)" tools/ci_check.py tools/run_prototype_tests.py tests/prototype/orb_bounded_recovery.lua
+          echo 'Command: python3 -B tools/ci_check.py --only orb_bounded_recovery --output /tmp/pr176-diagnostic.json'
+          echo 'PARTIAL diagnostic only; original 45-second per-test limits; no release or merge clearance.'
+      - name: Run Orb fixture once
+        timeout-minutes: 4
+        shell: bash
+        run: |
+          python3 -B tools/ci_check.py --only orb_bounded_recovery --output /tmp/pr176-diagnostic.json
+      - name: Preserve complete report in job log
+        if: always()
+        shell: bash
+        run: |
+          if test -f /tmp/pr176-diagnostic.json; then
+            sha256sum /tmp/pr176-diagnostic.json
+            cat /tmp/pr176-diagnostic.json
+          else
+            echo 'Report absent: tests unavailable or interrupted; not a pass.'
+          fi
+          echo '### PR176 partial diagnostic, not full-suite clearance' >> "$GITHUB_STEP_SUMMARY"
+          echo 'See complete JSON and source/runtime identity in the job log. Failed tests retain failed status.' >> "$GITHUB_STEP_SUMMARY"

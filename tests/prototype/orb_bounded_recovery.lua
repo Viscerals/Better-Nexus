@@ -1,5 +1,17 @@
 -- Synthetic services; real Orb owner, adapter, Store and policy. No live spending.
+-- DIAGNOSTIC ONLY: coarse CPU observations, not wall time or acceptance.
+local diagnosticPrevious=os.clock()
+local diagnosticStart=diagnosticPrevious
+local function diagnosticCheckpoint(phase,n)
+ local now=os.clock()
+ io.stderr:write(string.format('ORB_PHASE %s cpu=%.6f delta=%.6f checks=%d\n',
+  phase,now-diagnosticStart,now-diagnosticPrevious,n or 0))
+ io.stderr:flush()
+ diagnosticPrevious=now
+end
+diagnosticCheckpoint('support_begin',0)
 local R=dofile('tests/prototype/orb_recovery_support.lua')
+diagnosticCheckpoint('support_end',0)
 local checks=0
 -- SETUP establishes inputs, EXPECT checks behavior, and GUARD preserves safety.
 -- Executed source-bound results are recorded separately from these predicates.
@@ -30,6 +42,7 @@ end
 -- Distinct retained receipt serials are archived by real Check/Confirm; no
 -- placeholder digest, invalid receipt or scratch-only Store callback is used.
 local validArchiveEntries={};local archiveIdentities={}
+diagnosticCheckpoint('archive_bootstrap_begin',checks)
 for i=1,8 do
  local H,M,A,O=R.Class({latch=false,edit=function(row,state)row.logSerial=900+i;state.logSerial=900+i end})
  R.Server(H);R.S.Pass(H,M,A,1);local original=H.Clone(R.Saved())
@@ -39,6 +52,7 @@ for i=1,8 do
  assert(R.Same(e.receipt,original) and e.resolution.confidence=='NONE' and not archiveIdentities[e.id],'SETUP valid distinct capacity entry from actual atomic Continue')
  archiveIdentities[e.id]=true;validArchiveEntries[i]=H.Clone(e)
 end
+diagnosticCheckpoint('archive_bootstrap_end',checks)
 local function entryBytes(t)
  local bytes=0;for k,v in pairs(t)do bytes=bytes+#tostring(k)
   if type(v)=='table'then bytes=bytes+entryBytes(v)elseif type(v)=='string'then bytes=bytes+#v else bytes=bytes+8 end
@@ -345,6 +359,7 @@ end
 
 -- Automatic recovery preserves two of the existing archive slots AND two
 -- worst-case entry byte budgets for explicit restored-receipt Continue.
+diagnosticCheckpoint('capacity_group_begin',checks)
 local function seedArchive(n,padding)
  local function clone(v)if type(v)~='table'then return v end;local out={};for k,x in pairs(v)do out[k]=clone(x)end;return out end
  local list={}
@@ -605,6 +620,7 @@ do
  check(M.RunLog().entries[1].state=='unknown','GUARD current ownership never confirms the archived operation')
 end
 
+diagnosticCheckpoint('semantic_group_begin',checks)
 -- S1 semantic addition: a fresh exact owned gain is progress, never attribution.
 -- Only the player's checked consent may release its retained blocker.
 for _,reload in ipairs({false,true}) do
@@ -827,6 +843,7 @@ for _,kind in ipairs({'service','binding','level'}) do
  check(not M.ContinueConfirm(token) and R.Same(R.Saved(),original) and M.BlocksOrdinary(),'GUARD restored '..kind..' change invalidates the explicit token before save')
 end
 
+diagnosticCheckpoint('public_owner_group_begin',checks)
 -- public-owner regressions. Each case starts from real receipt/archive writes;
 -- no historical receipt, adapter or source policy implementation is replaced.
 local r1fail={}
@@ -949,6 +966,7 @@ for _,kind in ipairs({'future','malformed','unknown_receipt','unknown_late'}) do
  end)
 end
 if #r1fail>0 then error(table.concat(r1fail,'\n'),0) end
+diagnosticCheckpoint('lifecycle_group_begin',checks)
 -- Lifecycle and authority behavioral regressions. These invoke the actual public owners
 -- and UI handlers; SETUP establishes the boundary, EXPECT is the repaired
 -- behavior, and GUARD preserves independent safety facts.
@@ -1265,6 +1283,7 @@ r2case('E actual versioned maximal automatic receipt',function()
  check(edges<=1200 and bytes<=6144 and depth<=4,'GUARD actual post-representation remains within unchanged caps')
  print('OBSERVED maximal versioned entry edges='..edges..' bytes='..bytes..' depth='..depth)
 end)
+diagnosticCheckpoint('cancellation_group_begin',checks)
 -- Current owner cancellation and owed-offer orders use real callback/event paths.
 -- A classified entry then holds Resume until the actual post-entry settle
 -- deadline; the deadline alone reactivates nothing.
@@ -1472,6 +1491,7 @@ r2case('new Confirm carries the remaining classified loading window',function()
  check(H.Count('orb-spend')==spends+1 and H.Count('take')==takes,'GUARD the single eligible Start submits no further spend')
 end)
 if #r2fail>0 then error(table.concat(r2fail,'\n'),0) end
+diagnosticCheckpoint('loader_controls_begin',checks)
 -- Test-support loader controls (tests/prototype/harness.lua, H.Boot). They state
 -- what any module loader must preserve for these fresh boots, and show which
 -- path the boots above used. Synthetic files only; no game action.
@@ -1629,4 +1649,5 @@ do
  print('OBSERVED harness loader hits='..H3.LoaderStats().hits..' misses='..H3.LoaderStats().misses
   ..' cold='..H3.LoaderStats().cold..' entries='..H3.LoaderStats().entries..' bytes='..H3.LoaderStats().bytes)
 end
+diagnosticCheckpoint('all_scenarios_end',checks)
 print('PASS bounded Orb transition and missed-result recovery checks='..checks)
