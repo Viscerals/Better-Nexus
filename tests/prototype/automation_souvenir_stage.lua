@@ -24,8 +24,9 @@
 --     lock, a different spell of the wished family, two flagged cards) is left
 --     to the player with the stated souvenir reason, and nothing is sent;
 --   * Nexus never gives the souvenir up (no memory draw request);
---   * the existing guards still hold: a pending native pick, an Orb hold and
---     a souvenir flag that disappears inside the Take all send nothing;
+--   * the existing guards still hold: a pending native pick and an Orb hold
+--     send nothing, and a souvenir flag that disappears after the Take is
+--     entered (before the native Select) is refused at the send boundary;
 --   * the older provider keeps its earlier behavior (no souvenir rule).
 -- Real TOC boot (harness), real Wishlist/runtime/EchoWeaver/adapter path;
 -- synthetic services and SYNTHETIC ids only. Expected outcomes are written
@@ -56,6 +57,8 @@ local function Run(label,spec)
  H.service.SelectPerk=function(...) selects=selects+1;return select(...) end
  H.Boot()
  local A=Nexus.GameAdapter
+ local ctx={}
+ if spec.afterBoot then spec.afterBoot(H,ctx) end
  check(A.SetFirstLoadoutWishlistIdentity('Synthetic Souvenir',spec.echoes
   or {{spellId=X,quality=X%4,stacks=1},{spellId=Y,quality=Y%4,stacks=1}},spec.design or {})==true,
   label..': fixture: the plan is set')
@@ -67,9 +70,14 @@ local function Run(label,spec)
  local first=H.actions[a0+1]
  local log=Nexus.DiagnosticLogs.Snapshot('decision')
  local last=log[#log] or {}
+ local tookProposed=nil
+ for _,e in ipairs(log) do
+  local p=e.proposal
+  if p and p.type=='take' then tookProposed=p.spellId end
+ end
  return {action=first and first[1],id=first and first[2],actions=#H.actions-a0,sent=#sent,selects=selects,
   reason=tostring((last.proposal or {}).reason or ''),
-  board=Nexus.GameAdapter.Board(),H=H}
+  proposal=last.proposal or {},tookProposed=tookProposed,ctx=ctx,board=Nexus.GameAdapter.Board(),H=H}
 end
 
 local function Souvenir(id,extra)
@@ -102,8 +110,9 @@ HandedOff(Run('unrequested souvenir',{updated=true,board={Souvenir(200030)}}),'u
 HandedOff(Run('carried beside souvenir',{updated=true,
  board={{spellId=X,quality=X%4,isCarried=true},Souvenir(200030)}}),'carried beside souvenir')
 
--- 4. Control (also passes before the fix, through the ordinary three-card
--- planner): a needed souvenir beside two carried cards is taken.
+-- 4. Control (expected to pass before the fix too, through the ordinary
+-- three-card planner: by reading, not executed on the base source): a needed
+-- souvenir beside two carried cards is taken.
 do
  local r=Run('needed souvenir with carried',{updated=true,
   board={{spellId=200031,quality=1,isCarried=true},{spellId=200032,quality=2,isCarried=true},Souvenir(Y)}})
@@ -148,14 +157,32 @@ do
    GetCharges=function() return 0 end,IsOfferPending=function() return false end,RequestCharges=function() end} end})
  check(r.actions==0 and r.sent==0 and r.selects==0,'an unknown Orb state holds the souvenir Take: '..r.selects)
  check(r.reason=='Orb state active or unknown','and the Orb hold is the stated reason: '..r.reason)
+ -- The flag is cleared only once GameAdapter.Take has been entered (its
+ -- entry admission passed), at its granted read before the native Select;
+ -- the earlier ownership reads see the souvenir, so the planner decides it.
  r=Run('flag cleared inside the Take',{updated=true,board={Souvenir(X)},
-  beforeAuto=function(H)
+  afterBoot=function(H,ctx)
+   local take=Nexus.GameAdapter.Take
+   Nexus.GameAdapter.Take=function(...)
+    ctx.entered=(ctx.entered or 0)+1
+    local res={take(...)}
+    ctx.result=res
+    return unpack(res)
+   end
    local old=H.service.GetGrantedPerks
    H.service.GetGrantedPerks=function(...)
-    if H.perks.currentChoice and H.perks.currentChoice[1] then H.perks.currentChoice[1].isGuaranteed=false end
+    if ctx.entered and not ctx.cleared and H.perks.currentChoice and H.perks.currentChoice[1] then
+     ctx.cleared=true;H.perks.currentChoice[1].isGuaranteed=false
+    end
     return old(...)
    end
   end})
+ check(r.tookProposed==X,'the planner decided the souvenir Take: '..tostring(r.tookProposed))
+ check(r.ctx.entered==1 and r.ctx.cleared==true,'the Take was entered once and the flag cleared inside it: '
+  ..tostring(r.ctx.entered)..' '..tostring(r.ctx.cleared))
+ check(r.ctx.result and r.ctx.result[1]==false
+  and r.ctx.result[2]=='the memory card state is not known; the choice is left to the player',
+  'the send boundary refused the Take: '..tostring(r.ctx.result and r.ctx.result[2]))
  check(r.actions==0 and r.sent==0 and r.selects==0,'a souvenir flag that disappears inside the Take: Select is never called: '..r.selects)
 end
 
