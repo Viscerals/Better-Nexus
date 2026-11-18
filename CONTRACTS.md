@@ -293,8 +293,8 @@ This file has two parts.
   the souvenir. Nexus therefore reveals, and takes from a revealed board, only
   on a choice table that is actionable (`ChoiceActionable`): observed for
   `CHOICE_SETTLE` (1 s; first observation is never before the parse), and on
-  a frame strictly later than the first frame in which that held
-  (`GetTime()` is constant within a frame). In that first settled frame the
+  a frame strictly later than the first frame in which that held (compared
+  by `GetTime()` values). In that first settled frame the
   timer's summed elapsed time already covers the settle, so it fired in or
   before that frame; by the next frame its Select is pending (every send
   boundary refuses) or it was refused. `Board()` marks a choice that is not
@@ -302,8 +302,9 @@ This file has two parts.
   game's own pick window to pass` and the runtime decides again at the poll
   pace; `RevealMemory` (`reveal_not_settled`, superseded and decided again)
   and the revealed-board `ChoiceAdmission` refuse it at the send boundary.
-  Assumed, not proven offline: a shown frame's `OnUpdate` runs on every frame
-  and its elapsed time tracks `GetTime()`. For the Take the client's shared
+  Assumed, not proven offline (the harness models them by construction):
+  `GetTime()` is constant within a frame, a shown frame's `OnUpdate` runs on
+  every frame, and its elapsed time tracks `GetTime()`. For the Take the client's shared
   Select flag also separates the two picks in either order; for the reveal
   only the frame rule does.
   A run boundary (`RunBoundaryReset`) advances the run identity in the draw

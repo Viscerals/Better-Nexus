@@ -116,20 +116,24 @@ ctx=Boot({})
 Reply(ctx,{Card(A1),Card(X),Card(A2)});ctx.H.Advance(3)
 check(Takes(ctx,X)==1 and ctx.selects==1,'the needed revealed Echo is taken: '..Takes(ctx)..' / '..Reason())
 check(#ctx.reveals==1,'still one reveal request')
--- The binding ends with that board: the next ordinary-looking board (after
--- the grant) is not chosen from on the updated provider.
+-- R10, binding identity (reconciled with the ordinary-rolling restoration,
+-- 2026-11-17): the binding ends with its own board and never transfers. The
+-- next board (after the grant) is not bound to the old reveal; it is an
+-- ordinary three-card draw, so its needed Echo is taken once it is
+-- actionable. Deliberate change: before the restoration such a board was
+-- never chosen from at all.
 ctx.H.perks.pendingSelectSpellId=nil
 ctx.H.granted[ctx.H.names[X]]={{spellId=X,quality=X%4}}
 ctx.H.Notify();ctx.H.Advance(2)
 -- A foreign Select latch holds it for 2 s, so the decision comes after the
 -- board has settled.
 ctx.H.perks.pendingSelectSpellId=A3
-Reply(ctx,{Card(Y),Card(A1),Card(A3)})
--- Read while held, so the board is settled and actionable when released:
--- only the binding (tied to its own board) then keeps it unchosen.
-Nexus.GameAdapter.Board();ctx.H.Advance(1.2);Nexus.GameAdapter.Board();ctx.H.Advance(.8)
+Reply(ctx,{Card(Y),Card(A1),Card(A3)});ctx.H.Advance(2)
+check(Nexus.GameAdapter.Board().revealBound==nil and ctx.selects==1,
+ 'the old binding does not transfer to a later board (and nothing is sent while the latch holds): '..ctx.selects)
 ctx.H.perks.pendingSelectSpellId=nil;ctx.H.Advance(5)
-check(ctx.selects==2 and Takes(ctx,Y)==1 and #ctx.reveals==1,'a later unbound board is an ordinary draw: its needed Echo is taken once: '..ctx.selects)
+check(ctx.selects==2 and Takes(ctx,Y)==1 and #ctx.reveals==1,
+ 'a later unbound board is an ordinary draw: its needed Echo is taken once, no second reveal: '..ctx.selects)
 
 -- 3. A revealed board without a needed Echo: a plain Take, never a Banish,
 -- Reroll or Freeze (the reveal grants no search).
@@ -442,6 +446,8 @@ do
  local c,board,sent=DirectReveal(false)
  check(board.revealSent==true and board.revealable==nil and sent==false and #c.reveals==1,
   'same run: the same draw stays given up and is not revealed again')
+ local _,why=Nexus.GameAdapter.RevealMemory(Z,{verify=function() return true end,final=function() return true end})
+ check(why=='this souvenir was already given up','same run: refused by the one-reveal-per-draw guard: '..tostring(why))
  c,board,sent=DirectReveal(true)
  check(board.revealSent==nil and board.revealable==true,'after a run boundary the draw is not marked given up')
  check(sent==true and #c.reveals==2,'and it is revealed in the new run: '..#c.reveals)

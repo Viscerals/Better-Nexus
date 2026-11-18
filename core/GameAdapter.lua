@@ -5379,11 +5379,11 @@ ledger.REVEAL_WINDOW = 10
 -- reveal, and a Take on a revealed board, act on a choice table only when it
 -- is actionable: observed for CHOICE_SETTLE (first observation is never
 -- before the parse) and on a frame strictly later than the first frame on
--- which that held (GetTime() is constant within a frame). In that first
--- frame the timer's summed elapsed time already covers the settle, so it has
--- fired in or before that frame, and its Select is pending (every send
--- boundary refuses) or it was refused. Assumed, not proven here: a shown
--- frame's OnUpdate runs on every frame and its elapsed time tracks GetTime().
+-- which that held. In that first frame the timer's summed elapsed time
+-- already covers the settle, so it has fired in or before that frame, and
+-- its Select is pending (every send boundary refuses) or it was refused.
+-- Assumed, not proven here: GetTime() is constant within a frame, a shown
+-- frame's OnUpdate runs on every frame, and its elapsed time tracks GetTime().
 ledger.CHOICE_SETTLE = 1.0
 ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
 ledger.choiceSeen = setmetatable({}, { __mode = "k" })
