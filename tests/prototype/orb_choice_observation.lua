@@ -157,11 +157,10 @@ assert(H.Count('orb-spend')==0 and H.Count('take')==0,
  'observing and preparing a report sends no Orb or choice')
 -- Updated client (2026-11 capture): Root probes probe_spec_admission.lua and
 -- probe_spec_drift.lua, and the second Spec review. On the updated provider
--- (GetServerActiveDesign present) the specialization choice is the player's,
--- and the only automatic choice action Nexus admits is a Take of the memory
--- card (flag 3) the published choice shows: a hidden fourth memory card and
--- an armed native automatic pick cannot be observed, so every other Take and
--- every Reroll, Banish and Freeze is unavailable there. Real TOC, adapter
+-- (GetServerActiveDesign present) the specialization choice is the player's;
+-- a board that shows a memory card (flag 3) admits only a Take of that card;
+-- an ordinary three-card draw admits the ordinary actions once the native
+-- pick window has passed (restored 2026-11-17). Real TOC, adapter
 -- Take/Reroll/Banish/Freeze and Board; synthetic services only.
 do
  local function FreshBoot(level)
@@ -194,20 +193,66 @@ do
  assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses the specialization choice')
  FH.perks.currentSpecDraw={chosen=2}
  assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses a specialization draw')
- -- Ordinary offers on the updated provider: no automatic action at all, even
- -- with live rows that look settled (cached rows are no draw authority).
+ -- Ordinary offers on the updated provider (restored 2026-11-17): a
+ -- three-card board that shows no souvenir admits the ordinary Take, Reroll,
+ -- Banish and Freeze and the leveling pick, as on the older provider. Each
+ -- waits until the choice is actionable: observed for the settle period and
+ -- then a later frame, so a native auto-accept timer armed at the parse has
+ -- fired first. The pending-select checks stay.
+ local function Settled(FH)
+  Nexus.GameAdapter.Board() -- first observation of this choice table
+  FH.Advance(1.1)
+ end
  FH=FreshBoot(20)
  FH.Board(ORDINARY)
+ FH.perks.pendingSelectSpellId=nil
+ assert(Nexus.GameAdapter.OrdinaryBoardAllowed()==true,'updated provider: the ordinary gate is open on an ordinary draw')
+ accepted,reason=Nexus.GameAdapter.Take(200002)
+ assert(accepted==false and Sent(FH,'take')==0 and tostring(reason):find('pick window',1,true),
+  'updated provider: a Take before the native pick window has passed: '..tostring(reason))
+ Settled(FH)
+ accepted,reason=Nexus.GameAdapter.Take(200002)
+ assert(accepted==false and Sent(FH,'take')==0,'updated provider: no Take on the first settled frame: '..tostring(reason))
+ FH.Advance(0.05)
+ assert(Nexus.GameAdapter.Board().strictObservation==true,'updated provider: the leveling pick reads an ordinary draw')
+ accepted,reason=Nexus.GameAdapter.Take(200002)
+ assert(accepted==true and Sent(FH,'take')==1,'updated provider: an ordinary Take is admitted and sent once: '..tostring(reason))
  for _,try in ipairs({
-  {'take',function() return Nexus.GameAdapter.Take(200002) end},
   {'reroll',function() return Nexus.GameAdapter.Reroll() end},
   {'banish',function() return Nexus.GameAdapter.Banish(0) end},
   {'freeze',function() return Nexus.GameAdapter.Freeze(0) end},
  }) do
+  FH=FreshBoot(20)
+  FH.Board(ORDINARY)
+  FH.perks.pendingSelectSpellId=nil
+  Settled(FH)
+  -- The runtime's poll: the settled frame is observed, then a later one.
+  assert(Nexus.GameAdapter.Board().revealSettling==true,'fixture: the draw is settling on its first settled frame')
+  FH.Advance(0.05)
+  assert(Nexus.GameAdapter.Board().revealSettling==nil,'the draw is actionable on a later frame')
   local ok,why=try[2]()
-  assert(ok==false and Sent(FH,try[1])==0,'updated provider: an ordinary '..try[1]..' is unavailable: '..tostring(why))
+  assert(ok==true and Sent(FH,try[1])==1,'updated provider: an ordinary '..try[1]..' is admitted and sent once: '..tostring(why))
  end
- assert(Nexus.GameAdapter.Board().strictObservation==false,'updated provider: the leveling pick is unavailable')
+ -- The game's own auto-accept timer, armed at the parse, fires 0.18 s later
+ -- and takes its card: Nexus then sends nothing (the client's Select latch is
+ -- pending), for a Take or a Reroll.
+ FH=FreshBoot(20)
+ FH.Board(ORDINARY)
+ FH.perks.pendingSelectSpellId=nil
+ do
+  local native=CreateFrame('Frame');native.t=0
+  native:SetScript('OnUpdate',function(self,elapsed)
+   self.t=self.t+elapsed
+   if self.t>=0.18 then self:Hide();FH.service.SelectPerk(200003) end
+  end)
+  native:Show()
+ end
+ Settled(FH);FH.Advance(0.05)
+ assert(FH.perks.pendingSelectSpellId==200003 and Sent(FH,'take')==1,'fixture: the native timer took its card')
+ accepted,reason=Nexus.GameAdapter.Take(200002)
+ assert(accepted==false and Sent(FH,'take')==1,'updated provider: no Take while the native pick is pending: '..tostring(reason))
+ accepted,reason=Nexus.GameAdapter.Reroll()
+ assert(accepted==false and Sent(FH,'reroll')==0,'updated provider: no Reroll while the native pick is pending: '..tostring(reason))
  -- The memory card: another card is refused; the card itself is the positive
  -- control; no Reroll on that board.
  FH=FreshBoot(20)
@@ -234,7 +279,7 @@ do
   accepted=Nexus.GameAdapter.Take(200001)
   assert(accepted==false and Sent(FH,'take')==0,drift[1]..' installed inside a callout reached SelectPerk')
  end
- print('PASS updated client: specialization draw and memory card refuse automatic admission; ordinary actions unavailable: '..tostring(reason))
+ print('PASS updated client: specialization draw refused; a shown memory card admits only its own Take; ordinary draws admit ordinary actions after the native pick window')
 end
 -- W3, Orb admission on the updated client. Every Echo choice reaches the client
 -- through one parser, an Orb draw included. On the updated provider that parser

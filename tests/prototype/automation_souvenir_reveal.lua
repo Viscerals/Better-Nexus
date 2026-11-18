@@ -103,9 +103,13 @@ check(ctx.selects==0 and #ctx.other==0,'nothing else is sent')
 -- Repeated ticks with no reply: never a second request, never a Select.
 ctx.H.Advance(30)
 check(#ctx.reveals==1 and ctx.selects==0,'no retry while the reply is missing: '..#ctx.reveals)
--- A reply after the bound window is not bound to the request: not chosen from.
+-- A reply after the bound window is not bound to the request. Since the
+-- ordinary-rolling restoration (2026-11-17) it is an ordinary three-card draw
+-- like any other: the needed Echo is taken once it is actionable, and the
+-- reveal is never sent again. (Before: not chosen from at all.)
 Reply(ctx,{Card(X),Card(A1),Card(A2)});ctx.H.Advance(3)
-check(ctx.selects==0 and #ctx.reveals==1,'a late reply is not chosen from automatically')
+check(ctx.selects==1 and #ctx.reveals==1,'a late reply is an ordinary draw: one Select, no second reveal: '
+ ..ctx.selects..' '..#ctx.reveals)
 
 -- 2. The reply in time: three revealed Echoes; the needed one is taken once.
 ctx=Boot({})
@@ -125,7 +129,7 @@ Reply(ctx,{Card(Y),Card(A1),Card(A3)})
 -- only the binding (tied to its own board) then keeps it unchosen.
 Nexus.GameAdapter.Board();ctx.H.Advance(1.2);Nexus.GameAdapter.Board();ctx.H.Advance(.8)
 ctx.H.perks.pendingSelectSpellId=nil;ctx.H.Advance(5)
-check(ctx.selects==1 and #ctx.reveals==1,'a later unbound board is not chosen from: '..ctx.selects)
+check(ctx.selects==2 and Takes(ctx,Y)==1 and #ctx.reveals==1,'a later unbound board is an ordinary draw: its needed Echo is taken once: '..ctx.selects)
 
 -- 3. A revealed board without a needed Echo: a plain Take, never a Banish,
 -- Reroll or Freeze (the reveal grants no search).
@@ -156,12 +160,14 @@ end
 ctx=Boot({})
 ctx.H.granted[ctx.H.names[A3]]={{spellId=A3,quality=A3%4}}
 Reply(ctx,{Card(X),Card(A1),Card(A2)});ctx.H.Advance(3)
-check(ctx.selects==0,'a reply after a new grant is not bound to the reveal')
+check(Nexus.GameAdapter.Board() and Takes(ctx,X)==1 and ctx.selects==1 and #ctx.reveals==1,
+ 'a reply after a new grant is not bound to the reveal; it is chosen from as an ordinary draw (restoration 2026-11-17)')
 -- A changed pending-draw count: not the reply to it.
 ctx=Boot({})
 ctx.H.perks.pendingRollsCount=3
 Reply(ctx,{Card(X),Card(A1),Card(A2)});ctx.H.Advance(3)
-check(ctx.selects==0,'a reply with another pending-draw count is not bound to the reveal')
+check(Takes(ctx,X)==1 and ctx.selects==1 and #ctx.reveals==1,
+ 'a reply with another pending-draw count is not bound to the reveal; it is chosen from as an ordinary draw (restoration 2026-11-17)')
 
 -- 5. A needed souvenir is taken, never revealed.
 ctx=Boot({board={Souvenir(X)}})
@@ -455,10 +461,12 @@ do
  c.H.perks.pendingSelectSpellId=nil
 end
 
--- 11. Ordinary admission is unchanged: a three-card board that no reveal of
--- Nexus produced is not chosen from on the updated provider.
+-- 11. Ordinary admission (restored 2026-11-17): a three-card board that no
+-- reveal of Nexus produced is an ordinary draw; its needed Echo is taken once
+-- it is actionable, and no reveal is sent. (Before: not chosen from.)
 ctx=Boot({board={Card(X),Card(A1),Card(A2)}});ctx.H.Advance(5)
-check(ctx.selects==0 and #ctx.reveals==0,'an unbound three-card board is not chosen from')
+check(Takes(ctx,X)==1 and ctx.selects==1 and #ctx.reveals==0,
+ 'an unbound three-card board is an ordinary draw: one Take of the needed Echo: '..ctx.selects)
 
 _G.ProjectEbonholdOptionsService=nil
-print('PASS souvenir reveal: one request per unneeded souvenir, chosen only from its bound reply ('..checks..' checks)')
+print('PASS souvenir reveal: one request per unneeded souvenir; its bound reply chosen from without a search; unbound three-card boards are ordinary draws ('..checks..' checks)')

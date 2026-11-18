@@ -988,6 +988,13 @@ function A.Board()
     local bound = ledger.revealBound
     if bound and not rawequal(bound.ref, ch) then bound = nil end
     if bound and not ledger.ChoiceActionable(ch) then settling = true end
+    -- An ordinary three-card draw on the updated provider waits for the same
+    -- later-frame rule before any action (ChoiceAdmission); revealSettling
+    -- makes the planner wait and the runtime decide again at the poll pace.
+    if not memoryStage and not bound and #ch == 3 and rawget(ch, 4) == nil
+        and ledger.MemoryCardContract() and not ledger.ChoiceActionable(ch) then
+        settling = true
+    end
     return { cards = cards, guaranteedIndex = gi, signature = sig,
              idSignature = idSig,
              memoryStage = memoryStage,
@@ -5273,12 +5280,13 @@ end
 --     highlighted Wishlist when it fires (83-92, 197-225); no handle, state or
 --     ordering of it is readable, and the current design proves nothing about
 --     a design that armed it earlier.
--- So on the updated provider Nexus admits exactly one automatic choice
--- action: a Take of the memory card that the published choice shows (taking
--- it gives nothing up; both Selects take the client's one Select latch).
--- Every other automatic Take, and every Reroll, Banish and Freeze, is
--- unavailable there, with a stated reason; the game's own manual choice UI is
--- not touched. The older provider keeps its earlier admission.
+-- So on the updated provider: a board that shows a souvenir admits only a
+-- Take of that souvenir (or the souvenir lane's reveal); an ordinary draw
+-- admits ordinary actions once it is actionable (the later-frame rule that
+-- outlasts an armed auto-accept timer). The first point is accepted as a
+-- residual on the official design (a souvenir draw shows the souvenir face
+-- up, its three random cards face down) and the single client parser; it is
+-- not removed. The older provider keeps its earlier admission.
 ledger.UPDATED_UNAVAILABLE = "automatic rolling is not available with this game client; the choice is left to the player"
 -- The whole updated-client admission of one automatic choice action, memory
 -- only (rawget on the published choice). `spellId`: the card a Take would
@@ -5314,23 +5322,36 @@ ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
         end
         return false, ledger.UPDATED_UNAVAILABLE
     end
+    -- An ordinary draw (no souvenir shown): ordinary Take, Reroll, Banish and
+    -- Freeze, as on the older provider. The game's own auto-accept timer may
+    -- have been armed at this choice's parse and is not cancelled by its
+    -- option, so an action waits until the choice is actionable (the same
+    -- later-frame rule as the reveal); the pending-select checks at each send
+    -- boundary stay as they are. Accepted residual: a souvenir dropped by the
+    -- client's four-entry trim is not visible to any reader (CONTRACTS.md).
+    if visible == false and #ch == 3 and rawget(ch, 4) == nil then
+        if kind == "gate" then return true end
+        if not ledger.ChoiceActionable(ch) then return false, ledger.SETTLE_REASON end
+        return true
+    end
+    -- A souvenir is shown: only a Take of the souvenir itself (or the
+    -- souvenir lane's reveal); the game offers no reroll, banish or freeze
+    -- until that decision. A board of other than three cards without a
+    -- souvenir is neither, and keeps its earlier refusal.
     if kind == "take" then
         if not visible then return false, ledger.MEMORY_UNKNOWN end
         if visible ~= spellId then return false, ledger.MEMORY_GIVEN_UP end
         return true
     end
     if kind == "gate" then
-        -- The gate stays open only for the one admitted action.
         if visible then return true end
         return false, ledger.MEMORY_UNKNOWN
     end
     return false, ledger.UPDATED_UNAVAILABLE
 end
--- Admission of a Banish, Freeze or Reroll. On the updated provider none is
--- admitted (above). On the older provider: the choice admission and, at a
--- send boundary, no Select pending in the game. Memory only.
+-- Admission of a Banish, Freeze or Reroll: the choice admission (above) and,
+-- at a send boundary, no Select pending in the game. Memory only.
 ledger.MutationAdmission = function(perks, contract, kind, sending)
-    if contract then return false, ledger.UPDATED_UNAVAILABLE end
     local admitted, why = ledger.ChoiceAdmission(perks, contract, nil, kind, sending)
     if not admitted then return false, why end
     if sending and (type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil) then
@@ -5526,9 +5547,8 @@ ledger.LevelingStrictCards = function(ch)
     -- ordinary offers, and neither is a board with the memory card.
     if ledger.SpecDraw() ~= nil then return nil end
     local memory = ledger.MemoryCardContract()
-    -- The updated provider admits no leveling pick: its only admitted action
-    -- is a Take of a visible memory card, which is not an ordinary offer.
-    if memory then return nil end
+    -- On the updated provider a board that shows a souvenir is not three
+    -- ordinary offers (checked per card below).
     local cards = {}
     for i = 1, 3 do
         local c = ch[i]

@@ -354,7 +354,8 @@ local function Prepare(state)
     -- The three Echoes that answered Nexus's own souvenir reveal: chosen
     -- from, never searched (no Banish, Freeze or Reroll).
     local revealed=board.revealBound==true
-    if revealed and board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
+    -- Also an ordinary updated-provider draw that is not yet actionable.
+    if board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true
     return {state=state,requested=requested,outstanding=outstanding,total=total,choices=choices,

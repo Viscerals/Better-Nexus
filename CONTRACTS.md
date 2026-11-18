@@ -205,15 +205,30 @@ This file has two parts.
   recognized only by the absence of both markers and of the field, so a client
   that renames them would be read as the older provider. Offline evidence only;
   no native result. The three refusal texts are English and uncatalogued.
-- **Souvenir stage (updated provider).** On the updated provider (either
-  marker above) the ordinary path admits exactly one automatic choice action:
-  a `GameAdapter.Take` of the memory card (flag 3, `isGuaranteed`) that the
-  published choice shows. Every other Take, and every Reroll, Banish and
-  Freeze, is refused there (`ChoiceAdmission`, `MutationAdmission`); the gate
-  stays closed when no memory card is visible. `GameAdapter.Board()` sets
-  `memoryStage = true` when that provider shows a flagged card, `nil`
-  otherwise. Its absence proves nothing: a dropped fourth card can hide a
-  souvenir, so no visible flag never opens the ordinary actions. On a
+- **Ordinary draws (updated provider; restored 2026-11-17).** On the updated
+  provider (either marker above) a published choice of exactly three cards
+  with no memory card (flag 3) is an ordinary draw: the gate is open, and
+  `Take`, `Reroll`, `Banish`, `Freeze` and the strict leveling pick are
+  admitted as on the older provider (`ChoiceAdmission`, `MutationAdmission`,
+  `LevelingStrictCards`), once the choice is actionable (`ChoiceActionable`,
+  below; until then `Board()` sets `revealSettling`, the planner waits with
+  `waiting for the game's own pick window to pass` and the runtime decides
+  again at the poll pace). Every existing send guard stays (pending native
+  Select, in-flight action, session pause, Orb gate, the final memory-only
+  admission). A specialization draw being chosen is still refused. Accepted
+  residual, not removed: the client parser drops the last of four parsed
+  entries, and its stage layout allows three cards already on the table
+  beside a souvenir, so such a stage would be published as three cards with
+  no souvenir. The official design describes a souvenir draw as one face-up
+  souvenir with three face-down random cards, and one parser is shipped; no
+  native observation of that case exists. A board of other than three cards
+  without a memory card keeps its refusal.
+- **Souvenir stage (updated provider).** When the published choice shows a
+  memory card, the only ordinary-path choice action is a `GameAdapter.Take`
+  of that card; every other Take, and every Reroll, Banish and Freeze, is
+  refused there (the game offers none until the souvenir decision).
+  `GameAdapter.Board()` sets `memoryStage = true` when that provider shows a
+  flagged card, `nil` otherwise. On a
   `memoryStage` board (1 to 4 cards) `EchoWeaver.DecideNexus` does not wait
   for three cards. After its usual gates (Orb hold, plan, ownership sync,
   pending action, horizon, lock sync) it returns a `take` of the souvenir only
@@ -264,7 +279,7 @@ This file has two parts.
   IDs, no Select or specialization draw is pending, and the pending draw count
   and the owned total equal those of the request. Any other new choice ends
   the reveal unbound, and the ordinary updated-provider admission applies
-  (nothing is chosen). On a bound board `ChoiceAdmission` admits a Take of one
+  (an ordinary three-card draw, above). On a bound board `ChoiceAdmission` admits a Take of one
   of its three Echoes (entry and send boundary); Reroll, Banish and Freeze
   stay refused, and the planner decides with no search (`canBanish`,
   `canFreeze`, `canReroll` false): a needed Echo, else a filler.
