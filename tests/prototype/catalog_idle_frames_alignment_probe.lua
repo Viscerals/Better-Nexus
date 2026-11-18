@@ -16,8 +16,13 @@
 -- T.Profile(40,60), and then catalog_idle_frames.lua lines 14-117 in the same
 -- order, with the same profile, frame counts, counting wrappers, ticket-1
 -- loop, store-slice wrapper (rawStore, then raw PumpRootAdmission while pending,
--- guard 100000) and +5 ms profiler offset. The only change to that order is k
--- extra idle H.Advance(.05) frames between original lines 70 and 72. Inside the
+-- guard 100000) and +5 ms profiler offset. The changes to that order are k
+-- extra idle H.Advance(.05) frames between original lines 70 and 72 and, in
+-- Boot only, a bounded wait (at most 4000 frames) after the 100 settle frames
+-- for the original admitted-and-idle precondition (catalog_idle_frames.lua
+-- :58-59, which itself does not wait). The wait is reported per row as
+-- idleSettleFrames; a row that needed it (>0) is a sequence the original would
+-- have failed at setup, not a reproduction of its context. Inside the
 -- window only a wrapper-entered count, the ticket state at entry and the loop
 -- iteration count are kept: no status read, clock read or allocation in the
 -- loop. Everything else is read between frames, outside the window.
@@ -210,7 +215,18 @@ local function Boot()
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
  local readyFrames=T.Until(H,function()return Nexus.StartupStatus().state=='ready'end,200000)
  for _=1,100 do H.Advance(.05) end
- return H,readyFrames
+ -- Setup precondition (original :18-20), reached before the row starts: a
+ -- boot (first or re-boot) can still be finishing a background catalog commit 100 frames
+ -- after ready (candidate=true, CATALOG_COMMIT_PENDING, witness-verify), and
+ -- under the host CPU profiler a slower runner needs more frames for it
+ -- (#114 follow-up; reproduced with os.clock()*1000*2). Wait, bounded, for
+ -- the admitted and idle root; the frames spent are reported as
+ -- idleSettleFrames. The k idle frames and everything after are unchanged.
+ local C,idleSettleFrames=Nexus.BuildCatalog,0
+ while idleSettleFrames<4000 and not (C.RootState().state=='ROOT_ADMITTED' and C.RootState().candidate==false) do
+  H.Advance(.05);idleSettleFrames=idleSettleFrames+1
+ end
+ return H,readyFrames,idleSettleFrames
 end
 
 local function Row(row)
@@ -220,10 +236,11 @@ local function Row(row)
  local function unmet(which,detail)
   row.class='SETUP_UNMET_'..which
   if restore then restore() end
-  emit(row,'result',{{'class',row.class},{'detail',detail},
+  emit(row,'result',{{'class',row.class},{'detail',detail},{'idleSettleFrames',row.idleSettleFrames},
    {'note','fixture or instrument limit for this row; not a behavioural negative'}})
  end
- local okBoot,H,readyFrames=pcall(Boot)
+ local okBoot,H,readyFrames,idleSettleFrames=pcall(Boot)
+ row.idleSettleFrames=idleSettleFrames
  if not P.setup(okBoot,L..'fixture: a fresh boot reaches ready',not okBoot and H or nil) then
   unmet('BOOT_READY',H);return
  end
@@ -232,7 +249,7 @@ local function Row(row)
  local count=C.Count();local countText=C.Count()
  local admitted=count==40 and C.RootState().state=='ROOT_ADMITTED' and C.RootState().candidate==false
  if not P.setup(admitted,L..'fixture: the saved catalog is admitted and idle: '..tostring(countText)) then
-  unmet('CATALOG_ADMITTED',countText);return
+  unmet('CATALOG_ADMITTED',countText..' idleSettleFrames='..tostring(idleSettleFrames));return
  end
  -- Original lines 22-33.
  local frame
@@ -310,7 +327,7 @@ local function Row(row)
  -- State before the second Put (reads only; the Store coordinator through the
  -- raw slice's own upvalue, as the session-17 witness reads it).
  local coord=upvalue(rawStore,'bootstrapCoordinator')
- emit(row,'beforePut2',append(append(append(append({{'k',k},{'now',H.now},{'readyFrames',readyFrames},
+ emit(row,'beforePut2',append(append(append(append({{'k',k},{'now',H.now},{'readyFrames',readyFrames},{'idleSettleFrames',idleSettleFrames},
   {'alignNow',align.now},{'alignPumps',align.pump},{'alignRootReads',align.root},
   {'section1.pumps',s1.pump},{'section1.rootReads',s1.root},{'section1.statusReads',s1.status},
   {'section1.ready',s1.ready},{'section1.observed',s1.observed},{'section1.replaced',s1.replaced},
@@ -420,8 +437,11 @@ for _,k in ipairs(KS) do rows[#rows+1]=Run(k,false) end
 local cancel=Run(0,true)
 
 -- Summary. Findings are counted and named here; they are not assertions.
-local counts,order,findingRows,unmetRows,raisedRows={},{},{},{},{}
+local counts,order,findingRows,unmetRows,raisedRows,settledRows={},{},{},{},{},{}
 for _,row in ipairs(rows) do
+ if type(row.idleSettleFrames)=='number' and row.idleSettleFrames>0 then
+  settledRows[#settledRows+1]=row.label..':'..row.idleSettleFrames
+ end
  local class=row.class or 'RAISED'
  if not counts[class] then counts[class]=0;order[#order+1]=class end
  counts[class]=counts[class]+1
@@ -439,7 +459,8 @@ local interpretable=positiveValid and cancelValid and #unmetRows==0 and #raisedR
 local summaryRow={label='summary'}
 emit(summaryRow,'rows',{{'rows',#rows},{'classes',table.concat(classParts,',')},{'findings',#findingRows},
  {'findingRows',table.concat(findingRows,',')},{'setupUnmet',#unmetRows},{'setupUnmetRows',table.concat(unmetRows,',')},
- {'raised',#raisedRows},{'raisedRows',table.concat(raisedRows,',')}})
+ {'raised',#raisedRows},{'raisedRows',table.concat(raisedRows,',')},
+ {'idleSettled',#settledRows},{'idleSettledRows',table.concat(settledRows,',')}})
 print(table.concat({'CONTROL','positive','k=0','expected=COMMITTED','observed='..fmt(positive.class),
  'valid='..tostring(positiveValid)},'\t'))
 print(table.concat({'CONTROL','cancellation','k=0','expected=CONTROL_FAILED_CANCELLED','observed='..fmt(cancel.class),

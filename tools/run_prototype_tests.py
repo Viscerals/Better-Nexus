@@ -335,7 +335,14 @@ DEFAULT_TIMEOUT_SECONDS=45
 # Through a local LuaJIT bridge they passed in 42-43 s and 58-61 s; hosted CI run 36000257959
 # (ubuntu-latest, apt luajit) stopped both at 45 s.
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
-TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
+# #114 follow-up: orb_bounded_recovery, automation and community_failure_hold took 37.5-39.1 s,
+# 28.4-32.1 s and 29.1-33.2 s on the fastest hosted runners (catalog_root_capacity 7.3-7.6 s; runs
+# 44249390173 attempt 1 and 44088186649 job 134056099737) and hit 45 s on slower ones
+# (catalog_root_capacity 9.6-11.5 s; 44088186649 job 134056099608, test.9096 base, and
+# 44249390173 attempt 2). Locally they take 30 s, 25 s and 26 s, identical before and after the
+# 9101 rolling changes. 90 s is about 1.5x the slowest observed runner's projected time.
+TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120,
+    'orb_bounded_recovery':90,'automation':90,'community_failure_hold':90}
 
 # Issue #132: an accepted Wishlist upload stays bound to the editor/Create context and draft that
 # authorized it (SETUP/EXPECT/GUARD). Categories are pinned to the fixed public base bc5f495, whose

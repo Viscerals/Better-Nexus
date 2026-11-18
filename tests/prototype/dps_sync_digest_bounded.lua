@@ -23,7 +23,25 @@ local players={{name='PrototypeTester',class='MAGE',dps={lk=39000,dummy=38000},i
  {name='Alpha',class='MAGE',dps={lk=52000,dummy=48000},variant=10,ordinary=60}}
 for i=1,N do players[#players+1]={name='Filler'..i,class='PRIEST',variant=100+i,dps={lk=20000+i,dummy=19000+i}} end
 local fx=L.New({players=players})
-local H=F.Boot(fx:Install(F.Database({version=2})),function(h) h.playerLevel=60 end)
+-- Functional clock: this fixture counts operations and simulated frames, but
+-- catalog admission (MainLifecycle PumpCatalogAdmissionBatch) and the manual
+-- Sync batch spend a 2 ms profiler allowance per update. With the harness's
+-- host CPU clock that catalog pacing varied with runner speed, and section-10
+-- setup failed on hosted runners (run 44249390173: "the job reached its hash
+-- phase"; os.clock()*1000*2 reproduced "no catalog work or commit during the
+-- traffic" on 9db9e736 and 91aaafe5). Related to, not the same as, the #114
+-- 2 records/s gate failure. As in sync_admission_traffic_acceptance, each
+-- profiler read advances an exact 0.125 ms. This is not a CPU or frame-time
+-- measurement, and profileElapsedSeconds below still prints host os.clock.
+-- Measured: steps of 0.05-0.125 ms pass; 0.2 ms and above leave section 1
+-- "cold" (cause not established), so more profiler reads per update could
+-- need this step revisited. Other variance remains (section-8 settleFrames
+-- differ between runs under this clock); it is not CPU-clock driven.
+local H=F.Boot(fx:Install(F.Database({version=2})),function(h)
+ h.playerLevel=60
+ local profilerNow=0
+ debugprofilestop=function() profilerNow=profilerNow+0.125;return profilerNow end
+end)
 local D=Nexus.DpsCapture
 local function Frames(n,each) for i=1,n do if each then each(i) end;H.Advance(.05,.05) end end
 -- Builds without the bounded digest report no phase: ready once initialized.
@@ -433,7 +451,14 @@ do
  D.GetSyncHash()
  local sawHash=false
  for _=1,4000 do if Phase()=='hash' then sawHash=true;break end;H.Advance(.05,.05) end
- check(sawHash,'10: setup: the job reached its hash phase')
+ if not sawHash then
+  local st,keys=Stats(),{}
+  for k,v in pairs(st) do if type(v)~='table' then keys[#keys+1]=k..'='..tostring(v) end end
+  table.sort(keys)
+  local ss=Nexus.StartupStatus()
+  check(false,'10: setup: the job reached its hash phase: phase='..tostring(Phase())..' syncGate='
+   ..tostring(ss.syncGate)..' catalogReady='..tostring(ss.syncGateCatalogReady)..' stats '..table.concat(keys,' '))
+ end
  check(fx:Receive('Filler4','lk',{dps=70004,ts=time()-1}),'10: setup: Filler4 update accepted')
  local before=readyWithoutHash
  check(UntilReady(20000),'10: the digest becomes ready')

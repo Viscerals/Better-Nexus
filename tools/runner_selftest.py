@@ -22,7 +22,8 @@ from __future__ import annotations
 import contextlib, importlib.util, io, json, pathlib, subprocess, sys, tempfile, types
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LONG = {'catalog_root_capacity': 120, 'sync_admission_traffic_acceptance': 120}
+LONG = {'catalog_root_capacity': 120, 'sync_admission_traffic_acceptance': 120,
+        'orb_bounded_recovery': 90, 'automation': 90, 'community_failure_hold': 90}
 # The registered Python tests, and the scope wording of tools/ci_check.py's Python lines.
 PY = 'tools/tests/test_l10n_inventory.py'
 CATALOG_PY = 'tools/tests/test_l10n_catalog.py'
@@ -240,7 +241,7 @@ def main() -> int:
     expect('the default per-test timeout is 45 s',
            getattr(runner, 'DEFAULT_TIMEOUT_SECONDS', None) == 45,
            f'DEFAULT_TIMEOUT_SECONDS={getattr(runner, "DEFAULT_TIMEOUT_SECONDS", None)!r}')
-    expect('the timeout map is exactly catalog_root_capacity=120 and sync_admission_traffic_acceptance=120',
+    expect('the timeout map is exactly catalog_root_capacity=120, sync_admission_traffic_acceptance=120, orb_bounded_recovery=90, automation=90 and community_failure_hold=90',
            getattr(runner, 'TEST_TIMEOUT_SECONDS', None) == LONG,
            f'TEST_TIMEOUT_SECONDS={getattr(runner, "TEST_TIMEOUT_SECONDS", None)!r}')
 
@@ -257,7 +258,8 @@ def main() -> int:
            all(passed.get(n) == 45 for n in ordinary),
            'not 45: ' + ', '.join(f'{n}={passed.get(n)}' for n in ordinary if passed.get(n) != 45))
     raised = {n: t for n, t in fake.calls if t != 45}
-    expect('exactly catalog_root_capacity and sync_admission_traffic_acceptance get 120 s, nothing else',
+    expect('exactly catalog_root_capacity and sync_admission_traffic_acceptance get 120 s and orb_bounded_recovery,'
+           ' automation and community_failure_hold 90 s, nothing else',
            raised == LONG, f'tests not at 45 s: {raised}')
     r = rows(report)
     expect('each row records the timeout passed to subprocess.run as timeout_seconds',
@@ -344,7 +346,10 @@ def main() -> int:
                  'runtime: LuaJIT',
                  f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}',
                  'RESULT: no listed test failed; every listed test ran']
-    timing = ['timing: catalog_root_capacity PASS 71.25 s (limit 120 s)',
+    timing = ['timing: automation PASS 0.25 s (limit 90 s)',
+              'timing: community_failure_hold PASS 0.25 s (limit 90 s)',
+              'timing: orb_bounded_recovery PASS 0.25 s (limit 90 s)',
+              'timing: catalog_root_capacity PASS 71.25 s (limit 120 s)',
               'timing: sync_admission_traffic_acceptance PASS 88.5 s (limit 120 s)',
               'timing: startup_budget PASS 40.75 s (limit unknown s)',
               'timing: boot PASS 30.5 s (limit 45 s)',
