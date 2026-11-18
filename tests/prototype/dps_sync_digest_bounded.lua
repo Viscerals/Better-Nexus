@@ -26,11 +26,12 @@ local fx=L.New({players=players})
 -- Functional clock: this fixture counts operations and simulated frames, but
 -- catalog admission (MainLifecycle PumpCatalogAdmissionBatch) and the manual
 -- Sync batch spend a 2 ms profiler allowance per update. With the harness's
--- host CPU clock that catalog pacing varied with runner speed, and section-10
--- setup failed on hosted runners (run 44249390173: "the job reached its hash
--- phase"; os.clock()*1000*2 reproduced "no catalog work or commit during the
--- traffic" on 9db9e736 and 91aaafe5). Related to, not the same as, the #114
--- 2 records/s gate failure. As in sync_admission_traffic_acceptance, each
+-- host CPU clock that catalog pacing varied with runner speed
+-- (os.clock()*1000*2 reproduced the section-10 setup failure "no catalog work
+-- or commit during the traffic" on 9db9e736 and 91aaafe5). Related to, not the
+-- same as, the #114 2 records/s gate failure. The hosted "the job reached its
+-- hash phase" miss (run 44249390173) is a different route through the same
+-- manual-batch allowance: see the last section 10 block. As in sync_admission_traffic_acceptance, each
 -- profiler read advances an exact 0.125 ms. This is not a CPU or frame-time
 -- measurement, and profileElapsedSeconds below still prints host os.clock.
 -- Measured: steps of 0.05-0.125 ms pass; 0.2 ms and above leave section 1
@@ -450,19 +451,20 @@ check(#H.actions==0,'zero gameplay mutation')
 -- phase, not at a frame boundary: while Sync has a pending request, the
 -- lifecycle's manual preparation batch runs several hash slices in one update
 -- (MainLifecycle PumpManualPreparationBatch), and the job can then pass
--- through its hash phase and publish inside that update. Hosted run
--- 44249390173 missed the hash phase that way only once; it is reproduced here
--- by the second pass, which reports a pending manual request (#114).
+-- through its hash phase and publish inside that update. That is the likely
+-- cause of the one hosted miss (run 44249390173, #114): the second pass
+-- reproduces it with a forced pending manual request, but that run's pending
+-- owner was not recorded. A catalog that stays not ready (no digest pumps at
+-- all) would also fail this setup; its message reports both.
 for _,owner in ipairs({false,true}) do
  local label=owner and '10 (pending manual request)' or '10'
  local status=Nexus.Sync.UpdatePendingRequestStatus
  if owner then Nexus.Sync.UpdatePendingRequestStatus=function() return true,true end end
- local wrapped,update,pumpsInUpdate,maxPumps=D.PumpSyncHash,0,0,0
+ local wrapped,update,pumpsInUpdate=D.PumpSyncHash,0,0
  local queued,accepted,queuedPhase=false,nil,nil
  D.PumpSyncHash=function(...)
   local ready,progressed=wrapped(...)
   pumpsInUpdate=pumpsInUpdate+1
-  if pumpsInUpdate>maxPumps then maxPumps=pumpsInUpdate end
   if not queued and Phase()=='hash' then
    queued,queuedPhase=true,Phase()
    accepted=fx:Receive('Filler4','lk',{dps=70004+(owner and 1 or 0),ts=time()-1})
@@ -476,11 +478,22 @@ for _,owner in ipairs({false,true}) do
   if queued then break end
   pumpsInUpdate=0;H.Advance(.05,.05);update=update+1
  end
- check(queued and queuedPhase=='hash',label..': setup: the change was queued in the hash phase of the job: phase='
-  ..tostring(Phase())..' updates='..update)
+ -- The wait ends with the update in which the change was queued.
+ local queuedUpdatePumps=pumpsInUpdate
+ local setupOk,detail=queued and queuedPhase=='hash',''
+ if not setupOk then
+  local st,keys=Stats(),{}
+  for k,v in pairs(st) do if type(v)~='table' then keys[#keys+1]=k..'='..tostring(v) end end
+  table.sort(keys)
+  local ss=Nexus.StartupStatus()
+  detail=' phase='..tostring(Phase())..' updates='..update..' syncGate='..tostring(ss.syncGate)
+   ..' catalogReady='..tostring(ss.syncGateCatalogReady)..' stats '..table.concat(keys,' ')
+ end
+ check(setupOk,label..': setup: the change was queued in the hash phase of the job:'..detail)
  check(accepted,label..': setup: Filler4 update accepted')
  if owner then
-  check(maxPumps>1,label..': setup: the manual batch ran several digest slices in one update: '..maxPumps)
+  check(queuedUpdatePumps>1,label..': setup: the manual batch ran several digest slices in the update that queued the change: '
+   ..queuedUpdatePumps)
  end
  check(UntilReady(20000,function() pumpsInUpdate=0 end),label..': the digest becomes ready')
  D.PumpSyncHash=wrapped
