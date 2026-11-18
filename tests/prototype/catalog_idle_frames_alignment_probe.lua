@@ -215,7 +215,7 @@ local function Boot()
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
  local readyFrames=T.Until(H,function()return Nexus.StartupStatus().state=='ready'end,200000)
  for _=1,100 do H.Advance(.05) end
- -- Setup precondition (original :18-20), reached before the row starts: a
+ -- Setup precondition (catalog_idle_frames.lua:58-59), reached before the row starts: a
  -- boot (first or re-boot) can still be finishing a background catalog commit 100 frames
  -- after ready (candidate=true, CATALOG_COMMIT_PENDING, witness-verify), and
  -- under the host CPU profiler a slower runner needs more frames for it
@@ -460,7 +460,8 @@ local summaryRow={label='summary'}
 emit(summaryRow,'rows',{{'rows',#rows},{'classes',table.concat(classParts,',')},{'findings',#findingRows},
  {'findingRows',table.concat(findingRows,',')},{'setupUnmet',#unmetRows},{'setupUnmetRows',table.concat(unmetRows,',')},
  {'raised',#raisedRows},{'raisedRows',table.concat(raisedRows,',')},
- {'idleSettled',#settledRows},{'idleSettledRows',table.concat(settledRows,',')}})
+ {'idleSettled',#settledRows},{'idleSettledRows',table.concat(settledRows,',')},
+ {'controlIdleSettleFrames',cancel.idleSettleFrames}})
 print(table.concat({'CONTROL','positive','k=0','expected=COMMITTED','observed='..fmt(positive.class),
  'valid='..tostring(positiveValid)},'\t'))
 print(table.concat({'CONTROL','cancellation','k=0','expected=CONTROL_FAILED_CANCELLED','observed='..fmt(cancel.class),
