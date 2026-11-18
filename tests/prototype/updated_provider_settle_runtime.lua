@@ -93,6 +93,26 @@ do
  print(string.format('MEASURE updated-provider Wishlist Take delay at 60 fps: %.3f s',delay))
  check(Takes(H,X)==1 and delay<0.8,'pacing: the needed Echo is taken within 0.8 s of the draw: '..string.format('%.3f',delay))
 end
+-- The game's Orb state is not yet known (no charge count since load or
+-- /reload): ordinary rolling waits, and says why. Reported 9099: the wait
+-- said an Orb choice may be active although no Orb was in use; the gate's
+-- own reason ("orb state not yet known") was dropped by the planner. Once
+-- the state is known and idle, the needed Echo is taken.
+do
+ local orb={known=false}
+ local H=Boot(20,function() ProjectEbonhold.OrbService={IsStateKnown=function() return orb.known end,
+  IsOfferPending=function() return false end,GetCharges=function() return 0 end,RequestCharges=function() end} end)
+ check(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic Orb Unknown',
+  {{spellId=X,quality=X%4,stacks=1}},{})==true,'fixture: the plan is set')
+ H.Board({Card(A1),Card(X),Card(A2)});H.Notify();H.Advance(.5)
+ SlashCmdList.NEXUS('auto');H.Advance(2)
+ local rec=tostring((Nexus.Panel and Nexus.Panel._lastModel or {}).recommendation)
+ local want=Nexus.UserText.Message('orb state not yet known')
+ check(Takes(H)==0,'orb state unknown: no Take')
+ check(rec==want,'orb state unknown: the wait names the unconfirmed Orb state, not an active Orb choice: '..rec)
+ orb.known=true;H.Advance(3)
+ check(Takes(H,X)==1,'orb state known and idle: the needed Echo is taken: '..Takes(H))
+end
 -- Control: a pending native Select still sends nothing on an actionable board.
 do
  local H=WishlistBoot()

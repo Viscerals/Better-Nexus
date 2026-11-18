@@ -25,7 +25,9 @@ Nexus.Policy = Policy
 -- Pure: same input, same output; malformed input degrades to "wait".
 function Policy.Decide(state)
     if type(state) == "table" and state.ordinaryBoardAllowed == false then
-        return {type="wait", reason="Orb state active or unknown", annotations={}, deltas={}}
+        local why = state.ordinaryWhy
+        return {type="wait", reason=type(why) == "string" and why ~= "" and why or "Orb state active or unknown",
+            annotations={}, deltas={}}
     end
     -- Saved verification is identity, contents and ownership evidence; it
     -- selects no planner. `snapshotVerified`, `queue` and `flags` are

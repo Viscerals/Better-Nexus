@@ -256,6 +256,26 @@ for _,pair in ipairs({
  check(Takes(ctx,pair.target)==1 and #ctx.reveals==0,pair.name..': the needed Rare souvenir is taken')
 end
 
+-- 5c. Level 10 (reported 9099): the souvenir stage arrives with the initial
+-- specialization draw (currentSpecDraw chosen 0). Revealing only shows the
+-- hidden cards; SELECTING one of them chooses the specialization. So an
+-- unneeded souvenir is revealed (standing instruction), and the reply is
+-- never chosen from automatically, even if it carries no specialization
+-- marker: the player chooses the specialization. Once the published choice
+-- changes after the player's pick, ordinary rolling resumes.
+do
+ ctx=Boot({afterBoard=function(H) H.perks.currentSpecDraw={chosen=0} end})
+ check(#ctx.reveals==1 and ctx.selects==0,'level 10: an unneeded souvenir is revealed once: '..#ctx.reveals..' / '..Reason())
+ ctx.H.perks.currentSpecDraw=nil -- worst case: the reply has no marker
+ Reply(ctx,{Card(X),Card(A1),Card(A2)});ctx.H.Advance(5)
+ check(ctx.selects==0,'level 10: nothing is selected from the reply (it would choose the specialization): '..ctx.selects)
+ check(Reason()=='the specialization choice is left to the player','level 10: the wait names the specialization choice: '..Reason())
+ -- The player picks; the game publishes the next draw.
+ ctx.H.perks.pendingSelectSpellId=nil
+ Reply(ctx,{Card(Y),Card(A1),Card(A3)});ctx.H.Advance(5)
+ check(Takes(ctx,Y)==1,'after the player picks, ordinary rolling resumes: '..Takes(ctx)..' / '..Reason())
+end
+
 -- 6. No reveal, and the hand-off is stated, when:
 for _,case in ipairs({
  {'the game\'s own build asks for the souvenir',{wants={[Z]=true}}},
@@ -284,7 +304,7 @@ check(#ctx.reveals==0,'a pending native Select holds the reveal')
 ctx=Boot({setup=function() ProjectEbonhold.OrbService={IsStateKnown=function() return false end,
  GetCharges=function() return 0 end,IsOfferPending=function() return false end,RequestCharges=function() end} end})
 ctx.H.Advance(5)
-check(#ctx.reveals==0 and Reason()=='Orb state active or unknown','an unknown Orb state holds the reveal: '..Reason())
+check(#ctx.reveals==0 and Reason()=='orb state not yet known','an unknown Orb state holds the reveal, and says so: '..Reason())
 
 -- 8. Changes inside the reveal's own reads (after it is decided, before the
 -- request): the request is not sent.

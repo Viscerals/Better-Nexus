@@ -228,7 +228,10 @@ local function Prepare(state)
     local annotations, deltas = {}, {}
     local function Wait(reason) return nil, {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
     local plan, owned, board = state.plan, state.owned, state.board
-    if state.ordinaryBoardAllowed == false then return Wait("Orb state active or unknown") end
+    if state.ordinaryBoardAllowed == false then
+        return Wait(type(state.ordinaryWhy) == "string" and state.ordinaryWhy ~= "" and state.ordinaryWhy
+            or "Orb state active or unknown")
+    end
     if not plan or plan.advisorOnly then return Wait("assign a Wishlist") end
     if not owned or (owned.synced ~= true and (tonumber(state.level) or 0)>1) then return Wait("unsynced") end
     if state.pending or state.pendingAction then return Wait("waiting for action confirmation") end

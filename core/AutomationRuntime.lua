@@ -3278,10 +3278,15 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             rolling.set, rolling.inForce = true, rolling.requested
         end
     end
+    -- The ordinary-board gate and its own reason, read once: a planner wait
+    -- then says why (for example "orb state not yet known"), not a generic
+    -- Orb sentence.
+    local ordinaryGate = {true}
+    if Adapter.OrdinaryBoardAllowed then ordinaryGate = {Adapter.OrdinaryBoardAllowed()} end
     local state = {
         board = board, owned = owned, locked = locked, charges = charges, plan = plan,
         rollingPolicy = actionHold.rolling.inForce,
-        ordinaryBoardAllowed = not Adapter.OrdinaryBoardAllowed or Adapter.OrdinaryBoardAllowed(),
+        ordinaryBoardAllowed = ordinaryGate[1], ordinaryWhy = ordinaryGate[2],
         allowReroll = settings.autoReroll ~= false,
         allowFreeze = settings.autoFreeze ~= false,
         activeEchoes = activeRow and activeRow.echoes or {},
