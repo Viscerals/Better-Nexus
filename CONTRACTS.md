@@ -242,10 +242,14 @@ This file has two parts.
   spell ID is still outstanding (rolled plus counted locked copies
   subtracted). An unneeded souvenir is given up for the three hidden Echoes
   (souvenir reveal, below) when the board is `revealable` and a Wishlist
-  target is still missing. Otherwise it waits with the reason `souvenir: take
+  target is still missing. Unneeded is by exact spell id: every rarity of an
+  Echo is its own spell (the client's build matching and Nexus's targets both
+  use the exact id), so a lower tier never fulfils another tier's target, and
+  the reveal loses only that souvenir (the client's confirmation names it); a
+  different tier of its family still missing is no reason to hold it.
+  Otherwise it waits with the reason `souvenir: take
   it or draw three random Echoes; the choice is left to the player`: nothing
-  missing, a souvenir whose Echo family still has a missing target or is not
-  known, a souvenir the game's own build asks for, two flagged cards, or a
+  missing, a souvenir the game's own build asks for, two flagged cards, or a
   carried card beside the souvenir (giving it up or taking another card
   gives the souvenir up). The game's own choice window is not touched. The Take keeps every existing
   send guard (pending native Select, in-flight action, session pause, the

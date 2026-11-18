@@ -225,15 +225,43 @@ check(Takes(ctx,X)==1 and ctx.selects==1 and #ctx.reveals==1,
 ctx=Boot({board={Souvenir(X)}})
 check(Takes(ctx,X)==1 and #ctx.reveals==0,'a needed souvenir is taken, not given up')
 
+-- 5b. Another tier of a missing target's Echo family (reported 2026-11-17,
+-- synthetic ids mirroring the client database relationships: Mind
+-- Expansion Common 200002 and Rare 200494 share group 56; Spiritual
+-- Fortitude Uncommon 200454 and Rare 200495 share group 88). Every rarity is
+-- its own spell: the game's build matching and Nexus's targets use the exact
+-- spell id, so the lower tier never fulfils the Rare target, and the reveal
+-- loses only that souvenir. An unneeded souvenir is therefore revealed even
+-- when a different tier of its family is still missing. (Before: held for
+-- the player.) A needed souvenir of the exact id is still taken.
+for _,pair in ipairs({
+ {name='Mind Expansion',souvenir=200002,target=200494,group=56},
+ {name='Spiritual Fortitude',souvenir=200454,target=200495,group=88},
+}) do
+ local function setup(H)
+  if not H.db[pair.souvenir] then H.AddEcho(pair.souvenir,pair.name..' low',1,5,pair.group) end
+  H.db[pair.souvenir].groupId=pair.group
+  H.AddEcho(pair.target,pair.name..' Rare',2,5,pair.group)
+ end
+ local plan={{spellId=pair.target,quality=2,stacks=1},{spellId=X,quality=X%4,stacks=1}}
+ ctx=Boot({setup=setup,echoes=plan,board={Souvenir(pair.souvenir)}})
+ ctx.H.Advance(5)
+ local fam=Nexus.GameAdapter.Catalog().familyOf
+ check(fam[pair.souvenir]~=nil and fam[pair.souvenir]==fam[pair.target],pair.name..' setup: one family, two tiers')
+ check(#ctx.reveals==1 and ctx.selects==0,pair.name..': an unneeded lower tier is revealed while the Rare target is missing: '
+  ..#ctx.reveals..' '..ctx.selects..' / '..Reason())
+ -- The needed tier itself is taken, never revealed.
+ ctx=Boot({setup=setup,echoes=plan,board={Souvenir(pair.target)}})
+ ctx.H.Advance(5)
+ check(Takes(ctx,pair.target)==1 and #ctx.reveals==0,pair.name..': the needed Rare souvenir is taken')
+end
+
 -- 6. No reveal, and the hand-off is stated, when:
 for _,case in ipairs({
  {'the game\'s own build asks for the souvenir',{wants={[Z]=true}}},
  {'every Wishlist target is already owned',{owned={[X]=1,[Y]=1}}},
  {'a carried card stands beside the souvenir',{board={Card(A1,{isCarried=true}),Souvenir(Z)}}},
  {'two flagged cards',{board={Souvenir(Z),Souvenir(A1)}}},
- {'the souvenir is another spell in the family of a missing target',
-  {setup=function(H) H.db[X].groupId=5001;H.AddEcho(200091,'Echo 1 Variant',(X%4+2)%4,5,5001) end,
-   board={Souvenir(200091)}}},
  {'the reveal request code is not the captured one',{cs=350}},
  {'the reveal request code is absent',{cs=false}},
 }) do

@@ -323,22 +323,14 @@ local function Prepare(state)
             if board.revealSent==true then return Wait(SOUVENIR.SENT) end
             -- User requirement: an unneeded souvenir, shown alone (adapter
             -- revealable), is given up for the three hidden Echoes while a
-            -- Wishlist target is still missing. Not when its Echo family
-            -- still has a missing target (another tier), its family is not
-            -- known, or nothing is missing: then the player decides.
-            local family=card and card.family
-            if family==nil and id and state.catalog and state.catalog.familyOf then
-                family=state.catalog.familyOf[id]
-            end
-            local familyOf=state.catalog and state.catalog.familyOf
-            local familyMissing=family==nil or type(familyOf)~="table"
-            if not familyMissing then
-                for other,n in pairs(outstanding) do
-                    if n>0 and (familyOf[other]==nil or familyOf[other]==family) then familyMissing=true end
-                end
-            end
+            -- Wishlist target is still missing; with nothing missing the
+            -- player decides. "Unneeded" is by exact spell id: every rarity
+            -- of an Echo is its own spell (the game's build matching and
+            -- these targets both use the exact id), so a lower tier never
+            -- fulfils another tier's target, and the reveal loses only this
+            -- souvenir. (An earlier family-tier hold kept it for the player.)
             local eligible=id and card.selectable~=false and #board.cards==1
-                and total>0 and not familyMissing
+                and total>0
             if eligible and board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
             if eligible and board.revealable==true then
                 return nil,{type="reveal",spellId=card.spellId,index=index,
