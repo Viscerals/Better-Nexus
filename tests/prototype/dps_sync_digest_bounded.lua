@@ -446,24 +446,47 @@ check(#H.actions==0,'zero gameplay mutation')
 -- publishes its snapshot with that change still pending. The pump that
 -- publishes must not report ready before the change is applied, or Sync
 -- reads no digest in the frame it was told the digest is ready.
-do
+-- The change is queued right after the pump that leaves the job in its hash
+-- phase, not at a frame boundary: while Sync has a pending request, the
+-- lifecycle's manual preparation batch runs several hash slices in one update
+-- (MainLifecycle PumpManualPreparationBatch), and the job can then pass
+-- through its hash phase and publish inside that update. Hosted run
+-- 44249390173 missed the hash phase that way only once; it is reproduced here
+-- by the second pass, which reports a pending manual request (#114).
+for _,owner in ipairs({false,true}) do
+ local label=owner and '10 (pending manual request)' or '10'
+ local status=Nexus.Sync.UpdatePendingRequestStatus
+ if owner then Nexus.Sync.UpdatePendingRequestStatus=function() return true,true end end
+ local wrapped,update,pumpsInUpdate,maxPumps=D.PumpSyncHash,0,0,0
+ local queued,accepted,queuedPhase=false,nil,nil
+ D.PumpSyncHash=function(...)
+  local ready,progressed=wrapped(...)
+  pumpsInUpdate=pumpsInUpdate+1
+  if pumpsInUpdate>maxPumps then maxPumps=pumpsInUpdate end
+  if not queued and Phase()=='hash' then
+   queued,queuedPhase=true,Phase()
+   accepted=fx:Receive('Filler4','lk',{dps=70004+(owner and 1 or 0),ts=time()-1})
+  end
+  return ready,progressed
+ end
  Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{scope='test'})
  D.GetSyncHash()
- local sawHash=false
- for _=1,4000 do if Phase()=='hash' then sawHash=true;break end;H.Advance(.05,.05) end
- if not sawHash then
-  local st,keys=Stats(),{}
-  for k,v in pairs(st) do if type(v)~='table' then keys[#keys+1]=k..'='..tostring(v) end end
-  table.sort(keys)
-  local ss=Nexus.StartupStatus()
-  check(false,'10: setup: the job reached its hash phase: phase='..tostring(Phase())..' syncGate='
-   ..tostring(ss.syncGate)..' catalogReady='..tostring(ss.syncGateCatalogReady)..' stats '..table.concat(keys,' '))
- end
- check(fx:Receive('Filler4','lk',{dps=70004,ts=time()-1}),'10: setup: Filler4 update accepted')
  local before=readyWithoutHash
- check(UntilReady(20000),'10: the digest becomes ready')
- check(readyWithoutHash==before,'10: no pump reported ready while the digest was unreadable: '..(readyWithoutHash-before))
- check(D.GetSyncHash()==D.GetSyncHashUncached(),'10: the digest includes the change (canonical)')
+ for _=1,4000 do
+  if queued then break end
+  pumpsInUpdate=0;H.Advance(.05,.05);update=update+1
+ end
+ check(queued and queuedPhase=='hash',label..': setup: the change was queued in the hash phase of the job: phase='
+  ..tostring(Phase())..' updates='..update)
+ check(accepted,label..': setup: Filler4 update accepted')
+ if owner then
+  check(maxPumps>1,label..': setup: the manual batch ran several digest slices in one update: '..maxPumps)
+ end
+ check(UntilReady(20000,function() pumpsInUpdate=0 end),label..': the digest becomes ready')
+ D.PumpSyncHash=wrapped
+ Nexus.Sync.UpdatePendingRequestStatus=status
+ check(readyWithoutHash==before,label..': no pump reported ready while the digest was unreadable: '..(readyWithoutHash-before))
+ check(D.GetSyncHash()==D.GetSyncHashUncached(),label..': the digest includes the change (canonical)')
 end
 check(readyWithoutHash==0,'readiness contract over the whole test: '..readyWithoutHash..' ready report(s) without a digest')
 
