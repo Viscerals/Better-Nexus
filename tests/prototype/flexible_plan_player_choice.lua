@@ -206,6 +206,285 @@ check(metaCalls == 0 and #H.actions == actions and #H.sent == sent,
     'no caller metamethod, service/store/adapter/frame call, game action or send')
 check(passive.echoes[1].spellId == ids[1], 'no-I/O control still produces the explicit draft')
 
+-- PR136 picker port to the localized #151 chooser (docs/UI_TEXT_LAYOUT.md:
+-- fixed row labels; other tooltips are unchanged). The reused 32 px catalog
+-- rows keep one line and recover their complete current displayed ID, quality
+-- and name on hover, also after a wheel or search refresh rebinds a row under
+-- the pointer. A GameTooltip another frame takes after a real row hover is
+-- never hidden, replaced or reclaimed by leave, hide or rebind, while a
+-- tooltip the row still owns is cleaned up. Expected row texts come from the
+-- Nexus.Localization seam the chooser itself uses. Self-contained synthetic
+-- widgets with the offline 7 px per character model; not native font, pixel,
+-- wheel or tooltip evidence.
+do
+    local saved = {CreateFrame=CreateFrame, UIParent=UIParent, GameTooltip=GameTooltip,
+        UISpecialFrames=UISpecialFrames, theme=Nexus.Theme}
+    local named, Widget = {}, {}
+    local function noop() end
+    Widget.__index = function(_, key)
+        if Widget[key] then return Widget[key] end
+        if type(key) == 'string' and key:find('^%u') then return noop end
+        return nil
+    end
+    local function New(kind, parent, name)
+        local w = setmetatable({kind=kind, parent=parent, shown=true, width=0, height=0,
+            scripts={}, hooks={}, children={}, regions={}, mouse=false, enabled=true,
+            scale=1}, Widget)
+        if parent then
+            local list = kind == 'FontString' and parent.regions or parent.children
+            list[#list+1] = w
+        end
+        if name then named[name] = w end
+        return w
+    end
+    local function Fire(w, event, ...)
+        if w.scripts[event] then w.scripts[event](w, ...) end
+        for _, fn in ipairs(w.hooks[event] or {}) do fn(w, ...) end
+    end
+    local function Chars(text) return #(tostring(text or ''):gsub('[\128-\191]', '')) end
+    function Widget:SetSize(width, height) self.width, self.height = width, height end
+    function Widget:SetWidth(width) self.width = width end
+    function Widget:SetHeight(height) self.height = height end
+    function Widget:GetWidth() return self.width end
+    function Widget:GetHeight() return self.height end
+    function Widget:GetScale() return self.scale end
+    function Widget:SetScale(scale) self.scale = scale end
+    function Widget:IsShown() return self.shown end
+    function Widget:Show() if not self.shown then self.shown = true; Fire(self, 'OnShow') end end
+    function Widget:Hide() if self.shown then self.shown = false; Fire(self, 'OnHide') end end
+    function Widget:EnableMouse(on) self.mouse = on and true or false end
+    function Widget:IsMouseEnabled() return self.mouse end
+    function Widget:SetScript(event, fn) self.scripts[event] = fn end
+    function Widget:HookScript(event, fn)
+        local list = self.hooks[event] or {}
+        list[#list+1] = fn;self.hooks[event] = list
+    end
+    function Widget:SetText(text)
+        local old = self.text
+        self.text = text ~= nil and tostring(text) or nil
+        if self.kind == 'EditBox' and old ~= self.text then Fire(self, 'OnTextChanged', false) end
+    end
+    function Widget:GetText() return self.text end
+    function Widget:GetStringWidth() return Chars(self.text) * 7 end
+    function Widget:GetTextWidth() return Chars(self.text) * 7 end
+    function Widget:SetWordWrap(on) self.wordWrap = on and true or false end
+    function Widget:Enable() self.enabled = true end
+    function Widget:Disable() self.enabled = false end
+    function Widget:IsEnabled() return self.enabled end
+    function Widget:CreateFontString() return New('FontString', self) end
+    function Widget:GetParent() return self.parent end
+    local tip = {shown=false, lines={}}
+    function tip:SetOwner(owner, anchor) self.owner, self.anchor, self.lines = owner, anchor, {} end
+    function tip:AddLine(text) self.lines[#self.lines+1] = tostring(text) end
+    function tip:Show() self.shown = true end
+    function tip:Hide() self.shown, self.owner, self.lines = false, nil, {} end
+    function tip:IsShown() return self.shown end
+    function tip:IsOwned(frame) return self.owner == frame end
+    function tip:GetOwner() return self.owner end
+    local function Visible(owner)
+        if not (tip.shown and tip.owner == owner) then return nil end
+        return table.concat(tip.lines, '\n')
+    end
+    CreateFrame = function(kind, name, parent)
+        local w = New(kind, parent, name)
+        if kind == 'EditBox' then w.text = '' end
+        return w
+    end
+    UIParent = New('Frame');UIParent:SetSize(1280, 800)
+    GameTooltip, UISpecialFrames, Nexus.Theme = tip, {}, nil
+
+    -- The chooser's own text seam (T/TF): reviewed template, or the exact
+    -- English bytes the chooser passes when the seam cannot format it.
+    local L = Nexus.Localization
+    check(type(L) == 'table' and type(L.Format) == 'function' and type(L.Text) == 'function'
+        and type(L.Count) == 'function', 'SETUP private localization seam is loaded')
+    local function Shown(key, args, english)
+        local text, source = L.Format(key, args)
+        if source == 'unavailable' and english ~= nil then return english end
+        return text
+    end
+    local function Word(key) return (L.Text(key)) end
+
+    local longA = 'Synthetic private A with an exceptionally long exact catalog name that cannot fit one picker row'
+    local longB = 'Synthetic private B, a different long exact catalog name that also needs complete-text recovery'
+    local pickerNames = {longA, longB, 'Short C'}
+    local picker = {rows={}}
+    for i = 1, 20 do
+        local id = 340000 + i
+        picker.rows[id] = {spellId=id, name=pickerNames[i] or ('Synthetic private picker '..i),
+            quality=i % 4, maxStack=5, groupId=0}
+    end
+    local A, B, C = 340001, 340002, 340003
+    local function Full(id)
+        local value = picker.rows[id]
+        local quality = tostring(value.quality)
+        return Shown('plan.label.catalog_row', {id=tostring(id), quality=quality, name=value.name},
+            '#'..id..'  Q'..quality..'  '..value.name)
+    end
+    local function PoolText(id)
+        local value = picker.rows[id]
+        return Shown('plan.label.pool_row', {count='0', id=tostring(id), quality=tostring(value.quality),
+            max_stack=tostring(value.maxStack), name=value.name},
+            'Set: 0  #'..id..'  Q'..value.quality..' / max '..value.maxStack..'  '..value.name)
+    end
+    check(Full(A):find(longA, 1, true) and Full(A):find(tostring(A), 1, true)
+        and Full(B):find(longB, 1, true) and Full(B):find(tostring(B), 1, true),
+        'SETUP the displayed catalog row keeps the exact ID and the complete name')
+
+    -- One chooser with a #151 persistence facade spy: Show reads once; hover,
+    -- wheel, search and Add never read, save, remove, ask or open.
+    local function Start()
+        local spy = {reads=0, saves=0, clears=0, drafts=0}
+        local chooser = Nexus.FlexiblePlanChooser.New({
+            catalog=function() return picker end,
+            openDraft=function() spy.drafts = spy.drafts + 1;return false end,
+            persistence={
+                Read=function()
+                    spy.reads = spy.reads + 1
+                    return {mode='durable', class='ABSENT', loadable=false, saveable=true}
+                end,
+                Save=function() spy.saves = spy.saves + 1 end,
+                Clear=function() spy.clears = spy.clears + 1 end,
+            },
+        })
+        chooser.Show()
+        return chooser, spy, named.NexusFlexiblePlanCatalog, named.NexusFlexiblePlanPool,
+            named.NexusFlexiblePlanSearch, named.NexusFlexiblePlanChooser
+    end
+    local function Passive(chooser, spy, window, label)
+        local budget, found = Shown('plan.label.budget', {alternatives=L.Count(1), chosen=L.Count(0)}), false
+        for _, region in ipairs(window.regions) do
+            if region:GetText() == budget then found = true end
+        end
+        local state = chooser.PersistenceState()
+        check(found and spy.drafts == 0 and spy.reads == 1 and spy.saves == 0 and spy.clears == 0
+            and state.phase == 'idle' and state.confirming == nil and not state.pending, label)
+    end
+
+    -- Geometry, hover and rebinding.
+    local chooser, spy, catalogArea, poolArea, search, window = Start()
+    check(catalogArea and poolArea and search and #catalogArea.children == 12 and #poolArea.children == 12,
+        'private chooser keeps two fixed sets of 12 reused row frames')
+    local row1, row2 = catalogArea.children[1], catalogArea.children[2]
+    check(row1.spellId == A and row1.label:GetText() == Full(A),
+        'private catalog row shows the localized exact ID, quality and complete safe name')
+    check(row1.label:GetHeight() <= 32 and row1.label.wordWrap == false,
+        'private catalog label keeps one line at the 32 px row height')
+    check(row1.label:GetStringWidth() > row1.label:GetWidth(),
+        'SETUP the long exact name is shortened in the fixed private catalog label')
+    check(row1:IsMouseEnabled(), 'private catalog row takes mouse input for complete-text recovery')
+    Fire(row1, 'OnEnter')
+    check(Visible(row1) == Full(A), 'private hover recovers the complete current displayed row text')
+    Fire(catalogArea, 'OnMouseWheel', -1)
+    check(row1.spellId == B and row1.label:GetText() == Full(B), 'private wheel refresh rebinds the reused row to B')
+    check(Visible(row1) == Full(B), 'private open tooltip shows rebound B, not the previous A text')
+    Fire(catalogArea, 'OnMouseWheel', -1)
+    check(row1.spellId == C and row1.label:GetText() == Full(C)
+        and row1.label:GetStringWidth() <= row1.label:GetWidth(), 'private row rebinds to fitting short C')
+    check(not tip.shown, 'private: no stale long text remains over a fitting rebound item')
+    Fire(catalogArea, 'OnMouseWheel', 2)
+    check(row1.spellId == A and Visible(row1) == Full(A), 'private rebinding back to long A recovers A again')
+    Fire(row1, 'OnLeave')
+    check(not tip.shown, 'private leave closes the row-owned complete-text tooltip')
+    Fire(row2, 'OnEnter')
+    check(row2.spellId == B and Visible(row2) == Full(B), 'private second reused row recovers B on hover')
+    search:SetText(tostring(A))
+    check(row1.spellId == A and not row2:IsShown() and row2.spellId == nil, 'private search refresh leaves only A')
+    check(not tip.shown, 'private hidden row keeps no complete text of its previous item')
+    search:SetText('')
+    check(row2:IsShown() and row2.spellId == B and not tip.shown,
+        'private clearing search rebinds B without a stale tooltip')
+    Fire(row2, 'OnEnter')
+    check(Visible(row2) == Full(B), 'private re-entering the rebound row recovers B')
+    Fire(row2, 'OnLeave')
+    Fire(row1, 'OnEnter')
+    Fire(catalogArea, 'OnMouseWheel', -1)
+    check(row1.spellId == B and Visible(row1) == Full(B), 'private pointer rests on rebound B before Add')
+    Fire(row1, 'OnLeave')
+    Fire(row1.action, 'OnClick')
+    local poolRow = poolArea.children[1]
+    check(poolRow.spellId == B and row1.spellId == B and row1.action:GetText() == Word('plan.button.added')
+        and not row1.action:IsEnabled(), 'private Add adds rebound B exactly and shows the localized Added')
+    check(poolRow.label.wordWrap == false and poolRow:IsMouseEnabled(), 'private pool row keeps its one-line policy')
+    Fire(poolRow, 'OnEnter')
+    check(Visible(poolRow) == PoolText(B), 'private pool row still recovers its complete localized one-line text')
+    Fire(poolRow, 'OnLeave')
+    Passive(chooser, spy, window, 'private hover, refresh and rebinding choose, read, save and open nothing')
+    chooser.Hide()
+
+    -- Tooltip ownership: another frame takes GameTooltip after a real hover.
+    local outside = New('Frame', UIParent)
+    local EXTERNAL = 'External spell tooltip'
+    local function TakeTooltip()
+        tip:SetOwner(outside, 'ANCHOR_LEFT');tip:AddLine(EXTERNAL);tip:Show()
+    end
+    local function KeepsExternal()
+        return Visible(outside) == EXTERNAL and tip.anchor == 'ANCHOR_LEFT' and #tip.lines == 1
+    end
+    tip:Hide()
+    chooser, spy, catalogArea, poolArea, search, window = Start()
+    row1, row2 = catalogArea.children[1], catalogArea.children[2]
+    check(row1.spellId == A and row2.spellId == B, 'SETUP private ownership rows bind long A and B')
+    Fire(row1, 'OnEnter')
+    check(Visible(row1) == Full(A), 'private real catalog hover shows the row-owned complete text')
+    TakeTooltip()
+    Fire(row1, 'OnLeave')
+    check(KeepsExternal(), 'private catalog leave after transfer keeps the external owner, anchor and text')
+    tip:Hide()
+    Fire(row1, 'OnEnter')
+    check(Visible(row1) == Full(A), 'private row owns the tooltip again on a fresh hover')
+    TakeTooltip()
+    Fire(catalogArea, 'OnMouseWheel', -1)
+    check(row1.spellId == B and row1.label:GetText() == Full(B) and KeepsExternal(),
+        'private rebinding to long B neither hides, replaces nor reclaims the external tooltip')
+    Fire(catalogArea, 'OnMouseWheel', -1)
+    check(row1.spellId == C and KeepsExternal(), 'private rebinding to fitting C keeps the external tooltip')
+    tip:Hide()
+    Fire(catalogArea, 'OnMouseWheel', 1)
+    check(row1.spellId == B and Visible(row1) == Full(B),
+        'private: after release, rebinding recovers the current long text for the row')
+    Fire(catalogArea, 'OnMouseWheel', 1)
+    check(row1.spellId == A and Visible(row1) == Full(A), 'private row-owned tooltip follows its rebinding to A')
+    Fire(row1, 'OnLeave')
+    check(not tip.shown, 'private catalog leave still closes a tooltip the row owns')
+    Fire(row2, 'OnEnter')
+    check(Visible(row2) == Full(B), 'private second row owns its complete-text tooltip')
+    TakeTooltip()
+    search:SetText(tostring(A))
+    check(not row2:IsShown() and KeepsExternal(), 'private hiding the hovered row keeps the external tooltip')
+    Fire(row2, 'OnLeave')
+    check(KeepsExternal(), 'private late leave from the hidden row keeps the external tooltip')
+    search:SetText('')
+    check(row2:IsShown() and row2.spellId == B and KeepsExternal(),
+        'private reshowing the row keeps the external tooltip')
+    tip:Hide()
+    Fire(row2, 'OnEnter')
+    check(Visible(row2) == Full(B), 'private reshown row recovers B on hover')
+    search:SetText(tostring(A))
+    check(not tip.shown, 'private hiding the hovered row closes the tooltip it owns')
+    Fire(row2, 'OnLeave')
+    search:SetText('')
+    check(row1.spellId == A, 'SETUP private catalog row is bound to A before Add')
+    Fire(row1.action, 'OnClick')
+    poolRow = poolArea.children[1]
+    check(poolRow.spellId == A and row1.action:GetText() == Word('plan.button.added'),
+        'private Add still adds A exactly')
+    Fire(poolRow, 'OnEnter')
+    check(Visible(poolRow) == PoolText(A), 'private real pool hover shows its complete localized text')
+    TakeTooltip()
+    Fire(poolRow, 'OnLeave')
+    check(KeepsExternal(), 'private pool leave after transfer keeps the external tooltip')
+    tip:Hide()
+    Fire(poolRow, 'OnEnter')
+    Fire(poolRow, 'OnLeave')
+    check(not tip.shown, 'private pool leave still closes a tooltip the row owns')
+    Passive(chooser, spy, window, 'private tooltip ownership changes choose, read, save and open nothing')
+    chooser.Hide()
+
+    CreateFrame, UIParent, GameTooltip = saved.CreateFrame, saved.UIParent, saved.GameTooltip
+    UISpecialFrames, Nexus.Theme = saved.UISpecialFrames, saved.theme
+end
+
 -- PR136 catalog picker (docs/UI_TEXT_LAYOUT.md fixed row labels): the reused
 -- 32 px catalog rows keep one line and recover the complete current exact ID,
 -- quality and name on hover, also after a refresh rebinds a row under the

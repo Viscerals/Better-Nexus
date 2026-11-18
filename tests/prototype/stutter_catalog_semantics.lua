@@ -206,4 +206,78 @@ s=A.Slots()
 check(A.CatalogStatus().lastResult=='unchanged','B9: restored source is unchanged: '..tostring(A.CatalogStatus().lastResult))
 Echo('B9 restored',s,1,1,330001,2,1,'g3300')
 
+-- B10. Updated client (2026-11 capture; second Spec review and Root
+-- probe_catalog_contract_transition.lua): a row's requiredSpell is a tome
+-- gate only when the database uses isTome marks; otherwise it is a talent
+-- gate. A first mark added in place (same table, same version) changes the
+-- whole contract: the bounded row verifier no longer accepts the published
+-- legacy catalog, and the atomic source check rebuilds it. Removing the mark
+-- goes back; a mark on a row the catalog skips changes nothing.
+do
+ local db=ProjectEbonhold.PerkDatabase
+ local src=Nexus.EchoCatalogSource
+ H.names[440004]='Tome of Stutter Ungrouped'
+ H.names[9]='Some Talent'
+ db[330003].requiredSpell=9
+ db[330004].requiredSpell=440004
+ ok,result,changed=A.CheckCatalogSource()
+ check(ok==true and result=='rebuilt','B10: the in-place gates are published: '..tostring(result))
+ local cat=A.Catalog()
+ check(cat.tomeContract==false and cat.levers[9]~=nil and cat.levers[440004]~=nil,
+  'B10: without isTome marks every gate is a tome lever, as before')
+ db[330004].isTome=true
+ check(src.VerifyRow(cat,330004,db[330004],H.SpellName or GetSpellInfo)==false,
+  'B10: a first isTome mark added in place fails the bounded row verifier')
+ ok,result,changed=A.CheckCatalogSource()
+ cat=A.Catalog()
+ check(ok==true and result=='rebuilt' and cat.tomeContract==true,'B10: the contract change is rebuilt atomically: '..tostring(result))
+ check(cat.levers[440004]~=nil and cat.levers[9]==nil,'B10: under the contract a talent gate is no tome lever')
+ check(cat.rows[330003].requiredSpell==0 and cat.rows[330003].talentSpell==9,'B10: the talent gate is kept as a requirement')
+ db[339990]={comment='Skipped - Common',isTome=true}
+ ok,result,changed=A.CheckCatalogSource()
+ check(result=='unchanged' and A.Catalog().tomeContract==true,'B10: a mark on a row the catalog skips changes nothing: '..tostring(result))
+ db[339990]=nil
+ db[330004].isTome=nil
+ check(src.VerifyRow(A.Catalog(),330004,db[330004],H.SpellName or GetSpellInfo)==false,
+  'B10: removing the only mark fails the bounded row verifier')
+ ok,result,changed=A.CheckCatalogSource()
+ cat=A.Catalog()
+ check(result=='rebuilt' and cat.tomeContract==false and cat.levers[9]~=nil,'B10: and is rebuilt back to the legacy reading: '..tostring(result))
+ db[330003].requiredSpell=0
+ db[330004].requiredSpell=0
+ ok,result,changed=A.CheckCatalogSource()
+ check(result=='rebuilt','B10: the fixture rows are restored: '..tostring(result))
+ -- Third Spec review (Root probe_catalog_contract_removal): the only mark on
+ -- a row whose requiredSpell is 0 changes no gate, yet it decides the
+ -- contract. Its removal, and its move, are seen by the bounded verifier.
+ db[330003].requiredSpell=9
+ db[330006].isTome=true
+ ok,result,changed=A.CheckCatalogSource()
+ cat=A.Catalog()
+ check(result=='rebuilt' and cat.tomeContract==true and cat.levers[9]==nil,
+  'B10: a single mark on a zero-gate row makes the contract: '..tostring(result))
+ db[330006].isTome=nil
+ check(src.VerifyRow(cat,330006,db[330006],H.SpellName or GetSpellInfo)==false,
+  'B10: removing the last mark from a zero-gate row fails the bounded row verifier')
+ ok,result,changed=A.CheckCatalogSource()
+ cat=A.Catalog()
+ check(result=='rebuilt' and cat.tomeContract==false and cat.levers[9]~=nil,
+  'B10: and the legacy reading is rebuilt atomically: '..tostring(result))
+ db[330006].isTome=true
+ ok,result,changed=A.CheckCatalogSource()
+ db[330006].isTome=nil
+ db[330007].isTome=true
+ cat=A.Catalog()
+ check(src.VerifyRow(cat,330006,db[330006],H.SpellName or GetSpellInfo)==false
+  and src.VerifyRow(cat,330007,db[330007],H.SpellName or GetSpellInfo)==false,
+  'B10: a mark moved between zero-gate rows fails the verifier on both rows')
+ ok,result,changed=A.CheckCatalogSource()
+ check(result=='rebuilt' and A.Catalog().tomeContract==true and A.Catalog().rows[330007].tomeMark==true,
+  'B10: the moved mark is rebuilt: '..tostring(result))
+ db[330007].isTome=nil
+ db[330003].requiredSpell=0
+ ok,result,changed=A.CheckCatalogSource()
+ check(result=='rebuilt' and A.Catalog().tomeContract==false,'B10: the fixture rows are restored again: '..tostring(result))
+end
+
 print('PASS slot projection catalog semantics: fallback, retry, detached, mirror edits, swap, in-place, drift, source loss; '..checks..' checks')

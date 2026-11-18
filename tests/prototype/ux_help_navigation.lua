@@ -81,7 +81,8 @@ C.scenario('H1 Help during loading: direct pages; setup routes say why they wait
  H=dofile('tests/prototype/harness.lua')
  local T=dofile('tests/prototype/startup_support.lua');T.Load()
  local actions,sent=#H.actions,#H.sent
- SlashCmdList.NEXUS('help')
+ -- The reference pages (/nexus help opens the guided setup coach).
+ SlashCmdList.NEXUS('reference')
  local f=NexusHelpWindow
  C.setup(f and f:IsShown(),'H1: fixture: Help opens before start-up')
  C.setup(type(Nexus.StartupStatus)~='function' or not Nexus.StartupStatus().coreReady,'H1: fixture: start-up is not ready')
@@ -92,11 +93,19 @@ C.scenario('H1 Help during loading: direct pages; setup routes say why they wait
  local orbs=HelpButton('Orbs')
  if orbs then
   orbs:Click()
-  C.expect(f.title:GetText():find('Orbs / Lost Memories',1,true)~=nil and f.page:GetText()=='Page 5 / 7'
+  C.expect(f.title:GetText():find('Orbs / Lost Memories',1,true)~=nil and f.page:GetText()=='Page 5 / 8'
    and not orbs:IsEnabled(),'H1: a page button opens its page directly and shows it as current',f.title:GetText())
   HelpButton('Start'):Click()
-  C.expect(f.page:GetText()=='Page 1 / 7' and f.body:GetText():find('Start here',1,true)==1,
-   'H1: the Start page leads with the setup path',f.body:GetText():sub(1,60))
+  -- Accepted v23 form: the page opens with its own title as the gold
+  -- heading, then a blank line; the setup path is the first body text, at
+  -- the very next byte of the shown document (V.HelpDocument, all parts).
+  local L=Nexus.Localization
+  local title=L and L.Text and L.Text('help.title.page_start') or 'Getting started'
+  local head='|cffffd100'..title..'|r\n\n'
+  local ok,doc=pcall(V.HelpDocument,f)
+  doc=ok and doc or ''
+  C.expect(f.page:GetText()=='Page 1 / 8' and doc:sub(1,#head)==head and doc:find('Start here',1,true)==#head+1,
+   'H1: the Start page leads with the setup path, right under its title',doc:sub(1,80))
  end
  local assign,editor,setup=HelpButton('Assign Wishlist...'),HelpButton('Wishlist Editor'),HelpButton('Setup / Welcome')
  C.expect(assign~=nil and editor~=nil and setup~=nil,'H1: the setup row offers Setup / Welcome, Assign Wishlist... and Wishlist Editor')
@@ -112,7 +121,7 @@ C.scenario('H1 Help during loading: direct pages; setup routes say why they wait
  end
  C.guard(#H.actions==actions and #H.sent==sent,'H1: Help and its routes during loading act and send nothing')
  HelpButton('Next'):Click()
- C.guard(f.page:GetText()=='Page 2 / 7' and (not HelpButton('Wishlists') or not HelpButton('Wishlists'):IsEnabled()),
+ C.guard(f.page:GetText()=='Page 2 / 8' and (not HelpButton('Wishlists') or not HelpButton('Wishlists'):IsEnabled()),
   'H1: Next still navigates, and the page buttons follow it',f.page:GetText())
 end)
 

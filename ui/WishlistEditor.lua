@@ -21,6 +21,46 @@ local MAX_WISHLIST_ECHOES = 79
 local EchoListTotal = DraftModel.EchoListTotal
 local TrimWishlistName = DraftModel.TrimName
 
+-- Visible editor copy comes from the reviewed seam (core/Localization.lua,
+-- keys "editor.*"), looked up when it is shown, never cached at load: the
+-- session language is chosen after this file loads. Names, codes and game
+-- data are inserted through template text slots and are never translated.
+local function T(key) return (Nexus.Localization.Text(key)) end
+-- The generated name of an imported Wishlist whose code names none, said in
+-- the active language when the naming prompt opens for that new draft; the
+-- player may edit it, and the accepted name is then data like any other.
+local function ImportedDefault() return T("editor.value.imported_wishlist_default") end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+local function N(value) return Nexus.Localization.Count(value) end
+
+-- The client formats a StaticPopup's text (SetFormattedText): every "%" a
+-- translation holds is made literal, and POPUP_SLOT (a byte no reviewed text
+-- may hold) marks where the dialog's own "%s" argument goes.
+local POPUP_SLOT = "\127"
+local function PopupText(text)
+    local escaped = tostring(text):gsub("%%", "%%%%")
+    return (escaped:gsub(POPUP_SLOT, "%%s"))
+end
+
+-- A dialog whose visible fields are resolved each time the popup reads them,
+-- so a popup shown by any caller (the guided setup shows the import one)
+-- names the session language. A field the editor assigns directly (a Save
+-- confirmation's accept label) is used as assigned.
+local function LocalizedDialog(dialog, fields)
+    return setmetatable(dialog, {__index = function(_, field)
+        local resolve = fields[field]
+        if resolve then return resolve() end
+    end})
+end
+local function CancelLabel() return T("editor.button.cancel") end
+-- The code-owned names of the five Echo qualities (0..4), as the editor's
+-- catalog shows them (WishlistRenderer uses the same keys).
+local function QualityNames()
+    return {[0]=T("editor.value.quality_common"),[1]=T("editor.value.quality_uncommon"),
+        [2]=T("editor.value.quality_rare"),[3]=T("editor.value.quality_epic"),
+        [4]=T("editor.value.quality_legendary")}
+end
+
 local function DisplayUntrusted(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -113,8 +153,7 @@ local function SetExplicitCopyText(box, value)
         -- Nothing showable, so nothing is shown. Say so instead of leaving an
         -- empty box under a "copy this" label.
         box:SetText("")
-        print("|cffff6060Nexus:|r this wishlist cannot be exported as text: "
-            .. "its name contains characters the game cannot display.")
+        print("|cffff6060Nexus:|r " .. T("editor.chat.export_name_undisplayable"))
         return
     end
     box:SetText(shown)
@@ -128,6 +167,14 @@ local serverHideHooks = {}
 local wishlistController
 local flexiblePlanChooser
 local flexiblePlanRequest
+-- A workspace tab change is navigation, not a new editor open. Keep this
+-- controller draft only for the same character and selected Saved Build.
+local workspaceResume
+local function RefuseSuspendedDraftReplacement()
+    if not workspaceResume then return false end
+    print("|cffffd200Nexus:|r " .. T("editor.chat.plan_draft_suspended"))
+    return true
+end
 
 local function SyncFulfilledDraftTargets()
     M._fulfilledDraftTargets =
@@ -147,7 +194,8 @@ wishlistController = WishlistControllerFactory.New({
         end
         return NexusDB
     end,
-    notify = function(message) print(Nexus.UserText and Nexus.UserText.Message(message) or message) end,
+    -- The controller already says its line through UserText.Message once.
+    notify = function(message) print(message) end,
     requestRecompute = function()
         if Nexus.RequestRecompute then Nexus.RequestRecompute() end
     end,
@@ -159,7 +207,7 @@ wishlistController = WishlistControllerFactory.New({
             Nexus.CommunityBuilds.Show()
             return true
         end
-        print("|cffff6060Nexus:|r Build Library unavailable")
+        print("|cffff6060Nexus:|r " .. T("editor.chat.build_library_unavailable"))
         return false
     end,
 })
@@ -202,12 +250,30 @@ local function RendererInstance()
         "Wishlist renderer unavailable")
 end
 
+-- Guided setup receipts (core/GuidedSetup.lua): passive reports of real
+-- outcomes of this editor. They record only; nothing here writes, uploads
+-- or assigns, and a missing guide changes nothing.
+local guideSeen = 0
+local function GuideNote(kind, fields)
+    local guide = Nexus.GuidedSetup
+    if guide and type(guide.Note) == "function" then pcall(guide.Note, kind, fields) end
+end
+local function GuideSave()
+    local read = wishlistController.SaveReceipt
+    local receipt = type(read) == "function" and read() or nil
+    if type(receipt) == "table" and (tonumber(receipt.serial) or 0) > guideSeen then
+        guideSeen = receipt.serial
+        GuideNote("save", receipt)
+    end
+end
+
 function M._PumpApplyRetry()
     local ok = wishlistController.PumpApplyRetry()
     SyncFulfilledDraftTargets()
     if ok and wishlistRenderer then wishlistRenderer.SetApplySaved() end
     -- A finished retry (not an idle pump) shows its result at once.
     if ok ~= nil and wishlistRenderer then wishlistRenderer.RenderSaveResult() end
+    if ok ~= nil then GuideSave() end
 end
 
 function M.IsApplyPending()
@@ -219,6 +285,7 @@ local function AcceptApply(data)
     SyncFulfilledDraftTargets()
     if ok and wishlistRenderer then wishlistRenderer.SetApplySaved() end
     if wishlistRenderer then wishlistRenderer.RenderSaveResult() end
+    GuideSave()
     return ok, err
 end
 
@@ -226,34 +293,42 @@ end
 -- (ConfirmationText): the planned count, the destination this editor
 -- captured and, only when it applies, the Auto line. The renderer sets each
 -- accept button to the action that opened it (ConfirmLabel) before showing.
-StaticPopupDialogs["WISHLISTREALIZER_UPDATE_WISHLIST"] = {
-    text = "Save changes to '%s'?\n%s",
+StaticPopupDialogs["WISHLISTREALIZER_UPDATE_WISHLIST"] = LocalizedDialog({
+    -- The accept label stays a source literal (localization pending, see
+    -- WishlistRenderer M.ApplyAction); the renderer sets it before each show.
     button1 = "Save changes",
-    button2 = "Cancel",
     OnCancel = function(_, data) wishlistController.CancelApply(data) end,
     OnAccept = function(self, data)
         AcceptApply(data)
     end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function()
+        return PopupText(TF("editor.popup.save_changes_question", {name = POPUP_SLOT})) .. "\n%s"
+    end,
+    button2 = CancelLabel,
+})
 
-StaticPopupDialogs["WISHLISTREALIZER_CREATE_WISHLIST"] = {
-    text = "Create '%s'?\n%s",
+StaticPopupDialogs["WISHLISTREALIZER_CREATE_WISHLIST"] = LocalizedDialog({
     button1 = "Create & assign",
-    button2 = "Cancel",
     OnCancel = function(_, data) wishlistController.CancelApply(data) end,
     OnAccept = function(self, data)
         AcceptApply(data)
     end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function()
+        return PopupText(TF("editor.popup.create_question", {name = POPUP_SLOT})) .. "\n%s"
+    end,
+    button2 = CancelLabel,
+})
 
 -- The code of the open draft, or nil and why there is none. The second value
 -- of a code is what it leaves out (the controller's note), or nil.
 local function ExportEBH1String()
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.EncodeEBH1) then
-        return nil, "export codec unavailable"
+        return nil, T("editor.error.export_codec_unavailable")
     end
     local entries, note = wishlistController.ExportEntries()
     local classToken = ""
@@ -268,8 +343,8 @@ local function ExportEBH1String()
     -- (79 rolled copies, 6 locked target copies, 85 entries) and of a plan
     -- with no Echo; such a code imports nowhere, so none is offered.
     if type(code) ~= "string" or code:sub(1, 6) == "EBH1::" then
-        return nil, #(entries or {}) == 0 and "this wishlist has no Echoes to export"
-            or "this plan does not fit an export code (at most 79 rolled copies, 6 locked target copies and 85 entries)"
+        return nil, #(entries or {}) == 0 and T("editor.error.export_no_echoes")
+            or T("editor.error.export_envelope")
     end
     return code, note
 end
@@ -293,20 +368,34 @@ local function RefuseExplicitCopy(dialog, reason)
         box._nexusExplicitExportText = ""
         box:SetText("")
     end
-    local text = "Export unavailable: " .. tostring(reason or "this plan cannot be exported") .. "."
+    local text = TF("editor.error.export_unavailable",
+        {reason = tostring(reason or T("editor.error.export_unavailable_default"))})
     ExportPrompt(dialog, text)
     print("|cffff6060Nexus:|r " .. text)
 end
 
+local function EndGuidedImport()
+    if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
+        Nexus.GuidedSetupUI.RouteEnded('import')
+    end
+end
+
 local function LoadImportedWishlist(parsed, chosenName)
+    -- A naming popup can outlive the editor window. A delayed Accept must
+    -- never replace a Plan draft protected by workspace navigation; a guided
+    -- import waiting on it comes back unfinished, as for its other refusals.
+    if RefuseSuspendedDraftReplacement() then EndGuidedImport(); return false, "Plan draft suspended" end
     if parsed and parsed.needsRoleSelection then
-        return RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
+        local opened = RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
+        if not opened then EndGuidedImport() end
+        return opened
     end
     local ok, name, count, why =
         wishlistController.LoadImported(parsed, chosenName)
     if not ok then
-        print("|cffff6060Nexus:|r couldn't import that EBH1 string: "
-            .. tostring(why or "the Echo roles could not be represented exactly") .. ".")
+        print("|cffff6060Nexus:|r " .. TF("editor.chat.import_failed",
+            {reason = tostring(why and Nexus.UserText.Recognized(why) or T("editor.error.import_roles_unrepresentable"))}))
+        EndGuidedImport()
         return false
     end
     SyncFulfilledDraftTargets()
@@ -315,11 +404,16 @@ local function LoadImportedWishlist(parsed, chosenName)
     renderer.Prepare({attach=true, style=true, close=true})
     renderer.SetNameText(name)
     renderer.ShowFrame()
+    if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.WatchEditor then
+        Nexus.GuidedSetupUI.WatchEditor('import')
+    end
     M.Refresh()
-    local displayName = DisplayUntrusted(name, 1024, false) or "Wishlist"
-    print(string.format(
-        "|cff4dff80Nexus:|r imported %d Echo entr%s as new wishlist '%s'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
-        count, count == 1 and "y" or "ies", displayName))
+    local displayName = DisplayUntrusted(name, 1024, false) or T("editor.value.wishlist_fallback")
+    -- One entry or several: the English chose "entry" or "entries" by count.
+    print("|cff4dff80Nexus:|r " .. TF(count == 1 and "editor.chat.imported_draft_one"
+        or "editor.chat.imported_draft_many", {count = N(count), name = displayName}))
+    -- An opened draft, not a saved plan.
+    GuideNote("draft", {origin = "import", name = name})
     return true
 end
 
@@ -329,11 +423,13 @@ end
 -- Missing/mismatched evidence leaves a cancelable explicit fallback draft.
 RolePicker = { visibleRows=10 }
 
-function RolePicker.Hide()
+function RolePicker.Hide(continuing)
     local restore = RolePicker.state and RolePicker.state.restoreEditor
+    local wasImport = RolePicker.state and RolePicker.state.kind == "import"
     RolePicker.state=nil
     if RolePicker.frame then RolePicker.frame:Hide() end
     if restore and wishlistRenderer then wishlistRenderer.ShowFrame() end
+    if wasImport and not continuing then EndGuidedImport() end
 end
 
 function RolePicker.Count()
@@ -355,31 +451,35 @@ function RolePicker.Render()
     local total,locked=RolePicker.Count()
     local pages=math.max(1,math.ceil(#state.rows/RolePicker.visibleRows))
     state.page=math.max(1,math.min(pages,state.page or 1))
-    f.title:SetText("Choose locked Echo targets: " ..
-        (DisplayUntrusted(state.name,1024,false) or "Wishlist"))
-    f.count:SetText(string.format("Rolled copies %d/79  |  Locked targets %d/6  |  %d total",total-locked,locked,total))
-    f.pageLabel:SetText(string.format("Page %d / %d",state.page,pages))
+    f.title:SetText(TF("editor.title.role_picker",
+        {name=DisplayUntrusted(state.name,1024,false) or T("editor.value.wishlist_fallback")}))
+    f.count:SetText(TF("editor.label.role_rolled_copies",{count=N(total-locked)}).."  |  "
+        ..TF("editor.label.role_locked_targets",{count=N(locked)}).."  |  "
+        ..TF("editor.label.role_total",{count=N(total)}))
+    f.pageLabel:SetText(TF("editor.label.role_page",{page=N(state.page),pages=N(pages)}))
     if state.page>1 then f.prev:Enable() else f.prev:Disable() end
     if state.page<pages then f.next:Enable() else f.next:Disable() end
     if total-locked<=79 and total-locked>0 and locked<=6 then
         f.confirm:Enable()
     else f.confirm:Disable() end
-    f.confirm:SetText(state.assign and "Confirm locked targets & assign" or "Confirm locked targets & edit")
-    local qualityNames={[0]="Common",[1]="Uncommon",[2]="Rare",[3]="Epic",[4]="Legendary"}
+    -- Help quotes this pair; both are reviewed keys, so they stay in one
+    -- language together.
+    f.confirm:SetText(state.assign and T("editor.button.confirm_locked_assign") or T("editor.button.confirm_locked_edit"))
+    local qualityNames=QualityNames()
     for n,view in ipairs(f.rows) do
         local index=(state.page-1)*RolePicker.visibleRows+n
         local row=state.rows[index]
         view.index=index
         if row then
-            view.label:SetText((DisplayUntrusted(row.name,256,false) or tostring(row.id))
-                .. " (" .. tostring(qualityNames[row.quality] or row.quality) .. ") x" .. row.copies)
-            view.count:SetText(tostring(row.selected) .. " locked")
+            view.label:SetText(TF("editor.label.role_row",{name=DisplayUntrusted(row.name,256,false) or tostring(row.id),
+                quality=tostring(qualityNames[row.quality] or row.quality),copies=N(row.copies)}))
+            view.count:SetText(TF("editor.label.role_row_locked",{count=N(row.selected)}))
             if row.selected>0 then view.minus:Enable() else view.minus:Disable() end
             if row.selected<row.copies and locked<6 then view.plus:Enable() else view.plus:Disable() end
             view.frame:Show()
         else view.frame:Hide() end
     end
-    f.message:SetText(state.message or "Choose locked Echo targets. This changes the plan, not owned Echoes or resources.")
+    f.message:SetText(state.message or T("editor.status.role_default"))
 end
 
 function RolePicker.Adjust(index,delta)
@@ -399,7 +499,7 @@ function RolePicker.UseOwned(automatic)
     if not state then return end
     local locked=wishlistController.LockedProjection()
     if not locked or locked.synced~=true or type(locked.bySpell)~="table" then
-        RolePicker.Message("Waiting for the server's current locked Echo list. You can choose the intended targets manually.")
+        RolePicker.Message(T("editor.status.role_waiting_locked_list"))
         return
     end
     local catalog=wishlistController.CatalogProjection()
@@ -407,7 +507,7 @@ function RolePicker.UseOwned(automatic)
     for id,copies in pairs(locked.bySpell) do
         id=tonumber(id)
         if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) then
-            RolePicker.Message("The current locked Echo list is incomplete. Choose the intended targets manually.")
+            RolePicker.Message(T("editor.status.role_locked_list_incomplete"))
             return false
         end
         remaining[id]=(remaining[id] or 0)+copies
@@ -417,7 +517,7 @@ function RolePicker.UseOwned(automatic)
     -- Held copies beyond the plan envelope are valid ownership, not incomplete
     -- data; the suggestion just cannot use them.
     if ownedTotal>6 then
-        RolePicker.Message("Your locked Echoes hold more than the six target copies a plan designs. No targets were suggested; choose the intended targets manually.")
+        RolePicker.Message(T("editor.status.role_locked_over_six"))
         return false
     end
     local count=0
@@ -428,15 +528,31 @@ function RolePicker.UseOwned(automatic)
         selected[i]=copies;remaining[row.id]=(remaining[row.id] or 0)-copies
         count=count+copies
     end
-    if count>6 then RolePicker.Message("More than six matching copies; choose the six intended targets manually.");return end
+    if count>6 then RolePicker.Message(T("editor.status.role_matching_over_six"));return end
     for i,row in ipairs(state.rows) do row.selected=selected[i] end
     state.usedCurrentLocks=automatic==true
     state.message=automatic==true
-        and "Using matching currently locked Echoes. The plan must fit 79 rolled copies / 6 locked targets."
-        or "Matching currently locked Echoes suggested as targets. Review them, then confirm your plan."
+        and T("editor.status.role_using_current")
+        or T("editor.status.role_suggested")
     RolePicker.Render()
     local total=RolePicker.Count()
     return count>0 and total-count>0 and total-count<=79 and count<=6
+end
+
+-- D7: the numbered Saved Build an assignment was started for, as the Journal
+-- defines it (JournalTab.SavedBuildIdentity: slot, name and contents; the
+-- slot number or the name alone identifies nothing). `target` is
+-- {slot, identity}; it holds only while that slot still reads as that
+-- Saved Build. Unreadable, gone or empty never holds.
+function RolePicker.TargetHolds(target)
+    local journal=Nexus.JournalTab
+    return journal~=nil and type(journal.SavedBuildHolds)=="function"
+        and journal.SavedBuildHolds(target)==true
+end
+-- The Journal's own refusal line for it (and its stale chooser, if any).
+function RolePicker.RefuseChangedTarget(target)
+    local journal=Nexus.JournalTab
+    if journal and type(journal.SayTargetChanged)=="function" then journal.SayTargetChanged(target) end
 end
 
 function RolePicker.Accept()
@@ -444,7 +560,7 @@ function RolePicker.Accept()
     if not state then return false end
     local total,locked=RolePicker.Count()
     if locked>6 or total-locked>79 or total-locked<1 then
-        RolePicker.Message("Select up to six locked targets so no more than 79 rolled copies remain.")
+        RolePicker.Message(T("editor.status.role_select_limit"))
         return false
     end
     local echoes,ordinary,lockedRows={},{},{}
@@ -460,10 +576,10 @@ function RolePicker.Accept()
     end
     local prepared,why=DraftModel.NormalizeCandidateEvidence(ordinary,lockedRows,
         {catalog=wishlistController.CatalogProjection(),lockedBySpell={}})
-    if not prepared then RolePicker.Message(why or "These targets are not representable.");return false end
+    if not prepared then RolePicker.Message(why and Nexus.UserText.Recognized(why) or T("editor.status.role_not_representable"));return false end
     if state.kind=="import" then
         local name,class=state.name,state.class
-        RolePicker.Hide()
+        RolePicker.Hide(true)
         return LoadImportedWishlist({entries=echoes,name=name,class=class},name)
     end
     if state.assign then
@@ -477,11 +593,25 @@ function RolePicker.Accept()
         -- different current selection refuses and never retargets it.
         local slots=Adapter and Adapter.Slots and Adapter.Slots()
         if type(slots)~="table" or slots.activeKnown==false then
-            RolePicker.Message("Loadout data is not available right now. Nothing was confirmed or assigned; wait for it to load, then confirm again.")
+            RolePicker.Message(T("editor.status.role_loadout_unavailable"))
             return false
         end
         if (wishlistController.SelectedSavedBuild(slots) or 0)~=state.activeSlot then
-            RolePicker.Message("The active loadout changed. Cancel and select the intended loadout again.")
+            RolePicker.Message(T("editor.status.role_loadout_changed"))
+            return false
+        end
+        -- The same slot can hold another Saved Build by now (saved over or
+        -- renamed while this picker waited). Then no role is confirmed and
+        -- nothing is assigned: the picker closes and the player chooses
+        -- again, for what the slot holds now.
+        -- A numbered destination without a target was never identified: it
+        -- fails closed the same way (no role, no assignment), never open.
+        local target=state.target
+        if state.activeSlot>0 and not (target and RolePicker.TargetHolds(target)) then
+            GuideNote("assign",{origin="rolepicker",destination=state.activeSlot,
+                ok=false,reason="target_changed",guide=state.guide})
+            RolePicker.Hide()
+            RolePicker.RefuseChangedTarget(target)
             return false
         end
     end
@@ -490,14 +620,17 @@ function RolePicker.Accept()
         resolved,reason=Adapter.ConfirmWishlistRoles(state.candidate,echoes,
             state.usedCurrentLocks and "current-locks" or "user-confirmed")
     end
-    if not resolved then RolePicker.Message(reason or "Could not preserve this role choice; reopen the Wishlist.");return false end
+    if not resolved then RolePicker.Message(reason and Nexus.UserText.Recognized(reason) or T("editor.status.role_not_preserved"));return false end
     local loadoutSlot=state.loadoutSlot
     if state.assign then
         local ok,err
         if state.activeSlot==0 then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
         else ok,err=Adapter.SetLoadoutWishlist(state.activeSlot,resolved.slot,resolved) end
+        GuideNote("assign",{origin="rolepicker",destination=state.activeSlot==0 and "first" or state.activeSlot,
+            ok=ok==true,reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name,guide=state.guide})
         if not ok then
-            RolePicker.Message("Roles saved, but assignment did not complete: " .. tostring(err or "unavailable"))
+            RolePicker.Message(TF("editor.status.role_assign_incomplete",
+                {reason=tostring(err and Nexus.UserText.Recognized(err) or T("editor.value.reason_unavailable"))}))
             return false
         end
         loadoutSlot=state.activeSlot>0 and state.activeSlot or nil
@@ -507,8 +640,9 @@ function RolePicker.Accept()
     RolePicker.Hide()
     local opened=M.OpenForWishlist(resolved,loadoutSlot)
     if opened then
-        print("|cff4dff80Nexus:|r " .. (usedCurrentLocks and "Using matching currently locked Echoes for '" or "Locked Echo targets confirmed for '") ..
-            (DisplayUntrusted(name,1024,false) or "Wishlist") .. "'. Locked Echoes were not changed.")
+        print("|cff4dff80Nexus:|r " .. TF(usedCurrentLocks and "editor.chat.role_using_current_for"
+            or "editor.chat.role_confirmed_for",
+            {name=DisplayUntrusted(name,1024,false) or T("editor.value.wishlist_fallback")}))
     end
     if Nexus.JournalTab and Nexus.JournalTab.RefreshAssociations then Nexus.JournalTab.RefreshAssociations() end
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
@@ -525,8 +659,10 @@ function RolePicker.Ensure()
     f:SetClampedToScreen(true);f:EnableMouse(true);f:SetToplevel(true)
     f:SetScript("OnHide",function()
         local restore=RolePicker.state and RolePicker.state.restoreEditor
+        local wasImport=RolePicker.state and RolePicker.state.kind=="import"
         RolePicker.state=nil
         if restore and wishlistRenderer then wishlistRenderer.ShowFrame() end
+        if wasImport then EndGuidedImport() end
     end)
     UISpecialFrames[#UISpecialFrames+1]="NexusWishlistRolePicker"
     local p=f
@@ -549,7 +685,7 @@ function RolePicker.Ensure()
     f.title=label("GameFontNormal",20,-18,570)
     local help=label("GameFontHighlightSmall",20,-44,570)
     help:SetHeight(40)
-    help:SetText("Choose which copies this plan targets for locked Echo slots (at most six).\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
+    help:SetText(T("editor.body.role_help_targets").."\n"..T("editor.body.role_help_plan_only"))
     f.count=label("GameFontNormal",20,-83,570)
     f.rows={}
     for n=1,RolePicker.visibleRows do
@@ -576,17 +712,24 @@ function RolePicker.Ensure()
         b:SetFrameStrata("FULLSCREEN_DIALOG");b:SetFrameLevel(42);b:EnableMouse(true)
         b:SetSize(w,24);b:SetPoint("TOPLEFT",x,y);b:SetText(text);b:SetScript("OnClick",fn);return b
     end
-    f.prev=button("NexusWishlistRolePrevious","Previous",20,-394,82,function()
+    f.prev=button("NexusWishlistRolePrevious",T("editor.button.previous"),20,-394,82,function()
         if RolePicker.state then RolePicker.state.page=RolePicker.state.page-1;RolePicker.Render() end end)
-    f.next=button("NexusWishlistRoleNext","Next",188,-394,70,function()
+    f.next=button("NexusWishlistRoleNext",T("editor.button.next"),188,-394,70,function()
         if RolePicker.state then RolePicker.state.page=RolePicker.state.page+1;RolePicker.Render() end end)
     f.pageLabel=label("GameFontHighlightSmall",108,-401,78)
-    f.owned=button("NexusWishlistRoleUseOwned","Suggest matching locked targets",318,-394,270,function() RolePicker.UseOwned(false) end)
+    f.owned=button("NexusWishlistRoleUseOwned",T("editor.button.role_suggest"),318,-394,270,function() RolePicker.UseOwned(false) end)
     -- Two lines of a 16 px face (the longest message wraps to two at 570 px).
     f.message=label("GameFontHighlightSmall",20,-430,570)
     f.message:SetHeight(44);f.message:SetJustifyV("TOP")
-    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-476,278,RolePicker.Accept)
-    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-476,90,RolePicker.Hide)
+    f.confirm=button("NexusWishlistRoleConfirm",T("editor.button.confirm_locked_edit"),210,-476,278,RolePicker.Accept)
+    f.cancel=button("NexusWishlistRoleCancel",T("editor.button.cancel"),498,-476,90,function()
+        local pending=RolePicker.state
+        if pending and pending.assign then
+            GuideNote("assign",{origin="rolepicker",destination=pending.activeSlot==0 and "first" or pending.activeSlot,
+                ok=false,cancelled=true,reason="cancelled",guide=pending.guide})
+        end
+        RolePicker.Hide()
+    end)
     f:Hide()
     return f
 end
@@ -595,7 +738,7 @@ function RolePicker.Begin(entries,context)
     local candidate={echoes=entries,lockEvidenceStatus="unavailable"}
     local evidence=Adapter and Adapter.WishlistEvidenceState and Adapter.WishlistEvidenceState(candidate)
     if evidence~="evidence-pending" and evidence~="actionable" then
-        print("|cffff6060Nexus:|r Wishlist contents are invalid; no draft or saved data was changed.")
+        print("|cffff6060Nexus:|r " .. T("editor.chat.role_contents_invalid"))
         return false
     end
     local rows,byKey={},{}
@@ -604,13 +747,13 @@ function RolePicker.Begin(entries,context)
         local id,q,copies=tonumber(e.spellId),tonumber(e.quality or 0),tonumber(e.stacks)
         local cat=catalog and catalog.rows and catalog.rows[id]
         if q>255 or (cat and tonumber(cat.quality)~=q) then
-            print("|cffff6060Nexus:|r An Echo's quality does not match its exact ID; no data was changed.")
+            print("|cffff6060Nexus:|r " .. T("editor.chat.role_quality_mismatch"))
             return false
         end
         local key=tostring(id)..":"..tostring(q)
         local row=byKey[key]
         if not row then
-            row={id=id,quality=q,copies=0,selected=0,name=cat and cat.name or ("Echo "..id)}
+            row={id=id,quality=q,copies=0,selected=0,name=cat and cat.name or TF("editor.value.echo_id_fallback",{id=tostring(id)})}
             byKey[key]=row;rows[#rows+1]=row
         end
         row.copies=row.copies+copies
@@ -621,7 +764,8 @@ function RolePicker.Begin(entries,context)
     -- No modal frame is constructed on the normal automatic-current-lock path.
     local state={kind=context.kind,name=context.name,rows=rows,page=1,
         class=context.class,loadoutSlot=context.loadoutSlot,
-        assign=context.assign,activeSlot=context.activeSlot}
+        assign=context.assign,activeSlot=context.activeSlot,guide=context.guide,
+        target=context.target}
     if context.candidate then
         state.candidate={slot=context.candidate.slot,name=context.candidate.name,
             key=context.candidate.key,lockEvidenceStatus="unavailable",echoes={},
@@ -655,20 +799,67 @@ end
 -- never silently becomes action authority simply because a button was pressed.
 function M.UnresolvedRoleHint()
     local settings=Nexus.Store and Nexus.Store.Settings and Nexus.Store.Settings()
-    return settings and settings.useCurrentLocksForUntagged==false
-        and "choose locked targets" or "use current locks"
+    return T(settings and settings.useCurrentLocksForUntagged==false
+        and "editor.status.hint_choose_locked_targets" or "editor.status.hint_use_current_locks")
 end
 
-function M.ResolveAndAssignWishlist(candidate, activeSlot)
+function M.ResolveAndAssignWishlist(candidate, activeSlot, guide, binding)
+    -- guide (optional, passive): the guided setup origin its caller took as
+    -- the player started this operation; it is only carried to the result.
+    -- binding (optional): the Saved Build its caller showed the player
+    -- ({slot, identity}, JournalTab.AssignWithConsent's). A numbered target
+    -- without one is bound here, to what its slot holds at this call (the
+    -- editor's candidates arrive straight from their own check of it), and
+    -- refused here when that cannot be identified. So every role picker for
+    -- a numbered target carries one; it confirms no role and assigns nothing
+    -- unless that Saved Build is still the one in the slot
+    -- (RolePicker.Accept). Slot 0, the first-run target, has none.
+    local slot=tonumber(activeSlot) or 0
+    local target=nil
+    if slot>0 then
+        local journal=Nexus.JournalTab
+        if type(binding)=="table" then
+            -- A caller's binding is checked once more before anything starts.
+            if tonumber(binding.slot)~=slot or not RolePicker.TargetHolds(binding) then
+                GuideNote("assign",{origin="editor",destination=slot,ok=false,
+                    reason="target_changed",guide=guide})
+                RolePicker.RefuseChangedTarget(binding)
+                return false,"target_changed"
+            end
+            target=binding
+        else
+            -- D7-S3: a numbered target that cannot be identified now (empty,
+            -- missing or unreadable) starts nothing: no role choice, no role
+            -- picker that could wait until a Saved Build appears in that
+            -- slot, no assignment. It is refused here with the assignment's
+            -- own reason for such a slot, said in chat (the callers do not
+            -- show a return value).
+            local identity=journal and type(journal.SavedBuildIdentity)=="function"
+                and journal.SavedBuildIdentity(slot) or nil
+            if not identity then
+                local reason="that loadout slot is empty or unavailable"
+                GuideNote("assign",{origin="editor",destination=slot,ok=false,
+                    reason=reason,guide=guide})
+                print("|cffff6060Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason)))
+                return false,reason
+            end
+            target={slot=slot,identity=identity}
+        end
+    end
     local resolved,status,_,why=Adapter.ResolveWishlistEvidence(candidate)
     if status=="evidence-pending" then
         return RolePicker.Begin(resolved.echoes,{kind="existing",name=resolved.name,
             candidate=resolved,loadoutSlot=tonumber(activeSlot),assign=true,
-            activeSlot=tonumber(activeSlot) or 0})
+            activeSlot=tonumber(activeSlot) or 0,guide=guide,target=target})
     end
     if status~="actionable" then return false,why end
-    if tonumber(activeSlot)==0 then return Adapter.SetFirstRunWishlist(resolved.slot,resolved) end
-    return Adapter.SetLoadoutWishlist(activeSlot,resolved.slot,resolved)
+    local first=tonumber(activeSlot)==0
+    local ok,err
+    if first then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
+    else ok,err=Adapter.SetLoadoutWishlist(activeSlot,resolved.slot,resolved) end
+    GuideNote("assign",{origin="editor",destination=first and "first" or activeSlot,ok=ok==true,
+        reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name,guide=guide})
+    return ok,err
 end
 
 -- The editor's Wishlist candidates (when nothing is tracked) assign the clicked
@@ -678,6 +869,11 @@ end
 -- only after Assign, and only while the active Saved Build is still the one
 -- named. Cancel changes nothing; Auto is never changed here. Auto OFF, the
 -- first-run target and an empty or unknown Saved Build keep their behaviour.
+-- D7: the question is bound to the Saved Build it names (its slot, name and
+-- contents, from the row the name is read from here). Answered after that
+-- slot was saved over, renamed, emptied or became unreadable, it assigns
+-- nothing and the player is told to choose again; the active-slot refusal
+-- below is kept and comes after it.
 -- Returns what the consent call returned, or what `perform` returned.
 function M.ConfirmCandidateAssignment(candidate, perform)
     local adapter = Adapter or Nexus.GameAdapter
@@ -692,36 +888,41 @@ function M.ConfirmCandidateAssignment(candidate, perform)
     if not (journal and type(journal.AssignWithConsent) == "function") then
         local stats = type(Nexus.RecomputeStats) == "function" and Nexus.RecomputeStats() or nil
         if type(stats) == "table" and stats.autoEnabled == true then
-            print("|cffff6060Nexus:|r Nothing was assigned: Auto is ON and the confirmation that names its "
-                .. "consequence could not be shown. Turn Auto OFF to assign, or try again later.")
+            print("|cffff6060Nexus:|r " .. T("editor.chat.assign_consent_unavailable"))
             return nil, "consent_unavailable"
         end
         return perform()
     end
     local name = DisplayUntrusted(candidate and candidate.name, 1024, false)
-    if not name or name == "" then name = "Slot " .. tostring(candidate and candidate.slot or "?") end
+    if not name or name == "" then
+        name = TF("editor.value.slot_fallback", {slot = tostring(candidate and candidate.slot or "?")})
+    end
     local label = DisplayUntrusted(row.name, 1024, false)
     if not label or label == "" then label = tostring(active) end
-    return journal.AssignWithConsent(name, "Saved Build '" .. label .. "'", true, function()
+    local binding = type(journal.SavedBuildIdentity) == "function"
+        and {slot = active, identity = journal.SavedBuildIdentity(active, row)} or nil
+    return journal.AssignWithConsent(name, TF("editor.value.saved_build_quoted", {name = label}), true, function()
         local now = adapter and adapter.Slots and adapter.Slots()
         if type(now) ~= "table" or tonumber(now.activeSlot) ~= active then
-            print("|cffff6060Nexus:|r Nothing was assigned: the active Saved Build changed after you were "
-                .. "asked. Choose the Wishlist again.")
+            print("|cffff6060Nexus:|r " .. T("editor.chat.assign_saved_build_changed"))
             return
         end
         return perform()
-    end)
+    end, binding)
 end
 
 function M.ImportEBH1String(text, chosenName)
+    if RefuseSuspendedDraftReplacement() then EndGuidedImport(); return false, "Plan draft suspended" end
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.DecodeEBH1) then
-        print("|cffff6060Nexus:|r import codec unavailable")
+        print("|cffff6060Nexus:|r " .. T("editor.chat.import_codec_unavailable"))
+        EndGuidedImport()
         return
     end
     local parsed = Codec.DecodeEBH1(text, true)
     if not parsed or #parsed.entries == 0 then
-        print("|cffff6060Nexus:|r couldn't parse that as an EBH1 string.")
+        print("|cffff6060Nexus:|r " .. T("editor.chat.import_parse_failed"))
+        EndGuidedImport()
         return
     end
 
@@ -731,16 +932,53 @@ function M.ImportEBH1String(text, chosenName)
         return
     end
     local suggested = TrimWishlistName(parsed.name)
-    if suggested == "" then suggested = "Imported Wishlist" end
+    if suggested == "" then suggested = ImportedDefault() end
     local displaySuggested = DisplayUntrusted(suggested, 1024, false)
-        or "Imported Wishlist"
+        or ImportedDefault()
     StaticPopup_Show("NEXUS_NAME_IMPORTED_WISHLIST",
         displaySuggested, nil, parsed)
 end
 
-StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
-    text = "Your current wishlist + locked Echoes, as an EBH1 string.\nCtrl+A, Ctrl+C to copy:",
-    button1 = "Close",
+-- The import field's own limit, for another field that takes the same code
+-- (the guided setup's paste field).
+M.IMPORT_MAX_LETTERS = IMPORT_MAX_LETTERS
+
+-- A read-only check of a pasted EBH1 code through the same decoder the import
+-- uses (ImportEBH1String). It reads the text and nothing else: no draft, no
+-- popup, no save, no assignment and no receipt. A code that fills the field's
+-- whole limit may have been cut by it, so it is refused as possibly cut off.
+-- The decoder checks the code's form and envelope only; the editor checks its
+-- Echoes again when the draft is opened. Returns {state=...}:
+--   "empty"       nothing was pasted
+--   "unavailable" the decoder is not loaded
+--   "rejected"    reason "long" (limit = the field's letters) or "invalid"
+--   "accepted"    name (trimmed, or nil), entries, rolled and locked copies,
+--                 needsRoles (more than 79 rolled copies: the editor asks for
+--                 locked targets first) and suspended (an unsaved Plan draft in
+--                 another workspace refuses the import until it is resolved)
+function M.CheckImportCode(text)
+    if type(text) ~= "string" or not text:find("%S") then return {state = "empty"} end
+    if #(text:gsub("[\128-\191]", "")) >= IMPORT_MAX_LETTERS then
+        return {state = "rejected", reason = "long", limit = IMPORT_MAX_LETTERS}
+    end
+    local Codec = Nexus and Nexus.Codec
+    if not (Codec and type(Codec.DecodeEBH1) == "function") then return {state = "unavailable"} end
+    local ok, parsed = pcall(Codec.DecodeEBH1, text, true)
+    if not ok or type(parsed) ~= "table" or type(parsed.entries) ~= "table" or #parsed.entries == 0 then
+        return {state = "rejected", reason = "invalid"}
+    end
+    local rolled, locked = 0, 0
+    for _, e in ipairs(parsed.entries) do
+        local copies = tonumber(e.stacks) or 0
+        if e.locked then locked = locked + copies else rolled = rolled + copies end
+    end
+    local name = TrimWishlistName(parsed.name)
+    return {state = "accepted", name = name ~= "" and name or nil, entries = #parsed.entries,
+        rolled = rolled, locked = locked, needsRoles = parsed.needsRoleSelection == true,
+        suspended = workspaceResume ~= nil}
+end
+
+StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = LocalizedDialog({
     hasEditBox = true,
     editBoxWidth = 350,
     maxLetters = IMPORT_MAX_LETTERS,
@@ -754,8 +992,8 @@ StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
         if why then
             -- What the code leaves out (current locked Echoes above the plan's
             -- six locked target copies).
-            ExportPrompt(self, "Your current wishlist as an EBH1 string; " .. why
-                .. ".\nCtrl+A, Ctrl+C to copy:")
+            ExportPrompt(self, TF("editor.popup.export_intro_note", {note = why})
+                .. "\n" .. T("editor.popup.export_copy_hint"))
             print("|cffff9040Nexus:|r " .. why .. ".")
         end
         self.editBox:HighlightText()
@@ -764,17 +1002,19 @@ StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
     EditBoxOnEnterPressed = function(self) self:GetParent():Hide() end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function()
+        return PopupText(T("editor.popup.export_intro") .. "\n" .. T("editor.popup.export_copy_hint"))
+    end,
+    button1 = function() return T("editor.button.close") end,
+})
 
-StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
-    text = "Choose a name for this imported wishlist:\n%s",
-    button1 = "Open imported draft",
-    button2 = "Cancel",
+StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = LocalizedDialog({
     hasEditBox = true,
     editBoxWidth = 300,
     OnShow = function(self)
         local suggested = TrimWishlistName(self.data and self.data.name)
-        if suggested == "" then suggested = "Imported Wishlist" end
+        if suggested == "" then suggested = ImportedDefault() end
         ConfigureSafeNameEditBox(self.editBox)
         self.editBox:_NexusSetRawText(suggested)
         self.editBox:SetFocus()
@@ -788,26 +1028,34 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
         -- Said only when something really was dropped, so the message cannot
         -- outlive the rule that produces it.
         if name ~= "" and name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
-            print("|cffff6060Nexus:|r the | character is not kept in a wishlist "
-                .. "name; this import is named \"" .. name .. "\".")
+            -- The dropped character itself is code-owned (a reviewed text
+            -- cannot hold it), so it fills a slot of the sentence.
+            print("|cffff6060Nexus:|r " .. TF("editor.chat.import_pipe_dropped",
+                {character = "|", name = name}))
         end
         if name == "" then
-            print("|cffff6060Nexus:|r Enter a name for the imported wishlist.")
+            print("|cffff6060Nexus:|r " .. T("editor.chat.import_name_required"))
+            EndGuidedImport()
             return
         end
         LoadImportedWishlist(parsed, name)
     end,
+    OnCancel = function(self)
+        if self and self.Hide then self:Hide() end
+        EndGuidedImport()
+    end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
     end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide(); EndGuidedImport() end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function() return PopupText(T("editor.popup.name_import_prompt")) .. "\n%s" end,
+    button1 = function() return T("editor.button.open_imported_draft") end,
+    button2 = CancelLabel,
+})
 
-StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
-    text = "Paste a Wishlist import code (EBH1):\nThe import will be loaded as a new wishlist and will not overwrite the one currently open.",
-    button1 = "Continue",
-    button2 = "Cancel",
+StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = LocalizedDialog({
     hasEditBox = true,
     editBoxWidth = 350,
     maxLetters = IMPORT_MAX_LETTERS,
@@ -822,12 +1070,25 @@ StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
         -- The field was claimed by OnShow, so its text is the pasted bytes.
         M.ImportEBH1String(self and self.editBox and self.editBox:GetText())
     end,
+    OnCancel = function(self)
+        if self and self.Hide then self:Hide() end
+        EndGuidedImport()
+    end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
     end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+        EndGuidedImport()
+    end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function()
+        return PopupText(T("editor.popup.import_prompt") .. "\n" .. T("editor.popup.import_new_draft_note"))
+    end,
+    button1 = function() return T("editor.button.continue") end,
+    button2 = CancelLabel,
+})
 
 HideServerEchoUI = function()
     local journal = _G["ProjectEbonholdEchoJournal"]
@@ -860,6 +1121,12 @@ function M.ToggleDisplayPopup(anchorTo)
     return RendererInstance().ToggleDisplayPopup(anchorTo)
 end
 
+-- Where Display Settings opens relative to the editor (pure; the renderer's
+-- DisplayPopupPlacement).
+function M.DisplayPopupPlacement(spec)
+    return RendererInstance().DisplayPopupPlacement(spec)
+end
+
 function M.Init(adapter, model)
     Adapter = adapter
     Model = model
@@ -876,16 +1143,11 @@ function M.DebugDraftState()
     return wishlistController.DebugDraftState()
 end
 
-StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
+StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = LocalizedDialog({
     -- Accepting installs through the controller's single-use intent; its new
     -- draft cancels the current Save confirmation and any confirmed Save waiting
     -- to retry (WishlistController CancelApply). The consent says so, and that
     -- Cancel keeps both.
-    text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its"
-        .. " destination context. It also cancels any pending Save: an open Save confirmation or a"
-        .. " confirmed Save waiting to retry is not sent. The new draft is saved only when you save it."
-        .. " Cancel keeps the current draft and any pending Save.",
-    button1 = "Open new draft", button2 = "Cancel",
     -- OnAccept returns nothing, like the other Nexus confirmations. Its data
     -- is one owned, single-use request. An install attempt (installed or
     -- refused) or its own Cancel retires it; a newer request passes the older
@@ -900,13 +1162,26 @@ StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
     OnAccept = function(_, request) if request then request.Install() end end,
     OnCancel = function(_, request) if request then request.Cancel() end end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {
+    text = function()
+        return PopupText(T("editor.popup.flex_replace_question") .. "\n"
+            .. T("editor.popup.flex_replace_consequence"))
+    end,
+    button1 = function() return T("editor.button.open_new_draft") end,
+    button2 = CancelLabel,
+})
 
 function M.OpenFlexiblePlanChooser()
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     if not flexiblePlanChooser then
         flexiblePlanChooser = Nexus.FlexiblePlanChooser.New({
             catalog=wishlistController.CatalogProjection,
+            -- #151: the local pool owner; the chooser reads it only on first Show
+            -- and explicit Save/Load (no automatic Save or Load).
+            persistence=(Nexus.FlexiblePlanStore and Nexus.FlexiblePlanStore.New
+                and Nexus.FlexiblePlanStore.New({store=Nexus.Store})) or nil,
             openDraft=function(draft, alternatives, planCurrent, installed, refuse)
+                if workspaceResume then return refuse("EDITOR_CHANGED") end
                 local renderer = RendererInstance()
                 local name = renderer.NameText()
                 local intent, why = wishlistController.PrepareNewExactDraft(draft, alternatives)
@@ -930,6 +1205,9 @@ function M.OpenFlexiblePlanChooser()
                     -- refused request therefore cannot install when the former name,
                     -- count or context is restored and its old callback is replayed.
                     flexiblePlanRequest = nil
+                    -- A native popup may deliver Accept after its Plan window was
+                    -- suspended. Do not reveal the chooser over another workspace.
+                    if workspaceResume then return refuse("EDITOR_CHANGED") end
                     local current, countReason = planCurrent()
                     if not current then return RevealRefusal(countReason or "PLAN_CHANGED") end
                     if renderer.NameText() ~= name then return RevealRefusal("EDITOR_CHANGED") end
@@ -961,12 +1239,14 @@ function M.OpenFlexiblePlanChooser()
 end
 
 function M.OpenForCandidate(candidate)
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     RolePicker.Hide()
     local name, reason = wishlistController.BeginCandidate(candidate)
     if name == nil then
         SyncFulfilledDraftTargets()
         return false, reason
     end
+    workspaceResume = nil -- an accepted explicit Copy replaces the old draft
     SyncFulfilledDraftTargets()
     local renderer = RendererInstance()
     renderer.Prepare()
@@ -979,6 +1259,7 @@ function M.OpenForCandidate(candidate)
 end
 
 function M.OpenForWishlist(wishlist, loadoutSlot)
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     -- The record the player selected (a Journal row, an assignment, a confirmed
     -- role choice): its name and content as the server slot showed them when it
     -- was built. Taken before any resolution, so the controller compares the
@@ -999,6 +1280,7 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
         SyncFulfilledDraftTargets()
         return false
     end
+    workspaceResume = nil -- an accepted explicit open chooses a new draft
     SyncFulfilledDraftTargets()
     local renderer = RendererInstance()
     -- This can be the first editor entry after reload. Install the same menu
@@ -1012,6 +1294,8 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
 end
 
 function M.NewWishlist()
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
+    workspaceResume = nil
     RolePicker.Hide()
     HideServerEchoUI()
     wishlistController.BeginNewWishlist()
@@ -1023,7 +1307,129 @@ function M.NewWishlist()
     M.Refresh()
 end
 
+local function WorkspaceContext()
+    local guid = type(UnitGUID) == "function" and UnitGUID("player") or nil
+    local slots = Adapter and type(Adapter.Slots) == "function" and Adapter.Slots() or nil
+    if type(guid) ~= "string" or guid == ""
+        or type(slots) ~= "table" or slots.activeKnown == false then
+        return nil
+    end
+    return {
+        guid = guid,
+        nativeSlot = tonumber(slots.activeSlot) or 0,
+        selectedSavedBuild = wishlistController.SelectedSavedBuild(slots) or 0,
+        maxSlots = tonumber(slots.maxSlots) or 0,
+    }
+end
+
+local function SameWorkspaceContext(left, right)
+    return left and right and left.guid == right.guid
+        and left.nativeSlot == right.nativeSlot
+        and left.selectedSavedBuild == right.selectedSavedBuild
+        and left.maxSlots == right.maxSlots
+end
+
+local function SaveConfirmationOpen()
+    -- StaticPopup_Visible is part of the native FrameXML. Minimal offline
+    -- hosts that omit it also omit real interactive popup visibility.
+    if type(StaticPopup_Visible) ~= "function" then return false end
+    return StaticPopup_Visible("WISHLISTREALIZER_UPDATE_WISHLIST")
+        or StaticPopup_Visible("WISHLISTREALIZER_CREATE_WISHLIST")
+end
+
+function M.SuspendForWorkspace()
+    local renderer = RendererInstance()
+    if not renderer.IsShown() then return false, "Plan is not open" end
+    local confirmation = SaveConfirmationOpen()
+    if confirmation or M.IsApplyPending() then
+        return false, "finish or cancel the pending Save before leaving Plan"
+    end
+    local chooser = _G.NexusFlexiblePlanChooser
+    if flexiblePlanRequest or (chooser and chooser.IsShown and chooser:IsShown()) then
+        return false, "close Plan alternatives or finish its replacement before leaving Plan"
+    end
+    if type(StaticPopup_Visible) == "function"
+        and StaticPopup_Visible("NEXUS_NAME_IMPORTED_WISHLIST") then
+        return false, "finish or cancel the imported Wishlist name before leaving Plan"
+    end
+    local context = WorkspaceContext()
+    if not context then return false, "Saved Build context is not known" end
+    workspaceResume = context
+    return true
+end
+
+function M.CancelWorkspaceSuspend()
+    workspaceResume = nil
+end
+
+-- A read-only fact for an assignment action offered beside the editor (the
+-- Echo Journal's Auto-pick by rarity choice): true while a Save's
+-- confirmation is open or its apply is pending, as SuspendForWorkspace
+-- refuses to leave Plan then. Such an action waits instead of changing the
+-- assignment under a Save that is still deciding it. Changes nothing.
+function M.SavePendingNow()
+    return (SaveConfirmationOpen() or M.IsApplyPending()) and true or false
+end
+
+-- A read-only fact for the guided setup (ui/GuidedSetup.lua): nil while no
+-- unsaved Plan draft is set aside in another workspace, else whether the
+-- character and Saved Build it was set aside under are still the current ones
+-- (sameContext: ResumeWorkspaceDraft reopens it as it is; otherwise it asks
+-- before anything is discarded). It prints, shows, resumes and changes nothing.
+function M.SuspendedPlanDraft()
+    if not workspaceResume then return nil end
+    return {sameContext = SameWorkspaceContext(workspaceResume, WorkspaceContext()) and true or false}
+end
+
+-- The caller of the latest changed-context question that asked to hear about
+-- its Discard draft (the guided setup steps aside for the Plan it opens).
+-- Every ask replaces it and any hide of the question drops it, so an earlier
+-- caller never answers for a later question. Keep draft calls nothing.
+local contextChangedOpened
+
+StaticPopupDialogs["NEXUS_WORKSPACE_CONTEXT_CHANGED"] = LocalizedDialog({
+    OnAccept = function()
+        local opened = contextChangedOpened
+        contextChangedOpened = nil
+        workspaceResume = nil
+        M.Show()
+        if type(opened) == "function" then pcall(opened) end
+    end,
+    OnCancel = function() contextChangedOpened = nil end,
+    OnHide = function() contextChangedOpened = nil end,
+}, {
+    text = function() return PopupText(T("editor.popup.context_changed")) end,
+    button1 = function() return T("editor.button.discard_draft") end,
+    button2 = function() return T("editor.button.keep_draft") end,
+})
+
+-- onDiscardOpened (optional): called once, after Plan was shown for the
+-- current context, if the player answers this very changed-context question
+-- with Discard draft. Nothing else calls it.
+function M.ResumeWorkspaceDraft(onDiscardOpened)
+    if not workspaceResume then return false, "no workspace draft" end
+    if not SameWorkspaceContext(workspaceResume, WorkspaceContext()) then
+        contextChangedOpened = type(onDiscardOpened) == "function" and onDiscardOpened or nil
+        if type(StaticPopup_Show) == "function"
+            and not (type(StaticPopup_Visible) == "function"
+                and StaticPopup_Visible("NEXUS_WORKSPACE_CONTEXT_CHANGED")) then
+            StaticPopup_Show("NEXUS_WORKSPACE_CONTEXT_CHANGED")
+        end
+        return false, "context changed; choose whether to discard the draft"
+    end
+    if M.IsApplyPending() then
+        return false, "a Save is pending; return after it settles"
+    end
+    local renderer = RendererInstance()
+    renderer.Prepare({attach=true, style=true, close=true})
+    renderer.ShowFrame()
+    M.Refresh()
+    workspaceResume = nil
+    return true
+end
+
 function M.Show()
+    if workspaceResume then return M.ResumeWorkspaceDraft() end
     local slots=Adapter and Adapter.Slots and Adapter.Slots()
     -- The selected Saved Build, never a native Wishlist index: an association
     -- stored under one stays stored but is not opened as a loadout here.

@@ -38,8 +38,23 @@ function Commands.New(options)
 
     function M.Dispatch(message)
         local early=(message or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-        if early=="loading" or early=="help" or early=="guide" or early=="tutorial" or early=="orbs" then
+        -- help and tutorial open the guided setup coach at its current step
+        -- (design/current "Nexus Setup Alternative": Help and Setup open the
+        -- coach); reference opens the full reference pages, the optional
+        -- manual. All three answer during loading and change nothing.
+        if early=="loading" or early=="help" or early=="tutorial" or early=="orbs" then
             Invoke(early=="loading" and "loading" or early=="orbs" and "orbs" or "help",nil,early)
+            return
+        end
+        if early=="reference" then
+            Invoke("reference",nil,early)
+            return
+        end
+        -- guide opens the guided setup coach, not the reference pages. Like
+        -- Help it answers during loading; the coach says itself what is not
+        -- ready yet and opening it changes nothing.
+        if early=="guide" then
+            Invoke("guide",nil,early)
             return
         end
         if early=="update" or early=="updates" or early=="version" then
@@ -58,6 +73,13 @@ function Commands.New(options)
         -- it. It reads or writes nothing unless the coordinator waits on it.
         if early=="legacy" or early:match("^legacy%s") then
             Invoke("legacy",nil,early)
+            return
+        end
+        -- The session pause answers BEFORE the initialization gate too: a
+        -- hidden HUD or an unfinished start-up must not trap a paused player.
+        -- It prepares no saved data and runs no step.
+        if early=="pause" or early=="resume" or early=="paused" then
+            Invoke("sessionPause",nil,early)
             return
         end
         if not isInitialized() then
@@ -94,6 +116,12 @@ function Commands.New(options)
             Invoke("trace", context, normalized, traceValue)
             return
         end
+        -- Optional rarity-first pick while leveling with no Wishlist.
+        local levelingValue = normalized:match("^leveling%s+(%a+)$")
+        if normalized == "leveling" or levelingValue then
+            Invoke("leveling", context, normalized, levelingValue)
+            return
+        end
         if normalized == "prototype" then Invoke("prototype",context,normalized);return end
         if normalized:sub(1, 6) == "probe " then
             local target = normalized:sub(7):match("^%s*(.-)%s*$")
@@ -105,7 +133,9 @@ function Commands.New(options)
             Invoke("anchor", context, normalized, argument)
             return
         end
-        Invoke("help", context, normalized)
+        -- An unknown command gets the command summary and the reference
+        -- pages, as it always has; it does not open the setup coach.
+        Invoke("reference", context, normalized)
     end
 
     return M

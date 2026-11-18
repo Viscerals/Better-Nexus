@@ -50,7 +50,15 @@ local function Scans() return A.EchoReconcileStats().scans end
 local function Later() H.now=H.now+.25 end
 local function Show() Later();return M.Status(false) end -- one display refresh
 local function Read() Later();return A.Orbs.Read() end   -- one direct (action-path) read
-local function Generation(i) return (select(i,A.PresentationRevisions())) end
+-- Raw Echo generations: the cached counters EchoReconcileStats().generations
+-- (no reconciliation, no service read). Orb context.active carries the raw
+-- activeSlot generation (OrbAdapter ctx: EchoActiveSlotGeneration); the active
+-- value of PresentationRevisions also counts presentation-only knownness
+-- changes, so it is not that measure. Index 2: activeSlot, 3: granted.
+local function Generation(i)
+ local field=assert(({[2]='activeSlot',[3]='granted'})[i],'Generation: no raw Echo field for '..tostring(i))
+ return A.EchoReconcileStats().generations[field]
+end
 local ACTIVE,GRANTED=2,3
 local function Text(r)
  return 'error='..tostring(r and r.error)..' reason='..tostring(r and r.startReason)

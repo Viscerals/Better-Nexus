@@ -67,4 +67,32 @@ W.PumpHandshake()
 check(Sent(A)==0,'Off: zero outbound calls on every route: '..Sent(A))
 check(A.e.NexusDB.settings.syncMode=='off' and A.e.NexusDB.settingsVersion==5,'the saved mode and marker are unchanged')
 check(A.e.Nexus.SyncWire.Stats().suspended==false,'a mode refusal never suspends the wire')
+
+-- G-01: the diagnostic probe whisper is disabled. No peer can answer it and
+-- its token carried the sender's Wishlist name, so an Automatic and a Manual
+-- peer submit zero captured bytes for it on any route; a paused peer too. The
+-- status-request compatibility facade stays inert. Counted directly after each
+-- command, before any bridge step, so no other traffic is attributed to it.
+local function Probe(peer,label)
+ local start=#peer.H.sent
+ peer.e.SlashCmdList.NEXUS('probe OffPeer-Ebonhold')
+ local added={}
+ for i=start+1,#peer.H.sent do
+  local packet=peer.H.sent[i]
+  added[#added+1]=tostring(packet.route)..'/'..tostring(packet.kind)..' '..tostring(packet.text)
+ end
+ check(#added==0,label..': the probe submits zero bytes: '..table.concat(added,' ; '))
+end
+local policy=B.e.Nexus.SyncModePolicy
+check(policy.Mode()=='automatic','fixture: the format-2 peer is Automatic')
+Probe(B,'Automatic')
+local choice=policy.Choice()
+local applied,why=policy.ApplyChoice('manual',choice and choice.token)
+check(applied and policy.Mode()=='manual','fixture: the peer explicitly chooses Manual: '..tostring(why))
+Probe(B,'Manual')
+B.e.SlashCmdList.NEXUS('pause');check(B.e.Nexus.SessionPause.IsPaused(),'fixture: the peer pauses')
+Probe(B,'Paused')
+B.e.SlashCmdList.NEXUS('resume')
+local inert=#B.H.sent
+check(B.e.Nexus.Sync.HandleStatusRequest('OffPeer-Ebonhold','dev')==false and #B.H.sent==inert,'the status request facade stays inert and sends nothing')
 print('PASS sync_saved_mode_off: zero outbound (requests, responses, Share, handshakes, probe) with truthful refusals checks='..checks)

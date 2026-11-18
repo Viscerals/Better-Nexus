@@ -81,8 +81,10 @@ local function rows()
  return out
 end
 local function row(label)for _,r in ipairs(rows())do if r.label:GetText()==label then return r end end end
+-- The page's own button: the main panel's Play section has a Show/Hide
+-- details button with the same label.
 local function button(label)
- for _,b in ipairs(H.frames)do if b.kind=='Button' and b:GetText()==label and b:IsVisible()then return b end end
+ for _,b in ipairs(H.frames)do if b.kind=='Button' and b.parent==page and b:GetText()==label and b:IsVisible()then return b end end
 end
 local function lineOf(prefix)
  for _,r in ipairs(page.regions)do

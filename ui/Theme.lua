@@ -18,13 +18,59 @@ local stats = {
     treeWalks=0, skippedTrees=0, nodesVisited=0,
     buttonsStyled=0, virtualRows=0, hooks=0, textures=0,
     windowsStyled=0, exemptTrees=0, resolves=0, reapplies=0,
-    reappliedControls=0, preferenceChanges=0,
+    reappliedControls=0, preferenceChanges=0, windowBases=0, tooltipBases=0,
+    menuFills=0,
 }
+
+-- Full-UI localization (issues #143-#148): the shown style and colour names,
+-- hue words, menu rows, outcome notices and HELP resolve through
+-- Nexus.Localization at call time; while the seam is absent or a key answers
+-- "unavailable" the exact English below is shown. Style and palette ids, the
+-- saved values and the STYLES/PALETTES label fields stay raw (data and the
+-- names tests and callers compare); only the shown copy is translated.
+local function Say(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+local function SayF(key, args, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local text, source = localization.Format(key, args)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
+-- One reading of a client widget boolean (IsShown, IsVisible, GetChecked,
+-- IsEnabled, IsMouseEnabled). The 3.3.5a client answers 1 and nil, or 1
+-- and 0 (IsEnabled, docs/UI_NATIVE_THEME_CORRECTION.md), where the offline
+-- harness answers Lua booleans; both are read the same. True for true or 1,
+-- false for false, nil or 0, and nil for any other answer (a string, a
+-- table, another number), which is no client boolean and is not guessed.
+-- A caller that needs only yes or no compares the result with true. For
+-- client widget answers only: Nexus-owned Lua booleans are read as they are.
+function T.ClientBool(value)
+    if value == true or value == 1 then return true end
+    if value == false or value == nil or value == 0 then return false end
+    return nil
+end
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
 T.STYLE_KEY, T.PALETTE_KEY = "uiStyle", "uiPalette"
 T.DEFAULT_STYLE = "vista"
+-- v23: background opacity, a third presentation-only choice. A whole percent
+-- from 50 to 100 in steps of 10, saved as uiBackgroundOpacity only when the
+-- player chooses; absent is 100 (the look every window had), and Default
+-- clears the key. It scales only each styled window's background layers
+-- (backdrop colour, opaque base, shade); text, buttons, inputs, borders, the
+-- accent line and the exempt difficulty card keep their own look.
+T.OPACITY_KEY = "uiBackgroundOpacity"
+T.OPACITY_MIN, T.OPACITY_MAX, T.OPACITY_STEP, T.OPACITY_DEFAULT = 50, 100, 10, 100
 
 -- Text colours belong to the style, so a colour choice never lowers text
 -- contrast; a palette only moves borders, hover, glow and selection accents.
@@ -34,7 +80,7 @@ local STYLES = {
         summary="Default. A deep, quiet backdrop with Nexus Amethyst purple accents and glow.",
         windowBackdrop={bgFile=WHITE, edgeFile=EDGE, tile=false, edgeSize=12,
             insets={left=3, right=3, top=3, bottom=3}},
-        windowColor={0.030, 0.034, 0.046},
+        windowColor={0.030, 0.034, 0.046}, baseColor={0.030, 0.034, 0.046},
         shadeBottom={0, 0, 0, 0.30}, glowAlpha=0.14, accentAlpha=0.75,
         buttonBg={0.032, 0.038, 0.054, 0.96}, pressedBg={0.016, 0.020, 0.030, 1},
         text={0.94, 0.92, 0.86}, disabledText={0.52, 0.54, 0.57}, hoverAlpha=0.40,
@@ -46,7 +92,7 @@ local STYLES = {
         windowBackdrop={bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",
             edgeFile=EDGE, tile=true, tileSize=32, edgeSize=12,
             insets={left=4, right=4, top=4, bottom=4}},
-        windowColor={0.16, 0.165, 0.175},
+        windowColor={0.16, 0.165, 0.175}, baseColor={0.055, 0.057, 0.062},
         shade={0.10, 0.105, 0.115, 0.05},
         buttonBg={0.025, 0.03, 0.04, 0.96}, pressedBg={0.015, 0.02, 0.025, 1},
         text={0.92, 0.84, 0.62}, disabledText={0.48, 0.50, 0.52}, hoverAlpha=0.38,
@@ -76,6 +122,36 @@ local PALETTES = {
 }
 T.STYLES, T.PALETTES = STYLES, PALETTES
 
+-- Shown names by id (label key, then summary or hue key). Display only.
+local STYLE_KEYS = {
+    vista = {"theme.label.style_vista", "theme.tooltip.style_vista"},
+    slate = {"theme.label.style_slate", "theme.tooltip.style_slate"},
+}
+local PALETTE_KEYS = {
+    sapphire = {"theme.label.palette_sapphire", "theme.value.hue_blue"},
+    emerald = {"theme.label.palette_emerald", "theme.value.hue_green"},
+    amethyst = {"theme.label.palette_amethyst", "theme.value.hue_purple"},
+    ember = {"theme.label.palette_ember", "theme.value.hue_orange"},
+    auric = {"theme.label.palette_auric", "theme.value.hue_gold"},
+    graphite = {"theme.label.palette_graphite", "theme.value.hue_gray"},
+}
+local function StyleLabel(style)
+    local keys = STYLE_KEYS[style.id]
+    return keys and Say(keys[1], style.label) or style.label
+end
+local function StyleSummary(style)
+    local keys = STYLE_KEYS[style.id]
+    return keys and Say(keys[2], style.summary) or style.summary
+end
+local function PaletteLabel(palette)
+    local keys = PALETTE_KEYS[palette.id]
+    return keys and Say(keys[1], palette.label) or palette.label
+end
+local function PaletteHue(palette)
+    local keys = PALETTE_KEYS[palette.id]
+    return keys and Say(keys[2], palette.hue) or palette.hue
+end
+
 local BUTTON_BACKDROP = {bgFile=WHITE, edgeFile=EDGE, tile=false, edgeSize=10,
     insets={left=2, right=2, top=2, bottom=2}}
 local COMPACT_BACKDROP = {bgFile=WHITE, edgeFile=EDGE, tile=false, edgeSize=8,
@@ -90,6 +166,12 @@ local windows = setmetatable({}, weak)
 local rows = setmetatable({}, weak)
 local selectables = setmetatable({}, weak)
 local labels = setmetatable({}, weak)
+-- Native menus Nexus opens (T.OpenMenu): the initializer frames it opened
+-- them with, each shared list's own fill, and the lists that show a Nexus
+-- menu now (list -> its initializer).
+local menuOwners = setmetatable({}, weak)
+local menuFills = setmetatable({}, weak)
+local menuLists = setmetatable({}, weak)
 -- An explicit choice the Store owner could not keep (read-only saved data or
 -- no owner yet). It lasts for this session only and is never written anywhere.
 local session = {}
@@ -156,6 +238,7 @@ local function SavedChoices()
     local ok, settings = pcall(store.Settings)
     if not ok or type(settings) ~= "table" then return nil, nil, nil end
     local style, palette = settings[T.STYLE_KEY], settings[T.PALETTE_KEY]
+    local opacity = settings[T.OPACITY_KEY]
     -- A read-only saved root (future or unverified format) runs with a
     -- validated copy of its settings that leaves these presentation keys out.
     -- Its saved choice is then read, never written, from the saved table, so
@@ -165,8 +248,35 @@ local function SavedChoices()
     if type(saved) == "table" and saved ~= settings then
         if style == nil then style = rawget(saved, T.STYLE_KEY) end
         if palette == nil then palette = rawget(saved, T.PALETTE_KEY) end
+        if opacity == nil then opacity = rawget(saved, T.OPACITY_KEY) end
     end
-    return style, palette, settings
+    return style, palette, settings, opacity
+end
+
+-- A saved opacity this build accepts: a whole percent within the bounds, on
+-- a step. Anything else (another number, text, NaN, a table) is unknown: it is
+-- shown as 100% and stays saved until the player chooses.
+local function ValidOpacity(value)
+    return type(value) == "number" and value == value and value == math.floor(value)
+        and value >= T.OPACITY_MIN and value <= T.OPACITY_MAX
+        and (value - T.OPACITY_MIN) % T.OPACITY_STEP == 0
+end
+T.ValidOpacity = ValidOpacity
+-- The cache identity of a raw opacity (NaN is never equal to itself).
+local function OpacityToken(value)
+    if type(value) == "number" and value ~= value then return "nan" end
+    return value
+end
+
+-- A primary action (T.SetPrimary) is filled with the palette's hover colour
+-- while it is enabled; the style's text keeps its contrast on that fill. A
+-- disabled primary is drawn as any disabled button, so it never looks
+-- available. Every other button keeps the style's own fill.
+local function ButtonFill(button, enabled)
+    if button._nexusPrimary and enabled ~= false then
+        return Color(active.palette.hover, 1)
+    end
+    return Color(active.style.buttonBg)
 end
 
 local function ButtonState(button, enabled)
@@ -174,6 +284,9 @@ local function ButtonState(button, enabled)
     if enabled == nil then
         local value = not button.IsEnabled or button:IsEnabled()
         enabled = value == true or value == 1
+    end
+    if button._nexusPrimary then
+        pcall(button.SetBackdropColor, button, ButtonFill(button, enabled))
     end
     local text = TextRegion(button)
     if enabled then
@@ -191,9 +304,13 @@ local function PaintButton(button)
     local style, palette = active.style, active.palette
     pcall(button.SetBackdrop, button,
         button._nexusCompact and COMPACT_BACKDROP or BUTTON_BACKDROP)
-    pcall(button.SetBackdropColor, button, Color(style.buttonBg))
+    pcall(button.SetBackdropColor, button, ButtonFill(button))
     local hover = button._nexusDarkHover
-    if hover then pcall(hover.SetVertexColor, hover, Color(palette.hover, style.hoverAlpha)) end
+    if hover then
+        -- On a primary fill the hover colour would not show; the accent does.
+        local tint = button._nexusPrimary and palette.accent or palette.hover
+        pcall(hover.SetVertexColor, hover, Color(tint, button._nexusPrimary and 0.25 or style.hoverAlpha))
+    end
     ButtonState(button)
 end
 
@@ -208,22 +325,53 @@ local function PaintInput(input)
     pcall(input.SetBackdropBorderColor, input, Color(active.palette.border, 0.95))
 end
 
+-- The opaque base under a styled window (T.StyleWindow). Its frame sits one
+-- level below the window in the window's strata, so the window's own
+-- backdrop, shade, accent line, text and children all draw above it. A window
+-- at level 0 has no lower level; it keeps its backdrop alone.
+local function SyncWindowBase(window)
+    local base = window._nexusWindowBase
+    if not base then return false end
+    local level = tonumber(window.GetFrameLevel and window:GetFrameLevel()) or 0
+    if level < 1 then base:Hide(); return false end
+    pcall(base.SetFrameLevel, base, level - 1)
+    base:Show()
+    return true
+end
+T._SyncWindowBase = SyncWindowBase
+
 local function PaintWindow(window)
     local style, palette = active.style, active.palette
     local c = style.windowColor
+    -- The background opacity scales the background layers only (1 = the
+    -- look every window had); the border, accent line, controls and text
+    -- below and in the window keep their own alphas, and the window itself
+    -- is never faded as a whole.
+    local o = (tonumber(active.opacity) or T.OPACITY_DEFAULT) / 100
     pcall(window.SetBackdrop, window, style.windowBackdrop)
-    pcall(window.SetBackdropColor, window, c[1], c[2], c[3], window._nexusWindowAlpha or 0.90)
+    pcall(window.SetBackdropColor, window, c[1], c[2], c[3], (window._nexusWindowAlpha or 0.90) * o)
     pcall(window.SetBackdropBorderColor, window, Color(palette.windowBorder, 0.95))
+    local base = window._nexusWindowBase
+    if base then
+        -- Inside the border, at the style's own backdrop insets.
+        local inset = style.windowBackdrop.insets and style.windowBackdrop.insets.left or 3
+        base:ClearAllPoints()
+        base:SetPoint("TOPLEFT", window, "TOPLEFT", inset, -inset)
+        base:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -inset, inset)
+        local b = style.baseColor or c
+        pcall(base._nexusFill.SetVertexColor, base._nexusFill, b[1], b[2], b[3], o)
+        SyncWindowBase(window)
+    end
     local shade = window._nexusWindowShade
     if shade and style.shade then
         local s = style.shade
-        pcall(shade.SetGradientAlpha, shade, "VERTICAL", s[1], s[2], s[3], s[4], s[1], s[2], s[3], s[4])
-        pcall(shade.SetVertexColor, shade, s[1], s[2], s[3], s[4])
+        pcall(shade.SetGradientAlpha, shade, "VERTICAL", s[1], s[2], s[3], s[4] * o, s[1], s[2], s[3], s[4] * o)
+        pcall(shade.SetVertexColor, shade, s[1], s[2], s[3], s[4] * o)
     elseif shade then
         local b, g = style.shadeBottom, palette.accent
         pcall(shade.SetVertexColor, shade, 1, 1, 1, 1)
         pcall(shade.SetGradientAlpha, shade, "VERTICAL",
-            b[1], b[2], b[3], b[4], g[1], g[2], g[3], style.glowAlpha)
+            b[1], b[2], b[3], b[4] * o, g[1], g[2], g[3], style.glowAlpha * o)
     end
     local line = window._nexusWindowAccent
     if line and style.accentAlpha then
@@ -271,20 +419,30 @@ end
 -- table the Store serves, or a session-only choice changed; a change repaints
 -- the registry once.
 local function Active()
-    local savedStyle, savedPalette, settings = SavedChoices()
-    local rawStyle, rawPalette = savedStyle, savedPalette
+    local savedStyle, savedPalette, settings, savedOpacity = SavedChoices()
+    local rawStyle, rawPalette, rawOpacity = savedStyle, savedPalette, savedOpacity
     if session.style then rawStyle = session.style.value end
     if session.palette then rawPalette = session.palette.value end
+    if session.opacity then rawOpacity = session.opacity.value end
     if active and active.source == settings and active.rawStyle == rawStyle
-        and active.rawPalette == rawPalette then
+        and active.rawPalette == rawPalette
+        and active.opacityToken == OpacityToken(rawOpacity) then
         return active
     end
     local previous = active
     active = T.Resolve(rawStyle, rawPalette)
     active.source, active.rawStyle, active.rawPalette = settings, rawStyle, rawPalette
-    active.sessionOnly = session.style ~= nil or session.palette ~= nil
+    -- The opacity in effect: a valid saved or session value, else 100. An
+    -- unknown saved value is reported and kept, never rewritten.
+    active.opacityToken = OpacityToken(rawOpacity)
+    active.savedOpacity = rawOpacity
+    active.explicitOpacity = ValidOpacity(rawOpacity)
+    active.unknownOpacity = rawOpacity ~= nil and not active.explicitOpacity
+    active.opacity = active.explicitOpacity and rawOpacity or T.OPACITY_DEFAULT
+    active.sessionOnly = session.style ~= nil or session.palette ~= nil or session.opacity ~= nil
     stats.resolves = stats.resolves + 1
-    if previous and (previous.style ~= active.style or previous.palette ~= active.palette) then
+    if previous and (previous.style ~= active.style or previous.palette ~= active.palette
+        or previous.opacity ~= active.opacity) then
         Reapply()
     end
     return active
@@ -345,7 +503,9 @@ function T._OnMouseDown(self)
     if active then pcall(self.SetBackdropColor, self, Color(active.style.pressedBg)) end
 end
 function T._OnMouseUp(self)
-    if active then pcall(self.SetBackdropColor, self, Color(active.style.buttonBg)) end
+    if not active then return end
+    local enabled = not self.IsEnabled or self:IsEnabled()
+    pcall(self.SetBackdropColor, self, ButtonFill(self, enabled == true or enabled == 1))
 end
 function T._OnEnable(self) if active then ButtonState(self, true) end end
 function T._OnDisable(self) if active then ButtonState(self, false) end end
@@ -370,9 +530,219 @@ function T.StyleWindow(window, alpha)
     line:SetPoint("TOPLEFT", 6, -6)
     line:SetPoint("TOPRIGHT", -6, -6)
     window._nexusWindowAccent = line
+    -- #163 visual review: game text showed through windows that asked for
+    -- 0.94-0.98. The requested alpha is only the backdrop colour's; Nexus
+    -- Slate's tiled dialog background has its own partly transparent texels,
+    -- and every style's shade is translucent. An opaque base one level below
+    -- the window gives each style a solid floor behind its text while the
+    -- window still draws its own backdrop, texture, shade and border on top
+    -- (the same identity). Native effective opacity is not established here.
+    local base = CreateFrame("Frame", nil, window)
+    local fill = base:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    fill:SetAllPoints(base)
+    base._nexusFill = fill
+    window._nexusWindowBase = base
+    stats.windowBases = stats.windowBases + 1
+    -- A window raised or re-levelled while hidden takes its base along.
+    if window.HookScript then
+        window:HookScript("OnShow", SyncWindowBase)
+        stats.hooks = stats.hooks + 1
+    end
     windows[window] = true
     PaintWindow(window)
+    T.EnsureTooltipBase()
     return window
+end
+
+-- A Nexus tooltip gets the same solid floor: a base under GameTooltip, shown
+-- only while the tooltip's owner lies inside a styled Nexus window or a
+-- shared menu list that shows a Nexus menu now (T.OpenMenu), and hidden for
+-- every other owner and whenever the tooltip hides. GameTooltip's own
+-- backdrop, size and lines are unchanged. Created and hooked once.
+local tooltipHooked = false
+local function StyledOwner(owner)
+    local node, depth = owner, 0
+    while node and depth < 16 do
+        if windows[node] or menuLists[node] then return node end
+        if type(node.GetParent) ~= "function" then return nil end
+        local ok, parent = pcall(node.GetParent, node)
+        node = ok and parent or nil
+        depth = depth + 1
+    end
+    return nil
+end
+function T.SyncTooltipBase(tip)
+    tip = tip or GameTooltip
+    local base = tip and tip._nexusSolidBase
+    if not base then return false end
+    local okOwner, owner = pcall(tip.GetOwner, tip)
+    local level = tonumber(tip.GetFrameLevel and tip:GetFrameLevel()) or 0
+    if not (okOwner and owner and level >= 1 and StyledOwner(owner)) then
+        base:Hide()
+        return false
+    end
+    if not active then Active() end
+    local c = active.style.baseColor or active.style.windowColor
+    pcall(base._nexusFill.SetVertexColor, base._nexusFill, c[1], c[2], c[3], 1)
+    pcall(base.SetFrameLevel, base, level - 1)
+    base:Show()
+    return true
+end
+function T.EnsureTooltipBase()
+    if tooltipHooked then return true end
+    local tip = GameTooltip
+    if not (tip and tip.HookScript and type(hooksecurefunc) == "function"
+        and type(CreateFrame) == "function") then return false end
+    tooltipHooked = true
+    local base = CreateFrame("Frame", nil, tip)
+    base:SetPoint("TOPLEFT", tip, "TOPLEFT", 3, -3)
+    base:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", -3, 3)
+    local fill = base:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    fill:SetAllPoints(base)
+    base._nexusFill = fill
+    base:Hide()
+    tip._nexusSolidBase = base
+    stats.tooltipBases = stats.tooltipBases + 1
+    -- A post-hook: every Show of the shared tooltip, whoever calls it, runs
+    -- first; this only shows or hides the base, never the tooltip. OnShow
+    -- covers a tooltip the client shows without a Lua Show call (a SetText
+    -- or Set* that shows it); a Show of an already shown tooltip with a new
+    -- owner has only the Show hook.
+    local function Sync(self) pcall(T.SyncTooltipBase, self) end
+    hooksecurefunc(tip, "Show", Sync)
+    tip:HookScript("OnShow", Sync)
+    tip:HookScript("OnHide", function(self)
+        if self._nexusSolidBase then self._nexusSolidBase:Hide() end
+    end)
+    stats.hooks = stats.hooks + 3
+    return true
+end
+
+-- Native menus Nexus opens (native acceptance of test.163009: the Options
+-- menu fitted the screen, but main-panel text stayed readable through it).
+-- EasyMenu initializes the Nexus anchor frame and then displays the menu in
+-- the shared DropDownList<n> frames that every game and addon menu reuses
+-- (3.3.5 export, build 12340: UIDropDownMenu.xml 5-20; UIDropDownMenu.lua
+-- 178-201, 576-722 and 794-810; EasyMenu.lua 17-22), so styling the anchor
+-- never reached the surface on screen. Such a list gets one solid fill: a
+-- BACKGROUND texture of the list itself over its stock MenuBackdrop's
+-- background area (that backdrop's own 5-unit insets, UIDropDownMenuTemplates
+-- .xml 163-196, so no square corner shows past its rounded border),
+-- so that backdrop, its border and every row (all child frames of the list)
+-- still draw over it, in the list's own FULLSCREEN_DIALOG strata; no frame
+-- level is assumed. The fill shows only while its list is shown and the root
+-- menu open in it (UIDROPDOWNMENU_OPEN_MENU: set for level 1 and kept by its
+-- submenus, lines 622-624 and 690-693) is a frame T.OpenMenu opened. Another
+-- menu reusing the list, a hide and a close hide it again; the lists keep
+-- every script (HookScript), size, anchor, row, callback and timeout, and
+-- ToggleDropDownMenu is only post-hooked. Native effective opacity is not
+-- established here.
+local MENU_INSET = 5
+local menuHooked = false
+
+local function SyncMenuList(list)
+    local fill = list and menuFills[list]
+    if not fill then return false end
+    local open = _G.UIDROPDOWNMENU_OPEN_MENU
+    if not (open ~= nil and menuOwners[open] and list:IsShown()) then
+        fill:Hide()
+        menuLists[list] = nil
+        return false
+    end
+    if not active then Active() end
+    local c = active.style.baseColor or active.style.windowColor
+    pcall(fill.SetVertexColor, fill, c[1], c[2], c[3], 1)
+    fill:Show()
+    menuLists[list] = open
+    return true
+end
+
+local function HideMenuFill(list)
+    local fill = menuFills[list]
+    if fill then fill:Hide() end
+    menuLists[list] = nil
+end
+
+-- Made once per shared list, the first time a Nexus menu shows in it.
+local function MenuFill(list)
+    local fill = menuFills[list]
+    if fill then return fill end
+    if not (list.CreateTexture and list.HookScript) then return nil end
+    fill = list:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    local name = list.GetName and list:GetName()
+    local surface = name and _G[name .. "MenuBackdrop"] or list
+    fill:SetPoint("TOPLEFT", surface, "TOPLEFT", MENU_INSET, -MENU_INSET)
+    fill:SetPoint("BOTTOMRIGHT", surface, "BOTTOMRIGHT", -MENU_INSET, MENU_INSET)
+    fill:Hide()
+    menuFills[list] = fill
+    stats.menuFills = stats.menuFills + 1
+    -- A list shown or redrawn for another owner, or hidden by a close or a
+    -- timeout, follows at once.
+    list:HookScript("OnShow", SyncMenuList)
+    list:HookScript("OnHide", HideMenuFill)
+    stats.hooks = stats.hooks + 2
+    return fill
+end
+
+-- Every shared list, levels made on demand included: a list a Nexus menu
+-- shows gets its fill, every other list has it hidden. Returns how many
+-- lists show a Nexus menu.
+function T.SyncMenus()
+    local open = _G.UIDROPDOWNMENU_OPEN_MENU
+    local owned = open ~= nil and menuOwners[open] == true
+    local treated, level = 0, 1
+    local list = _G.DropDownList1
+    while list do
+        if owned and list:IsShown() then MenuFill(list) end
+        if SyncMenuList(list) then treated = treated + 1 end
+        level = level + 1
+        list = _G["DropDownList" .. level]
+    end
+    return treated
+end
+
+-- Submenus open from a row's hover or its arrow, both through
+-- ToggleDropDownMenu (UIDropDownMenuTemplates.xml 87-101 and 130-150).
+local function EnsureMenuHook()
+    if menuHooked then return true end
+    if not (type(hooksecurefunc) == "function" and type(ToggleDropDownMenu) == "function") then
+        return false
+    end
+    menuHooked = true
+    hooksecurefunc("ToggleDropDownMenu", function() pcall(T.SyncMenus) end)
+    stats.hooks = stats.hooks + 1
+    return true
+end
+
+-- Opens a Nexus menu exactly as EasyMenu(items, frame, anchor, x, y, "MENU")
+-- does, with `frame` recorded as a Nexus initializer.
+function T.OpenMenu(items, frame, anchor, x, y)
+    if type(EasyMenu) ~= "function" or not frame then return false end
+    menuOwners[frame] = true
+    EnsureMenuHook()
+    EasyMenu(items, frame, anchor, x or 0, y or 0, "MENU")
+    T.SyncMenus()
+    return true
+end
+
+-- A window's one primary action (Plan's Save / Create, level-80 Open Orbs and
+-- its Orbs hub): filled with the palette's hover colour while enabled, drawn as
+-- any disabled button otherwise. on=false returns it to an ordinary button.
+-- Only presentation; a repeated call with the same state does nothing.
+function T.SetPrimary(button, on)
+    if not button then return button end
+    on = on and true or nil
+    if button._nexusPrimary == on then return button end
+    button._nexusPrimary = on
+    if not button._nexusDarkStyled then T.StyleButton(button) end
+    if button._nexusDarkStyled and active then PaintButton(button) end
+    return button
 end
 
 -- Opt-in dialog labels follow style contrast and palette accents. The weak
@@ -507,12 +877,17 @@ function T.Current()
         savedStyle=a.savedStyle ~= nil and DisplayValue(a.savedStyle) or nil,
         savedPalette=a.savedPalette ~= nil and DisplayValue(a.savedPalette) or nil,
         sessionOnly=a.sessionOnly == true,
+        backgroundOpacity=a.opacity,
+        explicitBackgroundOpacity=a.explicitOpacity == true,
+        unknownBackgroundOpacity=a.unknownOpacity == true,
+        savedBackgroundOpacity=a.savedOpacity ~= nil and DisplayValue(a.savedOpacity) or nil,
     }
 end
 
 function T.Summary()
     local a = Active()
-    return a.style.label .. ", " .. a.palette.label
+    local style, palette = StyleLabel(a.style), PaletteLabel(a.palette)
+    return SayF("theme.value.summary", {style = style, palette = palette}, style .. ", " .. palette)
 end
 
 local OUTCOME = {
@@ -522,6 +897,19 @@ local OUTCOME = {
     unavailable="Applied for this session only. The settings owner is not available, so nothing was saved.",
 }
 T.OUTCOME = OUTCOME
+-- The shown outcome sentence (OUTCOME keeps the English by outcome name).
+local OUTCOME_KEYS = {
+    durable = "theme.status.outcome_saved",
+    database = "theme.status.outcome_database_loading",
+    session = "theme.status.outcome_session_read_only",
+    unavailable = "theme.status.outcome_owner_unavailable",
+}
+local function Applied(outcome)
+    local summary = T.Summary()
+    local said = Say(OUTCOME_KEYS[outcome], OUTCOME[outcome])
+    return SayF("theme.chat.appearance_applied", {summary = summary, outcome = said},
+        "Appearance: " .. summary .. ". " .. said)
+end
 
 -- An explicit selection is the only write. It goes through the Store
 -- settings owner; a refusal keeps saved data untouched and applies the choice
@@ -551,19 +939,30 @@ end
 
 function T.SetStyle(id)
     if type(id) ~= "string" or not STYLES[id] then
-        return nil, "That style is not available in this build. Nothing changed."
+        return nil, Say("theme.chat.style_unavailable", "That style is not available in this build. Nothing changed.")
     end
     local outcome = Choose("style", T.STYLE_KEY, id)
-    return outcome, "Appearance: " .. T.Summary() .. ". " .. OUTCOME[outcome]
+    return outcome, Applied(outcome)
 end
 
 -- nil returns to the style's own colours.
 function T.SetPalette(id)
     if id ~= nil and (type(id) ~= "string" or not PALETTES[id]) then
-        return nil, "That colour is not available in this build. Nothing changed."
+        return nil, Say("theme.chat.colour_unavailable", "That colour is not available in this build. Nothing changed.")
     end
     local outcome = Choose("palette", T.PALETTE_KEY, id)
-    return outcome, "Appearance: " .. T.Summary() .. ". " .. OUTCOME[outcome]
+    return outcome, Applied(outcome)
+end
+
+-- nil is Reset: it clears the saved opacity (100% is never stored). Any value
+-- off the bounds or steps, or not a whole number, is refused with nil and
+-- changes nothing; the menu offers only valid values. The write is the same
+-- explicit Store-owner choice as style and colour, with the same outcomes.
+function T.SetBackgroundOpacity(percent)
+    if percent ~= nil and not ValidOpacity(percent) then return nil, "invalid-value" end
+    if percent == T.OPACITY_DEFAULT then percent = nil end
+    local outcome = Choose("opacity", T.OPACITY_KEY, percent)
+    return outcome, Applied(outcome)
 end
 
 function T.Notify(message)
@@ -572,12 +971,18 @@ function T.Notify(message)
     end
 end
 
-T.HELP = "Appearance changes only how Nexus windows look. Style sets the "
+-- T.HELP (the Appearance hover) is a shown field: it resolves at each read
+-- through the metatable below, in the session's language.
+local HELP = "Appearance changes only how Nexus windows look. Style sets the "
     .. "structure (Nexus Vista is the default; Nexus Slate is the earlier shared "
     .. "dark style of the imported 1.19.3 source and test.9094, with the same "
     .. "colours and shapes; the Orb windows, plain in test.9094, now use it too). "
     .. "Colour sets the accents; Nexus Amethyst purple is the Vista default. The difficulty / Soul Ash card keeps its own "
     .. "look, and no choice changes automation or gameplay."
+setmetatable(T, {__index = function(_, name)
+    if name == "HELP" then return Say("theme.tooltip.appearance_help", HELP) end
+    return nil
+end})
 
 -- Items for one flat 3.3.5 EasyMenu. A check mark, not only a colour, marks
 -- the active choice; a saved value this build does not know is named and kept.
@@ -585,6 +990,45 @@ T.HELP = "Appearance changes only how Nexus windows look. Style sets the "
 -- "Default" row. It is checked for no saved colour and for a saved palette
 -- with those colours; opening the menu never rewrites either. Choosing it
 -- clears the saved colour, as "Style colours" did.
+--
+-- v23: the background opacity rows come first (100% Default, then 90% down
+-- to 50%), so the Settings window's Appearance page, which lists the first
+-- rows, shows the control and the current value at once. Each row carries
+-- item.opacity; the Default row clears the saved value; an unknown saved
+-- value checks no row and is named as kept after the six rows.
+local OPACITY_ROWS = {100, 90, 80, 70, 60, 50}
+local OPACITY_HELP = "Changes only how see-through Nexus window backgrounds are; text, buttons "
+    .. "and the difficulty card stay solid. 100% is the default look and clears the choice."
+local function PercentArgument(value)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Count) == "function" then
+        return localization.Count(value)
+    end
+    return {known = true, value = value}
+end
+local function OpacityItems(a, pick, items)
+    local help = Say("theme.tooltip.opacity", OPACITY_HELP)
+    for _, value in ipairs(OPACITY_ROWS) do
+        local text = value == T.OPACITY_DEFAULT
+            and Say("theme.menu.opacity_default", "Background opacity: 100% (default)")
+            or SayF("theme.menu.opacity_choice", {percent = PercentArgument(value)},
+                "Background opacity: " .. value .. "%")
+        items[#items + 1] = {
+            text=text, opacity=value,
+            checked=not a.unknownOpacity and a.opacity == value,
+            tooltipTitle=text, tooltipText=help,
+            func=pick(T.SetBackgroundOpacity, value ~= T.OPACITY_DEFAULT and value or nil),
+        }
+    end
+    if a.unknownOpacity then
+        local value = DisplayValue(a.savedOpacity)
+        items[#items + 1] = {notCheckable=true, disabled=true,
+            text=SayF("theme.menu.unknown_opacity", {value = value},
+                "Saved background opacity \"" .. value .. "\" is not in this build; it stays saved.")}
+    end
+    return items
+end
+
 function T.MenuItems(close)
     local a = Active()
     local function pick(fn, id)
@@ -594,37 +1038,47 @@ function T.MenuItems(close)
             T.Notify(message)
         end
     end
-    local items = {{text="Appearance: style", isTitle=true, notCheckable=true}}
+    local items = OpacityItems(a, pick, {})
+    items[#items + 1] = {text=Say("theme.menu.style_title", "Appearance: style"), isTitle=true, notCheckable=true}
     for _, style in ipairs(T.Styles()) do
+        local label = StyleLabel(style)
         items[#items + 1] = {
-            text=style.label .. (style.id == T.DEFAULT_STYLE and " (default)" or ""),
-            checked=a.style == style, tooltipTitle=style.label, tooltipText=style.summary,
+            text=style.id == T.DEFAULT_STYLE
+                and SayF("theme.menu.style_default", {style = label}, label .. " (default)") or label,
+            checked=a.style == style, tooltipTitle=label, tooltipText=StyleSummary(style),
             func=pick(T.SetStyle, style.id),
         }
     end
     if a.unknownStyle then
+        local value = DisplayValue(a.savedStyle)
         items[#items + 1] = {notCheckable=true, disabled=true,
-            text="Saved style \"" .. DisplayValue(a.savedStyle) .. "\" is not in this build; it stays saved."}
+            text=SayF("theme.menu.unknown_style", {value = value},
+                "Saved style \"" .. value .. "\" is not in this build; it stays saved.")}
     end
-    items[#items + 1] = {text="Appearance: colour", isTitle=true, notCheckable=true}
+    items[#items + 1] = {text=Say("theme.menu.colour_title", "Appearance: colour"), isTitle=true, notCheckable=true}
     local own = PALETTES[a.style.palette]
+    local ownLabel, ownHue = PaletteLabel(own), PaletteHue(own)
     items[#items + 1] = {
-        text="Default (" .. own.label .. ", " .. own.hue .. ")",
+        text=SayF("theme.menu.colour_default", {palette = ownLabel, hue = ownHue},
+            "Default (" .. ownLabel .. ", " .. ownHue .. ")"),
         checked=not a.unknownPalette and (not a.explicitPalette or SameColours(a.palette, own)),
         func=pick(T.SetPalette, nil),
     }
     for _, palette in ipairs(T.Palettes()) do
         if not SameColours(palette, own) then
+            local label, hue = PaletteLabel(palette), PaletteHue(palette)
             items[#items + 1] = {
-                text=palette.label .. " (" .. palette.hue .. ")",
+                text=SayF("theme.menu.colour_choice", {palette = label, hue = hue}, label .. " (" .. hue .. ")"),
                 checked=a.explicitPalette and a.palette == palette,
                 func=pick(T.SetPalette, palette.id),
             }
         end
     end
     if a.unknownPalette then
+        local value = DisplayValue(a.savedPalette)
         items[#items + 1] = {notCheckable=true, disabled=true,
-            text="Saved colour \"" .. DisplayValue(a.savedPalette) .. "\" is not in this build; it stays saved."}
+            text=SayF("theme.menu.unknown_colour", {value = value},
+                "Saved colour \"" .. value .. "\" is not in this build; it stays saved.")}
     end
     return items
 end
@@ -633,8 +1087,7 @@ function T.ShowMenu(anchor)
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
     T._menu = T._menu or CreateFrame("Frame", "NexusAppearanceMenu", UIParent, "UIDropDownMenuTemplate")
-    EasyMenu(T.MenuItems(CloseDropDownMenus), T._menu, anchor or "cursor", 0, 0, "MENU")
-    return true
+    return T.OpenMenu(T.MenuItems(CloseDropDownMenus), T._menu, anchor or "cursor", 0, 0)
 end
 
 -- Re-reads the choice and repaints styled controls if it changed.

@@ -2,6 +2,8 @@
 """Run only the prototype-specific checks. Never represents the upstream full suite.
 Python 3.9+. Native LuaJIT is preferred if installed; the local Lua 5.4 fallback
 is explicitly labelled and requires liblua5.4. No network or game access.
+Python unittest files are registered in PYTHON_TESTS, apart from NAMES. tools/ci_check.py
+runs them; this runner never passes one to a Lua runtime and never counts one.
 """
 from __future__ import annotations
 import argparse, ctypes.util, hashlib, json, os, pathlib, shutil, subprocess, sys, time
@@ -62,6 +64,7 @@ NAMES += ['sync_dps_correlation_wire','sync_correlation_limits','sync_claim_corr
 NAMES += ['sync_requester_filter']
 NAMES += ['sync_dps_bare_native_context','sync_dps_bare_native_paced']
 NAMES += ['sync_dps_bare_requester_route']
+NAMES += ['dps_lookup_fixed_key']
 NAMES += ['startup_build_identity']
 NAMES += ['community_cursor_readers','community_failure_hold','sync_locked_roles_request','leaderboard_roles_names']
 NAMES += ['sync_dps_native_relay_scan']
@@ -69,6 +72,7 @@ NAMES += ['update_notices']
 NAMES += ['update_peer_provenance']
 NAMES += ['sync_request_size']
 NAMES += ['orb_panel_idle_work','orb_readiness_persistence','orb_stacked_copies']
+NAMES += ['orb_bounded_recovery']  # Bounded recovery, lifecycle, capacity, consent and safety controls.
 NAMES += ['share_role_preservation']
 NAMES += ['share_pending_status']
 NAMES += ['share_plan_design_roles']
@@ -203,6 +207,7 @@ NAMES += ['echo_snapshot_rejected_field','fallback_static_invalidation']
 NAMES += ['echo_raw_shape_bounds']
 NAMES += ['orb_panel_assignment_failure_text','orb_passive_readiness_report','orb_readiness_collection_pure']
 NAMES += ['orb_choice_observation', 'choice_presence_diagnostics', 'orb_diagnostic_lifecycle_freshness']
+NAMES += ['orb_world_entry_hold', 'callboard_review_repairs']
 NAMES += ['ownership_passive_diagnostics']
 NAMES += ['locked_shape_capture','locked_shape_bounds','locked_shape_report','locked_shape_correlation']
 NAMES += ['legacy_dps_conversion_served','legacy_dps_conversion_recovery','legacy_dps_conversion_refusals']
@@ -244,6 +249,7 @@ NAMES += ['triage_locked_diagnostics']
 NAMES += ['ui_theme_appearance','orb_history_embedded','advisor_build_progress','advisor_build_progress_runtime']
 NAMES += ['orb_mini_panel']
 NAMES += ['hud_orb_mini_access']
+NAMES += ['panel_screen_fit']
 NAMES += ['ui_theme_native_templates']
 NAMES += ['ui_theme_setup_dialogs']
 NAMES += ['help_theme_appearance']
@@ -307,6 +313,21 @@ NAMES += ['ux_save_intents','ux_auto_assignment_consent','ux_automation_scope']
 NAMES += ['ux_save_retry_intent','ux_assignment_consent_routes']
 # UX M4: captured destination presentation, one qualified count vocabulary, record scope/detail and terminology lint (EXPECT fails on accepted M3 ab3cb307 by design).
 NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms']
+# UX M5: a separate, confirmed Share of your own Saved Build (Copy stays draft-only); the saved Sync mode shown, never set, in one vocabulary matching actual sends (EXPECT fails on accepted M4 23109b90 by design).
+NAMES += ['ux_share_confirmation','ux_sync_disclosure','ux_sync_disclosure_sends']
+# UX M5 14d: the optional account-level Sync mode choice (LP-12), its applied transitions, the Library status fit (MB1) and the automatic DPS Record Loadout page disclosure (MB2) (EXPECT fails on preimage d15ba07c by design).
+NAMES += ['ux_sync_mode_choice','ux_sync_mode_transitions','ux_sync_status_fit','ux_sync_dps_page']
+# M5 catalog cause witness (first stage): replays catalog_idle_frames lines 11-117 and prints passive C1-C5 observations of its preparation-window frame; no remedy (the first full-run failure at catalog_idle_frames:113 stays NOT_ESTABLISHED).
+NAMES += ['catalog_idle_frames_witness']
+# M5 P-ALIGN-1 alignment probe: fresh in-process boots that vary only the idle frames before the first write of the catalog_idle_frames sequence and record how the preparation-window ticket settles; observation only, no remedy (the first full-run failure at catalog_idle_frames:113 stays NOT_ESTABLISHED).
+NAMES += ['catalog_idle_frames_alignment_probe']
+# M5R2-MB1: a confirmed own Saved Build Share is the explicit Share operation; its actual admission or final refusal is stated after the local save; two runtimes (EXPECT fails on closed aeb35417 by design).
+NAMES += ['ux_share_admission']
+# UX M6: named Resume target and its full-window review after a target change, fixed separate Pause/Resume, and layered recovery, usage and Continue-history wording on the Orb window, strip, mini panel and history (SETUP/EXPECT/GUARD; real handlers, synthetic services).
+NAMES += ['orb_target_review','orb_fixed_pause_resume','orb_recovery_layers']
+# UX M7 (not accepted): setup checklist/status, Orb rendered-key review and recovery vocabulary, Share approval retirement and linked-DPS disclosure, Retry Share feedback, contextual Help (EXPECT predicted to fail on accepted M6 0924d06a, by design; not executed by the author).
+NAMES += ['ux_setup_checklist','ux_status_composition','orb_review_identity','orb_recovery_vocabulary']
+NAMES += ['ux_share_approval_retirement','ux_share_linked_dps','ux_retry_share_feedback','ux_context_help_access']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
@@ -316,8 +337,175 @@ DEFAULT_TIMEOUT_SECONDS=45
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
+# Issue #132: an accepted Wishlist upload stays bound to the editor/Create context and draft that
+# authorized it (SETUP/EXPECT/GUARD). Categories are pinned to the fixed public base bc5f495, whose
+# post-upload check compared the draft token only: EXPECT is predicted from source to fail there
+# (equal-content replacements, the bookkeeping after a host error that follows an equal-content
+# Copy, the partial notice that names the upload and its next step); GUARD is predicted to hold
+# there. Each check also states its source-predicted outcome at 791cdcc (context check) and
+# 9c60456 (draft identity); these are predictions from source, not recorded executions.
+NAMES += ['wishlist_upload_context']
+# #151: pure local-pool codec (EXPECT fails on docs-only 15dace7 by design).
+NAMES += ['flexible_plan_persistence_codec']
+# #151: private Store pool seam and FlexiblePlanStore.New Read/Save/Clear through real boot/reload (EXPECT fails before the seam by design).
+NAMES += ['flexible_plan_persistence_store']
+# #151 retention: measured maximal-pool startup work against actual PumpCaps/SourceBounds, a 28,672-byte sibling, released 9049 and current peers keep the key; no pool message or action.
+NAMES += ['flexible_plan_persistence_retention']
+# #151: chooser SavePool/LoadPool/PersistenceState, owned Load/Clear consent and the visible Save pool/Load saved controls over the real facade (EXPECT fails at 4c92d3f by design).
+NAMES += ['flexible_plan_persistence_chooser']
+# Issue #131: guided setup coach flow/navigation and receipt/read-back evidence (EXPECT fails at 2b287ef8 by design).
+NAMES += ['guided_setup_flow','guided_setup_readback']
+# First entry routing: a healthy first use is the guided setup coach; Help's primary Setup / Welcome opens it; declines, read-only and refusals stay honest (EXPECT fails at f67ba51e by design).
+NAMES += ['guided_first_entry']
+# Issue #131: the guide's place kept per character across an offline reload; every outcome read again; read-only, foreign and loading kept session-only (EXPECT fails at dfcca312 by design; native reload NOT_RUN).
+NAMES += ['guided_setup_resume']
+# Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
+NAMES += ['ui_review_navigation']
+# Setup Alternative (Codex review4): the setup window's and checklist's Help open the guarded coach, the manual is a separately named Reference; warning-open refusal falls back to Reference; 420 px / 125% and declared text-model geometry (EXPECT fails at the review3 cut by design; native NOT_RUN).
+NAMES += ['setup_help_entry_points']
+NAMES += ['full_ui_workspaces']
+# Issue #163: dedicated Settings window delegates to guarded owners; navigation reads only.
+NAMES += ['full_ui_settings']
+NAMES += ['full_ui_plan_routes']
+# Issue #163 Play panel (Claude Design full UI): offer cards, the offer heading, the waiting state and the Auto ON line; cards never choose (EXPECT fails before the change by design).
+NAMES += ['play_offer_cards']
+# Issue #163 Play panel summary (Claude Design full UI): compact plan progress with Details, the Difficulty / Soul Ash line, your vs best known DPS rows and the Orb run line (EXPECT fails before the change by design).
+NAMES += ['play_panel_summary']
+# Issue #165: the header Options button: its localized label with the code-owned trusted-notice "!", its hover, header line 1 geometry at 420 and 640 px and 125% text in both Difficulty / Soul Ash HUD modes, and its read-only menu route (synthetic fixtures; native glyph widths NOT_RUN).
+NAMES += ['panel_options_label']
+NAMES += ['panel_original_design']
+# Typography correction (reviewed revision 2): the Nexus-owned fonts follow GameFontHighlightSmall from 1x to 2x, never under 10 / 12 / 14, and the heading row's charges cell is 72 px x font scale in the room the shown heading leaves, never under 72; derived cells, heading form kept, native 10 at exactly 72 (EXPECT fails at 0dfbcf64 by design; native glyph widths NOT RUN).
+NAMES += ['panel_native_font_metrics']
+# Native QA test.163037 (source 328868e8): after start-up the client shortens the main panel's Wishlist caption, CALLBOARD label and PROGRESS caption, whose boxes are measured in the first render while the panel is hidden and has never been shown; on a client that reports another width for such a text (the one measured never-shown / shown pair, a fixture value for these labels) each label must fit once the panel is first shown, with no Details click, no added room, no font, scale or saved-choice change and no idle polling (EXPECT fails at 328868e8 by design; synthetic client model, native NOT_RUN).
+NAMES += ['panel_first_render_label_widths']
+# Native QA test.163008: window Help opens the guided coach and a labelled Reference opens the window's manual page; Options offers direct choices (no Manage submenu); Hide details collapses the Play detail section and its space, Show details restores the same counts, reload starts collapsed; Display Settings opens clear of the editor's upper-right controls at scaled and edge layouts (EXPECT fails at 0e5b84d7 by design; native NOT_RUN).
+NAMES += ['native_qa_163008']
+# Issues #131/#163 guide slice after native QA test.163008: the Wishlist the active Saved Build follows says Assigned now apart from the coach's single choice (duplicate-content identity, failing/missing/changed/inactive reads, replay and offline reload, honest summary); choice cards use the client round radio mark (UIRadioButtonTemplate); Step 7 rows show an icon and 12 px word with Go to step as a link on the row; a missing/failing active Saved Build reader is unknown, never a retained first-run plan; the coach is held by its top; Reference topics open in-view articles (Escape article -> topics -> step -> close) and Open full Reference is the separate manual route; the summary words its rows as the guide's own progress (EXPECT fails at 0e5b84d7 / 9bf92559 by design; native NOT_RUN).
+NAMES += ['visual_guide_context_163009']
+# Issue #163 workspace composition: opaque bases under styled windows and Nexus tooltips, the Theme primary fill; Records title/scope/selection prompt/scroll cue; Explore catalog version on hover and a no-selection detail; Plan search placeholder, primary Save and an Auto-manage label clear of My Builds; the Orb window's Start reason under Start (EXPECT fails at 9bf92559 by design; offline model only, native NOT_RUN).
+NAMES += ['visual_workspaces_163009']
+# Native acceptance of test.163009, Options menu: the shared DropDownList<n> showing a Nexus menu gets one opaque fill under its rows only while it shows that menu (UIDROPDOWNMENU_OPEN_MENU plus visibility); submenus, a level made on demand, close/reopen, other addons' and game menus reusing the lists, stock handlers and tooltip ownership, over a synthetic FrameXML dropdown written from the build-12340 export contract (EXPECT fails at a9ff2eda by design; native opacity NOT_RUN). M8/M9 (native test.163012) guard the Options toggle across ordinary renders, a foreign menu kept through them, and Pause / Resume through the stock row click (list hidden before the callback, owner once, title at once).
+NAMES += ['native_dropdown_ownership']
+# Native acceptance of test.163009, Play Details: five missing and seven extra distinct names show two names and +3 / +5 more as separate measured one-line rows, whole inside their columns at default, taller and 125% text and both no-wrap readings; held top, downward growth / edge clamp, collapse of all four categories and every row, memory-only reload (EXPECT fails at a9ff2eda by design; native fit NOT_RUN).
+NAMES += ['native_details_measurement']
+# Issue #126: the mirrored difficulty is only the hardmode service's confirmed state (IsDifficultyKnown exactly true, GetCurrentDifficulty 1..6), read passively; compact HUD text and the selected Hardcore draft are never the difficulty; unknown stays the generic caption through the real TOC/Main/ViewModel/Panel (EXPECT fails at 9bfb2bb9 by design; native NOT_RUN).
+NAMES += ['server_status_difficulty_authority']
+# Issue #21 Stage A: a Community or Leaderboard scroll that keeps the exact bound virtual window (same rows, revisions, selection, layout and checked-out frames) does not release and rebind it; wheel steps, clamping, the overflow cue and every data, dirty, filter, selection, layout, resize and failure rebind are kept (EXPECT fails at 9bfb2bb9 by design; native flicker and frame timing NOT_RUN).
+NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
+# Issue #167: the attached main-panel Orb strip of a settled finished run has its own session-only Hide; the same run stays hidden through ticker refresh and panel re-render, a different run (same numbers), active, pending, paused or recovery state stays shown, a stale click is refused, and nothing is spent, saved or changed (EXPECT fails at c7e4d7cd by design; native NOT_RUN).
+NAMES += ['orb_strip_dismiss']
+# Issue #168 (panelA): plain-left drag of the main panel from its background, grip and every passive label, count, card and icon through one owner (one StartMoving / StopMovingOrSizing, panelX / panelY saved once in UIParent units, only after a real move with valid reads); clicks, right drags and a second start do nothing; editor counts, difficulty and buttons are excluded; root / origin hide ends a move, the render transaction does not; hover areas fit their text (EXPECT fails at c7e4d7cd by design; native pointer capture NOT_RUN).
+NAMES += ['crimson_panel_drag']
+# Issue #170 (panelA): Options > Main panel size, 50%-150% in 5% steps with Reset to 100% (key removed); panelScale absent/malformed reads 100% without a write, explicit requests clamp and step; the choice is the main panel's FitToScreen ceiling (other callers keep 1) with Reduced to fit your screen shown and never saved; physical top-left kept on a size change, no panelX / panelY write; UIParent-unit drag save at 150%; no rescale during a drag; no other frame rescaled; read-only root session-only (EXPECT fails at 025d0ea by design; native pixels NOT_RUN).
+NAMES += ['crimson_panel_scale']
+# Issue #171 (panelA, UI slice): Options > Session over a boundary double of the frozen Nexus.SessionPause API: unavailable/malformed API shown as not available and never labelled paused; render/Options/Help call no Pause or Resume; one Pause / Resume per click, Nexus paused in the title and roll status, Resume with its note, no refresh step or Auto toggle; failing or unconfirmed Pause not shown as paused (EXPECT fails at e1183fd by design; whole-addon pause and native NOT_RUN).
+NAMES += ['crimson_panel_pause']
+# Issue #169 (panelA): short Auto hover (state, next action, consequence; OFF, selected ON, held, refused click, session pause) naming Options > Auto explained, which opens the Help Auto page with every former disclosure and current permission values; Options > Questions (FAQ) page and tab; reading changes nothing (EXPECT fails at e1183fd by design; native tooltip drawing NOT_RUN).
+NAMES += ['crimson_panel_auto_help']
+# Auto-pick by rarity as the alternative to a Wishlist: Plan's button and chooser row, the guarded removal of only the verified destination's assignment (asked first, cancel and every changed, unknown, failed or pending-Save case change nothing), no Auto start, no permission change, and Play's selected / Auto OFF / paused / level / ON words from real facts.
+NAMES += ['rarity_auto_pick_mode']
+# Independent review of the panelA slices (#168, #170, #171, #169): a render's hide reaching the drag origin keeps the move while a real hide or origin removal ends it once; Charges, recommendation and Details-heading hovers fit their text; Callboard title/objective tooltips suppressed after their producers during a move; a centre saved at a fitted size survives a fresh load; FitToScreen refuses infinite sizes; an unreadable pause Status is unknown, not unpaused; a confirmed pause is the Auto hold over stale state words (EXPECT fails at 4358349 by design; native NOT_RUN).
+NAMES += ['crimson_panel_review_fixes']
+# Issue #171: whole-addon session pause (Nexus.SessionPause): ordinary Auto held without an OFF/ON toggle, Orb runs held and never resumed by Resume, Sync/share/DPS quiet, memory-only lifetime (synthetic fixtures; native NOT_RUN).
+NAMES += ['session_pause_auto','session_pause_orb','session_pause_sync','session_pause_dps','session_pause_lifetime']
+# Issue #171 review repairs: pauses raised inside final callbacks (Orb pick boundary/refresh, option, tome, upload, wire, whisper, Details) stop the unsent work; a timely ACK settles a pre-pause HELLO; stale preparing Sync and queued handshakes end; paused start-up joins nothing (native NOT_RUN).
+NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
+# Issue #171 second review repair: a correlated answer to a Sync request sent before a pause still settles after Resume; the old grant sends nothing more (native NOT_RUN).
+NAMES += ['session_pause_sync_receive']
+# Issue #171 third review repair: a pause raised inside the transport's pre-submit observers (send_settled, send_attempting) stops the stale packet before submission with no attempt counted; a send already entered keeps its result (native NOT_RUN).
+NAMES += ['session_pause_transport_observers']
+# Issue #172: after an explicit Continue, a newly approved running Orb run keeps the ordinary pump cadence; idle late observation and restored receipts stay slow (synthetic timing; native NOT_RUN).
+NAMES += ['orb_continue_running_cadence']
+# Crimson composition (#167, #171, #169): the real SessionPause loaded from Nexus.toc, driven through the panel's registered Options rows (Pause, Resume, Auto explained, Questions), its title, roll status and Help pages; an approved Orb run held by the global Pause stays PAUSED with the same run after the panel Resume; the attached strip of that run and of a finished run with unknown outcomes stays shown without Hide and a kept Hide callback cannot hide it, while a settled run's Hide works; Auto OFF, saved roots and counted calls unchanged (EXPECT fails before the core lane is merged; read-only EasyMenu observer; native NOT_RUN).
+NAMES += ['crimson_pause_panel_orb_integration']
+# Native test.163012 (#165, #168): a successful render no longer hides the shown root or its descendants, so an Options click and a plain-left move straddling an ordinary render are kept under an explicit input-loss model; a failing render still hides it and ends a move once (EXPECT fails at b1ef408; native pointer capture, focus and hit order NOT_RUN).
+NAMES += ['native_panel_input_continuity']
+# Issue #169 (with #131 / #163), owner-approved FAQ readability: each Reference > Questions (FAQ) question is a gold line of its own, answers keep the white body font, groups are one more blank line apart; wording, other pages and passive reading unchanged; measured height and scroll range cover every wrapped row at the stated font models (EXPECT fails at b1ef408; native colour, contrast and glyph fit NOT_RUN).
+NAMES += ['faq_readability']
+# Owner-approved usability follow-up 2026-10-30, Panel/menu lane (#171, #165, #174, #164, #175, #169; displayed items 1, 2+9, 7, 8, 12, 14, 15): confirmed-pause banner with one Resume, unknown/failed pause honest; shorter grouped Options with every distinct route and current setting values; complete cached extra-copies window that stays truthful after a failed render and fits the screen; once-per-hide restore guidance; plain update copy; Soul Ash / Intensity / DPS hover; header FAQ shortcut; visible Auto OFF unchanged (synthetic fixtures; native NOT_RUN).
+NAMES += ['owner14_panel_usability']
+# Owner-approved usability follow-up 2026-10-30, Wishlist editor lane (#173; displayed items 3, 4, 6): the locked-slot automation caption readable without hover, always-visible counts and Owned text with long UTF-8 / escaped-pipe names and measured row pitch at default, 16 px and 2.0 text, and the destination row's assigned-now versus opened wording; reading changes nothing (stated font models only; native fit NOT_RUN).
+NAMES += ['owner14_editor_usability']
+# Owner-approved usability follow-up 2026-10-30, guide/Help/shared-copy lane (#131, #173, #169; displayed items 5, 6, 11, 13): shorter plain coach wording with consent, refusal and saved place kept; UserText.DestinationFields assigned now versus captured; Help page tabs apart from window buttons; one checklist marker language beside status words; every Auto OFF wording exact (EXPECT fails at f8cce3f4 by design; native NOT_RUN).
+NAMES += ['owner14_guide_help_usability']
+# Issue #147 S1: shared runtime/offline localization parity corpus (tests/prototype/fixtures/l10n_parity) through the unchanged core/Localization.lua under the harness Lua; P19/P20 native behaviour UNKNOWN (synthetic offline evidence; native NOT_RUN).
+NAMES += ['localization_parity']
+# Full visible-UI localization (#143-#148): the bounded 4096 cap, the block kind and the typed template kind of core/Localization.lua; text/format rules unchanged (synthetic offline; native NOT_RUN).
+NAMES += ['l10n_full_contract']
+# Full visible-UI localization: Settings selects Options rows by stable semantic identities, never English titles, so translated menus keep every setting; stale-click refusal kept (native NOT_RUN).
+NAMES += ['l10n_settings_identity']
+# Issue #144 passivity (family-144 PD1/PD3): passive Build Library/Leaderboard open, refresh, show and select write no saved filters (even same-value) and queue no loadout request; explicit filter choices and lock-in unchanged; incomplete Leaderboard row reachability UNKNOWN (native NOT_RUN).
+NAMES += ['l10n_passivity_library']
+# Full visible-UI localization: every declaration has admitted English, every Text/Format key literal in a TOC runtime source is a reviewed key of the matching kind, and no reviewed key lacks a consumer (static source + real seam; native NOT_RUN).
+NAMES += ['l10n_catalog_consumers']
+# Full-UI pseudo-locale support guards (early review FULLUI-FOUNDATION-1/2): tooltip capture restores every method incl. inherited nil originals on success and failure; an unmatched pseudo opener never hides English (synthetic; native NOT_RUN).
+NAMES += ['l10n_pseudo_support_guards']
+# Full-UI family library (helper a6a913ced96885815): Build Library window, detail states, Sync mode dialog and hovers through the seam under a pseudo pack; English, long and missing-entry fallback runs; passive re-render/hover/select (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_library']
+# Full-UI family chat (helper a35a4b3aaf9604e36): chat lines, ~40 slash commands, lifecycle/update notices and view-model labels through the seam under a pseudo pack; exact English via the UserText rewrite path; fallback, slots, passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_chat']
+# Full-UI family records (helper ab3569b2cf0edc78d): Leaderboard, loading status, log viewer, support report window and release note through the seam under a pseudo pack; support payload bytes identical across languages; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_records']
+# Full-UI family hud (helper ae8fa98fd17184856): Readout builders and charge legend, Theme, unit tooltip, Callboard, server notice and layout labels at their real receivers under a pseudo pack; exact English, unknown vs zero (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_hud']
+# Full-UI family usertext (helper a1d43a30c9cab02fd): every visible UserText output except T.Guide through the seam from the real raw inputs; exact English, raw codes kept, count/zero/unknown distinct, one real Panel render (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_usertext']
+# Full-UI family journal (helper ad1d915f09b0c1c32): Echo Journal Nexus Progress tab and Plan alternatives chooser through the seam under a pseudo pack; dialogs, slots, missing-entry, English and UTF-8 boundary runs (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_journal']
+# Full-UI family panel (helper a47a23a0761650bb8): main panel header, footer, workspaces, cards, details, hovers and every Options menu level at the real receivers under a pseudo pack; English, long and missing-entry runs; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_panel']
+# Full-UI family wishlist (helper a3e168aca82c2c089): Wishlist editor, display popup, chooser, menus, popups and on-screen Wishlist under a pseudo pack; slots, fallback, English, passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_wishlist']
+# Full-UI family orb (helper a2e9c1797a97d607b): Orb window states, history, Continue chrome, strip, mini panel and hovers under a pseudo pack; runtime texts mapped at display; no spend/action/send/write (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_orb']
+# Full-UI family guide (helper aa74953994bed3b99): Help pages and FAQ (blocks), Welcome/checklist, guided coach, Auto overwrite consent, Settings window and workspace labels under a pseudo pack; long, missing-entry and English phases; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_guide']
+# Full-UI v3 remainder: an Auto hold reason is presented once (AutomationRuntime keeps the English wording for its support report line; Readout.AutoHoldText -> UserText.Message says it in the active language), and the Orb block sentence through the Orb book; real boot, real Auto and Orb gate, exact English and pseudo (synthetic; native NOT_RUN).
+NAMES += ['l10n_hold_presentation']
+# Global v4 amendment: nine long paragraphs (block / lines=true template) are complete above 256 bytes at their real receivers (extra list, Language menu/Settings/chat, Details, size, Orb mini, Auto confirmation line, context popup, import chat); invalid/missing fall back to exact English; English bytes; passive (synthetic; native NOT_RUN).
+NAMES += ['l10n_long_paragraphs']
+# Souvenir stage (updated provider, flag 3 memory card shown alone or beside carried cards): a needed visible souvenir is taken; any other souvenir board is left to the player with a stated reason, never given up (no memory draw); older provider unchanged (synthetic; native NOT_RUN).
+NAMES += ['automation_souvenir_stage']
+# Souvenir reveal (user requirement 2026-11-17): an unneeded lone souvenir is given up once per draw (CS 349, empty body) and only the bound three-card reply is chosen from (Take only); wanted/native-wanted/ambiguous/held cases send nothing; delayed, wrong-shape and repeated replies; changes inside the reveal (synthetic; native NOT_RUN).
+NAMES += ['automation_souvenir_reveal']
+# Updated provider, ordinary rolling through the runtime: the later-frame settle rule delays a leveling or Wishlist Take and never leaves it as a rejected intent (a republished choice is superseded and decided again); a pending native pick sends nothing (synthetic; native NOT_RUN).
+NAMES += ['updated_provider_settle_runtime']
+# The game's own auto-accept timer (0.18 s, armed at the parse, never re-checks its option) against the later-frame settle rule in adversarial frame order (driver before timer; 60 fps, 20 fps, one long frame, late first read, option off): no Nexus action before the native pick; measures the no-timer admit delay (synthetic; native NOT_RUN).
+NAMES += ['updated_provider_native_timer_order']
+
+# Python unittest files, as POSIX paths from the repository root. They are registered here, apart
+# from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
+# tools/ci_check.py checks this list against every tools/tests/test_*.py file and runs each entry
+# as its own process with the current Python interpreter. This runner never passes one to a Lua
+# runtime and never counts one with NAMES.
+PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalog.py']
+# Issue #147 S1: offline side of the shared parity corpus and the G1 registry interlock sentinel.
+PYTHON_TESTS += ['tools/tests/test_l10n_parity.py']
+# Issue #147 R union: nonexecuting declaration parser of core/Localization.lua and the five-input registry-bound API and report v2.
+PYTHON_TESTS += ['tools/tests/test_l10n_registry.py']
+# Issue #147 R union, split from tools/tests/test_l10n_registry.py so that each file runs within
+# PYTHON_TEST_TIMEOUT_SECONDS (every class and test kept, each once): S7 provenance; S8 consumer
+# binding gate and controls C0-C19, C20-C38, and --consumers with _children and the state bounds.
+# Their shared non-test code is tools/tests/l10n_registry_support.py (not a test_*.py file).
+PYTHON_TESTS += ['tools/tests/test_l10n_registry_provenance.py',
+                 'tools/tests/test_l10n_registry_consumers.py',
+                 'tools/tests/test_l10n_registry_consumer_flow.py',
+                 'tools/tests/test_l10n_registry_consumer_cli.py']
+# Full visible-UI (#143-#148, #147): the final six-pack composition gate over the actual bytes, its runtime seam/receiver cross-check under LuaJIT and its synthetic controls (offline; native NOT_RUN).
+PYTHON_TESTS += ['tools/tests/test_l10n_full_ui_gate.py']
+# Wall-clock limit for one Python test process, read by tools/ci_check.py.
+PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
+
 def timeout_for(name:str)->int:
     return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
+
+# Captured output as text. On a timeout, TimeoutExpired carries what was read so far: None when
+# nothing was, and on POSIX raw bytes even with text=True. Reporting it must not raise or print a
+# bytes repr; the row's status stays TIMEOUT.
+def output_text(value)->str:
+    if value is None: return ''
+    if isinstance(value,bytes): return value.decode('utf-8',errors='replace')
+    return str(value)
 
 def main() -> int:
     ap=argparse.ArgumentParser()
@@ -343,21 +531,24 @@ def main() -> int:
         # 'seconds' is the measured elapsed time, also for TIMEOUT; 'timeout_seconds' is the configured limit.
         timeout=timeout_for(name);start=time.monotonic()
         try:
-            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
+            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,encoding='utf-8',errors='replace',capture_output=True,timeout=timeout)
             row={'test':name,'status':'PASS' if p.returncode==0 else 'FAIL','exit':p.returncode,
                  'seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,'stdout':p.stdout,'stderr':p.stderr}
         except subprocess.TimeoutExpired as exc:
             row={'test':name,'status':'TIMEOUT','seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,
-                 'stdout':str(exc.stdout or ''),'stderr':str(exc.stderr or '')}
-        results.append(row);print(name,row['status']);print(row.get('stdout','').rstrip());print(row.get('stderr','').rstrip())
+                 'stdout':output_text(exc.stdout),'stderr':output_text(exc.stderr)}
+        results.append(row);print(name,row['status']);print(output_text(row.get('stdout')).rstrip());print(output_text(row.get('stderr')).rstrip())
     runtime_files=[]
     for line in (ROOT/'Nexus.toc').read_text().splitlines():
         if line.strip() and not line.startswith('#'):
             p=ROOT/line.replace('\\','/');runtime_files.append({'path':str(p.relative_to(ROOT)).replace('\\','/'),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
     report={'schema':'nexus-prototype-tests/1','runtime':runtime,'selected_tests':names,'complete_inventory':NAMES,'source_runtime_files':runtime_files,
             'scope':'Prototype-specific synthetic offline tests, not the original 245-runner suite or native WoW validation',
+            'registered_python_tests':list(PYTHON_TESTS),
+            'python_tests_scope':'Registered Python unittest files; tools/ci_check.py runs them as separate processes. Not run or counted by this runner.',
             'results':results,'passed':sum(r['status']=='PASS' for r in results),
             'failed':sum(r['status'] in ('FAIL','TIMEOUT') for r in results),'not_run':sum(r['status']=='NOT_RUN' for r in results)}
+    print('Python tests (run by tools/ci_check.py, not by this runner):',', '.join(PYTHON_TESTS) or 'none')
     out=ns.output.resolve();out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('REPORT',out);return 1 if report['failed'] or report['not_run'] else 0
 if __name__=='__main__': raise SystemExit(main())

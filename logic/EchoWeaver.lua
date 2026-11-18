@@ -211,18 +211,39 @@ local LABELS = {
     SETTLE_HELD_WANTED="Take the held wanted Echo instead of searching (EchoWeaver, experimental)",
 }
 
+local SOUVENIR_PLAYER = "souvenir: take it or draw three random Echoes; the choice is left to the player"
+EchoWeaver.SOUVENIR_PLAYER = SOUVENIR_PLAYER
+local SOUVENIR = {
+    REVEAL = "Give up the unneeded souvenir and reveal three Echoes (EchoWeaver)",
+    SENT = "souvenir given up; waiting for the three revealed Echoes",
+    SETTLE = "waiting for the game's own pick window to pass",
+}
+EchoWeaver.SOUVENIR = SOUVENIR
+
 -- Everything both policies read, built once per decision. Returns nil and a
 -- wait result when a required input is missing or incomplete: that refusal is
--- the same for both policies.
+-- the same for both policies. A souvenir stage also returns nil and its whole
+-- decision (a Take of the needed souvenir, or a wait for the player).
 local function Prepare(state)
     local annotations, deltas = {}, {}
     local function Wait(reason) return nil, {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
     local plan, owned, board = state.plan, state.owned, state.board
-    if state.ordinaryBoardAllowed == false then return Wait("Orb state active or unknown") end
+    if state.ordinaryBoardAllowed == false then
+        return Wait(type(state.ordinaryWhy) == "string" and state.ordinaryWhy ~= "" and state.ordinaryWhy
+            or "Orb state active or unknown")
+    end
     if not plan or plan.advisorOnly then return Wait("assign a Wishlist") end
     if not owned or (owned.synced ~= true and (tonumber(state.level) or 0)>1) then return Wait("unsynced") end
     if state.pending or state.pendingAction then return Wait("waiting for action confirmation") end
-    if not board or type(board.cards)~="table" or #board.cards~=3 then return Wait("waiting for three-card board") end
+    -- A souvenir stage (adapter memoryStage) shows fewer than three cards by
+    -- design; it is decided below, never waited on as a short board. Bound:
+    -- the captured client lays out at most three carried cards plus the
+    -- souvenir (CONTRACTS.md, souvenir stage).
+    local memoryStage = type(board)=="table" and board.memoryStage==true
+        and type(board.cards)=="table" and #board.cards>=1 and #board.cards<=4
+    if not board or type(board.cards)~="table" or (#board.cards~=3 and not memoryStage) then
+        return Wait("waiting for three-card board")
+    end
     if not Integer(state.horizon,0) then return Wait("waiting for pending-pick count") end
     local locked = state.locked
     -- Permanent locked ownership must be known before subtracting copies.
@@ -286,14 +307,58 @@ local function Prepare(state)
             or otherTier and "wrong quality" or "filler"
         deltas[i]=wanted and (100+(tonumber(c.quality) or 0)*2) or -15
     end
+    if memoryStage then
+        -- Souvenir stage (updated provider). Taking any other card, or asking
+        -- for the three hidden random cards, gives the souvenir up for the
+        -- climb; Nexus never makes that sacrifice. The one automatic action
+        -- is a Take of exactly one visible souvenir that a Wishlist target
+        -- still needs; everything else is the player's choice.
+        local index
+        for i,c in ipairs(board.cards) do
+            if c.isGuaranteed==true then
+                if index then return Wait(SOUVENIR_PLAYER) end
+                index=i
+            end
+        end
+        local card=index and board.cards[index]
+        local id=card and tonumber(card.spellId)
+        if not id or card.selectable==false or (outstanding[id] or 0)<=0 then
+            if board.revealSent==true then return Wait(SOUVENIR.SENT) end
+            -- User requirement: an unneeded souvenir, shown alone (adapter
+            -- revealable), is given up for the three hidden Echoes while a
+            -- Wishlist target is still missing; with nothing missing the
+            -- player decides. "Unneeded" is by exact spell id: every rarity
+            -- of an Echo is its own spell (the game's build matching and
+            -- these targets both use the exact id), so a lower tier never
+            -- fulfils another tier's target, and the reveal loses only this
+            -- souvenir. (An earlier family-tier hold kept it for the player.)
+            local eligible=id and card.selectable~=false and #board.cards==1
+                and total>0
+            if eligible and board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
+            if eligible and board.revealable==true then
+                return nil,{type="reveal",spellId=card.spellId,index=index,
+                    reason=SOUVENIR.REVEAL,reasonCode="SOUVENIR_REVEAL",
+                    annotations=annotations,deltas=deltas,outstanding=total,planner="echoweaver"}
+            end
+            return Wait(SOUVENIR_PLAYER)
+        end
+        return nil,{type="take",spellId=card.spellId,index=index,
+            reason=LABELS.SELECT_OUTSTANDING_WISHLIST,reasonCode="SOUVENIR_NEEDED",
+            annotations=annotations,deltas=deltas,outstanding=total,planner="echoweaver"}
+    end
+    -- The three Echoes that answered Nexus's own souvenir reveal: chosen
+    -- from, never searched (no Banish, Freeze or Reroll).
+    local revealed=board.revealBound==true
+    -- Also an ordinary updated-provider draw that is not yet actionable.
+    if board.revealSettling==true then return Wait(SOUVENIR.SETTLE) end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true
     return {state=state,requested=requested,outstanding=outstanding,total=total,choices=choices,
         frozenCount=frozenCount,annotations=annotations,deltas=deltas,charges=charges,trusted=trusted,
         catalog=state.catalog,
-        canBanish=trusted and state.allowBanish~=false and not refused.banish,
-        canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false,
-        canReroll=trusted and state.allowReroll~=false and not refused.reroll}
+        canBanish=trusted and state.allowBanish~=false and not refused.banish and not revealed,
+        canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false and not revealed,
+        canReroll=trusted and state.allowReroll~=false and not refused.reroll and not revealed}
 end
 
 -- The normalized input of the pure planner. The capability arguments let the

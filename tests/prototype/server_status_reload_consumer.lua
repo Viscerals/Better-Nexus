@@ -1,12 +1,25 @@
--- Consumer contract only: synthetic HUD text through the real TOC boot,
--- ServerStatus scanner, Main display input, MainViewModel and Panel renderer.
--- This does not implement the foreign Ebonhold producer or prove realm tier.
+-- Consumer contract only: synthetic HUD text and a synthetic ready hardmode
+-- service through the real TOC boot, ServerStatus scanner, Main display input,
+-- MainViewModel and Panel renderer. Since #126 the difficulty comes only from
+-- ProjectEbonhold.HardmodeService: IsDifficultyKnown() exactly true, then
+-- GetCurrentDifficulty() 1..6 (the provided zero-argument contract). The HUD
+-- tier text is still installed, but it is not the difficulty. This does not
+-- implement the foreign Ebonhold producer or prove realm tier.
 -- F.Reload round-trips synthetic saved data and reloads modules offline; it
--- does not model the producer's native ReloadUI/default/request behavior.
+-- does not model the producer's native ReloadUI/default/request behavior, so
+-- each reload below installs the synthetic producer state it names.
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0
 local function check(value,message) assert(value,message);checks=checks+1 end
-local function InstallHud(H,text)
+-- A synthetic stand-in for the two passive service functions, holding only a
+-- cached value and a known flag. It requests, sends and replies nothing.
+local function Service(current,known)
+ local s={current=current,known=known}
+ s.api={GetCurrentDifficulty=function() return s.current end,
+  IsDifficultyKnown=function() return s.known end}
+ return s
+end
+local function InstallHud(H,text,service)
  HardmodeFrame=nil;EbonholdIntensityData=nil
  local root=CreateFrame('Frame','ProjectEbonholdPlayerRunFrame',UIParent)
  local header=CreateFrame('Frame',nil,root)
@@ -16,12 +29,14 @@ local function InstallHud(H,text)
  local ash=header:CreateFontString(nil);ash:SetText('76,054')
  local gain=header:CreateFontString(nil);gain:SetText('+188%')
  root.hardmodeTierText=tier;root.soulPointsText=ash;root.multiplierText=gain
- H.difficultyHud={root=root,tier=tier}
- -- Only the existing named balance contract is supplied. No tier getter or
- -- foreign update callback is invented, and Hide never changes the text.
+ H.difficultyHud={root=root,tier=tier,service=service}
+ -- Only the existing named balance contract and the provided hardmode
+ -- service functions are supplied. No foreign update callback is invented,
+ -- and Hide never changes the text.
  ProjectEbonhold.PlayerRunUI={GetUIElements=function()
   return {soulPointsText=ash}
  end}
+ ProjectEbonhold.HardmodeService=service and service.api or nil
 end
 local function Settle(H) H.Advance(2.5,.05) end
 local function ExpectCaption(H,mode,tier,label)
@@ -40,7 +55,10 @@ local function ExpectCaption(H,mode,tier,label)
   end
  end
  check(box~=nil and box:IsShown(),label..': actual difficulty card is shown')
- local expected='|cffff6b5f'..(tier or mode or 'Difficulty')..'|r'
+ -- A Hardcore tier and an unknown mode keep the red caption; a known Normal
+ -- (no tier) is neutral, as the game's own widget shows it (correction 3).
+ local colour=(tier==nil and mode=='Normal') and '|cffd9d9d9' or '|cffff6b5f'
+ local expected=colour..(tier or mode or 'Difficulty')..'|r'
  check(box.regions[1]:GetText()==expected,label..': actual rendered caption')
  check(Nexus.Panel.VisibilityFacts().committed==true,label..': panel committed')
  check(HardmodeFrame==nil,label..': no selected-menu override')
@@ -48,10 +66,12 @@ local function ExpectCaption(H,mode,tier,label)
  print('CONSUMER '..label..' mode='..tostring(mode)..' tier='..tostring(tier)
   ..' caption='..box.regions[1]:GetText())
 end
-local function Before(text) return function(H) InstallHud(H,text) end end
+local function Before(text,current,known)
+ return function(H) InstallHud(H,text,current~=nil and Service(current,known) or nil) end
+end
 
 local db=F.Database({});db.soulAshHudMode='nexus'
-local H=F.Boot(db,Before('Hardcore 1'));Settle(H)
+local H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
 ExpectCaption(H,'HC1','HC1','fresh boot HC1')
 check(not H.difficultyHud.root:IsShown(),'committed Nexus panel suppresses synthetic HUD')
 check(H.difficultyHud.tier:GetText()=='Hardcore 1','suppression does not edit HUD tier text')
@@ -60,23 +80,249 @@ H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
 ExpectCaption(H,'HC1','HC1','world entry unchanged HC1')
 
 -- The scanner must rediscover the replacement frame object after world entry.
-InstallHud(H,'Hardcore 1');H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
+-- The producer keeps its known flag across world entry, so the same service
+-- state is carried into the new HUD.
+InstallHud(H,'Hardcore 1',H.difficultyHud.service);H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
 ExpectCaption(H,'HC1','HC1','world entry replacement HC1')
 check(not H.difficultyHud.root:IsShown(),'world entry replacement HC1: new root is discovered and suppressed')
 
-H=F.Reload(Before('Hardcore 1'));Settle(H)
-ExpectCaption(H,'HC1','HC1','offline module reload unchanged HC1')
+H=F.Reload(Before('Hardcore 1',2,true));Settle(H)
+ExpectCaption(H,'HC1','HC1','offline module reload confirmed HC1')
 
 -- A consumer that remembers HC1 as authority would reject these legitimate
--- new input states. Only the supplied text is asserted, never server state.
-H.difficultyHud.tier:SetText('Normal');Settle(H)
-ExpectCaption(H,'Normal',nil,'explicit Normal after HC1')
-H=F.Reload(Before('Normal'));Settle(H)
-ExpectCaption(H,'Normal',nil,'offline module reload explicit Normal')
+-- new producer states. Only the synthetic service state is asserted, never
+-- server state.
+H.difficultyHud.service.current=1;H.difficultyHud.tier:SetText('Normal');Settle(H)
+ExpectCaption(H,'Normal',nil,'confirmed Normal after HC1')
+H=F.Reload(Before('Normal',1,true));Settle(H)
+ExpectCaption(H,'Normal',nil,'offline module reload confirmed Normal')
 
-H.difficultyHud.tier:SetText('');Settle(H)
-ExpectCaption(H,nil,nil,'absent difficulty text')
+-- No confirmed difficulty: the service goes away and the HUD text is empty.
+ProjectEbonhold.HardmodeService=nil;H.difficultyHud.tier:SetText('');Settle(H)
+ExpectCaption(H,nil,nil,'unloaded difficulty service')
 H=F.Reload(Before(''));Settle(H)
-ExpectCaption(H,nil,nil,'offline module reload absent difficulty')
+ExpectCaption(H,nil,nil,'offline module reload without difficulty service')
+
+-- Issue #164: Hide Nexus Panel is the player's saved display choice. While
+-- the panel is hidden the game's own Difficulty/Soul Ash widget is on screen,
+-- as and where the game left it; the choice survives an offline module
+-- reload and a login with the saved data, is undone only by /nexus panel or
+-- the minimap button, and never changes Auto or a setting. Offline consumer
+-- characterization only: this is not native client evidence.
+local function AutoFacts()
+ local stats=Nexus.RecomputeStats()
+ return tostring(stats.autoEnabled)..'|'..F.Serialize(Nexus.Store.Settings())
+end
+-- Counts every placement, alpha or mouse write to a stock widget. Nexus only
+-- ever hides and shows it.
+local function WatchStock(stock)
+ local writes={n=0}
+ for _,name in ipairs({'SetPoint','ClearAllPoints','SetAllPoints','SetParent',
+  'SetAlpha','EnableMouse','SetScale','SetFrameStrata','SetFrameLevel','SetSize'}) do
+  local original=stock[name]
+  stock[name]=function(self,...)
+   writes.n=writes.n+1;writes[#writes+1]=name
+   if original then return original(self,...) end
+  end
+ end
+ return writes
+end
+local function ExpectHidden(H,label)
+ local stock=H.difficultyHud.root
+ check(Nexus.Panel.IsShown()==false,label..': the Nexus panel is hidden')
+ check(Nexus.Panel.VisibilityFacts().wanted==false,label..': as the player chose')
+ check(NexusDB.panelHidden==true,label..': and the choice is saved')
+ check(stock:IsShown()==true,label..': the stock Difficulty/Soul Ash widget is on screen')
+ check(stock:GetParent()==UIParent,label..': in its own place')
+ check(Nexus.ServerStatus.VisibilityFacts().replacing==false,label..': nothing stands in for it')
+ check(H.difficultyHud.tier:GetText()=='Hardcore 1',label..': its difficulty text is untouched')
+ check(#H.actions==0,label..': no game action')
+end
+local function ExpectShown(H,label)
+ local stock=H.difficultyHud.root
+ check(Nexus.Panel.IsShown()==true,label..': the Nexus panel is on screen')
+ check(Nexus.Panel.VisibilityFacts().wanted==true,label..': as the player chose')
+ check(NexusDB.panelHidden==nil,label..': and no hide is saved')
+ check(stock:IsShown()==false,label..': the stock widget stands aside for it')
+ check(Nexus.ServerStatus.VisibilityFacts().replacing==true,label..': the panel replaces it')
+ check(#H.actions==0,label..': no game action')
+end
+do
+ local db=F.Database({});db.soulAshHudMode='nexus'
+ H=F.Boot(db,Before('Hardcore 1'));Settle(H)
+ check(Nexus.MainInternals.SavedRootReadOnlyV1()==nil,
+  'fixture: the saved root is writable, so a saved choice is expected to persist')
+ ExpectShown(H,'#164 fresh boot')
+ local writes=WatchStock(H.difficultyHud.root)
+ local auto=AutoFacts()
+ -- The header X and Hide Nexus Panel both call this.
+ Nexus.Panel.Hide()
+ check(H.difficultyHud.root:IsShown()==true,'#164 hide: the stock widget comes back at once')
+ Settle(H)
+ ExpectHidden(H,'#164 hide')
+ -- Mode changes while hidden: neither takes the stock widget away.
+ Nexus.ServerStatus.SetMode('server');Settle(H)
+ ExpectHidden(H,'#164 hidden, server HUD')
+ Nexus.ServerStatus.SetMode('nexus');Settle(H)
+ ExpectHidden(H,'#164 hidden, Nexus HUD')
+ check(NexusDB.soulAshHudMode=='nexus','#164: the HUD preference is what was chosen')
+ check(AutoFacts()==auto,'#164 hide: Auto and settings are unchanged')
+ check(writes.n==0,'#164 hide: no placement, alpha or mouse write: '..table.concat(writes,','))
+end
+do
+ -- Offline module reload with the saved data round-tripped.
+ H=F.Reload(Before('Hardcore 1'));Settle(H)
+ ExpectHidden(H,'#164 after reload')
+ Settle(H)
+ ExpectHidden(H,'#164 after reload, later scans')
+end
+do
+ -- Login with the saved choice: a fresh boot of a profile holding it.
+ local db=F.Database({});db.soulAshHudMode='nexus';db.panelHidden=true
+ H=F.Boot(db,Before('Hardcore 1'));Settle(H)
+ ExpectHidden(H,'#164 login')
+ local writes=WatchStock(H.difficultyHud.root)
+ local auto=AutoFacts()
+ -- /nexus panel restores it.
+ SlashCmdList.NEXUS('panel')
+ ExpectShown(H,'#164 /nexus panel')
+ Settle(H)
+ ExpectShown(H,'#164 /nexus panel, later scans')
+ -- The minimap button: repeated toggles never orphan either HUD.
+ local mini=_G.NexusMinimapButton
+ check(mini~=nil and mini:GetScript('OnClick')~=nil,'#164: the minimap button exists')
+ for round=1,4 do
+  mini:GetScript('OnClick')(mini,'LeftButton')
+  if round%2==1 then ExpectHidden(H,'#164 minimap toggle '..round)
+  else ExpectShown(H,'#164 minimap toggle '..round) end
+  Settle(H)
+  if round%2==1 then ExpectHidden(H,'#164 minimap toggle '..round..' settled')
+  else ExpectShown(H,'#164 minimap toggle '..round..' settled') end
+ end
+ -- Mode changes while visible.
+ Nexus.ServerStatus.SetMode('server')
+ check(H.difficultyHud.root:IsShown()==true and Nexus.Panel.IsShown()==true
+  and NexusDB.panelHidden==nil,'#164 visible, server HUD: the stock widget comes back, the panel stays')
+ Nexus.ServerStatus.SetMode('nexus');Settle(H)
+ ExpectShown(H,'#164 visible, Nexus HUD again')
+ -- Menu suppression. A dialog over a shown panel keeps the stock widget
+ -- replaced (no flicker); a hide while it is open gives the widget back, and
+ -- closing the dialog does not undo the hide.
+ local dialog=CreateFrame('Frame','NexusIssue164Dialog',UIParent)
+ dialog:Hide()
+ Nexus.Panel.AttachMenuFrame(dialog)
+ dialog:Show();Settle(H)
+ check(Nexus.Panel.VisibilityFacts().menuSuppressed==true and Nexus.Panel.IsShown()==false,
+  '#164 dialog: the panel is suppressed')
+ check(H.difficultyHud.root:IsShown()==false,'#164 dialog: the stock widget stays replaced')
+ Nexus.Panel.Hide()
+ check(H.difficultyHud.root:IsShown()==true,'#164 dialog: hiding the panel gives the widget back')
+ dialog:Hide();Settle(H)
+ ExpectHidden(H,'#164 dialog closed after a hide')
+ -- A show asked for while a dialog is open waits for the dialog to close.
+ dialog:Show()
+ SlashCmdList.NEXUS('panel')
+ check(Nexus.Panel.IsShown()==false and Nexus.Panel.VisibilityFacts().wanted==true,
+  '#164 dialog: a show waits for the dialog')
+ dialog:Hide();Settle(H)
+ ExpectShown(H,'#164 dialog closed after a show')
+ -- The game recreates its widget while the panel is hidden.
+ Nexus.Panel.Hide();Settle(H)
+ ExpectHidden(H,'#164 before recreation')
+ local old=H.difficultyHud.root
+ InstallHud(H,'Hardcore 1');H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
+ check(H.difficultyHud.root~=old,'fixture: a new stock widget object')
+ ExpectHidden(H,'#164 recreated while hidden')
+ SlashCmdList.NEXUS('panel');Settle(H)
+ ExpectShown(H,'#164 recreated, shown')
+ check(old:IsShown()==true,'#164: the old widget object was given back and is not touched again')
+ check(AutoFacts()==auto,'#164 toggles: Auto and settings are unchanged')
+ check(writes.n==0,'#164 toggles: no placement, alpha or mouse write: '..table.concat(writes,','))
+end
+do
+ -- Issue #164 readback through the real boot: a Show that returns without
+ -- putting the widget on screen (another addon's no-op wrapper) is not a
+ -- give-back. The state stays truthful (pending, still hidden by Nexus), the
+ -- scans do not call Show every second, and nothing is moved or written to
+ -- the widget. The game showing it later ends the claim.
+ local db=F.Database({});db.soulAshHudMode='nexus'
+ H=F.Boot(db,Before('Hardcore 1'));Settle(H)
+ ExpectShown(H,'#164 no-op Show fixture')
+ local stock=H.difficultyHud.root
+ local writes=WatchStock(stock)
+ local auto=AutoFacts()
+ local realShow,noOps=stock.Show,0
+ stock.Show=function() noOps=noOps+1 end
+ Nexus.Panel.Hide()
+ local facts=Nexus.ServerStatus.VisibilityFacts()
+ check(noOps==1 and stock:IsShown()==false,'#164 no-op Show: the hide asks for the widget once; nothing came back')
+ check(facts.restore=='pending' and facts.hiddenByNexus==true and facts.replacing==false and facts.stockShown==false,
+  '#164 no-op Show: the state says the give-back is pending, not done ('..tostring(facts.restore)..')')
+ Settle(H)
+ check(noOps==1 and Nexus.ServerStatus.VisibilityFacts().restore=='pending',
+  '#164 no-op Show: later scans read it back without calling Show every second')
+ stock.Show=realShow
+ SlashCmdList.NEXUS('panel');Settle(H)
+ ExpectShown(H,'#164 no-op Show, panel shown again')
+ check(Nexus.ServerStatus.VisibilityFacts().restore==nil,'#164 no-op Show: replacing again drops the pending give-back')
+ Nexus.Panel.Hide()
+ check(stock:IsShown()==true and Nexus.ServerStatus.VisibilityFacts().restore==nil
+  and Nexus.ServerStatus.VisibilityFacts().hiddenByNexus==false,'#164: a working Show reads back shown and the claim ends')
+ Settle(H)
+ ExpectHidden(H,'#164 no-op Show, then a real give-back')
+ check(AutoFacts()==auto and writes.n==0,'#164 no-op Show: Auto, settings and the widget\'s placement, alpha and mouse are unchanged')
+end
+-- C-05: reading the HUD preference never stores it. A saved value that is
+-- absent, or one this build does not know (a later build's choice), is shown
+-- as the Nexus HUD for the session and is kept exactly as saved through Init,
+-- every read, scanner passes and an offline module reload, so a rollback or a
+-- newer build reads back what it wrote. Only an explicit SetMode stores a
+-- known choice. Synthetic saved tables only; no live SavedVariables.
+local function ModeText() return F.Serialize(NexusDB.soulAshHudMode) end
+for _,case in ipairs({{label='missing'},{label='unknown',value='future-hud-mode'}}) do
+ local label='C-05 '..case.label..' saved mode'
+ local expected=F.Serialize(case.value)
+ local db=F.Database({});db.soulAshHudMode=case.value
+ H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
+ check(ModeText()==expected,label..': Init and scans leave the saved value as it was ('..ModeText()..')')
+ check(Nexus.ServerStatus.IsUsingNexusHud()==true,label..': the session shows the Nexus HUD')
+ check(Nexus.ServerStatus.VisibilityFacts().mode=='nexus',label..': and reports it as the effective preference')
+ ExpectCaption(H,'HC1','HC1',label)
+ ExpectShown(H,label)
+ Nexus.ServerStatus.GetSummary();Nexus.ServerStatus.IsDetected()
+ Nexus.ServerStatus.Rescan();Nexus.ServerStatus.PanelVisibilityChanged();Settle(H)
+ check(ModeText()==expected,label..': reads, a rescan and later scans store nothing ('..ModeText()..')')
+ local saved
+ H,saved=F.Reload(Before('Hardcore 1',2,true));Settle(H)
+ local key='["soulAshHudMode"]='
+ if case.value==nil then
+  check(saved:find(key,1,true)==nil,label..': the round-tripped data holds no stored mode')
+ else
+  check(saved:find(key..expected..',',1,true)~=nil,label..': the round-tripped data holds the exact saved value')
+ end
+ check(ModeText()==expected,label..': an offline module reload keeps it ('..ModeText()..')')
+ ExpectCaption(H,'HC1','HC1',label..' after reload')
+ ExpectShown(H,label..' after reload')
+ -- Explicit known choices are still stored, and later reads keep them.
+ Nexus.ServerStatus.SetMode('server')
+ check(NexusDB.soulAshHudMode=='server' and H.difficultyHud.root:IsShown()==true
+  and Nexus.ServerStatus.VisibilityFacts().mode=='server',label..': an explicit server choice is stored and gives the widget back')
+ Settle(H)
+ check(NexusDB.soulAshHudMode=='server' and Nexus.ServerStatus.IsUsingNexusHud()==false,label..': and later scans keep it')
+ Nexus.ServerStatus.SetMode('nexus');Settle(H)
+ check(NexusDB.soulAshHudMode=='nexus',label..': an explicit Nexus choice is stored')
+ ExpectShown(H,label..' explicit Nexus HUD')
+ check(#H.actions==0,label..': no game action')
+end
+do
+ -- Control: a known saved server choice is read as it is and kept.
+ local label='C-05 known server saved mode'
+ local db=F.Database({});db.soulAshHudMode='server'
+ H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
+ check(NexusDB.soulAshHudMode=='server' and Nexus.ServerStatus.IsUsingNexusHud()==false
+  and Nexus.ServerStatus.VisibilityFacts().mode=='server',label..': read as the server HUD and kept')
+ check(H.difficultyHud.root:IsShown()==true,label..': the stock widget keeps its place')
+ check(#H.actions==0,label..': no game action')
+end
 
 print('PASS server_status_reload_consumer checks='..checks..'; synthetic producer; native cause UNKNOWN')

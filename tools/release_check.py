@@ -20,7 +20,9 @@ Exit 1 on: an invalid label; a commit suffix that is not a prefix of the package
 name that differs from the derived one; a ZIP whose data/Release.lua states another label, version or
 channel; a ZIP whose Nexus.toc has no Version line, more than one, or one that names another build; a
 repository Nexus.toc whose Version is not the plain version; a public ZIP that is not marked public-test (or the reverse); a checksum file that does not
-match; an announced identity above 32 bytes; a test number that is not above the newest existing
+match; a package without exactly one Nexus/ui/Textures/NexusMinimap.tga in its exact 64x64 32-bit
+top-left TGA form, with any other image or texture path variant, or whose Nexus.toc lists a texture;
+an announced identity above 32 bytes; a test number that is not above the newest existing
 v<version>-test.<N> tag (with --require-newer).
 A plain push, a branch or an archive tag publishes nothing: no workflow in this repository has a tag or
 release trigger, and publication stays an explicit human-authorized step (RELEASE_SECURITY.md).
@@ -78,7 +80,10 @@ def main() -> int:
     if ns.internal:
         identity['toc'] += ' internal'
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-    from build_package import toc_directive, toc_directive_lines
+    from build_package import (toc_directive, toc_directive_lines, TEXTURE_ASSETS, TEXTURE_BYTES,
+                               texture_problems, toc_texture_entries)
+    # The one admitted image, as an archive member: exact path, exact case.
+    archive_textures = ['Nexus/' + n for n in TEXTURE_ASSETS]
 
     def toc_version_problem(toc: bytes, where: str, wanted: str) -> str | None:
         lines = toc_directive_lines(toc, 'Version')
@@ -129,6 +134,8 @@ def main() -> int:
                 problem = toc_version_problem(packaged_toc, 'packaged Nexus.toc', identity['toc'])
                 if problem:
                     problems.append(problem)
+                for entry in toc_texture_entries(packaged_toc.decode('utf-8', 'replace')):
+                    problems.append(f'packaged Nexus.toc must not load a texture as code: {entry}')
             # Exactly two addon folders: the addon, and the storage-only
             # support component that owns the report SavedVariables file.
             stray = [n for n in names
@@ -150,10 +157,26 @@ def main() -> int:
                 from build_package import companion_toc_problems, ALLOWED_SUFFIXES
                 problems.extend(companion_toc_problems(ctoc, 'NexusSupport.toc'))
                 for name in names:
-                    if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES:
+                    if (pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES
+                            and name not in archive_textures):
                         problems.append(f'unexpected file type in the package: {name}')
                     if '..' in pathlib.PurePosixPath(name).parts:
                         problems.append(f'package entry escapes its folder: {name}')
+            # The referenced minimap texture: present exactly once, read only
+            # when its declared size is the exact bounded size, then held to
+            # the same form the packager requires.
+            for member in archive_textures:
+                count = names.count(member)
+                if count != 1:
+                    problems.append(f'the package must hold {member} exactly once; found {count}')
+                    continue
+                with zipfile.ZipFile(ns.zip) as z:
+                    size = z.getinfo(member).file_size
+                    data = z.read(member) if size == TEXTURE_BYTES else None
+                if data is None:
+                    problems.append(f'{member} must be exactly {TEXTURE_BYTES} bytes; the archive declares {size}')
+                else:
+                    problems.extend(texture_problems(data, member))
             if field(packaged, 'version') != version:
                 problems.append(f'packaged version {field(packaged, "version")} differs from {version}')
             if field(packaged, 'buildLabel') != ns.label:

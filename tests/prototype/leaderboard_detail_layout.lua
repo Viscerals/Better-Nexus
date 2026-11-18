@@ -187,8 +187,9 @@ do
  Nexus.Leaderboard.SetClassFilter('ALL')
 end
 
--- 5. The 980 px window on a 5:4 UI (960 px wide at scale 1) is scaled to
--- fit with its close button on screen; on a wide UI it keeps scale 1.
+-- 5. The window (1040 px, the workspaces' common width since the finish
+-- pass; formerly 980) on a 5:4 UI (960 px wide at scale 1) is scaled to fit
+-- with its close button on screen; on a wide UI it keeps scale 1.
 do
  local w,h=UIParent:GetWidth(),UIParent:GetHeight()
  Nexus.Leaderboard.Hide()

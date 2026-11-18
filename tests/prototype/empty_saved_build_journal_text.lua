@@ -118,12 +118,22 @@ local function snapshot() return H.Clone(Nexus.Store.State()) end
 local function firstRun() return Nexus.Store.State().firstRunWishlist end
 
 local function texts(frame)
- local out={}
- for _,r in ipairs({frame:GetRegions()})do
+ -- Shown text only: the frame's own visible regions, then the visible cells
+ -- of its published destination row (a cell that is also a frame region is
+ -- read once). A tooltip is never part of it.
+ local out,seen={},{}
+ local function add(r)
+  if seen[r] then return end
+  seen[r]=true
   if r.GetText and r:IsVisible() then
    local t=r:GetText()
    if type(t)=='string' and t~='' then out[#out+1]=t end
   end
+ end
+ for _,r in ipairs({frame:GetRegions()})do add(r) end
+ local row=frame._destinationRow
+ if type(row)=='table' and type(row.cells)=='table' then
+  for i=1,#row.cells do if type(row.cells[i])=='table' then add(row.cells[i]) end end
  end
  return table.concat(out,'\n')
 end
@@ -306,7 +316,18 @@ do
  check(has(s.selectorTip,'Assigns a wishlist reference to the Saved Build currently selected in the server dropdown.'),'populated: selector tooltip unchanged')
  check(has(s.rowTip,'Sets this Wishlist as the target for this loadout.') and not has(s.rowTip,'refused'),'populated: row tooltip unchanged')
  check(has(s.unassignTip,'Keeps the Wishlist; stops using it for this loadout.'),'populated: Unassign tooltip unchanged')
- check(not has(s.hud,EMPTY_NOTE) and has(s.hud,NAME),'populated: the HUD shows the handed-off plan')
+ -- The Play header now owns the visible Wishlist identity. Its full hover
+ -- must still disclose the actual assigned plan when the label is shortened.
+ local cell=NexusPanel._contextWishlist
+ local w=cell and cell:IsVisible() and cell:GetText() or ''
+ local shown=w:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):gsub('^Wishlist:%s*',''):gsub('%s*%(assigned%)$',''):gsub('%.%.%.$','')
+ check(not has(s.hud,EMPTY_NOTE) and w~='' and has(s.hud,w) and #shown>=3 and NAME:sub(1,#shown)==shown,
+  'populated: the Play header shows the handed-off plan: '..w)
+ local hit=NexusPanel._contextWishlistHit
+ tip={}
+ local full=hit and hit:IsVisible() and Hover(hit) or ''
+ check(('\n'..full..'\n'):find('\nWishlist: '..NAME..' (assigned)\n',1,true)~=nil,
+  'populated: hovering the Play Wishlist line discloses the whole assigned plan: '..full)
  check(s.orbPlan=='Assigned Wishlist: '..NAME,'populated: Orb shows the assigned plan')
 end
 -- 3b. No Saved Build selected (slot 0): the first-run plan is the target; wording unchanged.

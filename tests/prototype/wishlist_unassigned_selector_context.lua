@@ -83,6 +83,31 @@ end
 -- The editor's context line: the text the editor anchors directly under its
 -- title (found by that anchor, not by its words).
 local function ContextLine()
+ -- Published destination row: its cells as shown, in order. The editor
+ -- shows the character, Saved Build and Wishlist cells, and the State cell
+ -- only for a warning (a routine State is on the row's hover). A published
+ -- row that does not show those three, or shows an empty State cell, or
+ -- hides the State cell but not its hover area, reads as no line (never a
+ -- tooltip or row metadata); the legacy anchored line is read only when no
+ -- row is published.
+ local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+ if type(row)=='table' and type(row.cells)=='table' then
+  local shown={}
+  for i=1,4 do
+   local c=row.cells[i]
+   local visible=#row.cells==4 and type(c)=='table' and c:IsVisible()
+   local t=visible and c:GetText()
+   if i==4 and type(c)=='table' and not visible then
+    local hit=type(row.hits)=='table' and row.hits[4]
+    if type(hit)~='table' or hit:IsVisible() then return '' end
+   elseif type(t)~='string' or t=='' then
+    return ''
+   else
+    shown[#shown+1]=V.Plain(t)
+   end
+  end
+  return table.concat(shown,' / ')
+ end
  for _,r in ipairs(NexusEditorFrame and NexusEditorFrame.regions or {}) do
   local at=r.points and r.points[1]
   if r.kind=='FontString' and at and at[1]=='TOP' and type(at[2])=='table'

@@ -26,7 +26,7 @@ For an unverified format, a future format and a malformed marker, "read-only" co
 - **Nothing is written.** No key is added, replaced or removed anywhere in the saved data, at start-up, during play or at logout: no catalog bundle (`authorityBundle`), no storage migration receipt, no diagnostic or error history, no repair record, no panel, overlay, minimap or HUD placement, no filter or run status, and no conversion or cleanup. Those values live in session memory and are gone after a reload.
 - **Community data.** The Build Library is admitted from the saved data as it is and served for the session. Community writes (Share, received rows, removal and retention markers, maintenance) are refused with `SAVED_FORMAT_READ_ONLY`. The next session admits the saved data again, including rows the other version added meanwhile. An authority bundle that an earlier build wrote into such data is served and kept byte for byte; it is never rewritten.
 - **DPS records.** Read-only is not unreadable. Once the catalog has admitted the saved data, the session's DPS store is a detached copy of the saved DPS records in the current layout: the authority bundle's DPS data, or with no bundle the saved `dpsCapture`. The Leaderboard, DPS lookups and the Build Library's qualified view show them as before; nothing is written back, and received records are refused. Saved data the catalog refuses (a catalog schema this build does not know, or an invalid bundle) shows no DPS records. An occupied bundle without DPS data shows none (legacy input is not revived), and the older per-player leaderboard shape is not shown, as in a writable profile. Saved DPS data that is not a plain table graph within the session copy bound (65,536 tables and 12 levels: tens of thousands of rows in the current bundle layout, about 700 rows in the older layout that keeps each row's Echo list) is not shown, and the DPS debug log says so.
-- **Error history.** The saved error history is still listed. Errors of this session are added in session memory only.
+- **Error history.** The session starts its error history from a detached copy of the saved history, then sanitizes it and keeps the newest 20 entries, so earlier errors are still listed. That copy is the Store's small plain-graph copy: at most 256 tables and eight levels, counting the history table itself. For the tested shape, a flat list of rows of simple fields, 255 rows fit and 256 do not; that row count follows from the table bound and is not a schema limit. A saved history the copy cannot take (more tables or levels, a metatable, a cycle, or a key or value the copy does not hold) is not seeded, and the session then lists no earlier errors. Errors of this session are still added, in session memory only. No saved history is deleted or rewritten, and a reload does not save the session's copy: the next session reads the unchanged saved history again under the same bound.
 - **Settings.** The session runs with a validated copy of the saved settings. An automation permission (`autoPick`, `autoActivate`, `autoDisable`, `autoSave`, `autoBanish`, `autoReroll`, `autoFreeze`, `autoLockEchoes`, `communityRetentionEnabled`) is on only when its saved value is exactly `true`. `false`, an absent value and any other value are off; shipped defaults never switch one on. Other settings this build knows keep a valid saved value and otherwise use the default. Settings this build does not know (for example the other addon's Sync controls) are not used. A lever opt-out list that cannot be read turns lever automation off. The session Automation master switch still starts OFF and cannot override a permission that is off.
 - **Changes in the session.** The editor's locked-Echo switch, `/nexus reroll|freeze|currentlocks on|off`, `/nexus anchor` and the placement controls change this session only, and the switch and the commands say so. The saved data is not changed; a reload starts again from the saved values.
 - **Client auto-accept.** Start-up does not change the client's auto-accept option (`autoAcceptLoadoutEchoes`), because the previous value could not be saved to restore it later. Automation waits while that option is on, as it always has.
@@ -85,6 +85,33 @@ Usable witnesses are canonical qualified identities or the strict bare namespace
 The private admission policy keeps the existing 2048 hard build-identity cap, limits new remote identities per observed transport-identity key to 256, and reserves 256 total slots against new remote growth (new remote identities stop at 1792 total). These are conservative engineering guardrails, each one eighth of the existing cap, not measured native requirements. Qualified and bare keys are deliberately disjoint: no combined per-person or cross-route cap is claimed. The reserve and hard cap remain global across both namespaces. Local saves may use remaining hard capacity; existing-ID updates retain all existing schema/owner/provenance checks. A legacy profile over either new threshold remains readable and is never evicted, migrated or rewritten to meet a quota. Every retained overlay identity with a usable witness is charged even if its row is hidden, suppressed, invalid or tombstoned; changing readability cannot release quota. Removing the overlay identity releases its charge, while re-admission records and charges its actual new origin. Complete candidate/batch reservations count before any new identity commits; cancellation commits neither rows nor quota usage. A missing or invalid actual sender is refused rather than borrowing a realm or trusting an author string.
 
 Only synthetic offline checks cover this policy. Native saturation time, native impact and tester Sync causality are not established.
+
+## Local planning pool (`flexiblePlanPoolV1`)
+
+The Plan alternatives chooser can store one planning pool on the current character row, under the additive key `flexiblePlanPoolV1`. It does so only when the player presses Save pool.
+
+The record is version 1:
+
+- `version`, plus five equal-length arrays: exact Echo ID, quality, maximum stack, group (-1 for none) and count (0 for not chosen);
+- at most 256 entries and 79 chosen ordinary copies.
+
+The record grants no ownership, assignment or permission to act. It is in no Sync, Share or wire payload.
+
+| Case | Behavior |
+|---|---|
+| No pool saved | Unchanged; start-up adds nothing. |
+| Settings format 2, or an accepted format 3 to 5 | Save pool and Load saved work. |
+| Read-only saved data (future, unverified or malformed format) | A valid saved pool can be loaded into the session. Save pool and removal are refused, and nothing is written. |
+| A pool record of a newer version (an exact integer version above 1) | Kept unchanged. Load saved, Save pool and removal are refused. |
+| A pool record this build cannot read (an unknown or missing field, a wrong shape, or past a bound) | Kept unchanged. Load saved, Save pool and removal are refused. |
+| An older build | The key is an unknown character-row key to it, and it keeps it. Offline tests cover released build 9049 and the current build; builds in between were not run. |
+| Other saved data | Unchanged. The Store's session snapshot leaves out only this exact top-level row key. A same-named key nested elsewhere, other row keys and unknown fields are kept and compared as before. |
+
+No settings format, profile, catalog, schema or protocol version changes, and nothing is migrated.
+
+Only offline synthetic tests with serialized module reboots cover this. They are not a native game save, reload or login.
+
+Details: `docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md`.
 
 ## Locked rows: occupied records, and Saved Build mirrors
 

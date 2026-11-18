@@ -8,6 +8,18 @@ assert(close);close:Click();assert(not f:IsShown() and M.Status().running)
 Nexus.Panel.Show();H.Advance(.3)
 local bar=assert(NexusPanel._orbControls)
 assert(bar:IsVisible() and bar.primary:GetText()=='Pause','main controls are visible with detail closed')
+-- Independent Spec review of 24a40301: this strip is a surface the main panel
+-- owns, so it draws no run count (counts only inside expanded Details). Here
+-- it is the real run after the real Start, read by the strip's own scheduled
+-- refresh (the time advanced above): its words carry no number, and the
+-- usage against the approved maximum is its hover.
+local drawn=bar.summary:GetText() or ''
+assert(drawn~='' and not drawn:find('%d') and not drawn:find('Orbs used',1,true) and not drawn:find('approved',1,true)
+ and not drawn:find('pending',1,true) and not drawn:find('remaining',1,true),'the strip draws no run count: '..drawn)
+assert(tostring(bar.summary._nexusFullText):find('Orbs used: %d+ / 3 approved')~=nil,
+ 'the strip hover keeps the usage and the approved maximum: '..tostring(bar.summary._nexusFullText))
+assert(bar.pause:IsVisible() and bar.resume:IsVisible() and bar.stop:IsVisible() and bar.details:IsVisible()
+ and bar.pause:IsEnabled() and not bar.resume:IsEnabled() and bar.stop:IsEnabled(),'the strip keeps its controls and gates')
 H.Offer();H.Result(410002,2);H.Advance(.3)
 assert(H.Count('orb-spend')==2,'closed detail continues confirmed attempts')
 bar.primary:Click();assert(not M.Status().running,'main Pause works')

@@ -457,6 +457,10 @@ function Transport.New(options)
     end
 
     local function Admit(packet, isControl)
+        -- The session pause transitions so far (issue #171): a packet admitted
+        -- before a Pause is never sent after it, even after a quick Resume.
+        local pause = Nexus and Nexus.SessionPause
+        packet.pauseEpoch = pause and pause.Status().epoch or 0
         if isControl then
             controlTail = controlTail + 1
             control[controlTail] = packet
@@ -916,6 +920,12 @@ function Transport.New(options)
         -- handling with the mode as its reason. It is not held at the head,
         -- where it would stall permitted work, and never released later.
         local permitted, modeWhy = permit(packet.metadata)
+        if permitted then
+            local pause = Nexus and Nexus.SessionPause
+            if pause and pause.Status().epoch ~= (packet.pauseEpoch or 0) then
+                permitted, modeWhy = false, "admitted before a session pause"
+            end
+        end
         if not RefreshSelection() then return end
         if not permitted then
             Pop(isControl, selectedIndex)
@@ -932,6 +942,13 @@ function Transport.New(options)
         end
         local channel = resolveChannel()
         if not channel or not RefreshSelection() then return end
+        -- The dispatch and channel reads above can run other code: after a
+        -- Pause, or a Pause and Resume, this packet is not submitted now; the
+        -- next turn ends it through the epoch check above.
+        do
+            local pause = Nexus and Nexus.SessionPause
+            if pause and (pause.IsPaused() or pause.Status().epoch ~= (packet.pauseEpoch or 0)) then return end
+        end
         local escaped = packet.payload:gsub("|", "||")
         if #escaped > chatLimit then
             log("TX", "DROPPED oversize msg (%d>%d): %s",
@@ -943,13 +960,47 @@ function Transport.New(options)
             return
         end
 
+        -- The pre-submit observers below (the previous packet's settlement and
+        -- this packet's send_attempting) run other code. Nothing is committed
+        -- before them: this attempt is only prospective until the final check.
         if lastSent and lastSent.packet then
             if not lastSent.requeued and OperationState(lastSent.packet) then
+                -- That packet really was submitted; it settles once
+                -- (MarkOperationTerminal), whatever happens to this one.
                 ObserveSettled(lastSent.packet, {outcome="sent-attempted",
                     reason="later send",
                     attempts=lastSent.packet.metadata.attempts,
                     queue=QueueDepth(true) + QueueDepth(false)})
             end
+        end
+        local attempt = packet.metadata.attempts + 1
+        if OperationState(packet) then
+            ObserveOperation("send_attempting", {outcome="attempting",
+                attempts=attempt,
+                queue=QueueDepth(true) + QueueDepth(false)}, packet)
+        end
+        -- Final submission boundary (issue #171). A callback above may have
+        -- removed or moved this exact packet: then it is not sent and no
+        -- other entry is popped. After a Pause, or a Pause and Resume, since
+        -- its admission (its own original epoch) it is dropped unsent, with no
+        -- attempt counted; the previous submission keeps its identity.
+        if not RefreshSelection() then return end
+        -- Cancelled, superseded or expired by a callback: not sent now; the
+        -- existing stale-head pruning ends it on a later turn.
+        if StaleReason(packet, current) then return end
+        do
+            local pause = Nexus and Nexus.SessionPause
+            if pause and (pause.IsPaused() or pause.Status().epoch ~= (packet.pauseEpoch or 0)) then
+                Pop(isControl, selectedIndex)
+                stats.modeDropped = (stats.modeDropped or 0) + 1
+                ObserveDropped(packet, {outcome="dropped",
+                    reason="admitted before a session pause",
+                    attempts=packet.metadata.attempts,
+                    queue=T.Snapshot().outbound})
+                return
+            end
+        end
+        if lastSent and lastSent.packet then
             local priorScope = RequestScope(lastSent.packet.metadata)
             if priorScope ~= "" and not requestIdCounts[priorScope] then
                 cancelledRequests[priorScope] = nil
@@ -957,14 +1008,9 @@ function Transport.New(options)
         end
         lastAttempt = current
         lastSent = nil
-        packet.metadata.attempts = packet.metadata.attempts + 1
+        packet.metadata.attempts = attempt
         stats.sendAttempts = (stats.sendAttempts or 0) + 1
         stats.attempted = (stats.attempted or 0) + 1
-        if OperationState(packet) then
-            ObserveOperation("send_attempting", {outcome="attempting",
-                attempts=packet.metadata.attempts,
-                queue=QueueDepth(true) + QueueDepth(false)}, packet)
-        end
         local ok, accepted
         if type(options.sendPacket)=="function" then
             ok, accepted = pcall(options.sendPacket,packet.payload,packet.metadata,channel)

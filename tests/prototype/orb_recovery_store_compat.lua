@@ -49,7 +49,10 @@ section('0 a real entry',function()
   return list
  end
  H,M,A,O=R.Class({edit=function(row,state)
-  for _,r in ipairs({row,state}) do r.picks=Picks();r.pickSeen=999;r.pickDropped=999 end
+  for _,r in ipairs({row,state}) do
+   r.picks=Picks();r.pickSeen=999;r.pickDropped=999
+   r.attributionAmbiguous=true;r.uncertain=3
+  end
  end})
  server=R.Server(H)
  S.Pass(H,M,A,2)
@@ -59,6 +62,8 @@ section('0 a real entry',function()
  local waited=0;while waited<20 and M.ContinueView().stage~='ready' do H.Advance(.25);waited=waited+.25 end
  assert(M.ContinueConfirm(M.ContinueView().token))
  entry=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ check(entry.receipt.attributionAmbiguous==true and entry.receipt.uncertain==3,
+  'GUARD current archive retains uncertainty fields; legacy key retention below does not establish semantic downgrade safety')
  local edges,bytes,depth=Measure(entry)
  print(string.format('  measured entry (deidentified 034 shape): %d edges, %d bytes, depth %d',edges,bytes,depth))
  check(edges<=1200 and bytes<=6144 and depth<=4,'a real entry is within the entry caps')
@@ -167,6 +172,174 @@ section('3 a newer archive format is kept unchanged',function()
  local _,row=Row(P.B.e)
  local view=P.B.e.Nexus.OrbRuntime.ContinueView()
  check(view.archive.state=='future' and view.archive.count==2,'the view names it: '..tostring(view.archive.state))
+end)
+
+section('4 ambiguous pending identity is versioned before and after choice',function()
+ for _,chosen in ipairs({false,true}) do
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(3))
+  local server=R.Server(H)
+  H.service.RequestChoice=function()
+   SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+   server.queue[#server.queue+1]={op=16,body=''}
+  end
+  for _=1,180 do if H.Count('orb-spend')==2 then break end;H.Advance(.25) end
+  assert(H.Count('orb-spend')==2,'SETUP original unknown spend archived')
+  if chosen then H.Offer() end
+  local original=H.Clone(R.Saved())
+  check(original.attributionFormat==1 and original.attributionOwner==UnitGUID('player') and original.guid==nil,
+   'EXPECT real identity is retained in versioned fields, chosen='..tostring(chosen))
+  check(original.originalSlot==1 and not original.loadoutChanged and original.uncertain==1,
+   'GUARD owner encoding fabricates no loadout change and preserves unknown exposure')
+  assert(M.Stop());local spends,takes=H.Count('orb-spend'),H.Count('take')
+  M=R.Reload(H);M.Pump()
+  if chosen then H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1) end
+  check(R.Saved() and M.BlocksOrdinary(),'EXPECT current reload reads encoded owner but retains attribution blocker')
+  check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD versioned owner restores no action authority')
+ end
+end)
+section('5 unknown or conflicting identity versions remain blocked',function()
+ for _,kind in ipairs({'future','conflicting','missing_owner'}) do
+  local H,M,A,O=R.Class({latch=false,edit=function(row,state)
+   for _,p in ipairs({row,state}) do
+    p.attributionFormat=kind=='future' and 2 or 1;p.attributionOwner=p.guid
+    if kind~='conflicting' then p.guid=nil end
+    if kind=='missing_owner' then p.attributionOwner=nil end
+   end
+  end})
+  local original=H.Clone(R.Saved());M.Pump();H.Advance(1)
+  check(M.BlocksOrdinary() and not M.ContinueView().eligible and R.Same(R.Saved(),original),
+   'GUARD '..kind..' owner identity cannot settle, Continue or rewrite the receipt')
+ end
+end)
+
+section('6 passive legacy preservation then one new-evidence safety migration',function()
+ assert(entry and entry.resolution.confidence=='NONE','SETUP real validated historical archive')
+ local H,M,A,O=R.Class({latch=false,edit=function(row,state)
+  for _,r in ipairs({row,state})do r.opaqueEvidence={keep=false,label='preserve'} end
+ end})
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local original=H.Clone(R.Saved());assert(original.guid and not original.attributionFormat and not original.attributionAmbiguous,'SETUP genuine legacy restored envelope without invented attribution')
+ for _=1,8 do M.Pump(true)end
+ check(R.Same(R.Saved(),original),'GUARD passive restore/read preserves all original saved bytes')
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1;local writes=0
+ owner.UpdateStateV1=function(...)writes=writes+1;return raw(...)end
+ H.granted=S.OwnedMap(S.Shape(),H,'500001:1',false);H.Notify();A.Poll();H.Advance(.5)
+ local migrated=H.Clone(R.Saved())
+ check(migrated.attributionAmbiguous and migrated.attributionFormat==1 and migrated.attributionOwner==original.guid and migrated.guid==nil,'EXPECT genuinely new ambiguous ownership migrates GUID information into the existing failclosed envelope')
+ for k,v in pairs(original)do if k~='guid'then check(R.Same(migrated[k],v),'GUARD migration retains original field '..k)end end
+ check(writes==1 and R.Same(migrated.opaqueEvidence,original.opaqueEvidence),'GUARD one safety migration retains unknown information')
+ for _=1,12 do M.Pump(true)end
+ owner.UpdateStateV1=raw
+ check(writes==1 and R.Same(R.Saved(),migrated) and M.BlocksOrdinary(),'GUARD stable new-evidence hold neither rewrites repeatedly nor fabricates server attribution')
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD restored safety migration restores no action authority')
+end)
+
+section('7 unrelated source-only history cannot explain the current removal',function()
+ assert(entry and not entry.receipt.selectedKey,'SETUP real source-only unconfirmed history')
+ local F=S.Shape();F.receipt.removed='500011:3'
+ local H,M,A,O=S.World(F,{slot=101,known=true,latch=false,charges=49,open=false})
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local original=H.Clone(R.Saved())
+ check(original.before[entry.receipt.removed]==1 and original.before[original.removed]==1,
+  'SETUP historical source remains owned while the different current source is removed')
+ for _=1,8 do M.Pump(true)end
+ check(R.Same(R.Saved(),original),
+  'EXPECT current source removal alone preserves the legacy receipt without false ambiguity or migration')
+ -- Observe the real owed offer and the player choice, then a fresh exact result.
+ O.offer=true
+ local cards={};for i,key in ipairs(S.Offer(F))do local id,q=S.IdQ(key);cards[i]={spellId=id,quality=q}end
+ H.Board(cards);M.Pump(true);R.Pick(H,500001)
+ H.granted=S.OwnedMap(F,H,'500001:1',false);O.offer=false;H.perks.currentChoice=nil
+ H.perks.pendingSelectSpellId=nil;H.Notify();A.Poll();H.Advance(.5)
+ check(not R.Saved() and H.Count('orb-spend')==0,
+  'EXPECT different current exact result settles without a fabricated recovery check or spend')
+end)
+
+section('8 unchanged retained archive has bounded repeated observation work',function()
+ local H,M,A,O=R.Class({latch=false})
+ local entries={};for i=1,8 do entries[i]=H.Clone(entry)end
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=entries end))
+ M.Pump(true);M.Status(false)
+ local raw=table.sort;local sorts=0
+ table.sort=function(...)sorts=sorts+1;return raw(...)end
+ local ok,err=pcall(function()for _=1,8 do M.Pump(true);M.Status(false)end end)
+ table.sort=raw;assert(ok,err)
+ print('ARCHIVE_WORK unchanged pump/status sorts='..sorts)
+ check(sorts<=160,'BOUND unchanged archive does not repeat receipt canonicalization on each pump/status: '..sorts)
+ -- A real content revision must invalidate the validated projection.
+ H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ check(M.Status(false).historyCount==1,'SETUP valid retained history reaches the review gate')
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].cd='damaged'end))
+ local view=M.Status(false)
+ check(not view.canStart and view.startReason:find('cannot be verified',1,true),
+  'GUARD revised damaged archive fails verification before the review gate')
+end)
+
+section('9 full distinct rolled build can reserve a safe exit',function()
+ ORB_SUPPORT_ECHOES={};for id=600001,600085 do ORB_SUPPORT_ECHOES[#ORB_SUPPORT_ECHOES+1]={id,1}end
+ local H,M,A,O=S.Fresh();ORB_SUPPORT_ECHOES=nil
+ UnitGUID=function()return 'Player-0-0000000001'end
+ H.granted={};H.locked={}
+ for id=600001,600085 do
+  local target=id<=600079 and H.granted or H.locked
+  target[H.names[id]]={{spellId=id,quality=1}}
+ end
+ S.Loadouts(H,A);H.perks.currentChoice={};H.Notify();A.Poll();H.Advance(.5)
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local view=M.Status(false)
+ check(view.historyCount==1 and view.canStart,
+  'EXPECT 79 distinct rolled copies and six locks retain a complete bounded exit: '..tostring(view.startReason))
+ assert(M.Start(2,false,view.historyReview))
+ local receipt=R.Saved()
+ check(receipt and receipt.attributionFormat==1 and H.Count('orb-spend')==1,
+  'EXPECT acknowledged full build admits exactly one versioned receipt')
+ local n=0;for _ in pairs(receipt.before)do n=n+1 end
+ check(n==79,'GUARD all 79 actual owned keys remain in the receipt')
+ check(M.BoundaryDiagnostics().mode=='session_only' and not receipt.boundaryJournal,
+  'GUARD only optional diagnostics use session memory when the full journal reserve cannot fit')
+ local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();R.Pick(H,410003);R.Pick(H,410004);R.Pick(H,410002)
+ H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
+ for _=1,180 do if #R.SavedRow('orbRecoveryArchive')==2 then break end;H.Advance(.25)end
+ local archived=R.SavedRow('orbRecoveryArchive')[2]
+ check(archived and archived.kind=='AUTO_UNCONFIRMED' and #archived.receipt.picks==3,
+  'EXPECT full build with all three raw picks retains its real bounded exit: entries='..#R.SavedRow('orbRecoveryArchive')
+  ..' picks='..tostring(archived and archived.receipt.picks and #archived.receipt.picks)..' reason='..tostring(M.Status(false).reason))
+ local edges,bytes,depth=Measure(archived)
+ print('FULL_BUILD_EXIT edges='..edges..' bytes='..bytes..' depth='..depth)
+ check(edges+32<=1200 and bytes+512<=6144 and depth<=4,
+  'GUARD complete full-build exit plus late reservation stays within unchanged entry caps')
+end)
+
+section('10 invalidated public snapshots cannot mutate cached history projections',function()
+ for _,kind in ipairs({'remove','append','late'})do
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={}
+  local owner=Nexus.MainInternals.StoreAuthorityOwner
+  assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+  local original=H.Clone(R.SavedRow('orbRecoveryArchive'))
+  local shown=M.Status(false)
+  assert(shown.canStart and shown.historyCount==1,'SETUP actual Status validates one retained entry')
+  local old=Nexus.Store.State().orbRecoveryArchive
+  assert(owner.UpdateStateV1(function(row)row.cacheOwnershipControl=(row.cacheOwnershipControl or 0)+1 end))
+  local current=Nexus.Store.State().orbRecoveryArchive
+  assert(current~=old and R.Same(current,original),'SETUP unrelated durable write replaced the defensive snapshot')
+  if kind=='remove' then table.remove(old,1)
+  elseif kind=='append' then old[#old+1]=H.Clone(old[1])
+  else old[1].late={{k='future_kind'}} end
+  local plan,why=M.Prepare('assigned',3)
+  check(plan and plan.historyCount==1 and plan.historyRisk~=nil,
+   'EXPECT stale public snapshot '..kind..' cannot change current review count or risk: '..tostring(why)
+   ..' count='..tostring(plan and plan.historyCount))
+  check(M.Status(false).historyCount==1 and R.Same(R.SavedRow('orbRecoveryArchive'),original),
+   'GUARD current disclosure and durable history remain exact after old snapshot '..kind)
+  local started,reason=M.Start(3)
+  check(not started and reason:find('Review the displayed',1,true) and H.Count('orb-spend')==0,
+   'GUARD old snapshot '..kind..' cannot bypass represented-history approval')
+ end
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

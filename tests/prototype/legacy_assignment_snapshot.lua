@@ -520,4 +520,43 @@ do
  check(upgraded('number',durable()),'a record added to an empty map is upgraded')
 end
 
+-- Updated client (audit 2026-11-17): a Wishlist row that wants Echo A and
+-- refuses Echo R (avoid=true, well formed) is read in full. The legacy
+-- bare-slot record migrates to the identity of its WANTED Echoes; the refused
+-- Echo is never a target; an upload over that row stays refused (it would
+-- erase the refusal). A malformed refusal still leaves the row unread.
+local R_ID=200005
+local function mixed(avoid)
+ local s=slots(nil)
+ s[101]={name='Plan A',verified=false,echoes={{spellId=A_ID,quality=A_ID%4,stacks=1,locked=false},avoid}}
+ return s
+end
+do
+ boot(nil,mixed({spellId=R_ID,quality=R_ID%4,stacks=1,avoid=true}))
+ seed('number',1,101)
+ check(durable()==101,'mixed row setup: the legacy bare slot is on disk')
+ local saved=F.Serialize(NexusDB)
+ boot(assert(loadstring('return '..saved))(),mixed({spellId=R_ID,quality=R_ID%4,stacks=1,avoid=true}))
+ H.Advance(2)
+ check(upgraded('number',durable()),'a valid wanted+refused row: the legacy record migrates to its wanted Echoes: '
+  ..tostring(type(durable())=='table' and durable().key or durable()))
+ check(targetSpell()==A_ID,'the wanted Echo is the target')
+ local w=Nexus.GameAdapter.Wishlist()
+ for _,e in ipairs(w and w.entries or {}) do check(e.spellId~=R_ID,'the refused Echo is never a target') end
+ local ok,why=Nexus.GameAdapter.UploadWishlist(101,'Plan A',plan(A_ID))
+ check(ok==false and why=='refused_entries','an upload over the row stays refused (keeps the refusal): '..tostring(why))
+ check(Nexus.GameAdapter.ServerWishlistSlotToken(101)==nil,'and the row still has no replacement token')
+end
+for _,bad in ipairs({
+ {'a non-boolean refusal flag',{spellId=R_ID,quality=R_ID%4,stacks=1,avoid='yes'}},
+ {'a refusal without a readable count',{spellId=R_ID,quality=R_ID%4,stacks=0,avoid=true}},
+}) do
+ boot(nil,mixed(bad[2]))
+ seed('number',1,101)
+ local saved=F.Serialize(NexusDB)
+ boot(assert(loadstring('return '..saved))(),mixed(bad[2]))
+ H.Advance(2)
+ check(durable()==101,bad[1]..': the row is not read in full and the legacy record is left as it is')
+end
+
 print('PASS legacy_assignment_snapshot: '..checks..' checks (legacy number and keyless table: saved table after the poll, an authorized write and a reload; slot reuse; no read writes; mirror not shown; selective upgrade; newer explicit choice; no-legacy poll cost; unassign and restore)')

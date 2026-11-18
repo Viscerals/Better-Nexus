@@ -1,0 +1,4 @@
+-- l10n parity case p17_key_65 (Refs #147, S1): test-only data; never listed in Nexus.toc.
+Nexus = Nexus or {}
+Nexus.LocalizationPacks = {
+}

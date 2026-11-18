@@ -294,4 +294,72 @@ check(summary:find('Recorded Lua errors retained: 4 (1 this session)',1,true)~=n
 File(false)
 H.Fire('PLAYER_LOGOUT')
 check(F.Serialize(NexusDB)==input,'protected profile: the saved root is byte-identical after reports and logout')
+
+-- 10. B-14 CHARACTERIZATION of the documented limitation (no runtime repair):
+-- a read-only profile seeds its session history from the Store's bounded
+-- plain-graph copy of the saved history (COPY_NODES 256 tables, COPY_DEPTH 8,
+-- the history table included). With flat rows of simple fields, 20 and 255
+-- rows fit and the newest 20 are listed; 256 and 300 rows do not fit, and
+-- the session lists no earlier entry. That is the existing behavior this
+-- records, not a repaired outcome. Session errors still work, and every saved
+-- byte stays as it was. Real TOC boot and real Errors/Store; synthetic data.
+for _,n in ipairs({20,255,256,300}) do
+ local boundary=F.Database({version=6,mutate=function(d)
+  d.errorHistoryBoundaryUnknown={keep='synthetic unknown sentinel'}
+  d.errorHistory={}
+  for i=1,n do d.errorHistory[i]={timestamp=1690001000+i,source='saved-src',message='saved-row-'..i} end
+ end})
+ local saved=F.Serialize(boundary)
+ H=Boot(boundary)
+ local label='B-14 '..n..' saved rows'
+ check(Nexus.MainInternals.SavedRootReadOnlyV1()~=nil,'SETUP '..label..': the future-format profile is read-only')
+ check(F.Serialize(boundary)==saved,label..': start-up writes nothing into the saved root')
+ local earlier=n<=255 and 20 or 0
+ local listed=Nexus.Errors.History()
+ check(#listed==earlier,label..': the session lists '..earlier..' earlier entries: '..#listed)
+ for i=1,#listed do
+  local row=n-20+i
+  check(listed[i].message=='saved-row-'..row and listed[i].source=='saved-src',
+   label..': earlier entry '..i..' is saved row '..row..' in order: '..tostring(listed[i].message))
+ end
+ check(F.Serialize(boundary)==saved,label..': reading the history writes nothing')
+ text=File(true);lines=Lines(Section(text))
+ check(lines[1]=='-- recorded Lua errors ('..earlier..' retained; 0 this session; newest first) --',
+  label..': the report header counts what is listed: '..tostring(lines[1]))
+ check(#lines==earlier+1,label..': one line per listed entry: '..#lines)
+ if earlier>0 then
+  check(lines[2]=='  1. '..When(1690001000+n)..', earlier session, saved-src: saved-row-'..n,
+   label..': the newest saved row comes first: '..tostring(lines[2]))
+  check(lines[21]=='  20. '..When(1690001000+n-19)..', earlier session, saved-src: saved-row-'..(n-19),
+   label..': down to the oldest of the 20: '..tostring(lines[21]))
+ end
+ check(F.Serialize(boundary)==saved,label..': preparing the report writes nothing')
+ check(Nexus.Errors.Record('B14.Session','synthetic session error '..n)==true,'SETUP '..label..': a session error is recorded')
+ local now=Nexus.Errors.History()
+ check(#now==math.min(20,earlier+1) and now[#now].message=='synthetic session error '..n and now[#now].source=='B14.Session',
+  label..': the session error is listed and the history stays bounded: '..#now)
+ for i=1,#now-1 do
+  check(now[i].message=='saved-row-'..(n-#now+1+i),label..': retained earlier entry '..i..' after the session error: '..tostring(now[i].message))
+ end
+ text=File(true);lines=Lines(Section(text))
+ check(lines[1]=='-- recorded Lua errors ('..#now..' retained; 1 this session; newest first) --',
+  label..': the report counts the session error: '..tostring(lines[1]))
+ check(lines[2]=='  1. '..When(now[#now].timestamp)..', this session, B14.Session: synthetic session error '..n,
+  label..': the session error comes first: '..tostring(lines[2]))
+ check(#lines==#now+1,label..': one line per retained entry: '..#lines)
+ if earlier>0 then
+  check(lines[3]=='  2. '..When(1690001000+n)..', earlier session, saved-src: saved-row-'..n,
+   label..': then the newest saved row: '..tostring(lines[3]))
+ end
+ summary=Summary()
+ check(summary:find('Recorded Lua errors retained: '..#now..' (1 this session)',1,true)~=nil,label..': the summary counts the same entries')
+ File(false)
+ check(F.Serialize(boundary)==saved,label..': the session error and both reports write nothing')
+ H.Fire('PLAYER_LOGOUT')
+ check(F.Serialize(boundary)==saved,label..': the saved root is byte-identical after logout')
+ check(boundary.errorHistoryBoundaryUnknown.keep=='synthetic unknown sentinel'
+  and #boundary.errorHistory==n and boundary.errorHistory[n].message=='saved-row-'..n,
+  label..': the unknown sentinel and every saved row are kept')
+ check(#H.actions==0,label..': no synthetic gameplay action ran')
+end
 print('PASS AUD-07 support reports show recorded Lua errors newest first, bounded, this session vs earlier, and write nothing checks='..checks)
