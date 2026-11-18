@@ -1542,7 +1542,6 @@ function A.RunBoundaryReset()
     ownedGeneration = ownedGeneration + 1
     -- A revealed board of the previous run is no admission in this one.
     ledger.revealBound = nil
-    ledger.specHold = nil
     ownedConfirmedGeneration = -1
     ownedRequestGeneration = -1
     ownedBaselineRef, ownedBaselineSig = nil, nil
@@ -5236,8 +5235,8 @@ end
 --
 -- The choice parser keeps Perks.currentSpecDraw = {chosen = n} while the
 -- shown draw is a specialization draw, nil on an ordinary draw. chosen 0
--- chooses the run's specialization; the game never auto-accepts it, and
--- Nexus never acts on it. "choosing": chosen is 0, or the field is present
+-- chooses the run's specialization (the game's own auto-accept skips it;
+-- Nexus decides it like any draw, by the selected build). "choosing": chosen is 0, or the field is present
 -- but chosen is not a positive whole number (fail closed). "spec" (and the
 -- chosen value): a draw of the specialization already chosen. nil: no such
 -- field, or no readable Perks table.
@@ -5305,28 +5304,10 @@ ledger.UPDATED_UNAVAILABLE = "automatic rolling is not available with this game 
 -- select (nil for the gate and for Reroll/Banish/Freeze). `sending`: at a send
 -- boundary an unreadable choice refuses. Returns true, or false and a reason.
 ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
-    local specHold = ledger.specHold
-    if specHold then
-        if type(perks) == "table" and rawequal(rawget(perks, "currentChoice"), specHold.ref) then
-            return false, ledger.SPEC_REASON
-        end
-        ledger.specHold = nil
-    end
-    if ledger.SpecDrawOf(perks) == "choosing" then
-        -- The initial specialization draw can arrive with a souvenir (level
-        -- 10). Official guide: taking the souvenir there leaves the
-        -- specialization choice open, so only that Take (and the gate that
-        -- lets the planner decide it) is admitted. Any other card would
-        -- choose the specialization, and a reveal opens that choice now:
-        -- both stay the player's (RevealSnapshot refuses a specialization
-        -- draw; Reroll, Banish and Freeze are refused below).
-        local souvenir = contract and type(perks) == "table"
-            and ledger.ChoiceMemory(rawget(perks, "currentChoice")) or nil
-        if souvenir and (kind == "gate" or (kind == "take" and spellId == souvenir)) then
-            return true
-        end
-        return false, ledger.SPEC_REASON
-    end
+    -- A specialization draw (currentSpecDraw) is decided like any other draw,
+    -- as in 9095: its cards are Echo spells, and the selected build's exact
+    -- targets choose among them (2026-11-18: the earlier refusal was an
+    -- assumption from the game's own auto-accept comment, not a user rule).
     if not contract then return true end
     local ch = type(perks) == "table" and rawget(perks, "currentChoice") or nil
     local visible = ledger.ChoiceMemory(ch)
@@ -5484,11 +5465,6 @@ end
 -- Memory only: the lone souvenir a reveal may give up, or nil and a reason.
 ledger.RevealSnapshot = function(perks, spellId)
     if type(perks) ~= "table" then return nil, "the game's selection state cannot be read" end
-    -- A specialization draw does not refuse the reveal: revealing gives the
-    -- souvenir up and shows the hidden cards; only SELECTING one of them
-    -- chooses the specialization (perks_service: "the card taken there picks
-    -- the spec"). After a reveal from the draw that is being chosen, its reply
-    -- is held for the player (ledger.specHold), so Nexus never selects there.
     if rawget(perks, "pendingSelectSpellId") ~= nil then return nil, "a selection is pending in the game" end
     for _, f in ipairs({"pendingReroll", "pendingOrbReroll", "pendingBanishIndex", "pendingFreezeIndex"}) do
         if rawget(perks, f) ~= nil then return nil, "an action is pending in the game" end
@@ -5508,8 +5484,8 @@ ledger.RevealSnapshot = function(perks, spellId)
     return ch
 end
 -- The first new choice after Nexus's reveal is its reply only when it comes
--- within the window, shows exactly three unflagged Echoes, no Select or
--- specialization draw is pending, and the pending draw count and the owned
+-- within the window, shows exactly three unflagged Echoes, no Select is
+-- pending, and the pending draw count and the owned
 -- total are those of the request. Then, and only then, it is bound. Any
 -- other new choice ends the reveal unbound (ordinary admission applies).
 ledger.RevealObserve = function(ch)
@@ -5520,17 +5496,11 @@ ledger.RevealObserve = function(ch)
         return
     end
     ledger.reveal = nil
-    if r.choosingSpec then
-        -- The reply to a reveal from the specialization draw being chosen:
-        -- whatever it shows, choosing from it may choose the specialization.
-        -- Held for the player until the published choice changes.
-        ledger.specHold = { ref = ch }
-        return
-    end
     if GetTime() - r.at > ledger.REVEAL_WINDOW then return end
     local perks = PerksTbl()
-    if type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil
-        or ledger.SpecDrawOf(perks) ~= nil then return end
+    -- A specialization marker on the reply does not refuse the binding: its
+    -- three Echoes are chosen from like any revealed board.
+    if type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil then return end
     if #ch ~= 3 or rawget(ch, 4) ~= nil then return end
     for i = 1, 3 do
         local c = rawget(ch, i)
@@ -5550,10 +5520,9 @@ ledger.AdmissionKey = function()
 end
 
 function A.OrdinaryBoardAllowed()
-    -- The specialization choice belongs to the player; on the updated
-    -- provider only a Take of a visible memory card stays admissible
-    -- (ChoiceAdmission). Memory-only reads; the game's own UI is not
-    -- touched, so the player's manual choice stays available.
+    -- The choice admission (ChoiceAdmission): on the updated provider a
+    -- shown souvenir admits only its own Take. Memory-only reads; the game's
+    -- own UI is not touched, so the player's manual choice stays available.
     local admitted, why = ledger.ChoiceAdmission(PerksTbl(), ledger.MemoryCardContract(), nil, "gate")
     if not admitted then return false, why end
     if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
@@ -5613,9 +5582,8 @@ end
 -- the whole board (never a filtered valid subset). Cards keep raw order.
 ledger.LevelingStrictCards = function(ch)
     if type(ch) ~= "table" or #ch ~= 3 or ch[4] ~= nil then return nil end
-    -- Updated client: a specialization draw (either kind) is not three
-    -- ordinary offers, and neither is a board with the memory card.
-    if ledger.SpecDraw() ~= nil then return nil end
+    -- A specialization draw is three ordinary offers (as in 9095); a board
+    -- with the memory card is not (checked per card below).
     local memory = ledger.MemoryCardContract()
     -- On the updated provider a board that shows a souvenir is not three
     -- ordinary offers (checked per card below).
@@ -5715,9 +5683,7 @@ function A.Take(spellId, expect)
     local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     -- Updated client: which provider contract this Take is admitted under,
     -- decided once (field reads only) and used again at the send boundary.
-    -- Also the specialization-draw state at entry: a change before the send
-    -- means the board was not the one this Take was decided for.
-    local memoryContract, specAtEntry = ledger.MemoryCardContract(), ledger.SpecDrawOf(PerksTbl())
+    local memoryContract = ledger.MemoryCardContract()
     -- Leveling pick (R4C): assignment projection revision (every real
     -- assignment setter advances it through MarkWishlistProjectionDirty) and
     -- owner at entry; compared again after the last callback-capable read.
@@ -5879,16 +5845,13 @@ function A.Take(spellId, expect)
             return false, "leveling_offer_changed"
         end
     end
-    -- Updated client (independent Spec P1): the specialization draw, the
-    -- visible memory card and the memory authority once more, after every
-    -- callback above (granted reads, verify, owner, level, final, pause),
-    -- from memory only; no callout separates this read from the Select. A
-    -- leveling pick also refuses any specialization draw here.
+    -- Updated client (independent Spec P1): the visible memory card and the
+    -- memory authority once more, after every callback above (granted reads,
+    -- verify, owner, level, final, pause), from memory only; no callout
+    -- separates this read from the Select.
     do
         local perksSend = PerksTbl()
         if type(perksSend) ~= "table" then return false, "the game's selection state cannot be read" end
-        if expect ~= nil and ledger.SpecDrawOf(perksSend) ~= nil then return false, "leveling_offer_changed" end
-        if ledger.SpecDrawOf(perksSend) ~= specAtEntry then return false, ledger.SPEC_REASON end
         local admitted, why = ledger.ChoiceAdmission(perksSend, memoryContract, spellId, "take", true)
         if not admitted then return false, why end
     end
@@ -6110,8 +6073,7 @@ function A.RevealMemory(spellId, expect)
     if not ledger.ChoiceActionable(ch) then return false, "reveal_not_settled" end
     local send = rawget(PE(), "sendToServer")
     ledger.revealDone[key] = true
-    ledger.reveal = { ref = ch, spellId = spellId, rolls = rolls, granted = granted, at = GetTime(),
-        choosingSpec = ledger.SpecDrawOf(perksSend) == "choosing" or nil }
+    ledger.reveal = { ref = ch, spellId = spellId, rolls = rolls, granted = granted, at = GetTime() }
     inFlightKind, inFlightSig = "reveal", nil
     selfCalling = true
     local ok = pcall(send, ledger.REVEAL_CODE, "")

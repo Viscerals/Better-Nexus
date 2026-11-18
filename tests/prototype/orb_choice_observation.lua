@@ -180,19 +180,8 @@ do
  local function Sent(FH,kind) local n=0;for _,a in ipairs(FH.actions) do if a[1]==kind then n=n+1 end end;return n end
  local ORDINARY={{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200003,quality=3}}
  local MEMORY={{spellId=200001,quality=1,isGuaranteed=true},{spellId=200002,quality=2},{spellId=200003,quality=3}}
- -- The initial specialization draw (chosen 0): no Take (Root probe), no Reroll.
- local FH=FreshBoot(10)
- FH.Board(ORDINARY)
- FH.perks.currentSpecDraw={chosen=0}
- FH.perks.pendingSelectSpellId=nil
- local accepted,reason=Nexus.GameAdapter.Take(200001)
- assert(accepted==false,'initial specialization reached SelectPerk instead of refusing automatic admission')
- assert(Sent(FH,'take')==0,'specialization must not be selected')
- accepted=Nexus.GameAdapter.Reroll()
- assert(accepted==false and Sent(FH,'reroll')==0,'no reroll on the specialization choice')
- assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses the specialization choice')
- FH.perks.currentSpecDraw={chosen=2}
- assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses a specialization draw')
+ local FH
+ local accepted,reason
  -- Ordinary offers on the updated provider (restored 2026-11-17): a
  -- three-card board that shows no souvenir admits the ordinary Take, Reroll,
  -- Banish and Freeze and the leveling pick, as on the older provider. Each
@@ -256,6 +245,23 @@ do
  assert(accepted==false and Sent(FH,'take')==1,'updated provider: no Take while the native pick is pending: '..tostring(reason))
  accepted,reason=Nexus.GameAdapter.Reroll()
  assert(accepted==false and Sent(FH,'reroll')==0,'updated provider: no Reroll while the native pick is pending: '..tostring(reason))
+ -- Specialization draws (restored 2026-11-18, as in 9095): the initial draw
+ -- (chosen 0) and a draw of the chosen specialization are decided like any
+ -- draw. The earlier refusal was an assumption from the game's own
+ -- auto-accept comment, not a user requirement.
+ for _,draw in ipairs({{'initial specialization draw',{chosen=0}},{'chosen specialization draw',{chosen=2}}}) do
+  FH=FreshBoot(10)
+  FH.Board(ORDINARY);FH.perks.currentSpecDraw=draw[2];FH.perks.pendingSelectSpellId=nil
+  Settled(FH);Nexus.GameAdapter.Board();FH.Advance(0.05) -- the settled frame is observed, then a later one
+  assert(Nexus.GameAdapter.Board().strictObservation==true,draw[1]..': the leveling pick reads it')
+  accepted,reason=Nexus.GameAdapter.Take(200002)
+  assert(accepted==true and Sent(FH,'take')==1,draw[1]..': a Take is admitted and sent once: '..tostring(reason))
+  FH=FreshBoot(10)
+  FH.Board(ORDINARY);FH.perks.currentSpecDraw=draw[2];FH.perks.pendingSelectSpellId=nil
+  Settled(FH);Nexus.GameAdapter.Board();FH.Advance(0.05) -- the settled frame is observed, then a later one
+  accepted,reason=Nexus.GameAdapter.Reroll()
+  assert(accepted==true and Sent(FH,'reroll')==1,draw[1]..': a Reroll is admitted and sent once: '..tostring(reason))
+ end
  -- The memory card: another card is refused; the card itself is the positive
  -- control; no Reroll on that board.
  FH=FreshBoot(20)
@@ -267,11 +273,20 @@ do
  assert(Nexus.GameAdapter.Board().strictObservation==false,'the leveling pick refuses a memory board')
  accepted=Nexus.GameAdapter.Take(200001)
  assert(accepted==true and Sent(FH,'take')==1,'positive control: the memory card itself stays admitted')
- -- Root probe_spec_drift on the admitted path: the specialization draw, or a
- -- cleared memory flag, installed inside the granted read after admission is
- -- refused at the send boundary (the only remaining Take path).
+ -- Root probe_spec_drift on the admitted path: a cleared memory flag
+ -- installed inside the granted read after admission changes the board and
+ -- is refused at the send boundary. A specialization marker alone changes no
+ -- card (2026-11-18): the souvenir Take still goes through.
+ FH=FreshBoot(20)
+ FH.Board(MEMORY)
+ FH.perks.pendingSelectSpellId=nil
+ do
+  local oldGranted=FH.service.GetGrantedPerks
+  FH.service.GetGrantedPerks=function(...) FH.perks.currentSpecDraw={chosen=0};FH.service.GetGrantedPerks=oldGranted;return oldGranted(...) end
+ end
+ accepted=Nexus.GameAdapter.Take(200001)
+ assert(accepted==true and Sent(FH,'take')==1,'a specialization marker installed inside a callout does not refuse the souvenir Take')
  for _,drift in ipairs({
-  {'specialization draw',function(P) P.currentSpecDraw={chosen=0} end},
   {'memory flag cleared',function(P) P.currentChoice[1].isGuaranteed=false end},
  }) do
   FH=FreshBoot(20)
@@ -282,7 +297,7 @@ do
   accepted=Nexus.GameAdapter.Take(200001)
   assert(accepted==false and Sent(FH,'take')==0,drift[1]..' installed inside a callout reached SelectPerk')
  end
- print('PASS updated client: specialization draw refused; a shown memory card admits only its own Take; ordinary draws admit ordinary actions after the native pick window')
+ print('PASS updated client: specialization draws decided like any draw; a shown memory card admits only its own Take; ordinary draws admit ordinary actions after the native pick window')
 end
 -- W3, Orb admission on the updated client. Every Echo choice reaches the client
 -- through one parser, an Orb draw included. On the updated provider that parser

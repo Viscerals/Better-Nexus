@@ -221,19 +221,17 @@ This file has two parts.
   the timer's Select, but not a mutation sent before the timer fires. A send
   refused only by that rule (for example after the game republished the same
   cards as a new table) is superseded and decided again, never kept as a
-  rejected intent. A specialization draw being chosen is still refused,
-  with one exception at level 10, where the souvenir stage arrives with the
-  initial specialization draw. Revealing only shows the hidden cards, and
-  SELECTING one of them chooses the specialization; the official guide says
-  taking the souvenir leaves the specialization choice open. So on that draw
-  a Take of the shown souvenir is admitted, and an unneeded souvenir is
-  revealed. The reply to that reveal is never chosen from automatically
-  (`specHold`, whatever the reply shows), and nor is any other card of the
-  draw. The wait says `the specialization choice is left to the player`,
-  and the hold ends when the published choice changes. A Take whose
-  specialization state changes between entry and send is refused. The
-  planner's waits carry the gate's own reason (for example `orb state not
-  yet known`); only a gate without one says the generic Orb sentence. Accepted
+  rejected intent. A specialization draw (`currentSpecDraw`, the initial
+  draw at level 10 or a draw of the chosen specialization) is decided like
+  any draw, as in 9095: its cards are Echo spells and the selected build's
+  exact targets choose among them; with no target among them the normal
+  planner decides. (A refusal added on 2026-11-16 rested on the game's own
+  auto-accept comment, not on a user rule, and was removed on 2026-11-18.)
+  At level 10 the souvenir stage can arrive with that draw: a needed
+  souvenir is taken, an unneeded one is revealed and its reply chosen from,
+  with or without a specialization marker on the reply. The planner's waits
+  carry the gate's own reason (for example `orb state not yet known`); only
+  a gate without one says the generic Orb sentence. Accepted
   residual, not removed: the client parser drops the last of four parsed
   entries, and its stage layout allows three cards already on the table
   beside a souvenir, so such a stage would be published as three cards with

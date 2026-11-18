@@ -257,23 +257,39 @@ for _,pair in ipairs({
 end
 
 -- 5c. Level 10 (reported 9099): the souvenir stage arrives with the initial
--- specialization draw (currentSpecDraw chosen 0). Revealing only shows the
--- hidden cards; SELECTING one of them chooses the specialization. So an
--- unneeded souvenir is revealed (standing instruction), and the reply is
--- never chosen from automatically, even if it carries no specialization
--- marker: the player chooses the specialization. Once the published choice
--- changes after the player's pick, ordinary rolling resumes.
-do
+-- specialization draw (currentSpecDraw chosen 0). Decided like any souvenir
+-- stage (2026-11-18; the specialization refusal was our assumption, not a
+-- user rule): an unneeded souvenir is revealed and its reply chosen from,
+-- with or without a specialization marker on the reply; a republished reply
+-- is not chosen from twice; the next draw is ordinary.
+for _,marker in ipairs({false,true}) do
+ local tag=marker and 'marker on the reply' or 'no marker on the reply'
  ctx=Boot({afterBoard=function(H) H.perks.currentSpecDraw={chosen=0} end})
- check(#ctx.reveals==1 and ctx.selects==0,'level 10: an unneeded souvenir is revealed once: '..#ctx.reveals..' / '..Reason())
- ctx.H.perks.currentSpecDraw=nil -- worst case: the reply has no marker
- Reply(ctx,{Card(X),Card(A1),Card(A2)});ctx.H.Advance(5)
- check(ctx.selects==0,'level 10: nothing is selected from the reply (it would choose the specialization): '..ctx.selects)
- check(Reason()=='the specialization choice is left to the player','level 10: the wait names the specialization choice: '..Reason())
- -- The player picks; the game publishes the next draw.
- ctx.H.perks.pendingSelectSpellId=nil
+ check(#ctx.reveals==1 and ctx.selects==0,tag..': level 10: an unneeded souvenir is revealed once: '..#ctx.reveals..' / '..Reason())
+ ctx.H.perks.currentSpecDraw=marker and {chosen=0} or nil
+ local reply={Card(A1),Card(X),Card(A2)}
+ Reply(ctx,reply);ctx.H.Advance(3)
+ check(Takes(ctx,X)==1 and ctx.selects==1,tag..': the needed Echo of the reply is taken: '..Takes(ctx)..' / '..Reason())
+ Reply(ctx,reply);ctx.H.Advance(3) -- the same reply republished; the pick is pending
+ check(ctx.selects==1,tag..': a republished reply is not chosen from twice: '..ctx.selects)
+ ctx.H.perks.currentSpecDraw=nil;ctx.H.perks.pendingSelectSpellId=nil
+ ctx.H.granted[ctx.H.names[X]]={{spellId=X,quality=X%4}}
  Reply(ctx,{Card(Y),Card(A1),Card(A3)});ctx.H.Advance(5)
- check(Takes(ctx,Y)==1,'after the player picks, ordinary rolling resumes: '..Takes(ctx)..' / '..Reason())
+ check(Takes(ctx,Y)==1,tag..': the next draw is ordinary: '..Takes(ctx)..' / '..Reason())
+end
+-- A needed target among the initial specialization draw's cards (no
+-- souvenir) is taken, which chooses the specialization the build asks for.
+ctx=Boot({board={Card(A1),Card(X),Card(A2)},afterBoard=function(H) H.perks.currentSpecDraw={chosen=0} end})
+ctx.H.Advance(3)
+check(Takes(ctx,X)==1 and #ctx.reveals==0,'level 10 without a souvenir: the needed target is taken: '..Takes(ctx)..' / '..Reason())
+-- No target among them: the planner's normal policy decides (as in 9095),
+-- with no specialization wait.
+ctx=Boot({board={Card(A1),Card(A2),Card(A3)},afterBoard=function(H) H.perks.currentSpecDraw={chosen=0} end})
+ctx.H.Advance(3)
+do
+ local acted=0;for _,a in ipairs(ctx.H.actions) do if a[1]=='take' or a[1]=='reroll' or a[1]=='banish' or a[1]=='freeze' then acted=acted+1 end end
+ check(acted>=1 and Reason()~='the specialization choice is left to the player',
+  'level 10 without a target: the normal planner acts (no specialization wait): '..acted..' / '..Reason())
 end
 
 -- 6. No reveal, and the hand-off is stated, when:

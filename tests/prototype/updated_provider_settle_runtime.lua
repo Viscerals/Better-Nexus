@@ -48,6 +48,17 @@ do
  Nexus.GameAdapter.Take=take
 end
 
+-- a2. Random Roll on a specialization draw (restored 2026-11-18, as in
+-- 9095): the initial draw and a draw of the chosen specialization are
+-- picked like any draw, once.
+for _,draw in ipairs({{chosen=0},{chosen=2}}) do
+ local H=Boot(20)
+ SlashCmdList.NEXUS('leveling on')
+ H.Board({Card(200011,1),Card(200014,4),Card(200012,2)});H.perks.currentSpecDraw=draw;H.Notify()
+ SlashCmdList.NEXUS('auto');H.Advance(4)
+ check(Takes(H)==1 and Takes(H,200014)==1,'a2: specialization draw chosen '..draw.chosen..': one leveling Take of the highest rarity: '..Takes(H))
+end
+
 -- b. A Wishlist Take whose cards are republished as a new table just before
 -- the adapter Take: superseded and decided again, never stuck as rejected.
 local function WishlistBoot()

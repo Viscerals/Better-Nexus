@@ -106,10 +106,10 @@ do
 end
 
 -- 1b. Level 10 (reported 9099): the souvenir stage arrives with the initial
--- specialization draw (currentSpecDraw chosen 0). Official guide: taking
--- the souvenir there leaves the specialization choice open, so a needed
--- souvenir is taken. Any other card there would choose the specialization
--- and stays the player's.
+-- specialization draw (currentSpecDraw chosen 0). It is decided like any
+-- souvenir stage (2026-11-18: the specialization refusal was our assumption,
+-- not a user rule): a needed souvenir is taken; another card beside it is
+-- refused because taking it gives the souvenir up.
 do
  local spec0=function(H) H.perks.currentSpecDraw={chosen=0} end
  local r=Run('needed souvenir at the specialization draw',{updated=true,board={Souvenir(X)},beforeAuto=spec0})
@@ -118,8 +118,8 @@ do
  check(r.actions==0 and r.sent==0 and r.selects==0,'level 10: an unneeded souvenir is not taken (this fixture has no reveal contract; the reveal is automation_souvenir_reveal 5c): '..r.actions..' '..r.sent)
  r=Run('carried card at the specialization draw',{updated=true,board={{spellId=Y,quality=Y%4,isCarried=true},Souvenir(200030)},beforeAuto=spec0})
  local ok,why=Nexus.GameAdapter.Take(Y)
- check(ok==false and why=='the specialization choice is left to the player' and r.selects==0,
-  'level 10: another card is never taken (it would choose the specialization): '..tostring(why))
+ check(ok==false and why=='the memory card would be given up' and r.selects==0,
+  'level 10: another card beside the shown souvenir is refused by the souvenir rule: '..tostring(why))
 end
 
 -- 2. Updated provider, the souvenir alone and not on the Wishlist.
