@@ -3140,6 +3140,12 @@ actionHold.RevealFinal = function(intent)
 end
 
 
+-- The adapter's later-frame settle refusal (GameAdapter A.SETTLE_REASON):
+-- nothing was sent and the choice only needs a later frame, so the intent is
+-- superseded and decided again; never kept as a rejected hold.
+local function SettleRefused(err)
+    return err ~= nil and Adapter.SETTLE_REASON ~= nil and err == Adapter.SETTLE_REASON
+end
 local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     locked)
     local settings = Store.Settings()
@@ -3660,6 +3666,11 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             -- A captured intent another owner already ended stays as recorded.
             if actionIntent == intent then FinishActionIntent("superseded", err, false) end
             RequestStepAt(GetTime())
+        elseif SettleRefused(err) then
+            -- Nothing was sent: the choice is not yet actionable (it was
+            -- republished, or the game's own pick window has not passed).
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
         else
             intent.mutationAttempted = true
             FinishActionIntent("rejected", err or "adapter_refused", true)
@@ -3678,6 +3689,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             lastDecision = immutable
             MarkIntentSubmitted(intent)
             SetStatus(string.format("|cffff6666Banished|r echo #%d", immutable.index))
+        elseif SettleRefused(err) then
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
         else
             refusedBanishSig = board.signature
             intent.mutationAttempted = true
@@ -3698,6 +3712,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             frozeThisBoard = board.signature
             SetStatus(string.format("|cff66aaff Froze|r echo #%d -- waiting for board to update",
                 immutable.index))
+        elseif SettleRefused(err) then
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
         else
             intent.mutationAttempted = true
             -- A refused Freeze does not keep the board blocked. Its loop
@@ -3734,7 +3751,7 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         end
     elseif immutable.type == "reroll" then
         MarkActionAttempt(immutable.type)
-        local ok = Adapter.Reroll()
+        local ok, err = Adapter.Reroll()
         if ok then
             lastDecision = immutable
             intent.rerollOrdinal = Adapter.RerollOrdinal
@@ -3747,6 +3764,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             else
                 fillerFishState.consecutive = 0
             end
+        elseif SettleRefused(err) then
+            if actionIntent == intent then FinishActionIntent("superseded", err, false) end
+            RequestStepAt(GetTime())
         else
             refusedRerollSig = board.signature
             intent.mutationAttempted = true

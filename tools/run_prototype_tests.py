@@ -468,6 +468,8 @@ NAMES += ['l10n_long_paragraphs']
 NAMES += ['automation_souvenir_stage']
 # Souvenir reveal (user requirement 2026-11-17): an unneeded lone souvenir is given up once per draw (CS 349, empty body) and only the bound three-card reply is chosen from (Take only); wanted/native-wanted/ambiguous/held cases send nothing; delayed, wrong-shape and repeated replies; changes inside the reveal (synthetic; native NOT_RUN).
 NAMES += ['automation_souvenir_reveal']
+# Updated provider, ordinary rolling through the runtime: the later-frame settle rule delays a leveling or Wishlist Take and never leaves it as a rejected intent (a republished choice is superseded and decided again); a pending native pick sends nothing (synthetic; native NOT_RUN).
+NAMES += ['updated_provider_settle_runtime']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

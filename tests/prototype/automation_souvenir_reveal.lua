@@ -144,6 +144,54 @@ for _,a in ipairs(ctx.H.actions) do kinds[a[1]]=(kinds[a[1]] or 0)+1 end
 check((kinds.take or 0)==1 and not kinds.banish and not kinds.reroll and not kinds.freeze,
  'a revealed board is chosen from, not searched: take='..tostring(kinds.take)..' banish='..tostring(kinds.banish)
  ..' reroll='..tostring(kinds.reroll)..' freeze='..tostring(kinds.freeze))
+-- Spec CB-S1 contrast (same cards, same charges, no reveal): an unbound
+-- ordinary board without a needed Echo IS searched, so the no-search rule
+-- above is the binding's, not a general hold.
+ctx=Boot({board={Card(A1),Card(A2),Card(A3)}});ctx.H.Advance(3)
+kinds={}
+for _,a in ipairs(ctx.H.actions) do kinds[a[1]]=(kinds[a[1]] or 0)+1 end
+check(#ctx.reveals==0 and ((kinds.banish or 0)+(kinds.reroll or 0)+(kinds.freeze or 0))>=1,
+ 'an unbound ordinary board without a needed Echo is searched: banish='..tostring(kinds.banish)
+ ..' reroll='..tostring(kinds.reroll)..' freeze='..tostring(kinds.freeze)..' take='..tostring(kinds.take))
+-- Standards T-1: the binding's admission is tied to its own board. After a
+-- bound reply was chosen from, a later unbound board admits a direct Reroll
+-- once it is actionable (a stale binding would refuse it as revealed).
+do
+ local c=Boot({})
+ Reply(c,{Card(A1),Card(X),Card(A2)});c.H.Advance(3)
+ check(Takes(c,X)==1,'T-1 setup: the bound reply was chosen from')
+ SlashCmdList.NEXUS('auto') -- Auto OFF: only the direct call below acts
+ c.H.perks.pendingSelectSpellId=nil
+ c.H.granted[c.H.names[X]]={{spellId=X,quality=X%4}}
+ c.H.Board({Card(A1),Card(A2),Card(A3)});c.H.Notify()
+ Nexus.GameAdapter.Board();c.H.Advance(1.2);Nexus.GameAdapter.Board();c.H.Advance(.05)
+ local before=0;for _,a in ipairs(c.H.actions) do if a[1]=='reroll' then before=before+1 end end
+ local ok,why=Nexus.GameAdapter.Reroll()
+ local after=0;for _,a in ipairs(c.H.actions) do if a[1]=='reroll' then after=after+1 end end
+ check(ok==true and after==before+1,'T-1: a direct Reroll on a later actionable unbound board is sent once: '..tostring(why))
+end
+-- Standards N-1 (bound reply): the game republishes the same three revealed
+-- Echoes as a new table just before the Take. That table is not the bound
+-- one and is not yet actionable: the Take is superseded and decided again,
+-- and the board ends with exactly one Take, never a rejected intent.
+do
+ local c=Boot({})
+ local take=Nexus.GameAdapter.Take
+ local cards={Card(A1),Card(X),Card(A2)}
+ local republished,first=0,nil
+ Nexus.GameAdapter.Take=function(...)
+  if republished==0 then republished=1;c.H.Board(cards) end
+  local res={take(...)}
+  first=first or res
+  return unpack(res)
+ end
+ Reply(c,cards);c.H.Advance(6)
+ Nexus.GameAdapter.Take=take
+ local life=Nexus.RecomputeStats().lastActionLifecycle or {}
+ check(republished==1 and first and first[1]==false,'N-1 setup: the first Take met the republished choice: '..tostring(first and first[2]))
+ check(Takes(c,X)==1 and c.selects==1 and #c.reveals==1 and life.state=='submitted',
+  'N-1: one Take after the republication, no rejected intent: '..Takes(c)..' '..tostring(life.state)..' '..tostring(life.reason))
+end
 
 -- 4. Replies that are not a clean three-card reveal of that draw: not chosen
 -- from, and never a second reveal.

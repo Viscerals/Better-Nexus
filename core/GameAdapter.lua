@@ -5327,7 +5327,9 @@ ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
     -- have been armed at this choice's parse and is not cancelled by its
     -- option, so an action waits until the choice is actionable (the same
     -- later-frame rule as the reveal); the pending-select checks at each send
-    -- boundary stay as they are. Accepted residual: a souvenir dropped by the
+    -- boundary stay as they are. For a Reroll, Banish or Freeze that rule is
+    -- the only ordering against such a timer: the pending-Select flag orders
+    -- a Take against it, not a mutation sent before the timer fires. Accepted residual: a souvenir dropped by the
     -- client's four-entry trim is not visible to any reader (CONTRACTS.md).
     if visible == false and #ch == 3 and rawget(ch, 4) == nil then
         if kind == "gate" then return true end
@@ -5386,6 +5388,8 @@ ledger.REVEAL_WINDOW = 10
 -- frame's OnUpdate runs on every frame, and its elapsed time tracks GetTime().
 ledger.CHOICE_SETTLE = 1.0
 ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
+-- The runtime treats exactly this refusal as superseded (decided again).
+A.SETTLE_REASON = ledger.SETTLE_REASON
 ledger.choiceSeen = setmetatable({}, { __mode = "k" })
 ledger.choiceSettledAt = setmetatable({}, { __mode = "k" })
 ledger.ChoiceSettled = function(ch)

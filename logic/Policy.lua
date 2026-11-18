@@ -79,6 +79,11 @@ function Policy.DecideLevelingRarity(state)
     if board.strictObservation == false then
         return Wait("the offer is not a clean three-card board; pick manually")
     end
+    -- The adapter's later-frame settle rule (Board().revealSettling), as in
+    -- EchoWeaver: wait, and the runtime decides again at the poll pace.
+    if board.revealSettling == true then
+        return Wait("waiting for the game's own pick window to pass")
+    end
     local best, bestQ, seen = nil, nil, {}
     for i = 1, L.boardSize do
         local c = cards[i]

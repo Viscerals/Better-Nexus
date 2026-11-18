@@ -213,9 +213,15 @@ This file has two parts.
   `LevelingStrictCards`), once the choice is actionable (`ChoiceActionable`,
   below; until then `Board()` sets `revealSettling`, the planner waits with
   `waiting for the game's own pick window to pass` and the runtime decides
-  again at the poll pace). Every existing send guard stays (pending native
-  Select, in-flight action, session pause, Orb gate, the final memory-only
-  admission). A specialization draw being chosen is still refused. Accepted
+  again at the poll pace; the optional leveling pick waits the same way).
+  Every existing send guard stays (pending native Select, in-flight action,
+  session pause, Orb gate, the final memory-only admission). For a Reroll,
+  Banish or Freeze the later-frame rule is the only ordering against an armed
+  auto-accept timer: the client's pending-Select flag orders a Take against
+  the timer's Select, but not a mutation sent before the timer fires. A send
+  refused only by that rule (for example after the game republished the same
+  cards as a new table) is superseded and decided again, never kept as a
+  rejected intent. A specialization draw being chosen is still refused. Accepted
   residual, not removed: the client parser drops the last of four parsed
   entries, and its stage layout allows three cards already on the table
   beside a souvenir, so such a stage would be published as three cards with
