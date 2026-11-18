@@ -4250,18 +4250,23 @@ local function ReadSlots()
             projectionStatus.slots.slots = projectionStatus.slots.slots + 1
             local echoes, refused = {}, {}
             local roleSourceValid = type(s.echoes) == "table"
+            local readComplete = roleSourceValid
             if type(s.echoes) == "table" then
                 -- Keep the existing slot projection, but do not derive roles
                 -- from a source whose malformed/sparse entries were omitted.
+                -- readComplete: the source list was read in full; unlike
+                -- roleSourceValid it is not cleared by a well-formed refusal
+                -- (avoid == true), so a mixed wanted+refused row is a known
+                -- row of wanted Echoes for the legacy assignment migration.
                 local sourceCount, lastIndex = 0, 0
                 for index in pairs(s.echoes) do
                     if type(index) == "number" then
                         sourceCount = sourceCount + 1
-                        if not PositiveInteger(index) then roleSourceValid = false end
+                        if not PositiveInteger(index) then roleSourceValid = false;readComplete = false end
                         if index > lastIndex then lastIndex = index end
                     end
                 end
-                if sourceCount ~= lastIndex then roleSourceValid = false end
+                if sourceCount ~= lastIndex then roleSourceValid = false;readComplete = false end
                 for i = 1, #s.echoes do
                     projectionStatus.slots.echoes =
                         projectionStatus.slots.echoes + 1
@@ -4271,6 +4276,11 @@ local function ReadSlots()
                         or (e.stacks ~= nil and not PositiveInteger(e.stacks))
                         or (e.quality ~= nil and NonNegativeInteger(e.quality) == nil) then
                         roleSourceValid = false
+                        readComplete = false
+                    end
+                    if e ~= nil and type(e) == "table" and e.avoid ~= nil
+                        and type(e.avoid) ~= "boolean" then
+                        readComplete = false
                     end
                     if id and e.avoid ~= nil and e.avoid ~= false then
                         -- Updated client: a Wishlist row's refused Echo
@@ -4304,6 +4314,7 @@ local function ReadSlots()
                 echoes = echoes,
                 suspectParse = (s.verified and #echoes == 0) and true or false,
                 roleSourceValid = roleSourceValid,
+                readComplete = readComplete,
                 refused = #refused > 0 and refused or nil,
             }
         end
@@ -7787,7 +7798,11 @@ local function ReconcileLegacyAssignments()
             -- yields no candidate, or one of survivors, and neither is proof of
             -- what the slot holds.
             local row = slots.bySlot and slots.bySlot[wanted]
-            if type(row) == "table" and row.roleSourceValid == false then
+            -- readComplete, not roleSourceValid: a row whose only "invalid"
+            -- part is a well-formed refusal is read in full; its candidate
+            -- holds only the wanted Echoes (a refusal is never a target), and
+            -- uploads over it stay refused (refused_entries).
+            if type(row) == "table" and row.readComplete == false then
                 incomplete = true
             else
                 for _, c in ipairs(live) do
