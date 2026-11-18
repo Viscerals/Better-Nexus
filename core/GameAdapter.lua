@@ -5397,7 +5397,12 @@ ledger.REVEAL_WINDOW = 10
 -- its Select is pending (every send boundary refuses) or it was refused.
 -- Assumed, not proven here: GetTime() is constant within a frame, a shown
 -- frame's OnUpdate runs on every frame, and its elapsed time tracks GetTime().
-ledger.CHOICE_SETTLE = 1.0
+-- The bound: from its parse the timer's summed elapsed time is at least the
+-- GetTime() difference, and Nexus's first observation is never earlier than
+-- the parse, so any settle of at least 0.18 s covers it; 0.2 s adds a margin
+-- for the summed float steps. (It was 1.0 s, a margin with no further
+-- basis; tests/prototype/updated_provider_native_timer_order.lua races it.)
+ledger.CHOICE_SETTLE = 0.2
 ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
 -- The runtime treats exactly this refusal as superseded (decided again).
 A.SETTLE_REASON = ledger.SETTLE_REASON
@@ -5411,6 +5416,23 @@ ledger.ChoiceSettled = function(ch)
 end
 ledger.ChoiceActionable = function(ch)
     return ledger.ChoiceSettled(ch) and GetTime() > ledger.choiceSettledAt[ch]
+end
+-- Pacing only (decides nothing): when the published choice can next become
+-- actionable. The end of its settle period, or now while it is settled but
+-- not yet on a later frame (the next frame then). nil when it is actionable,
+-- not yet observed, or unreadable. Memory only.
+function A.ChoiceSettleDueAt()
+    local perks = PerksTbl()
+    local ch = type(perks) == "table" and rawget(perks, "currentChoice") or nil
+    local seen = type(ch) == "table" and ledger.choiceSeen[ch] or nil
+    if seen == nil then return nil end
+    local due = seen + ledger.CHOICE_SETTLE
+    local settledAt = ledger.choiceSettledAt[ch]
+    if settledAt ~= nil then
+        if GetTime() > settledAt then return nil end
+        return settledAt
+    end
+    return due
 end
 -- One reveal per souvenir draw, for the session: the run (ownedGeneration,
 -- advanced at each run boundary), the souvenir, the pending draw count and

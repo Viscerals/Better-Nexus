@@ -298,7 +298,8 @@ This file has two parts.
   a timer firing later in the same frame as Nexus's reveal would still pick
   the souvenir. Nexus therefore reveals, and takes from a revealed board, only
   on a choice table that is actionable (`ChoiceActionable`): observed for
-  `CHOICE_SETTLE` (1 s; first observation is never before the parse), and on
+  `CHOICE_SETTLE` (0.2 s: the timer's 0.18 s plus a margin for summed frame
+  steps; it was 1 s; first observation is never before the parse), and on
   a frame strictly later than the first frame in which that held (compared
   by `GetTime()` values). In that first settled frame the
   timer's summed elapsed time already covers the settle, so it fired in or

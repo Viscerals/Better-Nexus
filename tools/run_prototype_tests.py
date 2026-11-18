@@ -470,6 +470,8 @@ NAMES += ['automation_souvenir_stage']
 NAMES += ['automation_souvenir_reveal']
 # Updated provider, ordinary rolling through the runtime: the later-frame settle rule delays a leveling or Wishlist Take and never leaves it as a rejected intent (a republished choice is superseded and decided again); a pending native pick sends nothing (synthetic; native NOT_RUN).
 NAMES += ['updated_provider_settle_runtime']
+# The game's own auto-accept timer (0.18 s, armed at the parse, never re-checks its option) against the later-frame settle rule in adversarial frame order (driver before timer; 60 fps, 20 fps, one long frame, late first read, option off): no Nexus action before the native pick; measures the no-timer admit delay (synthetic; native NOT_RUN).
+NAMES += ['updated_provider_native_timer_order']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

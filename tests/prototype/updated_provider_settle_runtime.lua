@@ -78,6 +78,21 @@ do
  Nexus.GameAdapter.Take=take
 end
 
+-- Pacing (measured offline, not native): with Auto already on, a newly
+-- published ordinary draw is acted on soon after its settle period. It took
+-- 1.5 s with a 1.0 s settle and 0.88 s when a settling choice is re-checked
+-- only at the 0.2 s poll pace (both measured on this harness); 0.72 s now.
+do
+ local H=WishlistBoot()
+ SlashCmdList.NEXUS('auto');H.Advance(1,1/60) -- Auto on, no choice shown yet
+ check(Takes(H)==0,'pacing setup: nothing sent before the draw')
+ local t0=H.now
+ H.Board({Card(A2),Card(X),Card(A1)});H.Notify()
+ while Takes(H)==0 and H.now<t0+3 do H.Advance(1/60,1/60) end
+ local delay=H.now-t0
+ print(string.format('MEASURE updated-provider Wishlist Take delay at 60 fps: %.3f s',delay))
+ check(Takes(H,X)==1 and delay<0.8,'pacing: the needed Echo is taken within 0.8 s of the draw: '..string.format('%.3f',delay))
+end
 -- Control: a pending native Select still sends nothing on an actionable board.
 do
  local H=WishlistBoot()

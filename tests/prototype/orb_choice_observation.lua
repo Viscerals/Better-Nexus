@@ -199,9 +199,12 @@ do
  -- waits until the choice is actionable: observed for the settle period and
  -- then a later frame, so a native auto-accept timer armed at the parse has
  -- fired first. The pending-select checks stay.
+ -- Ends on the FIRST frame on which the settle period has passed (one frame
+ -- step across the threshold): whoever observes it there, that frame is not
+ -- yet actionable; the next frame is.
  local function Settled(FH)
   Nexus.GameAdapter.Board() -- first observation of this choice table
-  FH.Advance(1.1)
+  FH.Advance(0.19,0.19);FH.Advance(0.02,0.02)
  end
  FH=FreshBoot(20)
  FH.Board(ORDINARY)

@@ -3585,9 +3585,17 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         end
         SetStatus(action.reason == "advisor"
             and "No wishlist set -- advisor only" or ("waiting: " .. tostring(action.reason)))
-        -- A souvenir or revealed choice not yet settled (Adapter.Board
-        -- revealSettling): decide again at the poll pace until it settles.
-        if board.revealSettling then RequestStepAt(GetTime() + cadence.poll) end
+        -- A choice not yet settled (Adapter.Board revealSettling): decide
+        -- again when it can be actionable (Adapter.ChoiceSettleDueAt: the end
+        -- of its settle period, then the next frame), never later than the
+        -- poll pace. Pacing only; the adapter still decides admission.
+        if board.revealSettling then
+            local now = GetTime()
+            local due = Adapter.ChoiceSettleDueAt and Adapter.ChoiceSettleDueAt() or nil
+            if type(due) ~= "number" or due ~= due then due = now + cadence.poll end
+            if due <= now then due = now + 0.001 end
+            RequestStepAt(math.min(due, now + cadence.poll))
+        end
         return
     end
     SetStatus("L" .. level .. " -- " .. (action.reason or action.type))
