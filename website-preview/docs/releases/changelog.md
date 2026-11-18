@@ -2,6 +2,24 @@
 
 This page summarizes published changes in original wording. The versioned GitHub release is the full record.
 
+## Public test.9101
+
+**1.20.0-beta.1 - 18 November 2026 - EXPERIMENTAL PRERELEASE**
+
+- **Ordinary rolling:** works again on the updated game client. Take, Reroll, Banish and Freeze each wait a short moment, so that the game's own automatic pick goes first.
+- **Souvenirs:**
+  - A souvenir your selected build needs is taken.
+  - One it does not need is given up, and Nexus chooses from the three revealed Echoes.
+  - Another rarity of the same Echo no longer counts as needing it.
+- **Level-10 specialization draws:** decided like any other draw.
+- **Pacing:** from about 1.8 s to about 0.85 s per action in offline tests on the updated client. Not measured live.
+- **Pause reasons:** a pause states its actual reason.
+- **Wishlists:** an older saved assignment upgrades when its Wishlist also refuses Echoes.
+
+The new automatic behaviour has not been tested in the game client. The offline suite passed all Lua tests. Two localization checks, which also fail on the unchanged base, still fail.
+
+[Full test.9101 notes](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9101)
+
 ## Public test.9095
 
 **1.20.0-beta.1 - 13 October 2026 - EXPERIMENTAL PRERELEASE**
@@ -72,6 +90,6 @@ These are cumulative published highlights, not a promise that every native edge 
 
 - [All published releases](https://github.com/Viscerals/Better-Nexus/releases)
 - [Inherited changelog in the source repository](https://github.com/Viscerals/Better-Nexus/blob/main/CHANGELOG.md)
-- [Download test.9095](index.md)
+- [Download test.9101](index.md)
 
 The historical changelog and development source can differ from the current package. Use the release tag and package identity for a precise report.
