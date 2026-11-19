@@ -157,7 +157,8 @@ assert(H.Count('orb-spend')==0 and H.Count('take')==0,
  'observing and preparing a report sends no Orb or choice')
 -- Updated client (2026-11 capture): Root probes probe_spec_admission.lua and
 -- probe_spec_drift.lua, and the second Spec review. On the updated provider
--- (GetServerActiveDesign present) the specialization choice is the player's;
+-- (GetServerActiveDesign present) a specialization draw is decided like any
+-- draw, as in 9095 (2026-11-18), so its Takes and Rerolls are sent below;
 -- a board that shows a memory card (flag 3) admits only a Take of that card;
 -- an ordinary three-card draw admits the ordinary actions once the native
 -- pick window has passed (restored 2026-11-17). Real TOC, adapter

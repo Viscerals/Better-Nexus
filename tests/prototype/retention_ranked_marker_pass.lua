@@ -42,15 +42,37 @@ local function Settle(ok,why,ticket)
  end
  return ok,why
 end
--- Count summary-cursor starts by the retention owner.
+-- Count summary-cursor starts by the retention owner. retentionScans counts
+-- every attempt, before the catalog answers (the assertions below use it as
+-- before). The diagnostic log (#114) also records, for each retention attempt,
+-- the simulated time, the caller line and whether the catalog accepted it
+-- (a token) or refused it (nil and its reason). It is printed only in a
+-- failure message; every argument and return value passes through unchanged.
 local retentionScans=0
+local scanLog,scanLogDropped,MAX_SCAN_LOG={},0,32
 local function HookCursor()
  local C=Nexus.BuildCatalog;local begin=C.BeginSummaryCursor
  C.BeginSummaryCursor=function(...)
-  local info=debug.getinfo(2,'S')
-  if info and tostring(info.source):find('DataRetention',1,true) then retentionScans=retentionScans+1 end
-  return begin(...)
+  local info=debug.getinfo(2,'Sl')
+  local retention=info and tostring(info.source):find('DataRetention',1,true)
+  if retention then retentionScans=retentionScans+1 end
+  local results={n=0}
+  local function keep(...) results.n=select('#',...);for i=1,results.n do results[i]=select(i,...) end end
+  keep(begin(...))
+  if retention then
+   if #scanLog<MAX_SCAN_LOG then
+    scanLog[#scanLog+1]=string.format('%d@%.1f:line%s:%s',retentionScans,Hh and Hh.now or -1,
+     tostring(info.currentline),results[1]~=nil and 'accepted' or ('refused('..tostring(results[2])..')'))
+   else scanLogDropped=scanLogDropped+1 end
+  end
+  return unpack(results,1,results.n)
  end
+end
+local function ScanLog()
+ local accepted=0
+ for _,e in ipairs(scanLog) do if e:find(':accepted',1,true) then accepted=accepted+1 end end
+ return ' [attempts '..retentionScans..', accepted among logged '..accepted..', log '..table.concat(scanLog,' ')
+  ..(scanLogDropped>0 and (' +'..scanLogDropped..' not logged') or '')..']'
 end
 
 -- 1. Start-up: the ranked scan loses the summary cursor to the hash warm-up.
@@ -142,16 +164,18 @@ F.fileHooks={[ [[core\DataRetention.lua]] ]=function()
   return begin(request)
  end
 end}
-retentionScans=0
+retentionScans=0;scanLog,scanLogDropped={},0
 H=F.Boot(RankedDb(40),function(h) Clock(h);busyUntil=h.now+400 end);F.fileHooks=nil
 C,R=Nexus.BuildCatalog,Nexus.DataRetention
 Run(380)
 check(Count(Seen())==0,'fixture: nothing is recorded while the catalog stays busy')
 local scansWhileBusy=retentionScans
-check(scansWhileBusy<=2,'busy retries start no new overlay scans: '..scansWhileBusy..' scans')
+check(scansWhileBusy<=2,'busy retries start no new overlay scans: '..scansWhileBusy..' scans'
+ ..(scansWhileBusy<=2 and '' or ScanLog()))
 Run(200)
 check(Count(Seen())==2,'after the busy period the retried marker pass records both first observations: '..Count(Seen()))
-check(retentionScans==scansWhileBusy,'the retried marker pass started no scan: '..retentionScans)
+check(retentionScans==scansWhileBusy,'the retried marker pass started no scan: '..retentionScans
+ ..(retentionScans==scansWhileBusy and '' or ScanLog()))
 
 -- 5. Positive control: a complete ranked run that removes DPS rows still
 -- writes them. 20 personal-best fingerprints with a limit of 16 keep 16,

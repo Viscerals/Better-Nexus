@@ -272,11 +272,12 @@ This file has two parts.
   lost for the climb. `Board()` marks a lone souvenir (exactly one published
   card, flagged) `revealable` only when the request would not be refused at
   once (`RevealSnapshot`: no Select, Reroll, Orb redraw, Banish or Freeze
-  pending, no specialization draw, `CS.REQUEST_PERK_MEMORY_DRAW == 349` and a
-  `sendToServer` function) and the game's `WantsMoreOfEcho(souvenir)` returns
+  pending, `CS.REQUEST_PERK_MEMORY_DRAW == 349` and a `sendToServer`
+  function; a specialization draw does not refuse it) and the game's `WantsMoreOfEcho(souvenir)` returns
   no true value (a missing or thrown read refuses); `revealSent` when this draw was already given up.
   `RevealMemory` sends nothing unless all of these hold again: the updated
-  provider, the ordinary gate (specialization, Orb), no session pause or
+  provider, the ordinary gate (`OrdinaryBoardAllowed`: the choice admission
+  and the Orb gates; a specialization draw is not refused), no session pause or
   passive mode, nothing in flight and no reveal waiting, the lone souvenir
   unchanged, `WantsMoreOfEcho` not true, the owned total readable, and this draw
   (the run's `ownedGeneration`, souvenir, pending draw count, owned total) not
@@ -296,8 +297,9 @@ This file has two parts.
   revealed Echoes`.
   The first new choice is bound to the reveal (`revealBound`) only when it
   arrives within the window, shows exactly three unflagged Echoes with valid
-  IDs, no Select or specialization draw is pending, and the pending draw count
-  and the owned total equal those of the request. Any other new choice ends
+  IDs, no Select is pending, and the pending draw count and the owned total
+  equal those of the request; a specialization marker on the reply does not
+  refuse the binding. Any other new choice ends
   the reveal unbound, and the ordinary updated-provider admission applies
   (an ordinary three-card draw, above). On a bound board `ChoiceAdmission` admits a Take of one
   of its three Echoes (entry and send boundary); Reroll, Banish and Freeze
