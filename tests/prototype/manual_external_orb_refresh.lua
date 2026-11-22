@@ -110,11 +110,22 @@ local function Same(a,b)
 end
 local function Show(a) local t={} for i,v in ipairs(a) do t[i]=tostring(v) end return '{'..table.concat(t,',')..'}' end
 -- The STILL NEEDED font string: created third after its label (ui/Panel.lua).
+-- Its face is one line per row (the column's own FontString, then its
+-- _nexusRows after native acceptance of test.163009); the rows that hold a
+-- line, in order, are read back as the lines of one text.
 local function Rendered()
  local f=_G.NexusPanel
  local regions=type(f)=='table' and f.regions or {}
  for i,r in ipairs(regions) do
-  if r.text=='STILL NEEDED' then return regions[i+3] and regions[i+3].text end
+  if r.text=='STILL NEEDED' then
+   local column=regions[i+3]
+   if not column then return nil end
+   local lines={}
+   for _,row in ipairs(column._nexusRows or {column}) do
+    if (row.text or '')~='' then lines[#lines+1]=row.text end
+   end
+   return table.concat(lines,'\n')
+  end
  end
 end
 local function NeedText(ids)

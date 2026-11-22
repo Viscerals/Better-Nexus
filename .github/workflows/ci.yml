@@ -24,12 +24,53 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          # Full history, so the released test.9049 source commit that the
+          # fixture check below reads is present in this checkout.
+          fetch-depth: 0
           persist-credentials: false
+      - name: Record the tested commit and tree
+        # The results below belong to this commit only. For a pull request it is
+        # GitHub's generated merge commit; literal-head records and checks the head.
+        run: |
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tested commit $sha, tree $tree"
+          echo "### Offline suite: commit \`$sha\`, tree \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Released-peer fixture against the released source (fail-capable; writes nothing)
+        # The pair tests check each released-peer file only against
+        # tests/prototype/fixtures/released_9049/MANIFEST.txt. This step checks that
+        # manifest and every fixture copy against the released test.9049 commit
+        # itself, never against the manifest. The commit is pinned here as well, so
+        # changing the tool's COMMIT and regenerating the fixture also fails.
+        shell: bash
+        env:
+          RELEASED_COMMIT: 27aaeec33d04b015ffb5ba124be9cf8cc2bae524
+        run: |
+          if ! git cat-file -e "${RELEASED_COMMIT}^{commit}"; then
+            echo "Released source commit $RELEASED_COMMIT is not reachable in this checkout."; exit 1
+          fi
+          echo "released source commit $RELEASED_COMMIT is present"
+          if git merge-base --is-ancestor "$RELEASED_COMMIT" HEAD; then
+            echo "released source commit is an ancestor of the tested commit"
+          else
+            echo "released source commit is not an ancestor of the tested commit (reachable from another fetched ref)"
+          fi
+          python3 -B - <<'PY'
+          import importlib.util, os, sys
+          spec = importlib.util.spec_from_file_location('released_fixture', 'tools/released_fixture.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          if module.COMMIT != os.environ['RELEASED_COMMIT']:
+              sys.exit(f"tools/released_fixture.py COMMIT is {module.COMMIT}, not the released {os.environ['RELEASED_COMMIT']}")
+          PY
+          python3 -B tools/released_fixture.py check
       - name: Install LuaJIT
         run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Inventory check and complete offline suite
         # Every listed test runs from this checkout. A NOT RUN, FAIL or TIMEOUT row
-        # fails the check; nothing unexecuted is counted as passed.
+        # fails the check; nothing unexecuted is counted as passed. This includes the
+        # full visible-UI composition gate (tools/tests/test_l10n_full_ui_gate.py),
+        # which fails while a shipped optional pack is incomplete.
         shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
         run: python3 tools/ci_check.py | tee ci-summary.txt
       - name: Summary
@@ -48,6 +89,8 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          # Full history, as in the other two jobs; the package reads HEAD only.
+          fetch-depth: 0
           persist-credentials: false
       - name: Package content and TOC compatibility checks
         run: python3 tools/build_package.py --check
@@ -86,6 +129,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # Full history, so the released test.9049 source commit is present.
+          fetch-depth: 0
           persist-credentials: false
       - name: Record the tested commit and tree
         env:
@@ -96,6 +141,32 @@ jobs:
           echo "tested commit $sha, tree $tree"
           echo "### Literal head: commit \`$sha\`, tree \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
           test "$sha" = "$EXPECTED_SHA"
+      # Same check as in offline-suite, on the head commit. It reads git objects
+      # and the checkout and writes nothing, so the archive steps below still see
+      # a clean tree.
+      - name: Released-peer fixture against the released source (fail-capable; writes nothing)
+        shell: bash
+        env:
+          RELEASED_COMMIT: 27aaeec33d04b015ffb5ba124be9cf8cc2bae524
+        run: |
+          if ! git cat-file -e "${RELEASED_COMMIT}^{commit}"; then
+            echo "Released source commit $RELEASED_COMMIT is not reachable in this checkout."; exit 1
+          fi
+          echo "released source commit $RELEASED_COMMIT is present"
+          if git merge-base --is-ancestor "$RELEASED_COMMIT" HEAD; then
+            echo "released source commit is an ancestor of the tested commit"
+          else
+            echo "released source commit is not an ancestor of the tested commit (reachable from another fetched ref)"
+          fi
+          python3 -B - <<'PY'
+          import importlib.util, os, sys
+          spec = importlib.util.spec_from_file_location('released_fixture', 'tools/released_fixture.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          if module.COMMIT != os.environ['RELEASED_COMMIT']:
+              sys.exit(f"tools/released_fixture.py COMMIT is {module.COMMIT}, not the released {os.environ['RELEASED_COMMIT']}")
+          PY
+          python3 -B tools/released_fixture.py check
       # The package steps come first: the suite writes ci-summary.txt into the
       # checkout, and an archive build refuses a tree with uncommitted files.
       - name: Package content and TOC compatibility checks

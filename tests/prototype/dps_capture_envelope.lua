@@ -348,4 +348,89 @@ check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
 local recovered=D.GetCurrentPersonalBest('dummy')
 check(recovered and recovered.dps>(before and before.dps or 0),
  'and the better result is recorded: '..tostring(recovered and recovered.dps))
+
+-- 7. H2-01: target classification through the real capture path, with the
+-- coherent loadout above and the unchanged 30-second dummy minimum. A
+-- complete legacy hexadecimal creature GUID names its entry: 0x F130 007F1D
+-- 00001A is entry 32541, a training dummy in the existing list, so a target
+-- whose name matches no English text still records. Anything else in that
+-- form is not an entry and stays unclassified unless the existing English
+-- name check matches. Each session has a higher Details total than the
+-- current best, so a refusal cannot hide behind a worse score.
+-- SYNTHETIC: the non-English names are synthetic strings, not attested client
+-- translations; addon messages these captures send stay in the harness. No
+-- game or network action, and no claim about which GUID form a client uses.
+local fixtureUnitName,priorUnitGUID=UnitName,UnitGUID
+local target={guid=nil,name=nil}
+UnitName=function(unit)
+ if unit=='target' then return target.name end
+ return fixtureUnitName(unit)
+end
+UnitGUID=function(unit)
+ if unit=='target' then return target.guid end
+ return priorUnitGUID and priorUnitGUID(unit) or nil
+end
+local nonEnglish="Cible d'entra\195\174nement"
+local REFUSED='ignored: target was not a training dummy or the Lich King'
+NexusDB.guidCaseUnknownSentinel={keep='guid-case-preserve-unknown',number=17}
+local echoKey=D.GetCurrentEchoKey()
+check(type(echoKey)=='string' and echoKey~='' and D.GetCurrentEchoCount()==79,
+ 'fixture: the coherent 79-copy loadout is current: '..tostring(D.GetCurrentEchoCount()))
+check(D.MinimumDuration('dummy')==30 and D.MinimumDuration('lk')==20,'fixture: the duration rules are unchanged')
+local function GuidSentinel()
+ local s=NexusDB and NexusDB.guidCaseUnknownSentinel
+ return type(s)=='table' and s.keep=='guid-case-preserve-unknown' and s.number==17
+end
+local function GuidCapture(label,category,guid,name,total)
+ check(GuidSentinel(),label..': fixture: the saved unknown sentinel is present')
+ check(D.GetCurrentEchoKey()==echoKey and D.GetCurrentEchoCount()==79,label..': fixture: the loadout evidence is unchanged')
+ local prior=D.GetCurrentPersonalBest(category)
+ local actions=#H.actions
+ target.guid,target.name,combat.total=guid,name,total
+ capture()
+ local after=D.GetCurrentPersonalBest(category)
+ check(#H.actions==actions,label..': no synthetic gameplay action or spend: '..(#H.actions-actions))
+ check(GuidSentinel(),label..': the saved unknown sentinel is kept')
+ check(D.GetCurrentEchoKey()==echoKey and D.GetCurrentEchoCount()==79,label..': the loadout evidence is kept')
+ return prior,after,tostring(Nexus.lastDpsNote)
+end
+local function GuidRecords(label,category,guid,name,total)
+ local prior,after,note=GuidCapture(label,category,guid,name,total)
+ local expected=math.floor(total/10)
+ check((prior and prior.dps or 0)<expected,label..': fixture: the session total is above the previous best')
+ check(after and after.dps==expected and after.fingerprint==echoKey
+  and (tonumber(after.duration) or 0)>=D.MinimumDuration(category),
+  label..': the saved personal best advances to '..expected..': '..tostring(after and after.dps)..' / '..note)
+ check(note:find(category..': '..expected..' DPS',1,true)==1,label..': the capture note states the record: '..note)
+end
+local function GuidRefused(label,guid,total)
+ local prior,after,note=GuidCapture(label,'dummy',guid,nonEnglish,total)
+ check(prior and math.floor(total/10)>prior.dps,label..': fixture: this session would be a new best if it were classified')
+ check(note==REFUSED,label..': the target is not classified: '..note)
+ check(after and after.dps==prior.dps and after.ts==prior.ts and after.fingerprint==prior.fingerprint,
+  label..': the previous personal best stands: '..tostring(after and after.dps))
+end
+-- Positive controls first: the matching modern form and the existing English
+-- fallback with an unknown legacy entry.
+GuidRecords('modern Creature 32541, non-English name','dummy','Creature-0-0-0-0-32541-000000001A',nonEnglish,1300000)
+GuidRecords('English fallback, unknown legacy entry','dummy','0xF13000FFFF00001A','Training Dummy',1400000)
+-- With the same non-English name, nothing else in the legacy form classifies.
+GuidRefused('unknown legacy entry','0xF13000FFFF00001A',1500000)
+GuidRefused('player prefix','0x0000007F1D00001A',1600000)
+GuidRefused('pet prefix','0xF140007F1D00001A',1700000)
+GuidRefused('missing hex digit','0xF130007F1D00001',1800000)
+GuidRefused('extra hex digit','0xF130007F1D00001A0',1900000)
+GuidRefused('non-hex entry digit','0xF130007G1D00001A',2000000)
+GuidRefused('leading junk','junk0xF130007F1D00001A',2100000)
+GuidRefused('trailing junk','0xF130007F1D00001Ajunk',2200000)
+-- The exact known legacy subject records the qualifying dummy best.
+GuidRecords('legacy hex 32541, non-English name','dummy','0xF130007F1D00001A',nonEnglish,2300000)
+-- The existing Lich King list: legacy entry 008EF5 is 36597; the modern form
+-- and the English name fallback are unchanged.
+GuidRecords('legacy hex Lich King 36597, non-English name','lk','0xF130008EF500001B',"Le Roi-liche synth\195\169tique",2400000)
+GuidRecords('modern Creature Lich King 36597, non-English name','lk','Creature-0-0-0-0-36597-000000001B',"Le Roi-liche synth\195\169tique",2500000)
+GuidRecords('English Lich King fallback, unknown legacy entry','lk','0xF13000FFFF00001B','The Lich King',2600000)
+local dummyAfterLk=D.GetCurrentPersonalBest('dummy')
+check(dummyAfterLk and dummyAfterLk.dps==230000,'the dummy best is unchanged by the Lich King sessions: '..tostring(dummyAfterLk and dummyAfterLk.dps))
+UnitName,UnitGUID=fixtureUnitName,priorUnitGUID
 print('PASS dps_capture_envelope: the saved slot\'s locked rows stay locked, and an impossible snapshot defers instead of being refused checks='..checks)

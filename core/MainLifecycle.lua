@@ -31,6 +31,25 @@ function Lifecycle.New(options)
     local EnsureAutomation = assert(options.ensureAutomation,
         "MainLifecycle requires automation binding")
     local Print = assert(options.print, "MainLifecycle requires print")
+    -- Full-UI localization, chat family: options.printText(text, source)
+    -- shows a translated (candidate) line without the English-only
+    -- UserText rewrite and English exactly as Print does; without it, Print.
+    local PrintText = type(options.printText) == "function" and options.printText
+        or function(text) return Print(text) end
+    -- The seam's text and source for a reviewed key, looked up at call time
+    -- (the key itself if the seam is absent; the TOC loads it first).
+    local function NoticeText(key, arguments)
+        local localization = Nexus.Localization
+        if type(localization) ~= "table" then return key, "base" end
+        if arguments == nil then return localization.Text(key) end
+        return localization.Format(key, arguments)
+    end
+    -- One reviewed notice (a text, or a template when arguments are given).
+    -- Versions and build labels are data slots.
+    local function Notice(key, arguments)
+        local text, source = NoticeText(key, arguments)
+        return PrintText(text, source)
+    end
     local RecordError = assert(options.recordError,
         "MainLifecycle requires error recording")
     local RecordStoreError = assert(options.recordStoreError,
@@ -52,6 +71,10 @@ function Lifecycle.New(options)
     local communityMutationTicket
     local communityReady = false
     local sharedWorldEntryPending = false
+    -- B-03: the adapter call that raised an error during the latest world
+    -- entry, {owner=, error=} (bounded one-line text), or nil. Reported by
+    -- StartupStatus; session-only, never saved, never used as readiness.
+    local worldEntryFailure = nil
     local rebindEvidenceDb, rebindEvidenceSource, rebindEvidenceOwner, rebindEvidenceInit
     local maintenanceFailureRecorded=false
     local syncInitialized = false
@@ -61,6 +84,26 @@ function Lifecycle.New(options)
     -- startup sequencing owner, created here before Store.Init (line 1202).
     local bootstrapCoordinator = nil
     local bootstrapFailureRecorded = false
+    -- A required owner raised an error during the one-time initialization
+    -- below: {owner=, error=} (bounded one-line text). Latched for the
+    -- session: Initialize is never attempted again, the start-up status is a
+    -- terminal failure naming that owner, and every gate that waits for
+    -- initialization stays closed. Session-only; never saved.
+    local initFailure = nil
+    local INIT_FAILURE_REASON = "CORE_INIT_FAILED"
+    -- B-12: the present, owner-matched Store authority factory
+    -- (Nexus.MainInternals.AuthorityBootstrap.New) raised an error while the
+    -- coordinator was being created: {owner=, error=} (bounded one-line
+    -- text). Latched for the session like initFailure: the factory is not
+    -- called again, Store.Init is not called after it (its private path would
+    -- call the same factory), the error is recorded once under the factory,
+    -- the start-up status is a terminal failure naming it, and every gate
+    -- that waits for initialization stays closed. A missing or non-matching
+    -- public factory is not this failure: Store.Init's private handle still
+    -- serves that case, and a pending result is never this failure either.
+    -- Session-only; never saved.
+    local factoryFailure = nil
+    local FACTORY_FAILURE_REASON = "AUTHORITY_BOOTSTRAP_FAILED"
     -- World entry can legitimately arrive while authority is still pending,
     -- because bootstrap advances bounded work across scheduler turns.
     local worldEntryPending = false
@@ -115,6 +158,15 @@ function Lifecycle.New(options)
     -- row, and the settings-format verdict. Reads the retained result and a
     -- pure classification only; never binds, pumps or retries.
     local function FailureFacts()
+        -- A required initialization owner failed after Store readiness: the
+        -- owner and its bounded error, recorded once when it failed.
+        if initFailure then
+            return {owner=initFailure.owner, error=initFailure.error}
+        end
+        -- B-12: the authority factory raised an error; recorded once.
+        if factoryFailure then
+            return {owner=factoryFailure.owner, error=factoryFailure.error}
+        end
         local r = bootstrapTerminal
         if type(r) ~= "table" or r.state ~= "failed" then
             -- The catalog refused its root after the Store finished: the
@@ -178,7 +230,9 @@ function Lifecycle.New(options)
     end
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
-        local failure=startupTiming.coreFailure or communityFailure
+        local failure=initFailure and INIT_FAILURE_REASON
+            or factoryFailure and FACTORY_FAILURE_REASON
+            or startupTiming.coreFailure or communityFailure
             or (bootstrapTerminal and bootstrapTerminal.state=="failed"
                 and (bootstrapTerminal.detail or bootstrapTerminal.reason or "STORE_INVALID"))
         local step,stepDone,stepTotal=CurrentStep()
@@ -192,6 +246,9 @@ function Lifecycle.New(options)
             recordsSeen=startupTiming.communityRecordsSeen or 0,
             step=step,stepDone=stepDone,stepTotal=stepTotal,
             failure=FailureFacts(),
+            -- B-03: a detached copy, so a status write cannot clear it.
+            worldEntryFailure=worldEntryFailure and {owner=worldEntryFailure.owner,
+                error=worldEntryFailure.error} or nil,
             coreSlices=startupTiming.slices or 0,
             syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
             syncGateAdapterReady=syncGate.adapterReady,
@@ -221,6 +278,9 @@ function Lifecycle.New(options)
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
         ["DpsCapture.OnCombatEnd"]={active=false,message=nil},
         ["DataRetention.Request"]={active=false,message=nil},
+        -- B-03: the two adapter calls of the world-entry sequence.
+        ["Adapter.OnEvent"]={active=false,message=nil},
+        ["Adapter.RequestSlots"]={active=false,message=nil},
     }
 
     local function RunIsolatedOwner(source, callback, ...)
@@ -268,6 +328,8 @@ function Lifecycle.New(options)
     -- inside an event: continuation scheduling is the scheduler's.
     local function EnsureBootstrapCoordinator(Store)
         if bootstrapCoordinator ~= nil then return bootstrapCoordinator end
+        -- B-12: a factory that already raised an error is never called again.
+        if factoryFailure then return nil end
         if type(Store) ~= "table" then return nil end
         -- Line 1202: MainLifecycle creates the coordinator. Line 1912 keeps the
         -- public Store inventory at nine, so the factory is reached through the
@@ -282,7 +344,19 @@ function Lifecycle.New(options)
         local community=Nexus.CommunityBuilds
         local ok, coordinator = pcall(factory.New,{deferAutomaticMaintenance=
             type(community)=="table" and type(community.Init)=="function"})
-        if not ok or type(coordinator) ~= "table" then return nil end
+        if not ok then
+            -- B-12: the present, owner-matched factory raised an error. Latch
+            -- one terminal failure naming it and record the error once; see
+            -- factoryFailure above. Only this raised-error path is latched.
+            local okText, text = pcall(ErrorText, coordinator)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = (text:gsub("[%c|]", " "))
+            if #text > 160 then text = text:sub(1, 160) .. "..." end
+            factoryFailure = {owner="AuthorityBootstrap.New", error=text}
+            RecordError("AuthorityBootstrap.New", coordinator)
+            return nil
+        end
+        if type(coordinator) ~= "table" then return nil end
         bootstrapCoordinator = coordinator
         return coordinator
     end
@@ -436,6 +510,9 @@ function Lifecycle.New(options)
     -- only by StoreResultIsReady, never by the call having completed.
     local function BindStoreAuthority(Store)
         local coordinator = EnsureBootstrapCoordinator(Store)
+        -- B-12: after a factory failure Store.Init is not called: without a
+        -- coordinator its private path would call the same factory again.
+        if factoryFailure then return false, factoryFailure.error end
         local ok, result
         if coordinator ~= nil then
             ok, result = pcall(Store.Init, coordinator)
@@ -452,8 +529,275 @@ function Lifecycle.New(options)
         end
     end
 
+    -- Issue #123: the Nexus-only UI language (settings.uiLanguage; enum in
+    -- data/DefaultProfile.lua). The active language is chosen once per Lua
+    -- session from the admitted Store's settings: Initialize calls
+    -- InitializeLanguage after Store admission and before the ordinary UI,
+    -- adapter and automation initialization, and repeated Initialize or
+    -- database-preparation turns never choose again. A saved change waits
+    -- for the next reload or login the player asks for: nothing here reloads
+    -- the UI, refreshes a view early, or reads or changes the game's own
+    -- language. ui/Panel.lua gets only the read-status and set-choice
+    -- callbacks below (Panel.Init); the Store's private writer stays here.
+    -- Issue #141: an absent preference, or exactly the Automatic value
+    -- (Localization.AUTOMATIC_PREFERENCE), means Automatic, and start-up
+    -- never adds the field. Automatic and each manual ID (English included)
+    -- are distinct saved choices: choosing Automatic over a manual or
+    -- unsupported value saves the Automatic value through the same private
+    -- writer; choosing the saved preference again writes nothing. The status
+    -- reports the saved preference, the preference this session started
+    -- with and the active language apart; nothing here switches the session
+    -- or reads a client language.
+    local languageInitialized = false
+    local languageSessionOnly = nil
+    local languageSettings = nil
+    local languageSavedSettings = nil
+    -- Issue #141: the saved preference this session started with:
+    -- "automatic", an offered ID, or false (unsupported); nil before start.
+    local languageStartPreference = nil
+    local LANGUAGE_READY = {STORE_READY=true, STORE_MUTATION_BUILD_PENDING=true,
+        STORE_MUTATION_FINAL_COMMIT_PENDING=true}
+
+    -- The Store's settings may be a validated, mutable session projection.
+    -- Use it to initialize active text, not to promise persistence.
+    local function StoreLanguage(Store)
+        if type(Store) ~= "table" or type(Store.Settings) ~= "function" then return nil end
+        local ok, settings = pcall(Store.Settings)
+        if not ok or type(settings) ~= "table" then return nil end
+        return rawget(settings, "uiLanguage"), settings
+    end
+
+    -- Retain the saved source admitted at initialization independently of
+    -- the Store's session projection. Reads never normalize or rewrite it.
+    local function SavedLanguage()
+        if languageSavedSettings then return rawget(languageSavedSettings, "uiLanguage") end
+        return nil
+    end
+
+    -- One read of the Localization seam; nil when it is absent or fails.
+    local function LocalizationValue(name, ...)
+        local localization = Nexus.Localization
+        local read = type(localization) == "table" and rawget(localization, name) or nil
+        if type(read) ~= "function" then return nil end
+        local ok, value = pcall(read, ...)
+        if ok then return value end
+        return nil
+    end
+
+    -- Issue #141: the saved value of the Automatic preference, or nil
+    -- without the seam. Reads one field.
+    local function AutomaticPreference()
+        local localization = Nexus.Localization
+        local value = type(localization) == "table"
+            and rawget(localization, "AUTOMATIC_PREFERENCE") or nil
+        return type(value) == "string" and value or nil
+    end
+
+    -- What a saved value means: "automatic" (absent, or exactly the
+    -- Automatic value), the offered language ID it names (a manual choice),
+    -- or false (unsupported: shown as English and kept as saved). Reads
+    -- only; never an alias.
+    local function LanguagePreference(raw)
+        if raw == nil then return "automatic" end
+        local automatic = AutomaticPreference()
+        if automatic ~= nil and raw == automatic then return "automatic" end
+        if type(raw) == "string" and LocalizationValue("EffectiveLanguage", raw) == raw then
+            return raw
+        end
+        return false
+    end
+
+    local function InitializeLanguage(Store)
+        if languageInitialized then return end
+        languageInitialized = true
+        local raw, settings = StoreLanguage(Store)
+        languageSettings = settings
+        local db = Database()
+        local saved = type(db) == "table" and rawget(db, "settings") or nil
+        if type(saved) == "table" and getmetatable(saved) == nil then
+            languageSavedSettings = saved
+        end
+        local savedRaw = SavedLanguage()
+        languageStartPreference = LanguagePreference(savedRaw)
+        -- Issue #141: Localization starts from the session projection (raw).
+        -- On a writable root that is the saved settings table itself; a
+        -- read-only projection keeps only an exact language ID or the exact
+        -- Automatic value and omits any other present saved value (a
+        -- near-case or future ID, a number, false or a table). Such a value
+        -- is not an absent preference: it is unsupported, as the start
+        -- preference above says, so Localization gets the unsupported value
+        -- false and shows English without starting Automatic. An absent value
+        -- and the exact Automatic value still start Automatic, and an ID the
+        -- projection holds is passed as before. The retained saved source is
+        -- only read here: nothing is normalized or written.
+        local start = raw
+        if start == nil and savedRaw ~= nil and languageStartPreference ~= "automatic" then
+            start = false
+        end
+        local localization = Nexus.Localization
+        local initialize = type(localization) == "table"
+            and rawget(localization, "InitializeActiveLanguage") or nil
+        if type(initialize) ~= "function" then return end
+        local ok, err = pcall(initialize, start)
+        if not ok then RecordError("Localization.InitializeActiveLanguage", err) end
+    end
+
+    -- Why a durable language choice cannot be made right now, or nil. Reads
+    -- only. The menu rows use it, and ChooseLanguage asks again at the click:
+    -- start-up finished; the private writer belongs to the exact Store this
+    -- session was initialized with (a stub or a reloaded Store module never
+    -- lends another Store's writer); no capacity refusal kept saved data
+    -- unchanged; the saved root is not read-only; it is still the database
+    -- this session prepared, its settings table is the admitted one the Store serves,
+    -- and the bootstrap coordinator is ready on that same database.
+    local function LanguageRefusal()
+        if not initialized or type(dependencies) ~= "table" then return "startup" end
+        local Store = dependencies.Store
+        local internals = Nexus.MainInternals
+        local owner = type(internals) == "table" and internals.StoreAuthorityOwner or nil
+        if type(Store) ~= "table" or type(Store.Settings) ~= "function"
+            or type(owner) ~= "table" or owner.owner ~= Store
+            or type(owner.UpdateSettingsV1) ~= "function" then
+            return "authority"
+        end
+        if startupTiming.coreFailure ~= nil then
+            return CAPACITY_REFUSALS[startupTiming.coreFailure] and "capacity" or "startup"
+        end
+        local readOnly = internals.SavedRootReadOnlyV1
+        if type(readOnly) ~= "function" then return "authority" end
+        local okRead, class = pcall(readOnly)
+        if not okRead or class ~= nil then return "read-only" end
+        local db = Database()
+        if type(db) ~= "table" or db ~= preparedDatabase then return "drift" end
+        local settings = rawget(db, "settings")
+        if type(settings) ~= "table" or getmetatable(settings) ~= nil then return "drift" end
+        local okSettings, current = pcall(Store.Settings)
+        if not okSettings or current ~= settings or settings ~= languageSettings then return "drift" end
+        local coordinator = bootstrapCoordinator
+        if coordinator ~= nil then
+            local okState, state = pcall(coordinator.State, coordinator)
+            local okDb, bound = pcall(coordinator.Database, coordinator)
+            if not okState or not LANGUAGE_READY[state] or not okDb or bound ~= db then
+                return "authority"
+            end
+        end
+        return nil
+    end
+
+    -- The chooser's facts. Reads only; never calls the writer.
+    local function LanguageStatus()
+        local raw = SavedLanguage()
+        local preference = LanguagePreference(raw)
+        local automatic = AutomaticPreference()
+        local active = LocalizationValue("ActiveLanguage")
+        local saved = LocalizationValue("EffectiveLanguage", raw)
+        local shown = automatic and LocalizationValue("EffectiveLanguage", automatic) or nil
+        local languages = LocalizationValue("Languages")
+        active = type(active) == "string" and active or "enUS"
+        saved = type(saved) == "string" and saved or "enUS"
+        -- preference: the saved choice ("automatic", an ID, or false for an
+        -- unsupported value); activeAutomatic: this session started on
+        -- Automatic; pending: the saved choice shows another language;
+        -- preferencePending: the saved choice is not the one this session
+        -- started with. A pending choice is never called active.
+        return {active=active, saved=saved, pending=saved ~= active,
+            preference=preference, automatic=preference == "automatic",
+            activeAutomatic=languageStartPreference == "automatic",
+            preferencePending=preference ~= languageStartPreference,
+            automaticPreference=automatic,
+            automaticLanguage=type(shown) == "string" and shown or "enUS",
+            savedUnsupported=raw ~= nil and preference == false,
+            sessionOnly=languageSessionOnly ~= nil, refusal=LanguageRefusal(),
+            languages=type(languages) == "table" and languages or {}}
+    end
+
+    -- One explicit choice from the chooser, with the authority checked again
+    -- here: an offered ID (a manual choice, English included) or the
+    -- Automatic value. A choice that is already the saved preference is a
+    -- no-op: no write (Automatic while none is saved included; English while
+    -- none is saved is a manual choice and is written). Only
+    -- {mode="durable"} from the writer is reported as saved; anything else is
+    -- reported as it is. The active language never changes here.
+    local function ChooseLanguage(id)
+        local automatic = AutomaticPreference()
+        local choice = automatic ~= nil and id == automatic and "automatic" or nil
+        if choice == nil and type(id) == "string"
+            and LocalizationValue("EffectiveLanguage", id) == id then
+            choice = id
+        end
+        if choice == nil then return {state="refused", reason="invalid"} end
+        local refusal = LanguageRefusal()
+        if refusal then return {state="refused", reason=refusal} end
+        local active = LocalizationValue("ActiveLanguage")
+        local isAutomatic = choice == "automatic"
+        local resolved = isAutomatic and LocalizationValue("EffectiveLanguage", id) or id
+        if LanguagePreference(SavedLanguage()) == choice then
+            return {state="unchanged", id=id, automatic=isAutomatic, resolved=resolved,
+                pending=resolved ~= active}
+        end
+        local owner = Nexus.MainInternals.StoreAuthorityOwner
+        local ok, result, why = pcall(owner.UpdateSettingsV1, "uiLanguage", id)
+        if not ok then
+            RecordError("StoreAuthorityOwner.UpdateSettingsV1", result)
+            return {state="refused", reason="failed"}
+        end
+        if type(result) == "table" and result.mode == "durable" then
+            if SavedLanguage() ~= id then
+                return {state="unconfirmed", id=id, automatic=isAutomatic}
+            end
+            languageSessionOnly = nil
+            return {state="saved", id=id, automatic=isAutomatic, resolved=resolved,
+                pending=resolved ~= active,
+                preferencePending=choice ~= languageStartPreference}
+        elseif type(result) == "table" and result.mode == "session" then
+            languageSessionOnly = id
+            return {state="session", id=id}
+        end
+        return {state="refused", reason=type(why) == "string" and why or "refused"}
+    end
+
+    -- Initialization ownership. Each dependent Init below runs inside one
+    -- protected call, so a raised error is recorded once under its owner and
+    -- can never escape into the per-frame caller (which would retry the whole
+    -- block every frame). Only a raised error counts: return values keep
+    -- their existing meanings and are not inspected here.
+    --
+    -- OPTIONAL owners are views and notices the core never depends on
+    -- (Updates, LogViewer, WishlistEditor, WishlistOverlay, Leaderboard,
+    -- Nameplate, ServerStatus, CallboardStatus). Their failure is recorded and
+    -- initialization continues, so a broken view cannot hold the core back.
+    local function InitOptionalOwner(source, callback, ...)
+        local ok, err = pcall(callback, ...)
+        if not ok then RecordError(source, err) end
+        return ok
+    end
+    -- REQUIRED owners are the bound dependencies the core runs on every frame
+    -- and every action passes through: automation (Initialize; OnUpdate per
+    -- frame), the game adapter (Init; Ready per frame) and the panel (Init;
+    -- the Auto toggle, HUD refresh and language callbacks). A raised error
+    -- latches a terminal failure naming the owner: initialization is not
+    -- marked done, never attempted again, and the gates stay closed.
+    local function InitRequiredOwner(source, callback, ...)
+        local ok, err = pcall(callback, ...)
+        if ok then return true end
+        local okText, text = pcall(ErrorText, err)
+        if not okText or type(text) ~= "string" then text = "<unprintable>" end
+        text = (text:gsub("[%c|]", " "))
+        if #text > 160 then text = text:sub(1, 160) .. "..." end
+        initFailure = {owner=source, error=text}
+        RecordError(source, err)
+        return false
+    end
+
     local function Initialize(updateStarted)
+        if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+            pcall(Nexus.OrbRuntime.ObserveLifecycle)
+        end
         if initialized then return true end
+        -- A required owner already failed: terminal for this session.
+        if initFailure then return false end
+        -- B-12: the authority factory already failed: terminal as well.
+        if factoryFailure then return false end
         dependencies = BindDependencies()
         if not dependencies then return false end
 
@@ -463,6 +807,8 @@ function Lifecycle.New(options)
         local Model = dependencies.Model
 
         local okStore, storeResult = BindStoreAuthority(Store)
+        -- B-12: recorded once, under the factory, when it failed.
+        if factoryFailure then return false end
         if not okStore then
             RecordStoreError(storeResult)
             return false
@@ -487,6 +833,9 @@ function Lifecycle.New(options)
                 return false
             end
         end
+        -- Issue #123: once per Lua session, after Store admission and before
+        -- the ordinary UI, adapter and automation initialization below.
+        InitializeLanguage(Store)
         local db = Database()
         local automation = EnsureAutomation()
         if not automation then return false end
@@ -517,14 +866,19 @@ function Lifecycle.New(options)
                 end
             end
             if Nexus.Updates and Nexus.Updates.Init then
-                Nexus.Updates.Init({
+                InitOptionalOwner("Updates.Init", Nexus.Updates.Init, {
                     -- A capacity-refused start-up leaves every saved key as it
                     -- found it, so the update module reads its stored notice
                     -- without rewriting, quarantining or removing it.
                     persist=not CAPACITY_REFUSALS[startupTiming.coreFailure],
-                    notify=function(version, _, message)
-                        Print(type(message) == "string" and message
-                            or ("Nexus build " .. tostring(version) .. ": see /nexus update. Installation is manual."))
+                    -- Updates words the notice through the seam and passes
+                    -- its source, so a translation skips the English rewrite.
+                    notify=function(version, _, message, source)
+                        if type(message) == "string" then
+                            PrintText(message, source)
+                        else
+                            Notice("main.chat.update_notice_fallback", {version=tostring(version)})
+                        end
                     end,
                     refresh=function()
                         if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
@@ -532,23 +886,33 @@ function Lifecycle.New(options)
                 })
             end
 
-            automation.Initialize()
-            Adapter.Init({OnStatus=Print}, Store)
+            if not InitRequiredOwner("AutomationRuntime.Initialize",
+                automation.Initialize) then
+                return false
+            end
+            if not InitRequiredOwner("Adapter.Init", Adapter.Init,
+                {OnStatus=Print}, Store) then
+                return false
+            end
             if Nexus.LogViewer and Nexus.LogViewer.Init then
-                Nexus.LogViewer.Init(options.logViewerProvider,
-                    options.clearDiagnosticLogs)
+                InitOptionalOwner("LogViewer.Init", Nexus.LogViewer.Init,
+                    options.logViewerProvider, options.clearDiagnosticLogs)
             end
             if Nexus.WishlistEditor and Nexus.WishlistEditor.Init then
-                Nexus.WishlistEditor.Init(Adapter, Model)
+                InitOptionalOwner("WishlistEditor.Init", Nexus.WishlistEditor.Init,
+                    Adapter, Model)
             end
             if Nexus.WishlistOverlay and Nexus.WishlistOverlay.Init then
-                Nexus.WishlistOverlay.Init(Adapter, Model)
-                if db.overlayShown then Nexus.WishlistOverlay.Show() end
+                InitOptionalOwner("WishlistOverlay.Init", function()
+                    Nexus.WishlistOverlay.Init(Adapter, Model)
+                    if db.overlayShown then Nexus.WishlistOverlay.Show() end
+                end)
             end
             preparedDatabase=db
         end
         if Nexus.Leaderboard and Nexus.Leaderboard.Init then
-            Nexus.Leaderboard.Init(Adapter, Model)
+            InitOptionalOwner("Leaderboard.Init", Nexus.Leaderboard.Init,
+                Adapter, Model)
         end
         if Nexus.Performance
             and type(Nexus.Performance.InstallDefaults) == "function" then
@@ -565,19 +929,39 @@ function Lifecycle.New(options)
                     okRefresh and "initialization failed" or refreshReady)
             end
         end
-        if Nexus.Nameplate and Nexus.Nameplate.Init then Nexus.Nameplate.Init() end
-        if Nexus.ServerStatus and Nexus.ServerStatus.Init then
-            Nexus.ServerStatus.Init()
+        if Nexus.Nameplate and Nexus.Nameplate.Init then
+            InitOptionalOwner("Nameplate.Init", Nexus.Nameplate.Init)
         end
-        Panel.Init({
+        if Nexus.ServerStatus and Nexus.ServerStatus.Init then
+            InitOptionalOwner("ServerStatus.Init", Nexus.ServerStatus.Init)
+        end
+        if Nexus.CallboardStatus and Nexus.CallboardStatus.Init then
+            InitOptionalOwner("CallboardStatus.Init", Nexus.CallboardStatus.Init)
+        end
+        if not InitRequiredOwner("Panel.Init", Panel.Init, {
             ToggleAuto=function()
                 local enabled = automation.ToggleAuto()
-                Print("auto " .. (enabled and "ON" or "OFF"))
+                Notice(enabled and "main.chat.auto_on" or "main.chat.auto_off")
                 return enabled
             end,
             RefreshDisplay=function() return RefreshHud() end,
             RequestFirstDisplay=function() return RequestFirstHud() end,
-        })
+            SetAutoManageTomes=function(enabled)
+                local owner = Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+                if not (owner and owner.owner == Store and type(owner.UpdateSettingsV1) == "function") then
+                    return false
+                end
+                local result = owner.UpdateSettingsV1("autoDisable", enabled)
+                if not result then return false end
+                RequestRecompute()
+                return true
+            end,
+            -- Issue #123: the language chooser's two explicit callbacks.
+            LanguageStatus=function() return LanguageStatus() end,
+            ChooseLanguage=function(id) return ChooseLanguage(id) end,
+        }) then
+            return false
+        end
         initialized = true
         RegisterStutterAlertProvider()
         RequestRecompute()
@@ -586,10 +970,10 @@ function Lifecycle.New(options)
         local release = type(Nexus.ReleaseIdentity) == "function"
             and Nexus.ReleaseIdentity() or nil
         local privateMark = release and release.channel == "internal" and " internal" or ""
-        Print("v" .. Nexus.VERSION .. " build=" .. buildLabel .. privateMark
-            .. " -- type /nexus for commands.")
+        Notice("main.chat.loaded", {version="" .. Nexus.VERSION, build=buildLabel .. privateMark})
         if Adapter.RivalDetected() then
-            Print("|cffff6060EchoOptimizer detected -- it conflicts with Nexus's board hook. Disable EchoOptimizer; Nexus replaces its functionality.|r")
+            local text, source = NoticeText("main.chat.echo_optimizer_conflict")
+            PrintText("|cffff6060" .. text .. "|r", source)
         end
         return true
     end
@@ -862,7 +1246,31 @@ function Lifecycle.New(options)
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
         local Store = dependencies.Store
-        Adapter.OnEvent(event)
+        -- B-03: the shared entry (retention request, Sync start or world
+        -- entry with its channel join, DPS start) is owned before any adapter
+        -- call below can raise an error. Before this, one error here left it
+        -- unscheduled until the next loading screen while StartupStatus said
+        -- ready. CompleteSharedWorldEntry still runs it once, on a later
+        -- scheduler turn, and still holds it while the session is paused.
+        sharedWorldEntryPending = true
+        worldEntryFailure = nil
+        -- The two adapter calls are isolated: an error is recorded under its
+        -- owner (while that call keeps failing with the same error, a later
+        -- entry does not record it again),
+        -- the first one is named in StartupStatus().worldEntryFailure for this
+        -- entry, and the rest of the sequence keeps its order. Return values
+        -- keep their meanings and are not inspected.
+        local function WorldEntryStep(source, callback, ...)
+            local ok, err = RunIsolatedOwner(source, callback, ...)
+            if ok or worldEntryFailure then return ok end
+            local okText, text = pcall(ErrorText, err)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = (text:gsub("[%c|]", " "))
+            if #text > 160 then text = text:sub(1, 160) .. "..." end
+            worldEntryFailure = {owner=source, error=text}
+            return false
+        end
+        WorldEntryStep("Adapter.OnEvent", Adapter.OnEvent, event)
         -- Ordinary account registration, gated on readiness (1198-1206).
         SubmitOrdinaryRegistration()
         -- The client's own auto-accept option is changed only where the
@@ -874,16 +1282,20 @@ function Lifecycle.New(options)
             and not (type(readOnlyRoot) == "function" and readOnlyRoot()) then
             Adapter.SetSoloPicker()
         end
-        Adapter.RequestSlots()
+        WorldEntryStep("Adapter.RequestSlots", Adapter.RequestSlots)
         local automation = EnsureAutomation()
         if dependencies.JournalTab then
             dependencies.JournalTab.TryInstall(automation.JournalData)
         end
-        sharedWorldEntryPending = true
     end
 
     local function CompleteSharedWorldEntry()
         if not communityReady or not sharedWorldEntryPending then return end
+        -- Session pause (issue #171): community start-up integrity reached
+        -- its safe boundary; the shared entry (retention request, Sync start
+        -- or world entry with its channel join, DPS start) stays pending
+        -- until the first unpaused update.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return end
         sharedWorldEntryPending = false
         -- Retention maintenance (first observation and expiry of retention
         -- markers) runs through its own scheduler once the shared catalog is
@@ -1006,6 +1418,11 @@ function Lifecycle.New(options)
                            arg5, arg6, arg7, arg8, arg9)
         if event == "ADDON_LOADED" then
             if arg1 == "Nexus" then
+                -- Before the login enter. A frame created inside that enter
+                -- does not receive it.
+                if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+                    pcall(Nexus.OrbRuntime.ObserveLifecycle)
+                end
                 local storeReady = false
                 if Nexus.Store and Nexus.Store.Init then
                     local okStore, storeResult =
@@ -1020,7 +1437,10 @@ function Lifecycle.New(options)
                     -- owns advancing it: with no coordinator, a pending result
                     -- never resolves and is still reported. Dependents stay
                     -- withheld in both cases.
-                    if not okStore then
+                    if factoryFailure then
+                        -- B-12: recorded once, under the factory owner.
+                        storeReady = false
+                    elseif not okStore then
                         RecordStoreError(storeResult)
                     elseif not storeReady
                         and not (StoreResultIsPending(storeResult)
@@ -1040,6 +1460,13 @@ function Lifecycle.New(options)
                 RegisterStutterAlertProvider()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
+            -- Created during this dispatch: the new frame is not in the
+            -- current event snapshot, so record the enter once here.
+            local noteEnter = false
+            if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+                local okCreated, created = pcall(Nexus.OrbRuntime.ObserveLifecycle)
+                noteEnter = okCreated and created == true
+            end
             -- Bootstrap advances bounded work per scheduler turn, so
             -- world entry can arrive while authority is still pending. The
             -- request is recorded and completed on the turn the coordinator
@@ -1067,6 +1494,10 @@ function Lifecycle.New(options)
                     startupTiming.maxUpdateMs=math.max(
                         startupTiming.maxUpdateMs,finished-started)
                 end
+            end
+            if noteEnter and Nexus.OrbRuntime
+                and type(Nexus.OrbRuntime.NoteWorldEnter) == "function" then
+                pcall(Nexus.OrbRuntime.NoteWorldEnter)
             end
         elseif event == "PLAYER_LEVEL_UP" then
             if initialized then dependencies.Adapter.OnEvent(event) end
@@ -1145,10 +1576,12 @@ function Lifecycle.New(options)
                             startupTiming.readySeconds = startupTiming.readyAt
                                 - startupTiming.worldEnteredAt
                         end
-                    elseif failed then
-                        -- Terminal authority failure. Initialize recorded the
-                        -- attributed reason once; dependents stay withheld and
-                        -- the coordinator never retries (line 1519).
+                    elseif failed or initFailure or factoryFailure then
+                        -- Terminal authority failure, a required
+                        -- initialization owner failed, or (B-12) the authority
+                        -- factory raised an error. The attributed reason was
+                        -- recorded once; dependents stay withheld and nothing
+                        -- retries (line 1519).
                         worldEntryPending = false
                     end
                 end
@@ -1186,6 +1619,32 @@ function Lifecycle.New(options)
                 local automation=EnsureAutomation()
                 if automation then automation.OnUpdate(elapsed) end
             end
+            return
+        end
+        -- Whole-addon session pause (issue #171). The authority rebind and
+        -- the Store slice above still reach their safe boundary. No routine
+        -- maintenance, shared world entry, catalog or hash admission, Share
+        -- pump or Sync producer runs. Retained Sync work keeps its absolute
+        -- expiry (Sync.OnUpdate does only that while paused), a combat
+        -- capture ends unrecorded, and automation still observes results
+        -- while every action it could take refuses at its own gate.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            syncGate.reason, syncGate.owner = "session-paused", "none"
+            if syncInitialized and Nexus.Sync
+                and type(Nexus.Sync.UpdatePendingRequestStatus)=="function" then
+                RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
+                    Nexus.Sync.UpdatePendingRequestStatus)
+            end
+            if syncInitialized and Nexus.Sync then
+                RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
+            end
+            if not dependencies.Adapter.Ready() then return end
+            if dpsInitialized and Nexus.DpsCapture then
+                RunIsolatedOwner("DpsCapture.OnUpdate",
+                    Nexus.DpsCapture.OnUpdate, elapsed)
+            end
+            local automation = EnsureAutomation()
+            if automation then automation.OnUpdate(elapsed) end
             return
         end
         phaseStarted = PhaseBegin("lifecycle.phase.maintenance")
@@ -1310,15 +1769,18 @@ function Lifecycle.New(options)
                 local noticed = startupTiming.saturationNoticed or {}
                 startupTiming.saturationNoticed = noticed
                 for _, line in ipairs({
-                    {"refusedBuilds", "Community catalog full: new shared builds are refused."},
-                    {"refusedTombstones", "Community removal markers full: new build removals are refused."},
-                    {"refusedBarriers", "Community retention markers full: older shared builds are kept instead of removed."},
-                    {"refusedCatalog", "Community catalog full: new shared data is refused."},
+                    {"refusedBuilds", "main.chat.saturation_builds"},
+                    {"refusedTombstones", "main.chat.saturation_tombstones"},
+                    {"refusedBarriers", "main.chat.saturation_barriers"},
+                    {"refusedCatalog", "main.chat.saturation_catalog"},
                 }) do
                     if not noticed[line[1]] and (tonumber(record[line[1]]) or 0) > 0 then
                         noticed[line[1]] = true
-                        Print(line[2] .. " Your existing Community builds and Leaderboard stay available. "
-                            .. "See /nexus status.")
+                        -- Two reviewed sentences on one line, joined here.
+                        local first, firstSource = NoticeText(line[2])
+                        local rest, restSource = NoticeText("main.chat.saturation_still_available")
+                        PrintText(first .. " " .. rest, (firstSource == "candidate"
+                            or restSource == "candidate") and "candidate" or "base")
                     end
                 end
             end

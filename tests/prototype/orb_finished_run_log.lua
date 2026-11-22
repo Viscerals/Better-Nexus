@@ -56,9 +56,9 @@ Nexus.OrbPanel.Refresh()
  local firstLine=f.status:GetText():sub(1,#label)
 check(firstLine==label,
  'the panel renders its own finished phase label: '..tostring(firstLine))
-check(f.start:GetText()=='Start new run','the primary control offers a new run')
+-- Start/Stop rework (2026-11-19): one fixed Start, no usage line against a maximum.
+check(f.start:GetText()=='Start' and not f.usage:IsShown(),'Start keeps its words; no usage-against-maximum line')
 check(not f.stop:IsEnabled(),'Stop is disabled for a finished run')
-check(f.usage:GetText():find('10 / 10',1,true),'the completed usage stays visible: '..f.usage:GetText())
 
 -- 3. The run log records every operation once, in order, with real fields.
 local before=H.Count('orb-spend')

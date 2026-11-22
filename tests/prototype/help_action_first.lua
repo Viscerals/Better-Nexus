@@ -15,11 +15,28 @@ end
 local actions,sent=#H.actions,#H.sent
 local auto=Nexus.RecomputeStats().autoEnabled
 
--- Pages, ids and order are the existing ones (entry points depend on them).
+-- Pages, ids and order are the existing ones (entry points depend on them);
+-- issue #169 appended Questions (FAQ) last.
 local ids={}
 for _,p in ipairs(Nexus.Help.Pages) do ids[#ids+1]=p.id end
-check(table.concat(ids,',')=='start,wishlists,rolling,sharing,orbs,troubleshooting,about','page ids and order unchanged: '..table.concat(ids,','))
-local function Page(id) Nexus.Help.Show(id);return NexusHelpWindow.body:GetText() end
+check(table.concat(ids,',')=='start,wishlists,rolling,sharing,orbs,troubleshooting,about,faq','page ids and order unchanged: '..table.concat(ids,','))
+-- v28 r4 representation (read seam only): a page's shown document is the
+-- visible FontStrings under the Reference scroll child (NexusHelpWindow.content),
+-- in creation order, each read as it stores its text (GetText), joined at part
+-- boundaries by a line break.
+local function Page(id)
+ Nexus.Help.Show(id)
+ local out={}
+ local function walk(o)
+  if o.kind=='FontString' then
+   local ok,vis=pcall(function() return o:IsVisible() end)
+   if ok and vis then out[#out+1]=o:GetText() or '' end
+  end
+  for _,c in ipairs(type(o.children)=='table' and o.children or {}) do walk(c) end
+ end
+ walk(NexusHelpWindow.content)
+ return table.concat(out,'\n')
+end
 local start,wishlists,rolling,sharing,orbs,trouble=Page('start'),Page('wishlists'),Page('rolling'),Page('sharing'),Page('orbs'),Page('troubleshooting')
 local file=assert(io.open('README-PROTOTYPE.md','rb'));local guide=file:read('*a');file:close()
 guide=guide:gsub('%s+',' ')
@@ -37,19 +54,19 @@ check(has(trouble,'only when no action is active or pending: log out to characte
 check(has(guide,'only when no action is active or pending: log out to character selection'),'guide: turning Nexus off guarded')
 check(has(trouble,'UNVERIFIED hint') and has(guide,'UNVERIFIED hint'),'peer update reports are unverified hints')
 
--- 2. Max and the budget: Max follows the balance and starts nothing; the
--- approved maximum is fixed; the manual limit is its own rule.
-check(has(orbs,'Max returns to following the balance') and has(orbs,'Help and Max spend nothing'),'Max follows the balance and spends nothing')
-check(has(orbs,'up to 1000') and has(orbs,'Typing an amount stops that'),'the draft follows the balance up to 1000 until typed')
-check(has(orbs,'The approved maximum does not change during the run'),'approved maximum fixed')
-check(has(orbs,'whole number from 1 to 10,000'),'manual-limit validation stated separately')
-check(has(orbs,'A maximum saved by an earlier version is kept'),'legacy saved values kept')
-check(has(orbs,'Start new run') and has(orbs,'Confirm new run'),'explicit new-run review')
+-- 2. Start/Stop (2026-11-19, user/coordinator-approved wording): there is no
+-- maximum, Max or budget to describe; Start begins a run, Stop ends it.
+check(has(orbs,'There is no maximum to set') and has(orbs,'and Help spend nothing') and not has(orbs,'Max returns'),'no maximum to set; opening and Help spend nothing')
+check(not has(orbs,'up to 1000') and not has(orbs,'Typing an amount'),'no balance-following maximum is described')
+check(not has(orbs,'approved maximum'),'no approved maximum is described')
+check(not has(orbs,'whole number from 1 to 10,000'),'no maximum to type is described')
+check(has(orbs,'A maximum saved by an earlier version is kept but not used'),'legacy saved values kept, and not used')
+check(has(orbs,'After a run ends, click Start to begin a new one') and not has(orbs,'Confirm new run'),'a new run is a new Start')
 for _,text in ipairs({orbs,guide}) do
  check(not text:find('Max starts',1,true) and not text:find('Max approves',1,true) and not text:find('Max changes',1,true),'Max never described as starting or approving')
 end
-check(has(orbs,'Closing the window does not stop an approved run. Use Pause or Stop.'),'closing is not stopping')
-check(has(orbs,'Recheck only asks for balance and ownership data; it is not a replay or a fix'),'Recheck is read-only')
+check(has(orbs,'Closing the window does not stop a run. Use Stop'),'closing is not stopping')
+check(has(orbs,'A run has no Advanced exclusions or Recheck'),'no Recheck or Advanced control is described')
 check(has(orbs,'do not clear it') or has(orbs,'does not clear it') or has(orbs,'do not clear'),'unresolved receipt is not cleared by relog or controls')
 before(orbs,'if that action\'s offer is still open','choose in that window','narrow manual case: prerequisite before the action')
 
@@ -88,6 +105,16 @@ for _,path in ipairs({'ui/Panel.lua','ui/OrbPanel.lua','ui/SupportReport.lua','u
  local f=assert(io.open(path,'rb'));sources[#sources+1]=f:read('*a');f:close()
 end
 local all=table.concat(sources,'\n')
+-- Issues #143/#148: EXTRA COPIES moved from a ui/Panel.lua literal to the
+-- stable reviewed key panel.heading.extra_copies. Its evidence is the actual
+-- consumer call that binds that key to the same widget (shedLabel, the
+-- extra-copies heading) plus the exact English the real seam gives the key
+-- in this English session. A data string alone, or a key no consumer binds,
+-- never counts; every other label below is a source literal or a key bound
+-- the same way (see the generic rule below).
+local KEYED={['EXTRA COPIES']={key='panel.heading.extra_copies',
+ bind='shedLabel:SetText((Nexus.Localization.Text("panel.heading.extra_copies")))'}}
+local panelFile=assert(io.open('ui/Panel.lua','rb'));local panelSource=panelFile:read('*a');panelFile:close()
 for _,label in ipairs({'Wishlist Editor','Create & assign','Create unassigned','Import','Save changes','Save & assign','Assign Wishlist','Unassign Wishlist',
  'Confirm locked targets & edit','Build Library','All Shared','Require both DPS records','Updating results...','Copy into Editor',
  'Share Build','Stop Sharing','Sync Now','Training Dummy','Lich King','Both records','Open Orbs...','Orbs / Lost Memories',
@@ -96,13 +123,53 @@ for _,label in ipairs({'Wishlist Editor','Create & assign','Create unassigned','
  'Needed','Target already met','Not on Wishlist','Auto ON','Auto OFF','Automation settings'}) do
  -- A string literal or a colour-coded span in the source, not any substring.
  local esc=label:gsub('%p','%%%0')
- check(all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r'),'real label: '..label)
+ if KEYED[label] then
+  -- Keyed (see KEYED): its actual Panel binding and exact English, not a literal.
+  local keyed=KEYED[label]
+  local text,source,why=Nexus.Localization.Text(keyed.key)
+  local english,base,reason=Nexus.Localization.Resolve(keyed.key)
+  check(Nexus.Localization.ActiveLanguage()=='enUS' and Nexus.Localization.Kind(keyed.key)=='text'
+   and text==label and source=='base' and why==nil and english==label and base=='base' and reason==nil
+   and panelSource:find(keyed.bind,1,true)~=nil,'real label: '..label..' (key '..keyed.key..' bound by ui/Panel.lua, exact English)')
+ else
+  -- A source literal, or (full-UI localization) a reviewed static key whose
+  -- exact English in this English session is the label and that one of
+  -- these UI sources binds through a seam lookup. A data string alone, or a
+  -- key no consumer looks up, never counts.
+  local literal=all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r')
+  local bound
+  if not literal then
+   for _,key in ipairs(Nexus.Localization.Keys()) do
+    local english,base,reason=Nexus.Localization.Resolve(key)
+    if english==label and base=='base' and reason==nil and Nexus.Localization.Kind(key)=='text'
+     and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)) then bound=key;break end
+   end
+  end
+  check(literal or (Nexus.Localization.ActiveLanguage()=='enUS' and bound),'real label: '..label)
+ end
 end
 
--- Quoted status lines exist as shown (colour codes aside).
+-- Quoted status lines exist as shown (colour codes aside): in a source
+-- literal, or (full-UI localization) inside the exact English of a reviewed
+-- key that one of these UI sources looks up through the seam.
+local function keyedShows(line)
+ for _,key in ipairs(Nexus.Localization.Keys()) do
+  local kind=Nexus.Localization.Kind(key)
+  local english,base,reason
+  if kind=='text' or kind=='block' then english,base,reason=Nexus.Localization.Resolve(key)
+  elseif kind=='template' then
+   -- A template's literal English (its placeholders are code-filled), bound
+   -- where a UI source names the key.
+   english,base=Nexus.LocalizationEnglish[key],'base'
+  end
+  if english and base=='base' and reason==nil and has(english,line)
+   and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)
+    or (kind=='template' and all:find('Format("'..key..'"',1,true))) then return key end
+ end
+end
 for _,line in ipairs({'Waiting for the game to confirm the last Echo action.','No Echo choice is showing.','Auto ON — paused',
  'Owner identity not established.','Not prepared','Updating results...','Status: '}) do
- check(has(all,line),'real status text: '..line)
+ check(has(all,line) or (Nexus.Localization.ActiveLanguage()=='enUS' and keyedShows(line)),'real status text: '..line)
 end
 
 -- 7. Conservative fit: no unbreakable token wider than the Help body
@@ -112,12 +179,91 @@ for _,p in ipairs(Nexus.Help.Pages) do
 end
 
 -- 8. Reading every page, through every entry point, changes nothing.
--- /nexus help reopens the guide on the page last shown; Start page returns
--- to Getting started (existing behaviour).
-SlashCmdList.NEXUS('help');check(NexusHelpWindow:IsShown(),'/nexus help opens the guide')
+-- /nexus reference reopens the reference pages on the page last shown; Start
+-- page returns to Getting started (existing behaviour). /nexus help opens the
+-- guided setup coach instead (help.lua).
+SlashCmdList.NEXUS('reference');check(NexusHelpWindow:IsShown(),'/nexus reference opens the reference pages')
 local startButton
 for _,x in ipairs(H.frames) do if x:GetParent()==NexusHelpWindow and x.kind=='Button' and x:GetText()=='Start page' then startButton=x end end
-startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 7','Start page returns to Getting started')
-for i=1,7 do check(#NexusHelpWindow.body:GetText()>300,'page '..i..' has its text');Nexus.Help.Show(ids[i]) end
+startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 8','Start page returns to Getting started')
+for i=1,#ids do check(#NexusHelpWindow.body:GetText()>300,'page '..i..' has its text');Nexus.Help.Show(ids[i]) end
 check(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled==auto,'reading Help sends, acts and changes nothing')
+
+-- 9. /nexus anchor (B-04): only an exact positive integer is set. Any other
+-- argument keeps the previous preference and says the command's usage through
+-- the existing usage line; explicit off and the bare command still clear. No
+-- spell-ID upper bound is assumed. Nothing acts, sends or changes Auto.
+local settings=Nexus.Store.Settings()
+local ANCHOR_USAGE='/nexus anchor <spell ID>|off'
+local usage,usageSource=Nexus.Localization.Format('command.chat.usage',{usage=ANCHOR_USAGE})
+check(usageSource~='unavailable' and has(usage,ANCHOR_USAGE),'the anchor usage resolves through command.chat.usage: '..tostring(usage))
+for _,value in ipairs({'abc','1.5','-1','0','1e309','-1e309','nan','inf'}) do
+ settings.anchorSpellId=200001
+ local mark=#H.chat+1
+ SlashCmdList.NEXUS('anchor '..value)
+ local said=table.concat(H.chat,'\n',mark)
+ check(settings.anchorSpellId==200001,'anchor '..value..' keeps the previous anchor: '..tostring(settings.anchorSpellId))
+ check(has(said,ANCHOR_USAGE) and not has(said,'preference set to'),'anchor '..value..' says the usage, not a new value: '..said)
+end
+settings.anchorSpellId=200001
+local anchorMark=#H.chat+1
+SlashCmdList.NEXUS('anchor 200002')
+check(settings.anchorSpellId==200002 and has(table.concat(H.chat,'\n',anchorMark),'preference set to 200002'),'an exact positive integer is set and reported')
+SlashCmdList.NEXUS('anchor off');check(settings.anchorSpellId==nil,'explicit off clears the anchor')
+settings.anchorSpellId=200001
+SlashCmdList.NEXUS('anchor');check(settings.anchorSpellId==nil,'the bare command still clears the anchor')
+check(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled==auto,'anchor commands act, send and change Auto nothing')
+
+-- 10. Help before start-up completes (B-13). /nexus help, tutorial and guide
+-- still open the guide while the Store has not admitted the saved root, and a
+-- following world boundary writes no diagnostic key (diagnosticMeta,
+-- rollTraceLog or any other) into that root. PLAYER_LOGOUT, already clean
+-- with Auto OFF, stays a control. Fresh real runtimes; ADDON_LOADED starts
+-- the real coordinator and no frame advance completes it.
+local function Fresh()
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ NexusPanel=nil;NexusGuidedSetup=nil;NexusHelpWindow=nil
+ return dofile('tests/prototype/harness.lua'),dofile('tests/prototype/startup_support.lua')
+end
+local function Ready() return Nexus.StartupStatus().coreReady==true end
+local function CountAppends()
+ local counts={all=0,early=0};local append=Nexus.DiagnosticLogs.Append
+ Nexus.DiagnosticLogs.Append=function(...)
+  counts.all=counts.all+1;if not Ready() then counts.early=counts.early+1 end
+  return append(...)
+ end
+ return counts
+end
+for _,command in ipairs({'help','tutorial','guide'}) do
+ for _,event in ipairs({'PLAYER_ENTERING_WORLD','PLAYER_LEAVING_WORLD','PLAYER_LOGOUT'}) do
+  local label=command..'/'..event
+  local P,T=Fresh()
+  NexusDB=T.Profile(0,0);local raw=NexusDB
+  T.Load();P.Fire('ADDON_LOADED','Nexus')
+  check(not Ready(),label..': fixture start-up still pending')
+  local before=P.Clone(raw);local acts,sends=#P.actions,#P.sent
+  local appends=CountAppends()
+  SlashCmdList.NEXUS(command)
+  check(NexusGuidedSetup and NexusGuidedSetup:IsShown(),label..': the guide opens before start-up completes')
+  check(T.Equal(before,raw),label..': the command alone changes no saved key')
+  P.Fire(event)
+  local added={};for k in pairs(raw) do if before[k]==nil then added[#added+1]=k end end;table.sort(added)
+  check(not Ready() and NexusDB==raw,label..': still pending on the same raw root')
+  check(#added==0 and raw.diagnosticMeta==nil and raw.rollTraceLog==nil,label..': no saved key added before readiness: '..table.concat(added,','))
+  check(appends.early==0,label..': no diagnostic append before readiness: '..appends.early)
+  check(T.Equal(before,raw),label..': the raw root is unchanged')
+  check(#P.actions==acts and #P.sent==sends,label..': no action or send')
+ end
+end
+-- Ready control: after start-up the same guide and world boundary still
+-- record the roll-record boundary, never before readiness.
+do
+ local P=Fresh();P.Boot()
+ check(Ready(),'ready control: start-up completed')
+ SlashCmdList.NEXUS('help');check(NexusGuidedSetup and NexusGuidedSetup:IsShown(),'ready control: the guide opens')
+ local appends=CountAppends();local acts=#P.actions
+ P.Fire('PLAYER_ENTERING_WORLD')
+ check(appends.all>0 and appends.early==0,'ready control: the ready world boundary still records: '..appends.all)
+ check(#P.actions==acts,'ready control: no action')
+end
 print('PASS help_action_first checks='..checks)

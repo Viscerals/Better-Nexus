@@ -652,3 +652,459 @@ realPrint('PASS native_wishlist_tome_sequence: each level-1 Journal selection (A
     .. 'leaves exactly its tomes enabled and the rest disabled on the synthetic server, one confirmed '
     .. 'request per changed tome; Auto OFF, tome permission OFF and level 2 send none; native Wishlist '
     .. 'activation keeps the Saved Build association; checks=' .. #results)
+
+-- H20: first-run native Wishlist activation (appended; the cases above and
+-- their PASS are unchanged). NATIVE above covers only a populated Saved Build.
+-- Here the world is a fresh first run: no populated Saved Build, native
+-- active slot 0, every tome disabled. A native publication is the raw host
+-- change of the active slot plus its notification (as Native does); it is not
+-- a Nexus association and not an adapter Activate call.
+--
+-- Expected target, from source (core/GameAdapter.lua at 919ebe5):
+--   WishlistRoles.SelectedSavedBuild (3001-3013): a native active slot above
+--     the Saved Build range keeps a Saved Build only when one was kept, and
+--     ObserveSavedBuild (2989-2995) keeps one only by reading a populated
+--     Saved Build as active. With none, the answer is nil, false for slot 0,
+--     101 and 102 alike.
+--   A.Wishlist (3669-3700): with no selected or kept Saved Build in range,
+--     the target is ResolveFirstRunWishlist (2770-2775), the stored
+--     state.firstRunWishlist. ReadAssignedWishlist (3846-3856) takes that same
+--     record as the saved assignment when the native slot has no association.
+--   ui/JournalTab.lua (1564, 1428-1456): with no selected Saved Build, the
+--     picker row calls A.SetFirstRunWishlist, which stamps a new assignment.
+-- So native activation of a Wishlist mirror neither assigns that Wishlist nor
+-- changes the stored first-run assignment, and only an explicit Journal
+-- choice moves the target. Every boundary prints the raw synthetic host and
+-- stored facts (H20RAW) before any adapter or observer read (H20VIEW).
+-- Each read window is also checked for passivity (H20-READ-PASSIVE): an
+-- independent string snapshot of host actions, accepted requests, queued
+-- replies, the raw disabled flags, pending directions, the native slot and
+-- the durable assignment records, taken before the reads, must equal the
+-- one taken after them (H20AFTER). Each completed case must end settled
+-- after its final reads (H20-CASE-SETTLED): no undelivered reply, nothing
+-- pending, the expected tome set, and no request or host action after the
+-- last guarded read. The held boundary in HELD is checked for passivity
+-- only; its queue and pending entries stay distinct from delivery.
+--
+--   FIRST    reset to 1 and login at 1: Journal A, native 101, 102, 0, 102,
+--            Journal C with B natively active, native 0, idle.
+--   GUARD    Auto OFF and/or tome permission OFF over the same route plus
+--            observer reads: no tome request. Control: grant, Journal B.
+--   DISC     discovery answer and mirror unknown: assignment and native facts
+--            kept, held reason shown, no toggle; a known answer and its
+--            notification restored in the same runtime settle the target.
+--   HELD     every reply held across native 101/102/0 publications: requests
+--            accepted and pending, server mirror unchanged, no duplicate; the
+--            queued replies released settle the Journal choice.
+--
+-- These results are counted on their own below: any H20 miss or setup failure
+-- raises after the PASS line above, so the file still exits nonzero.
+local h20First = #results + 1
+realPrint('H20 prior checks=' .. (h20First - 1))
+
+-- Direction of each accepted request, read from the raw host flag at the
+-- call: a toggle of a disabled Echo is an enable request. Wraps the World
+-- recorder (which owns W.requests and W.queue); adds no answer of its own.
+local function H20Instrument(W)
+    local H, inner = W.H, W.H.service.ToggleTomeEcho
+    H.service.ToggleTomeEcho = function(id)
+        local wasDisabled, count = H.disabled[id] == true, #W.requests
+        local accepted = inner(id)
+        if accepted and #W.requests == count + 1 then
+            W.requests[#W.requests].dir = wasDisabled and 'enable' or 'disable'
+        end
+        return accepted
+    end
+    W.h20Nexus, W.h20Adapter = Nexus, W.A
+end
+
+local function H20Publish(slot)
+    return function(W)
+        W.H.perks.serverActiveSlot = slot; W.H.Notify()
+        return W.H.perks.serverActiveSlot == slot,
+            'raw native active slot ' .. tostring(slot) .. ' published with its notification'
+    end
+end
+
+local function H20RequestText(W, step)
+    local out = {}
+    for _, r in ipairs(W.requests) do
+        if step == nil or r.step == step then
+            local i = INDEX_OF_ECHO[r.id]
+            out[#out + 1] = (i and TOME[i] or '?') .. ':' .. tostring(r.id) .. ':' .. tostring(r.dir)
+        end
+    end
+    return #out > 0 and table.concat(out, ',') or 'none'
+end
+
+local function H20FirstText(first)
+    if type(first) ~= 'table' then return tostring(first) end
+    return tostring(first.slot) .. '/' .. tostring(first.name) .. '/' .. tostring(first.assignmentId)
+end
+
+-- Independent string snapshot of the consequential facts a read must leave
+-- alone. Internal caches and diagnostic counters are deliberately not in it.
+local H20_SNAP_PARTS = {'actions', 'requests', 'queue', 'disabled', 'pending', 'native', 'assignment'}
+local function H20Snap(W)
+    local H, out = W.H, {}
+    local actions = {}
+    for _, action in ipairs(H.actions) do
+        local parts = {}
+        for i = 1, #action do
+            parts[#parts + 1] = type(action[i]) == 'table' and 'table' or tostring(action[i])
+        end
+        actions[#actions + 1] = table.concat(parts, ':')
+    end
+    out.actions = #actions .. '{' .. table.concat(actions, ',') .. '}'
+    local requests = {}
+    for _, r in ipairs(W.requests) do
+        requests[#requests + 1] = tostring(r.id) .. ':' .. tostring(r.dir) .. ':' .. tostring(r.step)
+            .. ':' .. string.format('%.2f', r.at)
+    end
+    out.requests = #requests .. '{' .. table.concat(requests, ',') .. '}'
+    local queue = {}
+    for _, q in ipairs(W.queue) do queue[#queue + 1] = tostring(q.id) .. '@' .. string.format('%.2f', q.due) end
+    out.queue = #queue .. '{' .. table.concat(queue, ',') .. '}'
+    local disabled = {}
+    for id, flag in pairs(H.disabled) do disabled[#disabled + 1] = tostring(id) .. '=' .. tostring(flag) end
+    table.sort(disabled)
+    out.disabled = '{' .. table.concat(disabled, ',') .. '}'
+    out.pending = PendingText()
+    out.native = 'active=' .. tostring(H.perks.serverActiveSlot) .. ' discovery='
+        .. tostring(H.perks.discoveredEchoes ~= nil) .. '/' .. tostring(H.discovered ~= nil)
+    local state = Nexus.Store.State() or {}
+    local first, links = state.firstRunWishlist, {}
+    if type(state.loadoutWishlists) == 'table' then
+        for slot, link in pairs(state.loadoutWishlists) do
+            links[#links + 1] = tostring(slot) .. '=' .. (type(link) == 'table'
+                and (tostring(link.name) .. '/' .. tostring(link.assignmentId)) or tostring(link))
+        end
+    end
+    table.sort(links)
+    out.assignment = 'first=' .. H20FirstText(first) .. '/' .. tostring(type(first) == 'table' and first.key or nil)
+        .. ' links{' .. table.concat(links, ',') .. '} serial=' .. tostring(state.wishlistAssignmentSerial)
+    return out
+end
+
+-- Compares a snapshot taken before a read window with one taken now.
+-- `reads` names the reads of that window.
+local function H20Passive(W, label, before, reads)
+    local after, changed = H20Snap(W), {}
+    for _, part in ipairs(H20_SNAP_PARTS) do
+        if after[part] ~= before[part] then
+            changed[#changed + 1] = part .. ' ' .. before[part] .. ' -> ' .. after[part]
+        end
+    end
+    W.h20LastRequests, W.h20LastActions = #W.requests, #W.H.actions
+    realPrint(string.format('H20AFTER %s %s #%d %s: actions %s requests %s queue %s pending %s disabled %s %s %s',
+        W.group, W.case, W.step, label, after.actions, after.requests, after.queue, after.pending,
+        after.disabled, after.native, after.assignment))
+    record(W.group, W.case, W.step, label, 'H20-READ-PASSIVE', #changed == 0,
+        reads .. ' left host actions, requests, queue, mirror, pending, native and assignment facts '
+            .. (#changed == 0 and 'unchanged' or ('changed: ' .. table.concat(changed, '; '))))
+end
+
+-- One boundary. `key`: the Wishlist expected as the stored first-run
+-- assignment and the target (nil: none yet). `identity`: the assignmentId it
+-- must still carry (nil: not compared). Returns the stored assignmentId.
+local function H20Facts(W, label, active, key, identity)
+    local H, n = W.H, W.step
+    -- Raw synthetic host and stored state first, and the passivity snapshot.
+    local before = H20Snap(W)
+    local rawActive = H.perks.serverActiveSlot
+    local rawDisabled = {}
+    for i = 1, #GATED do rawDisabled[#rawDisabled + 1] = TOME[i] .. '=' .. tostring(H.disabled[GATED[i]] == true) end
+    local queued = {}
+    for _, q in ipairs(W.queue) do queued[#queued + 1] = tostring(q.id) end
+    local state = Nexus.Store.State() or {}
+    local first = state.firstRunWishlist
+    local links = type(state.loadoutWishlists) == 'table' and state.loadoutWishlists or {}
+    local linked = {}
+    for slot in pairs(links) do linked[#linked + 1] = tostring(slot) end
+    table.sort(linked)
+    realPrint(string.format('H20RAW %s %s #%d %s: native active=%s disabled{%s} server %s requests(step) %s requests(all) %s queued{%s} pending %s firstRun=%s loadoutLinks{%s} discovery=%s',
+        W.group, W.case, n, label, tostring(rawActive), table.concat(rawDisabled, ','), Show(Server(W)),
+        H20RequestText(W, n), H20RequestText(W), table.concat(queued, ','), PendingText(), H20FirstText(first),
+        table.concat(linked, ','), tostring(H.perks.discoveredEchoes ~= nil)))
+    -- Derived adapter views afterwards.
+    local slots = W.A.Slots() or {}
+    local selected, kept = W.A.SelectedSavedBuild()
+    local a = W.A.AssignedWishlist() or {}
+    local assignedText = AssignedText(W)
+    realPrint(string.format('H20VIEW %s %s #%d %s: Slots().activeSlot=%s SelectedSavedBuild=%s,%s assigned %s identity=%s note=%s',
+        W.group, W.case, n, label, tostring(slots.activeSlot), tostring(selected), tostring(kept),
+        assignedText, tostring(a.identity), tostring(a.note)))
+    H20Passive(W, label, before, 'Slots, SelectedSavedBuild, AssignedWishlist and AssignedText')
+    record(W.group, W.case, n, label, 'H20-NATIVE-SLOT', rawActive == active and tonumber(slots.activeSlot) == active,
+        'raw ' .. tostring(rawActive) .. ', adapter ' .. tostring(slots.activeSlot) .. ', want ' .. tostring(active))
+    record(W.group, W.case, n, label, 'H20-SELECTED', selected == nil and kept == false,
+        'SelectedSavedBuild ' .. tostring(selected) .. ',' .. tostring(kept) .. '; want nil,false (no Saved Build kept)')
+    record(W.group, W.case, n, label, 'H20-NO-LOADOUT-LINK', #linked == 0,
+        'stored Saved Build associations {' .. table.concat(linked, ',') .. '}; want none')
+    if key == nil then
+        record(W.group, W.case, n, label, 'H20-FIRST-RUN', first == nil and a.state == 'unassigned',
+            'stored ' .. H20FirstText(first) .. ', assigned ' .. tostring(a.state) .. '; want none, unassigned')
+        return nil
+    end
+    local w = WISHLISTS[key]
+    local storedOk = type(first) == 'table' and tonumber(first.slot) == w.slot and first.name == w.name
+        and first.assignmentId ~= nil and (identity == nil or first.assignmentId == identity)
+    record(W.group, W.case, n, label, 'H20-FIRST-RUN', storedOk,
+        'stored ' .. H20FirstText(first) .. '; want ' .. w.slot .. '/' .. w.name
+            .. (identity and ('/' .. tostring(identity)) or ''))
+    local id = type(first) == 'table' and first.assignmentId or nil
+    record(W.group, W.case, n, label, 'H20-TARGET', a.state == 'ready' and a.name == w.name
+            and id ~= nil and a.identity == id,
+        'assigned ' .. assignedText .. ' identity ' .. tostring(a.identity) .. '; want ready/' .. w.name
+            .. ' identity ' .. tostring(id))
+    return id
+end
+
+-- The tome-automation hold the observer states (read-only).
+local function H20HeldReason(W, label, wantUnknown)
+    local before = H20Snap(W)
+    local raw = W.H.perks.discoveredEchoes == nil and W.H.discovered == nil
+    local obs = W.A.TomeStateObservation() or {}
+    local reasons = table.concat(obs.reasons or {}, '; ')
+    local synced = W.A.DiscoverySynced()
+    H20Passive(W, label, before, 'TomeStateObservation and DiscoverySynced')
+    local held = reasons:find('discovery mirror is unsynced', 1, true) ~= nil
+    record(W.group, W.case, W.step, label, 'H20-HELD-REASON',
+        (wantUnknown and raw and synced == false and held)
+            or (not wantUnknown and not raw and synced == true and not held),
+        'raw discovery unknown=' .. tostring(raw) .. ' DiscoverySynced=' .. tostring(synced)
+            .. ' reasons [' .. reasons .. ']; server ' .. Show(Server(W)))
+end
+
+-- Whole-case guard: the only host mutation calls are the recorded accepted
+-- tome toggles, each with a direction. No upload, Save, Activate, lock,
+-- unlock, Select (take), banish, freeze or reroll; the OrbService has no
+-- ConfirmSpend, so no Orb can be spent here.
+local function H20Guard(W, key)
+    W.step = W.step + 1
+    local other, toggles, undirected = {}, 0, 0
+    for _, action in ipairs(W.H.actions) do
+        if action[1] == 'toggle' then toggles = toggles + 1
+        else other[#other + 1] = tostring(action[1]) end
+    end
+    for _, r in ipairs(W.requests) do if r.dir == nil then undirected = undirected + 1 end end
+    local spend = rawget(ProjectEbonhold.OrbService, 'ConfirmSpend')
+    record(W.group, W.case, W.step, 'whole case', 'H20-NO-OTHER-MUTATION',
+        #other == 0 and toggles == #W.requests and undirected == 0 and spend == nil
+            and Nexus == W.h20Nexus and Nexus.GameAdapter == W.h20Adapter,
+        'other host actions {' .. table.concat(other, ',') .. '}; toggles ' .. toggles .. ' = accepted '
+            .. #W.requests .. ' (' .. H20RequestText(W) .. '); undirected ' .. undirected
+            .. '; Orb spend member ' .. tostring(spend) .. '; same runtime ' .. tostring(Nexus == W.h20Nexus))
+    -- Settled after the final reads: nothing undelivered or pending, the
+    -- case's final tome set, and nothing sent after the last guarded read.
+    local want = Vector(WISHLISTS[key].tomes)
+    local server = Server(W)
+    record(W.group, W.case, W.step, 'whole case', 'H20-CASE-SETTLED',
+        #W.queue == 0 and next(Pending()) == nil and Same(server, want)
+            and #W.requests == W.h20LastRequests and #W.H.actions == W.h20LastActions,
+        'undelivered replies ' .. #W.queue .. '; pending ' .. PendingText() .. '; server ' .. Show(server)
+            .. '; want ' .. Show(want) .. '; requests ' .. #W.requests .. ' (at the last guarded read '
+            .. tostring(W.h20LastRequests) .. '); host actions ' .. #W.H.actions .. ' (at the last guarded read '
+            .. tostring(W.h20LastActions) .. ')')
+end
+
+local function H20FirstRunNative(W)
+    H20Instrument(W)
+    Enter(W)
+    H20Facts(W, 'fresh first-run world', 0, nil)
+    Step(W, 'Journal selection A', 'A', WISHLISTS.A.tomes)
+    local idA = H20Facts(W, 'Journal selection A', 0, 'A')
+    Step(W, 'native active A101', H20Publish(WISHLISTS.A.slot), nil)
+    H20Facts(W, 'native active A101', WISHLISTS.A.slot, 'A', idA)
+    Step(W, 'native active B102', H20Publish(WISHLISTS.B.slot), nil)
+    H20Facts(W, 'native active B102', WISHLISTS.B.slot, 'A', idA)
+    Step(W, 'native active 0', H20Publish(0), nil)
+    H20Facts(W, 'native active 0', 0, 'A', idA)
+    Step(W, 'native active B102 again', H20Publish(WISHLISTS.B.slot), nil)
+    H20Facts(W, 'native active B102 again', WISHLISTS.B.slot, 'A', idA)
+    Step(W, 'Journal selection C while B is natively active', 'C', WISHLISTS.C.tomes)
+    local idC = H20Facts(W, 'Journal selection C while B is natively active', WISHLISTS.B.slot, 'C')
+    record(W.group, W.case, W.step, 'Journal selection C', 'H20-NEW-ASSIGNMENT', idC ~= nil and idC ~= idA,
+        'assignment ' .. tostring(idA) .. ' -> ' .. tostring(idC))
+    Step(W, 'native active 0 after C', H20Publish(0), nil)
+    H20Facts(W, 'native active 0 after C', 0, 'C', idC)
+    Idle(W, 'idle after the native sequence', IDLE_SECONDS)
+    H20Facts(W, 'idle after the native sequence', 0, 'C', idC)
+    H20Guard(W, 'C')
+end
+
+local function H20Guarded(W)
+    H20Instrument(W)
+    Enter(W)
+    H20Facts(W, 'fresh first-run world', 0, nil)
+    Step(W, 'Journal selection A', 'A', nil)
+    local idA = H20Facts(W, 'Journal selection A', 0, 'A')
+    Step(W, 'native active A101', H20Publish(WISHLISTS.A.slot), nil)
+    H20Facts(W, 'native active A101', WISHLISTS.A.slot, 'A', idA)
+    Step(W, 'native active B102', H20Publish(WISHLISTS.B.slot), nil)
+    H20Facts(W, 'native active B102', WISHLISTS.B.slot, 'A', idA)
+    Step(W, 'observer and assignment reads', function(W)
+        local before = H20Snap(W)
+        Journal()
+        local a = W.A.AssignedWishlist() or {}
+        local obs = W.A.TomeStateObservation() or {}
+        W.A.DisabledLevers(); W.A.SelectedSavedBuild(); Nexus.RecomputeStats()
+        H20Passive(W, 'observer and assignment reads', before,
+            'Journal refresh, AssignedWishlist, TomeStateObservation, DisabledLevers, SelectedSavedBuild and RecomputeStats')
+        return a.state == 'ready', 'assigned ' .. tostring(a.state) .. '/' .. tostring(a.name)
+            .. ', observer rows ' .. #(obs.rows or {})
+    end, nil)
+    Step(W, 'Journal selection C while B is natively active', 'C', nil)
+    local idC = H20Facts(W, 'Journal selection C while B is natively active', WISHLISTS.B.slot, 'C')
+    Step(W, 'native active 0', H20Publish(0), nil)
+    H20Facts(W, 'native active 0', 0, 'C', idC)
+    Idle(W, 'idle with the permission withheld', IDLE_SECONDS)
+    -- Control, as Guarded: grant only what was withheld; the same route then mutates.
+    Step(W, 'grant the withheld permission', function(W)
+        if W.o.tomePermission == false then SetPermission(true) end
+        if not W.o.auto then AutoOn(W) end
+        local auto, tome = Nexus.RecomputeStats().autoEnabled, Nexus.Store.Settings().autoDisable
+        return auto == true and tome == true, 'Auto=' .. tostring(auto) .. ' tomePermission=' .. tostring(tome)
+    end, nil, {observeOnly=true})
+    Step(W, 'control: Journal selection B with the permission granted', 'B', WISHLISTS.B.tomes)
+    H20Facts(W, 'control: Journal selection B', 0, 'B')
+    H20Guard(W, 'B')
+end
+
+local function H20Discovery(W)
+    H20Instrument(W)
+    Enter(W)
+    Step(W, 'Journal selection A', 'A', WISHLISTS.A.tomes)
+    local idA = H20Facts(W, 'Journal selection A', 0, 'A')
+    Step(W, 'native active B102', H20Publish(WISHLISTS.B.slot), nil)
+    H20Facts(W, 'native active B102', WISHLISTS.B.slot, 'A', idA)
+    Step(W, 'discovery answer and mirror unknown', function(W)
+        W.h20Discovered = W.H.discovered
+        W.H.discovered = nil; W.H.perks.discoveredEchoes = nil; W.H.Notify()
+        return W.H.service.GetDiscoveredEchoes() == nil, 'synthetic GetDiscoveredEchoes and Perks.discoveredEchoes now nil'
+    end, nil)
+    H20Facts(W, 'discovery unknown', WISHLISTS.B.slot, 'A', idA)
+    H20HeldReason(W, 'discovery unknown', true)
+    Step(W, 'Journal selection C while discovery is unknown', 'C', nil)
+    local idC = H20Facts(W, 'Journal selection C while discovery is unknown', WISHLISTS.B.slot, 'C')
+    H20HeldReason(W, 'Journal selection C while discovery is unknown', true)
+    Step(W, 'native active 0 while discovery is unknown', H20Publish(0), nil)
+    H20Facts(W, 'native active 0 while discovery is unknown', 0, 'C', idC)
+    Idle(W, 'idle while discovery is unknown', IDLE_SECONDS)
+    H20HeldReason(W, 'idle while discovery is unknown', true)
+    Step(W, 'known discovery answer restored with its notification', function(W)
+        W.H.discovered = W.h20Discovered; W.H.perks.discoveredEchoes = W.H.discovered; W.H.Notify()
+        return Nexus == W.h20Nexus, 'same runtime ' .. tostring(Nexus == W.h20Nexus)
+    end, WISHLISTS.C.tomes)
+    H20Facts(W, 'discovery restored', 0, 'C', idC)
+    H20HeldReason(W, 'discovery restored', false)
+    H20Guard(W, 'C')
+end
+
+local function H20Held(W)
+    H20Instrument(W)
+    Enter(W)
+    Step(W, 'Journal selection A', 'A', WISHLISTS.A.tomes)
+    local idA = H20Facts(W, 'Journal selection A', 0, 'A')
+    Step(W, 'native active A101', H20Publish(WISHLISTS.A.slot), nil)
+    H20Facts(W, 'native active A101', WISHLISTS.A.slot, 'A', idA)
+    -- One step: Journal C with every reply held across native 102 and 0.
+    W.step = W.step + 1
+    local n, label = W.step, 'Journal selection C, replies held across native 102 and 0'
+    local before, want = Server(W), Vector(WISHLISTS.C.tomes)
+    W.hold = true
+    record(W.group, W.case, n, label, 'PICK', Pick(W, 'C'))
+    Run(W, 1)
+    H20Publish(WISHLISTS.B.slot)(W); Run(W, 1)
+    H20Publish(0)(W); Run(W, 1)
+    local held, pending, count, unmatched, stepped = Server(W), Pending(), {}, {}, 0
+    for _, r in ipairs(W.requests) do
+        if r.step == n then
+            stepped = stepped + 1
+            local i = INDEX_OF_ECHO[r.id]
+            count[r.id] = (count[r.id] or 0) + 1
+            local entry = i and pending[LEVER[i]]
+            if not (type(entry) == 'table' and entry.want == (r.dir == 'disable')) then
+                unmatched[#unmatched + 1] = (i and TOME[i] or tostring(r.id)) .. ':' .. tostring(r.dir)
+            end
+        end
+    end
+    local duplicate = {}
+    for id, c in pairs(count) do if c > 1 then duplicate[#duplicate + 1] = tostring(id) .. 'x' .. c end end
+    record(W.group, W.case, n, label, 'H20-HELD-NOT-CHANGED', Same(held, before),
+        'server mirror while held ' .. Show(held) .. '; before ' .. Show(before))
+    record(W.group, W.case, n, label, 'H20-HELD-QUEUED', stepped > 0 and #W.queue == stepped,
+        'accepted while held ' .. H20RequestText(W, n) .. '; undelivered replies ' .. #W.queue)
+    record(W.group, W.case, n, label, 'H20-HELD-PENDING', stepped > 0 and #unmatched == 0,
+        'pending ' .. PendingText() .. (#unmatched > 0 and ('; no matching pending entry for '
+            .. table.concat(unmatched, ',')) or ''))
+    record(W.group, W.case, n, label, 'H20-HELD-NO-DUPLICATE', #duplicate == 0,
+        'same-toggle requests while pending ' .. (#duplicate > 0 and table.concat(duplicate, ',') or 'none'))
+    local idC = H20Facts(W, 'held, before release', 0, 'C')
+    W.hold = false
+    local waited = Settle(W, want)
+    local after = Server(W)
+    local exact, sent, wrong = Sends(W, n, before, want)
+    record(W.group, W.case, n, label, 'TOMES', Same(after, want), 'server ' .. Show(after) .. '; want ' .. Show(want))
+    record(W.group, W.case, n, label, 'REQUESTS', exact,
+        'accepted requests ' .. sent .. ' (' .. H20RequestText(W, n) .. ')' .. (wrong ~= '' and ('; ' .. wrong) or ''))
+    record(W.group, W.case, n, label, 'CONFIRMED', Quiet(W),
+        'pending ' .. PendingText() .. '; undelivered replies ' .. #W.queue .. '; settled after ' .. string.format('%.2f', waited) .. 's')
+    H20Facts(W, 'released and settled', 0, 'C', idC)
+    Step(W, 'native active B102 after release', H20Publish(WISHLISTS.B.slot), nil)
+    H20Facts(W, 'native active B102 after release', WISHLISTS.B.slot, 'C', idC)
+    H20Guard(W, 'C')
+end
+
+local H20_PLAN = {}
+local function H20Case(group, case, o, body)
+    H20_PLAN[#H20_PLAN + 1] = group .. ' ' .. case
+    Case(group, case, o, body)
+end
+for _, entry in ipairs({'reset', 'login1'}) do
+    H20Case('H20-FIRST', 'first_run/' .. entry,
+        {destination='first_run', entry=entry, auto=true, tomePermission=true}, H20FirstRunNative)
+end
+for _, g in ipairs({{false, true}, {true, false}, {false, false}}) do
+    H20Case('H20-GUARD', 'first_run/auto-' .. (g[1] and 'on' or 'off') .. '/tome-' .. (g[2] and 'on' or 'off'),
+        {destination='first_run', entry='reset', auto=g[1], tomePermission=g[2]}, H20Guarded)
+end
+H20Case('H20-DISC', 'first_run/reset',
+    {destination='first_run', entry='reset', auto=true, tomePermission=true}, H20Discovery)
+H20Case('H20-HELD', 'first_run/reset',
+    {destination='first_run', entry='reset', auto=true, tomePermission=true}, H20Held)
+
+-- H20 aggregation over only the records added above.
+local h20Seen, h20Missed, h20Total = {}, {}, 0
+for i = h20First, #results do
+    local r = results[i]
+    local key = r.group .. ' ' .. r.case
+    local c = h20Seen[key] or {ok=0, miss=0, guard=false, writes=false}
+    h20Seen[key] = c
+    h20Total = h20Total + 1
+    if r.check == 'H20-NO-OTHER-MUTATION' then c.guard = true end
+    if r.check == 'NO-BUILD-WRITES' then c.writes = true end
+    if r.ok then c.ok = c.ok + 1
+    else
+        c.miss = c.miss + 1
+        h20Missed[#h20Missed + 1] = key .. ' #' .. tostring(r.step) .. ' ' .. r.check .. ' (' .. r.label .. ')'
+    end
+end
+for _, key in ipairs(H20_PLAN) do
+    local c = h20Seen[key]
+    if not (c and c.guard and c.writes) then
+        h20Missed[#h20Missed + 1] = key .. ' did not reach its whole-case guards'
+    end
+    realPrint('H20 SUMMARY ' .. key .. ' ok=' .. (c and c.ok or 0) .. ' miss=' .. (c and c.miss or 0))
+end
+if #h20Missed > 0 or h20Total == 0 then
+    error('FAIL native_wishlist_tome_sequence H20: ' .. #h20Missed .. ' expectation(s) not met of '
+        .. h20Total .. ':\n' .. table.concat(h20Missed, '\n'), 0)
+end
+realPrint('PASS native_wishlist_tome_sequence H20: first-run native Wishlist activation (101, 102, 0) '
+    .. 'keeps the stored first-run assignment and target, selects no Saved Build and sends no tome '
+    .. 'request; only Journal choices move the target with one confirmed request per changed tome; '
+    .. 'Auto OFF / tome permission OFF send none; unknown discovery holds and a restored answer settles; '
+    .. 'held replies stay pending without duplicates until released; every boundary read is passive '
+    .. 'and every case ends settled; checks=' .. h20Total
+    .. ' (prior ' .. (h20First - 1) .. ')')

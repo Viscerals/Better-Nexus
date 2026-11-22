@@ -1,27 +1,27 @@
+-- Start/Stop rework (2026-11-19). The idle Orb window has no maximum box, Max
+-- button, usage line or Advanced exclusions: Start and Stop only. At zero
+-- balance Start is unavailable and says why; the window keeps its closed size;
+-- Close still releases a stale input focus. Nothing is sent.
+-- (Replaces the strict legacy maximum EditBox idle pin.)
 local H=dofile('tests/prototype/orbs_support.lua');local M,O=H.M,H.O
 dofile('tests/prototype/legacy_editbox_support.lua')(H)
 H.OrbPlan();O.charges=0
 local count=#H.actions
 local ok,f=pcall(Nexus.OrbPanel.Show)
-assert(ok,'legacy idle Orb render failed: '..tostring(f))
+assert(ok,'idle Orb render failed: '..tostring(f))
 assert(f.limit.Enable==nil and f.limit.Disable==nil and f.limit.IsEnabled==nil,'fixture must not supply Button methods')
 assert(f.limit.UnknownCapitalizedMethod==nil,'fixture must not invent unknown methods')
-assert(f.limit.mouseEnabled and f.limit.keyboardEnabled,'idle maximum must be editable')
--- No saved maximum: the draft follows the confirmed balance, here zero (not 1 or 10).
-assert(f.limit:GetText()=='0' and f.usage:GetText()=='Orbs used: 0 / 0','actual maximum and usage must render: '..f.limit:GetText()..' / '..f.usage:GetText())
-assert(f.status:GetText():find('No confirmed Orbs are available.',1,true),'zero balance explanation must render')
+for _,k in ipairs({'limit','max','usage','approval','advancedToggle','advanced'}) do
+ assert(not f[k]:IsShown(),'idle: no '..k)
+end
+assert(f.balance:GetText():find('^Confirmed Orb balance: 0'),'the balance line still renders: '..tostring(f.balance:GetText()))
 assert(not f.start:IsEnabled() and not f.stop:IsEnabled(),'zero balance cannot start a run')
-assert(not f.advanced:IsShown() and f:GetHeight()==445,'Advanced starts hidden in the closed-size panel')
-f.limit:SetFocus();assert(H.TypeLimit(f,'3'))
-Nexus.OrbPanel.Refresh()
-assert(f.limit:HasFocus() and f.limit:GetText()=='3','passive refresh must preserve idle typing')
-f.limit:GetScript('OnEnterPressed')(f.limit)
-assert(not f.limit:HasFocus() and M.Status().config.maxOrbs==3,'Enter saves the idle maximum and releases focus')
-f.limit:SetFocus();assert(H.TypeLimit(f,'9'));f.limit:GetScript('OnEscapePressed')(f.limit)
-assert(not f.limit:HasFocus() and f.limit:GetText()=='3','Escape restores the saved maximum')
-H.OrbButton('Advanced',f):Click();assert(f.advanced:IsShown() and f:GetHeight()==660)
-H.OrbButton('Advanced',f):Click();assert(not f.advanced:IsShown() and f:GetHeight()==445)
+assert(f.startWhy:GetText():find('No confirmed Orbs',1,true),'zero balance: Start says why: '..tostring(f.startWhy:GetText()))
+local closedH=f:GetHeight()
+assert(closedH<=445 and f._bandsBottom<=closedH,'the closed-size panel')
+O.charges=3;Nexus.OrbPanel.Refresh()
+assert(f.start:IsEnabled() and not f.stop:IsEnabled() and f:GetHeight()<=445,'with Orbs Start is offered in the same window')
 f.limit:SetFocus();H.OrbButton('Close',f):Click()
 assert(not f:IsShown() and not f.limit:HasFocus(),'Close releases the hidden input focus')
-assert(#H.actions==count,'opening/editing/closing the zero-balance panel submits no gameplay action')
-print('PASS strict legacy EditBox idle/zero balance/max usage/status/focus/Advanced/Close')
+assert(#H.actions==count,'opening/refreshing/closing the panel submits no gameplay action')
+print('PASS idle Orb window: Start/Stop only, zero balance, closed size, Close')

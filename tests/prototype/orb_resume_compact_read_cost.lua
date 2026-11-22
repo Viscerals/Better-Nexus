@@ -23,7 +23,7 @@ local function wrap(t,k,label)
  t[k]=function(...)if measuring then counts[label]=(counts[label]or 0)+1 end;return fn(...)end
 end
 for _,spec in ipairs({
- {A.Orbs,'Read','adapterRead'},{A,'Owned','owned'},{A,'EchoActiveSlotGeneration','reconcile'},
+ {A.Orbs,'Read','adapterRead'},{A,'Owned','owned'},{A,'InFlight','flight'},{A,'EchoActiveSlotGeneration','reconcile'},
  {A,'AutomationSignature','fallbackSignature'},{A,'RequestGranted','refresh'},{A,'Poll','poll'},
  {A.Orbs,'Acquire','acquire'},{A.Orbs,'Rebind','rebind'},
  {M,'Pump','pump'},{M,'Resume','resumeAction'},
@@ -35,7 +35,7 @@ pairs=function(t)if measuring and t==cat.rows then counts.fullCatalogWalk=(count
 local function Read(label)
  counts={};local saved=F.Serialize(NexusDB);local actions=#H.actions
  measuring=true;local s=M.CompactStatus();measuring=false
- for _,k in ipairs({'adapterRead','owned','reconcile','fallbackSignature','refresh','poll',
+ for _,k in ipairs({'adapterRead','owned','flight','reconcile','fallbackSignature','refresh','poll',
  'acquire','rebind','pump','resumeAction','runtimeFacade','storeMutation','fullCatalogWalk'})do
   check((counts[k]or 0)==0,label..' performs no '..k)
  end
@@ -53,6 +53,24 @@ local trust=A.OwnershipTrustView;A.OwnershipTrustView=nil
 check(not Read('missing context').canResume,'missing required passive context fails closed')
 A.OwnershipTrustView=trust
 check(Read('context restored').canResume,'restored passive context does not change permission or pending work')
+-- A real admitted automatic check is paused before its owed offer appears.
+-- This is the paused hot path that must remain display-only at 4 Hz.
+local R=dofile('tests/prototype/orb_recovery_support.lua')
+local server=R.Server(H,{mode='hold'})
+H.service.RequestChoice=function()SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)end
+check(M.Resume(),'SETUP resume existing approved run before automatic check')
+for _=1,120 do if M.ContinueView().liveStage=='checking' then break end;H.Advance(.25)end
+check(M.ContinueView().liveStage=='checking','SETUP real automatic check was admitted')
+check(M.Pause(),'SETUP pause the admitted automatic owner')
+H.Offer();H.Advance(.5)
+check(M.ContinueView().liveStage=='held',
+ 'SETUP held automatic owner has a current owed offer without a full Status read')
+check(Read('held automatic owed offer').canResume,'EXPECT held automatic compact Resume uses passive facts only')
+-- Display eligibility cannot replace direct Resume's current action guards.
+H.perks.pendingReroll=true
+check(not Read('owed offer gains host latch').canResume,'EXPECT compact-only owed Resume drops immediately for a new host latch')
+check(not M.Resume() and H.Count('take')==0,'GUARD fresh host-pending state refuses real Resume')
+H.perks.pendingReroll=nil
 for i=#originals,1,-1 do local o=originals[i];o[1][o[2]]=o[3]end
 pairs=rawPairs
 print('PASS orb_resume_compact_read_cost checks='..checks..' catalogRows='..catalogSize)

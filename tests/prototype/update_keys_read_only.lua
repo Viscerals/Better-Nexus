@@ -88,4 +88,72 @@ check(hint and hint.display=='1.20.0-beta.1 test.9037','read-only hint: it is sh
 check(Nexus.Updates.Status().state=='hint','read-only hint: and reaches the status')
 check(Nexus.Updates.DismissHint()==true,'read-only hint: the dismissal is accepted')
 check(Keys()==hintBefore,'read-only hint: and none of it wrote an update key')
+
+-- 4. A read-only root stays read-only while the character identity is not
+-- known (the client placeholder name, or no realm yet). The saved-format
+-- verdict comes first, so the owner refuses rather than answering "loading",
+-- and no update path rewrites, quarantines or removes a saved key.
+local identityCases={
+ {'Unknown name',function(real)return function(unit)if unit=='player' then return 'Unknown' end return real(unit)end end,nil},
+ {'empty realm',nil,function()return '' end},
+}
+for _,format in ipairs({
+ {'future',function(db)db.settingsVersion=6 end},
+ {'unverified',function(db)db.settingsVersion=5;db.settings.syncMode='sometimes' end},
+ {'malformed',function(db)db.settingsVersion={version=5} end}}) do
+ for _,case in ipairs(identityCases) do
+  local label=format[1]..' / '..case[1]
+  local db=Saved(F.Database({mutate=format[2]}))
+  local keysBefore=F.Serialize({notice=db.updateNotice,advisory=db.updateAdvisory,
+   dismissed=db.updateDismissed,noticeQuarantine=nil,advisoryQuarantine=nil})
+  Boot(db)
+  check(Nexus.Store.StateWriteStatus().mode=='unavailable','fixture '..label..': read-only with identity known')
+  check(Keys()==keysBefore,'fixture '..label..': start-up wrote no update key')
+  local rootBefore=F.Serialize(NexusDB)
+  local realName,realNorm,realRealm=UnitName,GetNormalizedRealmName,GetRealmName
+  if case[2] then UnitName=case[2](realName) end
+  if case[3] then GetNormalizedRealmName=case[3];GetRealmName=case[3] end
+  check(Nexus.Store.CurrentOwnerKey()==nil,'fixture '..label..': the identity is unknown')
+  local w=Nexus.Store.StateWriteStatus()
+  check(w.mode=='unavailable' and w.reason=='saved-format' and w.format==format[1],
+   label..': the saved-format verdict precedes the identity check: '..tostring(w.mode)..'/'..tostring(w.reason)..'/'..tostring(w.format))
+  Nexus.Updates.Init({notify=function()end})
+  Nexus.Updates.Reevaluate()
+  SlashCmdList.NEXUS('update')
+  Nexus.Updates.Dismiss()
+  Nexus.Updates.SetEnabled(true)
+  Nexus.Updates.SetPreference('stable')
+  UnitName,GetNormalizedRealmName,GetRealmName=realName,realNorm,realRealm
+  check(Keys()==keysBefore,label..': no update key is rewritten, quarantined or removed: '..Keys())
+  check(NexusDB.updateNoticeQuarantine==nil and NexusDB.updateAdvisoryQuarantine==nil,label..': no quarantine key is created')
+  check(F.Serialize(NexusDB)==rootBefore,label..': the saved root is byte-identical')
+ end
+end
+
+-- 5. Before the saved-data owner has given a writable verdict (the start-up
+-- coordinator has not reached STORE_READY), /nexus update and a dismissal on
+-- a writable root still answer but write nothing; the same maintenance then
+-- happens once the owner is ready.
+local early=Saved(F.Database())
+local earlyKeys=F.Serialize({notice=early.updateNotice,advisory=early.updateAdvisory,
+ dismissed=early.updateDismissed,noticeQuarantine=nil,advisoryQuarantine=nil})
+local earlyMode,earlyChat,earlyAfterUpdate,earlyAfterDismiss
+F.fileHooks={[ [[data\Release.lua]] ]=function()Nexus.Release.availableVersion=AVAILABLE end}
+F.Boot(early,nil,function(h)
+ earlyMode=Nexus.Store.StateWriteStatus().mode
+ earlyChat=#h.chat
+ SlashCmdList.NEXUS('update')
+ earlyChat=#h.chat>earlyChat
+ earlyAfterUpdate=Keys()
+ Nexus.Updates.Dismiss()
+ earlyAfterDismiss=Keys()
+end)
+F.fileHooks=nil
+check(earlyMode~='durable','pre-ready: the owner has not given a writable verdict yet: '..tostring(earlyMode))
+check(earlyChat,'pre-ready: /nexus update still answers')
+check(earlyAfterUpdate==earlyKeys,'pre-ready: /nexus update writes no update key: '..tostring(earlyAfterUpdate))
+check(earlyAfterDismiss==earlyKeys,'pre-ready: a dismissal writes no update key: '..tostring(earlyAfterDismiss))
+check(Nexus.StartupStatus().coreReady==true and Nexus.Store.StateWriteStatus().mode=='durable','pre-ready: start-up then completes writable')
+check(NexusDB.updateAdvisory==nil and type(NexusDB.updateAdvisoryQuarantine)=='table'
+ and type(NexusDB.updateNoticeQuarantine)=='table','pre-ready: the ordinary maintenance happens once the owner is ready')
 print('PASS update_keys_read_only: update keys untouched in a read-only session; normal maintenance and dismissal kept checks='..checks)

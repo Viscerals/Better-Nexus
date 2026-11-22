@@ -1,11 +1,12 @@
 -- Nexus: Orb of Lost Memories game boundary.
--- EchoWeaver Orb mode: only the public OrbService and PerkService calls listed
--- in THIRD_PARTY.md. Capability detection is read-only; no speculative spend/selection.
+-- EchoWeaver Orb mode uses the OrbService, PerkService and OptionsService
+-- contracts and secure SendAddonMessage post-hook described in THIRD_PARTY.md.
+-- Capability detection is read-only; no speculative spend/selection.
 Nexus = Nexus or {}
 local A = assert(Nexus.GameAdapter, "OrbAdapter requires GameAdapter")
 local O = {}
 A.Orbs = O
-local owner, ownerContext
+local owner, ownerContext, runOwner, redrawReturn
 local observations = { serial=0, grantedRef=nil, grantedSig=nil }
 local selectionSerial,selection=0,nil
 local watched={}
@@ -271,6 +272,22 @@ function O.Read(mode)
     local okB,rawB=call(svc,"GetCurrentChoice")
     if type(A.ObserveChoiceRead)=="function" then pcall(A.ObserveChoiceRead,okB,rawB,"orb_read") end
     if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable.","choice" end
+    -- This action read keeps nil distinct. The inert ProjectEbonhold metadata
+    -- v37 reference (perks_service.lua hash in THIRD_PARTY.md) clears its
+    -- cache to nil for an empty response AND for an unparseable response;
+    -- only the transport observation can distinguish those during recovery.
+    local choiceShape=rawB==nil and "unknown" or "checked"
+    if type(rawB)=="table" then
+        if getmetatable(rawB) then choiceShape="invalid"
+        else
+            local n=0
+            for k in pairs(rawB) do
+                n=n+1
+                if n>3 or not integer(k,1) or k>3 then choiceShape="invalid";break end
+            end
+            if n~=#rawB then choiceShape="invalid" end
+        end
+    end
     local board,parts={},{}
     for i,c in ipairs(rawB or {}) do
         if i>3 or type(c)~="table" or not integer(c.spellId,1) then return nil,"The current Echo offer is invalid.","choice" end
@@ -303,9 +320,14 @@ function O.Read(mode)
         -- during source loss. Keep its group/requirement metadata, but require
         -- a matching live entry before this row can authorize an Orb action.
         local g=tonumber(row.groupId)
-        local gated=(tonumber(row.requiredSpell) or 0)~=0
+        -- Updated client: a talent gate (talentSpell) is a real requirement
+        -- too, so it stays gated here; the raw entry carries either gate in
+        -- its requiredSpell field.
+        local tomeGate,talentGate=tonumber(row.requiredSpell) or 0,tonumber(row.talentSpell) or 0
+        local gate=tomeGate~=0 and tomeGate or talentGate
+        local gated=gate~=0
         local metadataKnown=type(raw)=="table"
-            and tonumber(raw.requiredSpell or 0)==(tonumber(row.requiredSpell) or 0)
+            and tonumber(raw.requiredSpell or 0)==gate
             and tonumber(raw.groupId or 0)==(tonumber(row.groupId) or 0)
         local learned=not gated or (discoveryKnown and (discovered[id]~=nil or observed[id]==true))
         local mask=tonumber(row.classMask or (raw and raw.classMask)) or 0
@@ -336,6 +358,7 @@ function O.Read(mode)
         local built=buildRow(id,row);rawset(t,id,built);return built
     end})
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
+        choiceShape=choiceShape,
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
         hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb,display),at=GetTime and GetTime() or 0,
         selectionSerial=selectionSerial,selection=copy(selection),
@@ -344,18 +367,76 @@ function O.Read(mode)
         selectInFlight=tonumber(pe.Perks.pendingSelectSpellId)}
     return s
 end
+-- Updated-client Orb admission (W3). Memory only: rawget on the game's own
+-- ProjectEbonhold, PerkService and Perks tables; no getter, metamethod or
+-- client callout, so the same check can be repeated at a send boundary with
+-- nothing able to run between it and the host call.
+--
+-- Every Echo choice, an Orb draw included, reaches the client through one
+-- parser. On the updated provider (recognized, as on the ordinary path, by its
+-- loadout readers GetServerActiveDesign / WantsMoreOfEcho) that parser:
+--   * marks a memory card with flag 3 and drops a fourth card before it
+--     publishes the choice, so three ordinary-looking cards do not show that
+--     no memory card was offered;
+--   * keeps Perks.currentSpecDraw while the shown draw is a specialization
+--     draw. That draw is not an Orb choice, and the Orb service's pending
+--     count does not say which draw is on the table.
+-- The admitted client source does not say whether an Orb draw can carry
+-- either, and nothing readable binds the shown cards to the Orb that was
+-- spent. So no Orb spend and no Orb choice is admitted on the updated
+-- provider, and none while the specialization field is present on any
+-- provider. The older provider keeps its earlier admission. Nothing here
+-- touches the game's own Orb or choice windows.
+-- Returns true, or false, the reason text and a fixed code.
+local CLIENT_SPEC="The game's Echo choice data reports a specialization draw, which is not an Orb choice. No Orb or choice was sent. Use the game's own Orb and choice windows."
+local CLIENT_UPDATED="Orb mode cannot act with this game client: Nexus cannot verify that an Orb offer has no memory card or specialization draw. No Orb or choice was sent. Use the game's own Orb and choice windows."
+local CLIENT_UNREADABLE="The game's Echo choice state cannot be read. No Orb or choice was sent."
+function O.ClientAdmission()
+    local pe=_G.ProjectEbonhold
+    if type(pe)~="table" then return false,CLIENT_UNREADABLE,"unreadable" end
+    local svc,perks=rawget(pe,"PerkService"),rawget(pe,"Perks")
+    if type(svc)~="table" or type(perks)~="table" then return false,CLIENT_UNREADABLE,"unreadable" end
+    -- Any value: a marker of the wrong type is not proof of the older provider.
+    if rawget(svc,"GetServerActiveDesign")~=nil or rawget(svc,"WantsMoreOfEcho")~=nil then
+        return false,CLIENT_UPDATED,"updated_client"
+    end
+    -- Without those readers the field still belongs to a parser that draws
+    -- specializations. Any value: a malformed field is still that field. The
+    -- parser keeps it after the draw is answered, until its next choice.
+    if rawget(perks,"currentSpecDraw")~=nil then return false,CLIENT_SPEC,"spec_draw" end
+    return true
+end
 function O.SameContext(a,b) return same(a,b) end
+-- Pure scalar display check; no game getters, observers or reconciliation.
+-- Other eligibility facts are the last complete Pump observation. Resume reads
+-- all current authority again before any action.
+function O.OwedDisplayClear()
+    return hostPending(_G.ProjectEbonhold)==false
+end
 function O.SameOwner(a,b)
     return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc
         and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
 end
+-- The whole-addon session pause (issue #171): no new ownership, action or
+-- read request while it holds. Release, Read, Watch and capture stay available.
+local function sessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
+-- The pause transition count when a call was admitted; crossed(mark) is true
+-- after a Pause, or a Pause and Resume, raised by any callback since then.
+local function pauseMark() local p=Nexus.SessionPause;return p and p.Status().epoch or 0 end
+local function crossed(mark) return sessionPaused() or pauseMark()~=mark end
 function O.Rebind(token,expected)
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return nil,"Nexus is paused for this session." end
+    local mark=pauseMark()
     if not owner or token~=owner then return nil,"This run no longer owns Orb actions." end
     local fresh,err=O.Read();if not fresh then return nil,err end
+    if crossed(mark) then return nil,"Nexus is paused for this session." end
     if not O.SameOwner(ownerContext,fresh.context) or not expected or not same(expected.context,fresh.context)
         or fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then
         return nil,"The original owner or a pending action prevents resuming."
     end
+    -- Resuming toward a next spend: not on a client where none is admitted.
+    local admitted,why=O.ClientAdmission()
+    if not admitted then return nil,why end
     ownerContext=fresh.context;return true
 end
 -- Observe native manual settlement without replacing any game handler.
@@ -457,7 +538,14 @@ local function watchChoices(svc)
         -- that a reload superseded (the harness keeps the old wrapper) is inert.
         if A.Orbs~=O then return end
         local raw
-        if captureSink and not selfSelecting then
+        -- Nor is the ordinary adapter's own Take (GameAdapter.SelfCalling): it is
+        -- not a manual pick, and it must not fill the receipt's evidence slots.
+        local okSelf,ordinarySelf=pcall(function()
+            local adapter=Nexus.GameAdapter
+            return adapter and type(adapter.SelfCalling)=="function" and adapter.SelfCalling()==true
+        end)
+        ordinarySelf=okSelf and ordinarySelf==true
+        if captureSink and not selfSelecting and not ordinarySelf then
             local okR,r=pcall(rawPick,svc,id)
             if okR and type(r)=="table" then raw=r
             else raw={id=integer(id,1) and id or nil} end -- the read failed: the Echo id is still kept
@@ -511,14 +599,22 @@ function O.Watch(s,notify)
 end
 function O.Unwatch() watcherContext=nil;watcherNotify=nil end
 function O.IsOwned() return owner~=nil end
+local PAUSED="Nexus is paused for this session. No Orb action was sent."
 function O.Acquire(s)
+    if sessionPaused() then return nil,PAUSED end
+    local mark=pauseMark()
     if owner then return nil,"Orb mode already owns an operation." end
     local fresh,err=O.Read();if not fresh then return nil,err end
+    if crossed(mark) then return nil,PAUSED end
     if not s or not same(s.context,fresh.context) or s.grantedKey~=fresh.grantedKey
         or s.lockedKey~=fresh.lockedKey or s.charges~=fresh.charges then return nil,"Your Echo state changed. Review the plan again." end
     if fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then return nil,"Resolve the current Echo action first." end
     if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
     if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
+    -- Last, after every callout above: no run starts on a client where no Orb
+    -- action is admitted, so no receipt or ownership is created for it.
+    local admitted,why=O.ClientAdmission()
+    if not admitted then return nil,why end
     owner={};ownerContext=fresh.context;selection=nil
     watchChoices(ownerContext.svc)
     return owner,fresh
@@ -528,16 +624,41 @@ function O.Release(token)
     owner=nil;ownerContext=nil;return true
 end
 local function validate(token)
+    if sessionPaused() then return nil,PAUSED,"SESSION_PAUSED" end
     if not owner or token~=owner then return nil,"Orb action ownership is unavailable." end
-    local s,err=O.Read();if not s then return nil,err end
+    local s,err=O.Read();if not s then return nil,err,"READ_UNAVAILABLE" end
     if not same(ownerContext,s.context) then return nil,"The character, loadout, or game service changed. Orb mode is paused." end
     if s.autoAccept or (A.RivalDetected and A.RivalDetected()) then return nil,"Another Echo picker may interfere. Orb mode is paused." end
     if A.DIAGNOSTIC_PASSIVE then return nil,"Actions are blocked in passive diagnostics." end
     return s
 end
-function O.Spend(token,key,expected,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
-    if s.offerPending or #s.board>0 or s.hostPending or A.InFlight() or s.charges<1 then
+local function recordActionException(source,cause)
+    if type(Nexus.Errors)=="table" and type(Nexus.Errors.Record)=="function" then
+        pcall(Nexus.Errors.Record,source,cause)
+    end
+end
+local function checkedValidation(token,source,reason)
+    local ok,s,err,code=pcall(validate,token)
+    if not ok then
+        recordActionException(source,s)
+        return nil,reason,"VALIDATION_ERROR"
+    end
+    return s,err,code
+end
+function O.Spend(token,key,expected,guard,admit)
+    local mark=pauseMark()
+    local s,err,code=checkedValidation(token,"OrbAdapter.SpendValidation","The Orb state check failed. No Orb was sent.")
+    if not s then return nil,"REJECTED",err,code end
+    if s.choiceShape=="invalid" then
+        return nil,"REJECTED","The current Echo choices are malformed. No Orb was sent.","CHOICE_INVALID"
+    end
+    local checked,inFlight=true,false
+    if not s.offerPending and #s.board==0 and not s.hostPending then checked,inFlight=pcall(A.InFlight) end
+    if not checked then
+        recordActionException("OrbAdapter.SpendValidation",inFlight)
+        return nil,"REJECTED","The Orb state check failed. No Orb was sent.","VALIDATION_ERROR"
+    end
+    if s.offerPending or #s.board>0 or s.hostPending or inFlight or s.charges<1 then
         return nil,"REJECTED","Another choice is pending or no Orbs remain."
     end
     if not expected or s.grantedKey~=expected.grantedKey or s.lockedKey~=expected.lockedKey
@@ -545,16 +666,39 @@ function O.Spend(token,key,expected,guard)
         return nil,"REJECTED","The approved source or balance changed before spending."
     end
     local id=tonumber(tostring(key):match("^(%d+):%d+$"));if not id then return nil,"REJECTED","Invalid source." end
-    if guard and guard(s)~=true then return nil,"REJECTED","Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
-    boundary("host_call",s)
+    if guard then
+        local checked,allowed,why=pcall(guard,s)
+        if not checked then
+            recordActionException("OrbAdapter.SpendGuard",allowed)
+            return nil,"REJECTED","The final Orb protection check failed. No Orb was sent.","GUARD_ERROR"
+        end
+        if allowed~=true then return nil,"REJECTED",why or "Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
+    end
+    -- No diagnostic callback may intervene between the last guard and host.
+    -- Report crossing after the invocation (also when it throws), before its
+    -- typed return event; diagnostics never authorize or cancel this crossing.
+    -- A Pause, or a Pause and Resume, raised by the guard or a read above
+    -- still stops it here, before the host.
+    -- The client admission is read here, after the last read and guard, so a
+    -- provider or draw that changed inside one of them still spends nothing.
+    local admitted,clientWhy=(admit or O.ClientAdmission)()
+    if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
+    boundary("host_call",s)
     boundary(not ok and "host_error" or value==false and "host_false" or value==true and "host_true" or "host_other",nil)
     if not ok then return nil,"AMBIGUOUS","The spend call failed; its server outcome is unknown. No repeat will be sent." end
-    if value==false then return nil,"REJECTED","The game refused the Orb spend." end
+    if value==false then return nil,"REJECTED","The game refused the Orb spend.","HOST_FALSE" end
     return true,"SUBMITTED"
 end
-function O.Select(token,index,expectedBoard,id,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
+function O.Select(token,index,expectedBoard,id,guard,admit)
+    local mark=pauseMark()
+    local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
+    if not s then return nil,"REJECTED",err,code end
+    -- Before any card is considered: the truthful reason on a client or draw
+    -- where no Orb choice is admitted. Read again at the host boundary below.
+    local admitted,clientWhy=(admit or O.ClientAdmission)()
+    if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
         if c and other.spellId==id and other.quality~=c.quality then
@@ -564,15 +708,121 @@ function O.Select(token,index,expectedBoard,id,guard)
     if not s.offerPending or s.hostPending or not c or not c.selectable or c.spellId~=id
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end
-    if guard and guard(s)~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    if guard then
+        local checked,allowed=pcall(guard,s)
+        if not checked then
+            recordActionException("OrbAdapter.SelectGuard",allowed)
+            return nil,"REJECTED","The final Echo protection check failed. No selection was sent. Resolve the original pending operation manually.","GUARD_ERROR"
+        end
+        if allowed~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    end
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     selfSelecting=true
     boundary("pick_call",s)
+    -- The boundary sink runs other code: a pause it raised still stops the
+    -- choice before the host. The journal then shows pick_call with no pick
+    -- outcome, followed by the caller's select_rejected.
+    -- The guard and the boundary sink ran other code as well: the client
+    -- admission is read once more, immediately before the host.
+    admitted,clientWhy=(admit or O.ClientAdmission)()
+    if not admitted then selfSelecting=false;return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
+    if crossed(mark) then selfSelecting=false;return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     selfSelecting=false
     boundary((not ok or (v~=true and v~=false)) and "pick_unknown" or v==false and "pick_false" or "pick_true",nil)
     if not ok or (v~=true and v~=false) then return nil,"AMBIGUOUS","The selection outcome is unknown. No selection will be repeated." end
-    if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually." end
+    if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually.","HOST_FALSE" end
     return true,"SUBMITTED",s.grantStamp
+end
+-- Start/Stop Orb automation (OrbAuto, 2026-11-19) ---------------------------
+-- The run owner holds the same single ownership token as Orb mode. It is
+-- acquired with any current choice on the table (an open Orb offer is
+-- actionable; every action still validates the fresh state itself) and is
+-- rebound to a fresh read before each action, because the ownership
+-- generation in the context moves with every ownership push.
+function O.AcquireRun()
+    if sessionPaused() then return nil,PAUSED end
+    if owner then return nil,"Orb mode already owns an operation." end
+    local fresh,err=O.Read();if not fresh then return nil,err end
+    if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
+    if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
+    owner={};ownerContext=fresh.context;selection=nil;runOwner=owner
+    watchChoices(ownerContext.svc)
+    return owner,fresh
+end
+-- Read-only diagnostic: the code of the last RerollOffer return ("true",
+-- "false", "nil", "other" or "error"), or nil before any redraw. Uninterpreted.
+function O.LastRedrawReturn() return redrawReturn end
+-- Read-only: the current owner is an OrbAuto run (AcquireRun), not Orb mode.
+function O.RunOwned() return owner~=nil and owner==runOwner end
+function O.RunRebind(token,s)
+    if not owner or token~=owner or type(s)~="table" then return false end
+    ownerContext=s.context;return true
+end
+-- The minimal actionable native state for OrbAuto. On the older provider the
+-- earlier admission (O.ClientAdmission) applies unchanged. On the updated
+-- provider (its loadout readers GetServerActiveDesign / WantsMoreOfEcho):
+--   "spend": no Echo choice is published (an empty or absent currentChoice).
+--     A specialization field left from an answered draw does not refuse it.
+--   "choice" (Select or redraw on an Orb offer): the game's own Orb flag
+--     (OrbService.IsOfferPending, read by the caller's state read) binds the
+--     shown choice to the Orb, as the game's own auto-accept exemption and
+--     its Orb redraw button do; no specialization field; exactly three
+--     published cards and no fourth; no memory card (flag isGuaranteed).
+--     A memory card or a specialization draw is left to the player.
+-- Memory only (rawget), as O.ClientAdmission. Returns true, or false and text.
+local CHOICE_MEMORY="The Orb offer shows a memory card. Nexus leaves that choice to you; no choice was sent."
+local CHOICE_SHAPE="The Orb offer is not a complete three-card choice. No choice was sent."
+local SPEND_OPEN="An Echo choice is open. No Orb was spent."
+function O.RunAdmission(kind)
+    local pe=_G.ProjectEbonhold
+    if type(pe)~="table" then return false,CLIENT_UNREADABLE end
+    local svc,perks=rawget(pe,"PerkService"),rawget(pe,"Perks")
+    if type(svc)~="table" or type(perks)~="table" then return false,CLIENT_UNREADABLE end
+    local updated=rawget(svc,"GetServerActiveDesign")~=nil or rawget(svc,"WantsMoreOfEcho")~=nil
+    if not updated then return O.ClientAdmission() end
+    local ch=rawget(perks,"currentChoice")
+    if kind=="spend" then
+        if ch==nil then return true end
+        if type(ch)~="table" then return false,CLIENT_UNREADABLE end
+        if rawget(ch,1)~=nil then return false,SPEND_OPEN end
+        return true
+    end
+    if rawget(perks,"currentSpecDraw")~=nil then return false,CLIENT_SPEC end
+    if type(ch)~="table" or rawget(ch,4)~=nil then return false,CHOICE_SHAPE end
+    for i=1,3 do
+        local c=rawget(ch,i)
+        if type(c)~="table" then return false,CHOICE_SHAPE end
+        if rawget(c,"isGuaranteed") then return false,CHOICE_MEMORY end
+    end
+    return true
+end
+-- The game's own Orb redraw of an open Orb offer (OrbService.CanRerollOffer /
+-- RerollOffer, the game's "Use Orbs" button; the server charges one Orb).
+-- One call per open offer; the caller keeps one request in flight.
+function O.Redraw(token,expectedBoard)
+    local mark=pauseMark()
+    local s,err,code=checkedValidation(token,"OrbAdapter.RedrawValidation","The Orb state check failed. No redraw was sent.")
+    if not s then return nil,"REJECTED",err,code end
+    if not s.offerPending or #s.board~=3 or s.boardKey~=expectedBoard or s.hostPending
+        or s.selectInFlight~=nil then return nil,"REJECTED","The Orb offer changed or another action is pending." end
+    local orb=ownerContext.orb
+    if type(orb)~="table" or type(orb.RerollOffer)~="function" or type(orb.CanRerollOffer)~="function" then
+        return nil,"REJECTED","This game client offers no Orb redraw.","NO_REDRAW"
+    end
+    local okC,can=pcall(orb.CanRerollOffer)
+    if not okC or can~=true then return nil,"REJECTED","The game does not allow an Orb redraw now.","REDRAW_REFUSED" end
+    local admitted,why=O.RunAdmission("choice")
+    if not admitted then return nil,"REJECTED",why,"CLIENT_CONTRACT" end
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
+    -- Its raw return is kept as a diagnostic code only: the admitted client
+    -- reference has no OrbService source, and its own "Use Orbs" button ignores
+    -- this return too, so true, false or nil is not interpreted here.
+    local ok,ret=pcall(orb.RerollOffer)
+    redrawReturn=not ok and "error" or ret==true and "true" or ret==false and "false" or ret==nil and "nil" or "other"
+    boundary("redraw_call",s)
+    if not ok then return nil,"AMBIGUOUS","The redraw call failed; its outcome is unknown. No repeat will be sent." end
+    return true,"SUBMITTED"
 end
 do
     local read=O.Read
@@ -583,8 +833,10 @@ do
     end
 end
 -- Passive transport observer (035) ---------------------------------------------
--- The audited client (the owner's installed bytes; the reporter's build is NOT
--- verified) delivers every server message through ONE CHAT_MSG_ADDON frame, keeps
+-- The owner's inspected inert snapshot reported delivery through ONE
+-- CHAT_MSG_ADDON frame. Its dispatcher artifact was not hash-pinned; the v37
+-- perks-service hash in THIRD_PARTY.md establishes only the listed cache/request
+-- facts, not the network dispatcher or installed tester bytes. That snapshot keeps
 -- one handler per opcode, and checks the prefix and the framing, not the sender or
 -- the channel. This observer therefore never registers an opcode handler: it
 -- listens to the same event in a frame of its own, which leaves the game's frame,
@@ -617,9 +869,44 @@ local TRANSPORT_PREFIX="AAM0x9"
 local TRANSPORT_OPS={[16]=true,[18]=true,[540]=true,[542]=true,[1000]=true,[1220]=true}
 local TRANSPORT_RING,COUNT_CAP=48,1000000
 local T={started=false,epoch=0,ord=0,ring={},requests=0,reqOrd=0,good={},bad={},
+    ownBare=0,ownFramed=0,
     counts={Q=0,A=0,R=0,echo=0,drop=0,other=0,seg=0},
     rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0,mixed=0}}
 local function bump(t,k) t[k]=math.min((t[k] or 0)+1,COUNT_CAP) end
+local function outgoingReady()
+    return T.outgoingFunction~=nil and _G.SendAddonMessage==T.outgoingFunction
+        and type(hooksecurefunc)=="function" and not T.outgoingOverflow
+end
+function O.RecoveryAvailable()
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestChoice)~="function" then return false,"choice_query_unavailable" end
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function"
+        or (T.outgoingAttempted and not outgoingReady()) then return false,"no_choice_observer" end
+    return true
+end
+local function observeOutgoing(prefix,payload)
+    if prefix~=TRANSPORT_PREFIX then return end
+    local key=payload=="16" and "ownBare" or payload=="16\t" and "ownFramed" or nil
+    if not key then return end
+    if T[key]>=COUNT_CAP then T.outgoingOverflow=true;return end
+    T[key]=T[key]+1
+    if key=="ownFramed" then T.ownFramedAt=GetTime and GetTime() or 0 end
+end
+function O.StartChoiceObserver()
+    if T.outgoingAttempted then return outgoingReady() end
+    -- An approved run observes outgoing framing even if the optional query
+    -- service appears later. Query capability is checked separately at use.
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function" then return false end
+    T.outgoingAttempted=true
+    local protected=pcall
+    local ok=protected(hooksecurefunc,"SendAddonMessage",function(prefix,payload)
+        if A.Orbs~=O then return end
+        if not protected(observeOutgoing,prefix,payload) then T.outgoingOverflow=true end
+    end)
+    if not ok then return false end
+    T.outgoingFunction=_G.SendAddonMessage
+    return outgoingReady()
+end
 -- A canonical whole number: digits only (a leading minus only where signed), no
 -- leading zero, no "-0", at most six digits.
 local function canonical(text,signed)
@@ -710,6 +997,9 @@ local function transportCapture(prefix,payload,dist,sender)
         if mid and op~=1220 then segmentNote(op,mid,idxText,totalText,true) end
     elseif op~=1220 then
         rec.cls="A"
+        -- Exact empty SS16 is the native handler's explicit no-choice reply.
+        -- Retain a boolean only. Nil cache alone remains unknown.
+        if op==16 and evt=="16" and rest=="" then rec.emptyChoice=true end
         if mid then
             local state=segmentNote(op,mid,idxText,totalText,false)
             if state=="partial" then bump(T.counts,"seg");return end
@@ -766,8 +1056,17 @@ function O.TransportStatus()
     -- retained: how many records the ring holds now (never more than TRANSPORT_RING).
     local retained=0
     for _ in pairs(T.ring) do retained=retained+1 end
+    local pe=_G.ProjectEbonhold;local svc=type(pe)=="table" and pe.PerkService
     return {started=T.started,epoch=T.epoch,ord=T.ord,counts=copyNumbers(T.counts),rejects=copyNumbers(T.rejects),
+        choiceObserver=outgoingReady()==true,ownBare=T.ownBare,ownFramed=T.ownFramed,ownFramedAt=T.ownFramedAt,
+        choiceQuery=type(svc)=="table" and type(svc.RequestChoice)=="function",
+        outgoingAttempted=T.outgoingAttempted==true,
         good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd,retained=retained}
+end
+-- Passive cursor for compact affordances: no map copies, observer start,
+-- backlog classification or query. It is not an action authorization.
+function O.TransportCursor()
+    return T.ord,T.epoch
 end
 -- The relevant records that arrived after ordinal `since`, oldest first, or nil and
 -- "overflow" when the bounded ring no longer covers them.
@@ -783,16 +1082,63 @@ function O.TransportSince(since)
     end
     return out
 end
-function O.RequestRefresh()
+-- A manual Recheck may still obtain the exact ownership result while a charge
+-- reply is outstanding. This sends no second charge request and no choice query.
+function O.RequestOwnershipRefresh()
+    if sessionPaused() then return false,"session_paused" end
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestGrantedPerks)~="function" then return false,"refresh_unavailable" end
+    if not pcall(svc.RequestGrantedPerks) then return false,"ownership_refresh_failed" end
+    return true
+end
+function O.RequestRefresh(withChoice)
+    if sessionPaused() then return false,"session_paused" end
+    local admitted=pauseMark()
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
-    if not a or not b then return false,"The client cannot request an Orb/ownership refresh." end
-    local okA=pcall(orb.RequestCharges);local okB=pcall(svc.RequestGrantedPerks)
-    -- The mark is the arrival ordinal at this moment. It is not a correlation: a
+    if not a or not b then return false,"refresh_unavailable" end
+    local choiceReady=type(svc.RequestChoice)=="function"
+    if withChoice and choiceReady and not outgoingReady() then return false,"no_choice_observer" end
+    if withChoice and choiceReady then
+        local opts=_G.ProjectEbonholdOptionsService
+        local ok,value=false,nil
+        if type(opts)=="table" and type(opts.GetSetting)=="function" then ok,value=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes") end
+        if not ok or value~=false then return false,"auto_accept" end
+    end
+    -- The option read above can run other code: nothing is sent yet.
+    if crossed(admitted) then return false,"session_paused" end
+    -- Keep the pre-existing charge/ownership refresh when the optional choice
+    -- query is missing, but report failure: partial facts authorize no recovery.
+    local ord=T.ord
+    local okA=pcall(orb.RequestCharges)
+    if not okA then return false,"charge_refresh_failed" end
+    -- Retain the sent request even when a later refresh throws. The mark starts
+    -- before the call, so a synchronous reply is included in serialization too.
+    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=ord
+    local mark={ord=ord,n=T.requests,epoch=T.epoch,ownBare=T.ownBare}
+    -- A pause raised inside a request already sent keeps that request and its
+    -- mark; only the requests not yet sent are refused.
+    if crossed(admitted) then return false,"session_paused",mark end
+    local okB=pcall(svc.RequestGrantedPerks)
+    if not okB then return false,"ownership_refresh_failed",mark end
+    if withChoice and choiceReady and crossed(admitted) then
+        mark.ownBare=T.ownBare;mark.choiceUnverified=true
+        return false,"session_paused",mark
+    end
+    local bareBefore,framedBefore=T.ownBare,T.ownFramed
+    local okCall=not withChoice or (choiceReady and pcall(svc.RequestChoice))
+    local okChoice=okCall
+    if withChoice and choiceReady then
+        okChoice=okChoice and outgoingReady() and T.ownBare>bareBefore and T.ownFramed==framedBefore
+    end
+    -- The mark is the arrival ordinal before the charge call. It is not a correlation: a
     -- reply that arrives later is "observed after refresh began", nothing more. A request
     -- that was not sent has no mark.
-    if not okA then return false end
-    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord
-    return okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
+    mark.ownBare=T.ownBare;mark.choiceUnverified=withChoice and choiceReady and not okChoice or nil
+    local why
+    if withChoice and not choiceReady then why="choice_query_unavailable"
+    elseif not okCall then why="choice_request_failed"
+    elseif not okChoice then why="own_choice_request" end
+    return okChoice,why,mark
 end

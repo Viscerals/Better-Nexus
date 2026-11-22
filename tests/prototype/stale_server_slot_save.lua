@@ -47,6 +47,28 @@ local function boot(saved,slots)
  return h
 end
 local H=boot()
+-- Revision 6 (updated-client compatibility, full-CI finding): GameAdapter.
+-- UploadWishlist replaces an existing server Wishlist (slot > 0) only when
+-- the current slot list shows that destination in full; a missing one is
+-- refused ("stale_slot") and starts no spacing. Slot 103 is not in this
+-- fixture's list, so the spacing setup names it as a known synthetic Wishlist
+-- mirror (above the declared slots, unverified, the spacer's own Echoes) for
+-- that one real upload and then puts the list back exactly as it was. The
+-- spacing window is the production one, opened by that real upload; nothing
+-- is stubbed and no timestamp is set.
+local function KnownSlotUpload(upload,slot,name,echoes)
+ local created=H.perks.serverBuildSlots==nil
+ if created then H.perks.serverBuildSlots={} end
+ local slots=H.perks.serverBuildSlots
+ local prior=slots[slot]
+ local rows={}
+ for i,e in ipairs(echoes) do rows[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks or 1,locked=false} end
+ slots[slot]={name=name,verified=false,echoes=rows}
+ local ok,why=upload(slot,name,echoes)
+ slots[slot]=prior
+ if created then H.perks.serverBuildSlots=nil end
+ return ok,why
+end
 -- M3: the editor's actions are named by their effect; a legacy label also
 -- finds the action with that default intent (new label first, then legacy).
 local LABELS={['Create Wishlist']={'Create & assign','Create unassigned','Create Wishlist'},
@@ -154,7 +176,7 @@ end
 -- 4. The slot is reused while the save waits on the upload spacing.
 open()
 do
- check(Nexus.GameAdapter.UploadWishlist(103,'W16-SPACER',{{spellId=200768,quality=0,stacks=1}})==true,'fixture: a recent upload starts the spacing window')
+ check(KnownSlotUpload(Nexus.GameAdapter.UploadWishlist,103,'W16-SPACER',{{spellId=200768,quality=0,stacks=1}})==true,'fixture: a recent upload starts the spacing window')
  local before=snapshot()
  button('Save Wishlist'):Click();H.AcceptPopup()
  check(Nexus.WishlistEditor.IsApplyPending()==true,'precondition: the save waits for the spacing')
@@ -260,7 +282,15 @@ do
  ok,why=A.UploadWishlist(102,NAME,planRows,{[token]=true})
  check(ok==false and why=='stale_slot' and #H.actions==before,'the adapter refuses a slot that shows nothing too: '..tostring(why))
  H.Advance(4)
- check(A.UploadWishlist(102,NAME,planRows)==true and #H.actions==before+1,'a caller that names no identity is unchanged')
+ -- Revision 7 (updated-client contract): naming no identity does not skip the
+ -- destination guard; a slot that shows nothing is still refused before the
+ -- host call, and the refusal starts no spacing window.
+ ok,why=A.UploadWishlist(102,NAME,planRows)
+ check(ok==false and why=='stale_slot' and #H.actions==before,
+  'a caller that names no identity is refused for a slot that shows nothing: '..tostring(why))
+ -- The earlier positive control, on a destination the slot list shows in full.
+ setMirror(102,row(NAME,planRows))
+ check(A.UploadWishlist(102,NAME,planRows)==true and #H.actions==before+1,'a caller that names no identity is unchanged for a known destination')
  H.Advance(4)
  check(A.UploadWishlist(0,'W16-CREATE',planRows,{[token]=true})==true,'the create sentinel 0 is never checked')
 end
@@ -408,5 +438,52 @@ do
  check(ok==false and reason=='stale_confirmation','the earlier confirmation no longer stands: '..tostring(reason))
 end
 
+-- 10. Fable R1 (updated client): a server Wishlist that holds wanted AND
+-- refused Echoes, opened through the real journal and editor with the real
+-- GameAdapter (no stubbed upload). The editor shows its wanted Echoes; Save is
+-- refused with the true reason before any upload, never as an empty slot and
+-- never with a reopen remedy, and the server Wishlist, its name, its
+-- assignment, every wanted entry and the refused entry are kept.
+do
+ local MIXED=row(NAME,planRows)
+ MIXED.echoes[#MIXED.echoes+1]={spellId=200768,quality=0,stacks=1,locked=false,avoid=true}
+ H=boot(H.Clone(saved),{[102]=H.Clone(MIXED)})
+ notices={}
+ local A=Nexus.GameAdapter
+ local mirror=A.Slots().bySlot[102]
+ check(type(mirror)=='table' and type(mirror.refused)=='table' and #mirror.refused==1
+  and mirror.refused[1].spellId==200768,'R1 fixture: the real adapter keeps the refusal apart on slot 102')
+ check(A.ServerWishlistSlotToken(102)==nil,'R1 fixture: a Wishlist with refusals has no identity token')
+ journal()
+ check(NexusAssociatedWishlistDesignButton:IsEnabled(),'R1: the Wishlist with refusals is listed and opened by its wanted Echoes')
+ NexusAssociatedWishlistDesignButton:Click()
+ selected(201172).plus:Click()
+ local before,state=#H.actions,snapshot()
+ button('Save Wishlist'):Click()
+ if H.popup then H.AcceptPopup() end
+ H.Advance(4)
+ check(#H.actions==before,'R1: nothing is uploaded')
+ check(said('refuses some Echoes') and said('remove those refusals'),'R1: the player is told the Wishlist refuses Echoes and why it is not saved')
+ check(said('shows only its wanted Echoes'),'R1: the incomplete editor representation is explained')
+ check(not said('the slot is empty or not loaded') and not said('open the Wishlist again'),
+  'R1: no false empty-slot reason and no reopen remedy')
+ check(T.Equal(state,snapshot()),'R1: names and assignments are unchanged')
+ local kept=H.perks.serverBuildSlots[102]
+ check(kept.name==NAME and #kept.echoes==#planRows+1 and kept.echoes[#kept.echoes].avoid==true,
+  'R1: the server Wishlist keeps its name, every wanted entry and the refused entry')
+ -- The controller result: the true machine reason, from the real adapter.
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+  accountRoot=function() return {} end,notify=function() end})
+ c.Initialize(A)
+ local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=H.Clone(planRows)}
+ check(c.BeginWishlist(wishlist,nil)==true,'R1: a controller opens the Wishlist with refusals')
+ local data,why=c.PrepareApply(NAME)
+ check(data==nil and why=='refused_entries','R1: PrepareApply names the refusals: '..tostring(why))
+ local ok,reason=c.AcceptApply(102,NAME,H.Clone(planRows))
+ check(ok==false and reason=='refused_entries' and #H.actions==before,
+  'R1: the direct payload path is refused with the same reason and sends nothing: '..tostring(reason))
+end
+-- The capture ends here, after the last section that reads said(): section
+-- 10's refusal is printed by the real editor path and must be in `notices`.
 print=rawPrint
 print('PASS stale_server_slot_save: '..checks..' checks (reuse before Save, during confirmation, during retry; name/content/missing; ABA; consecutive saves; adapter; compatibility)')

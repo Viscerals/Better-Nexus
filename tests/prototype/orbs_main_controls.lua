@@ -1,20 +1,29 @@
-local H=dofile('tests/prototype/orbs_support.lua');local M=H.M
+-- Start/Stop rework (2026-11-19): the Orb window's real Start starts the run
+-- with no maximum; closing the window leaves the run going; Stop ends it.
+-- (Replaces the earlier maximum-approval and Pause/Resume strip pin.)
+local H=dofile('tests/prototype/orbs_support.lua');local M,O=Nexus.OrbAuto,H.O
 H.OrbPlan({{spellId=410002,quality=2,stacks=3}})
-local f=Nexus.OrbPanel.Show();f.limit:SetText('3');f.start:Click()
-assert(H.Count('orb-spend')==1 and M.Status().limit==3,'actual Start is the maximum/source approval')
+local OFFER={{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}}
+local function Taken(id,q)
+ local out=H.Clone(H.granted)
+ for _,es in pairs(out) do for i=#es,1,-1 do if es[i].spellId==O.source then table.remove(es,i);break end end end
+ out[H.names[id]]=out[H.names[id]] or {};table.insert(out[H.names[id]],{spellId=id,quality=q})
+ H.granted=out;H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false;H.Notify();H.A.Poll()
+end
+local f=Nexus.OrbPanel.Show()
+assert(not f.limit:IsShown() and not f.max:IsShown(),'no maximum control')
+f.start:Click();H.Advance(.5)
+assert(M.Active() and H.Count('orb-spend')==1,'actual Start starts the run and spends one Orb')
 local close
 for _,b in ipairs(H.frames)do if b:GetParent()==f and b:GetText()=='Close'then close=b end end
-assert(close);close:Click();assert(not f:IsShown() and M.Status().running)
-Nexus.Panel.Show();H.Advance(.3)
-local bar=assert(NexusPanel._orbControls)
-assert(bar:IsVisible() and bar.primary:GetText()=='Pause','main controls are visible with detail closed')
-H.Offer();H.Result(410002,2);H.Advance(.3)
-assert(H.Count('orb-spend')==2,'closed detail continues confirmed attempts')
-bar.primary:Click();assert(not M.Status().running,'main Pause works')
-H.Offer();assert(H.Count('take')==1,'paused ready offer does not select')
-bar.primary:Click();assert(H.Count('take')==2 and M.Status().limit==3,'main Resume retains approval')
-bar.stop:Click();assert(not M.Status().running)
-H.Result(410002,2);H.Advance(.5)
-assert(M.Status().state=='STOPPED' and H.Count('orb-spend')==2,'main Stop permits passive settlement only')
+assert(close);close:Click();assert(not f:IsShown() and M.Active(),'closing the window leaves the run going')
+O.offer=true;H.Board(OFFER);H.Advance(.5)
+assert(H.Count('take')==1,'closed window: the offer is answered')
+Taken(410002,2);H.Advance(.5)
+assert(H.Count('orb-spend')==2,'closed window: the run continues with the next Orb')
+Nexus.OrbPanel.Show();assert(f.stop:IsEnabled(),'Stop is offered while the run is ON')
+f.stop:Click();assert(not M.Active(),'Stop ends the run')
+O.offer=true;H.Board(OFFER);H.Advance(1)
+assert(H.Count('take')==1 and H.Count('orb-spend')==2,'nothing is sent after Stop')
 assert(Nexus.RecomputeStats().autoEnabled==false,'ordinary rolling stays OFF')
-print('PASS actual Start/Close and main-panel Pause/Resume/Stop with continuous confirmed attempts')
+print('PASS actual Start/Close/Stop with a continuing run and no maximum')

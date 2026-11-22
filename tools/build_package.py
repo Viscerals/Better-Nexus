@@ -16,6 +16,9 @@ Content rule, the same one the published test.9027 package used, plus the
 storage-only support component:
   * the six top-level files in TOP_LEVEL;
   * everything under core/, data/, logic/, third_party/, ui/;
+  * of those, only .lua, .toc and .md files, plus exactly one image: the minimap
+    texture ui/Textures/NexusMinimap.tga (TEXTURE_ASSETS), required, at that exact
+    path and in one exact bounded TGA form; no other image, suffix or root;
   * everything under companion/NexusSupport/, packaged as its own addon folder
     so WoW creates a separate SavedVariables file for support reports;
   * nothing else: no tests, tools, docs, .github, SavedVariables, logs or archives.
@@ -44,7 +47,19 @@ RUNTIME_DIRS = ['core', 'data', 'logic', 'third_party', 'ui']
 COMPANION_DIR = 'companion/NexusSupport'
 COMPANION_ADDON = 'NexusSupport'
 ALLOWED_SUFFIXES = {'.lua', '.toc', '.md'}
-LABEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$')
+# The one runtime file that is not Lua, TOC or Markdown: the minimap button
+# texture that ui/Panel.lua names. It is admitted at this exact, case-exact
+# path only (archive member Nexus/ui/Textures/NexusMinimap.tga); every other
+# image, a case or path variant, and any copy in the support component stays
+# an unexpected file type. It is data, never a Nexus.toc entry.
+TEXTURE_ASSETS = ('ui/Textures/NexusMinimap.tga',)
+# Its exact form: uncompressed true-colour TGA (type 2), 64x64, 32-bit BGRA,
+# 8 alpha bits, top-left origin (descriptor 0x28); no image ID, colour map,
+# RLE or footer, so the file is exactly the header and the pixels.
+TEXTURE_HEADER = bytes((0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 64, 0, 32, 0x28))
+TEXTURE_BYTES = len(TEXTURE_HEADER) + 64 * 64 * 4   # 16402
+IMAGE_SUFFIXES = {'.tga', '.blp', '.png', '.jpg', '.jpeg', '.bmp'}
+LABEL =re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$')
 SOURCE_LABEL = b'buildLabel = "source"'
 SOURCE_CHANNEL = b'channel = "development"'
 RUNTIME_LABEL = re.compile(r'test\.([1-9]\d{0,9})-[0-9a-f]{7,12}')   # used with fullmatch
@@ -147,11 +162,42 @@ def companion_toc_problems(toc: str, toc_name: str) -> list[str]:
     return problems
 
 
+def texture_problems(data: bytes | None, where: str) -> list[str]:
+    """The exact bounded form of the minimap texture. The packager applies it to
+    the committed file and tools/release_check.py to the packaged copy."""
+    if data is None:
+        return [f'missing the minimap texture {where}']
+    if len(data) != TEXTURE_BYTES:
+        return [f'{where} must be exactly {TEXTURE_BYTES} bytes (64x64 32-bit TGA, no footer); found {len(data)}']
+    header = data[:len(TEXTURE_HEADER)]
+    if header != TEXTURE_HEADER:
+        return [f'{where} is not an uncompressed 64x64 32-bit BGRA top-left TGA with 8 alpha bits '
+                f'and no image ID or colour map: header {header.hex()}']
+    pixels = data[len(TEXTURE_HEADER):]
+    if not any(pixels[3::4]):
+        return [f'{where} has no visible pixel']
+    for offset in range(0, len(pixels), 4):
+        if pixels[offset + 3] == 0 and (pixels[offset] or pixels[offset + 1] or pixels[offset + 2]):
+            index = offset // 4
+            return [f'{where} carries colour in a fully transparent pixel (x {index % 64}, y {index // 64})']
+    return []
+
+
+def toc_texture_entries(toc: str) -> list[str]:
+    """TOC entries that name an image. WoW loads every TOC entry as code, so a
+    texture must never be listed there."""
+    listed = [l.strip().replace('\\', '/') for l in toc.splitlines() if l.strip() and not l.lstrip().startswith('#')]
+    return [e for e in listed if e in TEXTURE_ASSETS or pathlib.PurePosixPath(e).suffix.lower() in IMAGE_SUFFIXES]
+
+
 def check(files: dict[str, bytes]) -> list[str]:
     problems = [f'missing top-level file: {n}' for n in TOP_LEVEL if n not in files]
     for name in files:
-        if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES:
+        if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES and name not in TEXTURE_ASSETS:
             problems.append(f'unexpected file type in package: {name}')
+    # The referenced minimap texture is required, in its exact form.
+    for name in TEXTURE_ASSETS:
+        problems.extend(texture_problems(files.get(name), name))
 
     # The companion is its own addon: its TOC must load exactly its own files,
     # it must declare its own SavedVariables, and it must not depend on Nexus.
@@ -179,6 +225,8 @@ def check(files: dict[str, bytes]) -> list[str]:
     for entry in listed:
         if entry not in files:
             problems.append(f'Nexus.toc loads a file that is not packaged: {entry}')
+    for entry in toc_texture_entries(toc):
+        problems.append(f'Nexus.toc must not load a texture as code: {entry}')
     unloaded = [n for n in files if n.endswith('.lua') and n not in listed
                 and not n.startswith(COMPANION_DIR + '/')]
     for name in unloaded:

@@ -5,8 +5,10 @@
 --     Confirm row; the row labels keep one line at the row height.
 --  2. On-Screen Wishlist settings: the subtitle and the hint take their
 --     measured height and the controls below them move down, inside the popup.
---  3. Orb panel and Continue: a fixed status or refusal box keeps its size and
---     its complete text is in a tooltip while it overflows (only then).
+--  3. Orb panel and Continue: the run page's status and notice take their
+--     measured height up to their former boxes (74 and 24), with no blank
+--     band, in order inside the window; Continue's fixed explanation keeps
+--     its size. A text past its box is complete in a tooltip (only then).
 --  4. Orb history: the details child is as tall as the measured details, so
 --     the last line of a long operation is inside the scroll range.
 --  5. Release note: the window is as tall as the measured note, above its button.
@@ -116,17 +118,65 @@ do
  G=dofile('tests/prototype/layout_geometry_support.lua')
  SlashCmdList.NEXUS('orbs')
  local f=assert(NexusOrbPanel)
+ check(f:IsShown() and Nexus.OrbPanel.Page()=='run','fixture: the Orb window shows its run page')
  -- The longest notice the Orb panel writes (ui/OrbPanel.lua).
  local LONG='The maximum follows the confirmed Orb balance, which is not available. Nothing was started.'
+ -- The run page flows its rows (ui/OrbPanel.lua flowBands): a nonempty text
+ -- takes its measured height, at least one 12-unit line and at most its
+ -- former box; an empty one keeps a 1-unit placeholder and no band. Returns
+ -- the height this model needs and whether it is past the box.
+ local function Expected(fs,width,cap,m)
+  local need=G.Rows(fs:GetText(),width,m.char)*m.line
+  if need==0 then return 1,false end
+  return math.min(cap,math.max(12,need)),need>cap
+ end
+ -- The complete text on hover exactly when it is past its box (or the box
+ -- shows a shortened name, whose whole text the owner stored).
+ local function Whole(hit,fs,over,tag)
+  local lines,full=Hover(hit),fs._nexusFullText or fs:GetText()
+  if over or fs._nexusFullText then check(lines and lines[1]==full,tag..' is complete in its tooltip')
+  else check(lines==nil,tag..' fits and shows no tooltip') end
+ end
  for _,m in ipairs({G.MODELS.default,G.MODELS.px16}) do
   G.UseFont(m)
   f.notice:SetText(LONG)
-  local fits=G.Rows(LONG,f.notice:GetWidth(),m.char)*m.line<=f.notice:GetHeight()
-  local lines=Hover(f.noticeHit)
-  if fits then check(lines==nil,m.name..': a notice that fits shows no tooltip')
-  else check(lines and lines[1]==LONG,m.name..': an overflowing notice is complete in its tooltip') end
-  check(f.notice:GetHeight()==24 and f.status:GetHeight()==74,m.name..': the fixed boxes keep their size')
+  Nexus.OrbPanel.Refresh()
+  check(f.notice:GetText()==LONG,m.name..': fixture: the refresh keeps the notice')
+  check((f.status:GetText() or '')~='',m.name..': fixture: the run page shows a status')
+  local noticeH,noticeOver=Expected(f.notice,440,24,m)
+  check(f.notice:GetWidth()==440 and f.notice:GetHeight()==noticeH,
+   m.name..': the notice is its measured height up to 24: '..f.notice:GetHeight()..' == '..noticeH)
+  Whole(f.noticeHit,f.notice,noticeOver,m.name..': the notice')
+  local statusH,statusOver=Expected(f.status,580,74,m)
+  check(f.status:GetWidth()==580 and f.status:GetHeight()==statusH,
+   m.name..': the status is its measured height up to 74: '..f.status:GetHeight()..' == '..statusH)
+  Whole(f.statusHit,f.status,statusOver,m.name..': the status')
+  -- Start/Stop rework (2026-11-19): no approval or usage rows, and no close
+  -- notice ("Use Pause or Stop" names controls that no longer exist; Start/Stop
+  -- surfaces, field report on 9106). The Start row, status, notice and the
+  -- button row in order, apart, with no gap above 16 units, all inside the window.
+  check(not f.approval:IsShown() and not f.usage:IsShown(),m.name..': no approval or usage row')
+  check(not f.closeNotice:IsShown(),m.name..': no obsolete close notice')
+  local box={0,0,f:GetWidth(),f:GetHeight()}
+  local startRow,status,notice=G.Rect(f.start,f),G.Rect(f.status,f),G.Rect(f.notice,f)
+  local help=G.Rect(f.help,f)
+  local order={startRow,status,notice,help}
+  local bad
+  for i=2,#order do
+   local gap=order[i][2]-order[i-1][4]
+   if not (gap>=0 and gap<=16) then bad=bad or ('row '..i..' '..G.Text(order[i])..' is '..gap..' below '..G.Text(order[i-1])) end
+  end
+  for _,r in ipairs(order) do if not G.Inside(r,box) then bad=bad or (G.Text(r)..' is outside the window '..G.Text(box)) end end
+  check(not bad,m.name..': Start row, status, notice and buttons are stacked inside the window'..(bad and (': '..bad) or ''))
+  for _,b in ipairs({f.cont,f.review}) do
+   if b:IsShown() then
+    local r=G.Rect(b,f)
+    check(G.Inside(r,box) and G.Apart(r,notice) and G.Apart(r,status) and G.Apart(r,help),
+     m.name..': '..b:GetText()..' is inside the window, beside the notice and apart from the status and buttons')
+   end
+  end
  end
+ check(G.Rows(LONG,440,G.MODELS.default.char)*G.MODELS.default.line<=24,'fixture: the default face fits the notice')
  check(G.Rows(LONG,440,G.MODELS.px16.char)*G.MODELS.px16.line>24,'fixture: the 16 px face overflows the notice')
  local c=Nexus.OrbPanel.ShowContinue()
  c.body:SetText(string.rep('The game reported no usable outcome for the confirmed spend. ',20))

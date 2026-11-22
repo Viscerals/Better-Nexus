@@ -23,7 +23,10 @@ check(F.Serialize(Nexus.Store.State().orbRefinement.pending)==receipt and #H.act
 check(pcall(Nexus.OrbPanel.Show),'real full window remains renderable')
 local mini=Nexus.OrbPanel.ShowMini()
 check(not NexusOrbPanel.start:IsEnabled() and not mini.resume:IsEnabled(),'real full and mini Resume controls withheld')
-check(NexusOrbPanel.stop:IsEnabled() and mini.stop:IsEnabled(),'Stop remains available in both views')
+-- Start/Stop surfaces (2026-11-19, 9106 field report): the surfaces offer no Stop
+-- for the earlier runtime's paused or held run (a recovery action that sent
+-- nothing); its runtime Stop keeps the receipt as before.
+check(not NexusOrbPanel.stop:IsEnabled() and not mini.stop:IsEnabled(),'neither view offers a Stop for that held run')
 check(A.SetFirstLoadoutWishlistIdentity('Orb test',original),'real writer restores exact original assignment')
 local restored=M.Status();check(not restored.canResume and not M.CompactStatus().canResume,'rewriting old content stamps a new assignment identity and cannot resume pending work')
 check(restored.progress and restored.progress.rolledMissing==3,'original target display recovers')

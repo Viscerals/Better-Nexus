@@ -171,4 +171,103 @@ H.maxSlotsValue=6;H.Notify();A.Poll();H.Advance(1)
 rows=OpenRows()
 check(#rows==6 and rows[6].enabled,'declared six again: the sixth row returns and is selectable')
 
+-- Updated client (2026-11 capture): Root probes probe_refused_intent.lua and
+-- probe_upload_unreadable.lua. A Wishlist row's refused Echo (avoid) never
+-- becomes a wanted Echo; a Wishlist that refuses Echoes, an unreadable or
+-- missing destination, and an incoming refused Echo are never uploaded.
+-- Real TOC and adapter; synthetic services only.
+do
+ local function FreshBoot(slots)
+  Nexus=nil;NexusDB=nil;SlashCmdList=nil
+  local FH=dofile('tests/prototype/harness.lua')
+  FH.playerLevel=40
+  FH.AddEcho(201172,'Probe Echo',0,5)
+  FH.service.GetServerMaxSlots=function() return 10 end
+  FH.service.GetServerActiveDesign=function() return 101 end
+  FH.perks.serverActiveSlot=1
+  FH.perks.serverBuildSlots=slots
+  FH.Boot()
+  FH.Advance(5)
+  return FH,Nexus.GameAdapter
+ end
+ local function Uploads(FH) local n=0;for _,a in ipairs(FH.actions) do if a[1]=='upload' then n=n+1 end end;return n end
+ local FH,FA=FreshBoot({
+  [1]={name='Live',verified=true,echoes={{spellId=201172,quality=0,stacks=1,locked=false}}},
+  [101]={name='Wishlist',verified=false,echoes={{spellId=201172,quality=0,stacks=1,locked=false,avoid=true}}}
+ })
+ local slots=FA.Slots()
+ assert(type(slots)=='table' and slots.bySlot[1],'fixture must reach actual slots projection')
+ local design=slots.bySlot[101]
+ assert(design,'fixture must reach the current Wishlist')
+ assert(design.roleSourceValid==false or (design.echoes[1] and design.echoes[1].avoid==true),
+  'refused Echo silently becomes a wanted Echo: preserve avoid or mark unsupported')
+ for _,e in ipairs(design.echoes) do assert(e.spellId~=201172,'a refused Echo is not a projected target') end
+ assert(design.refused and design.refused[1].spellId==201172,'the refusal is kept on the row')
+ assert(FA.ServerWishlistSlotToken(101)==nil,'a row with a refusal gives no identity token')
+ local ok,why=FA.UploadWishlist(101,'Wishlist',{{spellId=201172,quality=0,stacks=1}})
+ assert(ok==false and why=='refused_entries','an upload that would erase the refusal is refused: '..tostring(why))
+ ok,why=FA.UploadWishlist(0,'New',{{spellId=201172,quality=0,stacks=1,avoid=true}})
+ assert(ok==false and why=='refused_entries','an incoming refused Echo is never uploaded as wanted: '..tostring(why))
+ assert(Uploads(FH)==0,'read and refused uploads must not mutate the server')
+ -- Root probe_upload_unreadable: the destination cannot be read.
+ FH,FA=FreshBoot({[101]={name='Wishlist',verified=false,echoes={{spellId=201172,quality=0,stacks=1,avoid=true}}}})
+ FH.service.GetServerBuildSlots=function() return nil end
+ local sent=0
+ FH.service.UploadServerBuildSlot=function(...) sent=sent+1;return true end
+ ok,why=FA.UploadWishlist(101,'Wishlist',{{spellId=201172,quality=0,stacks=1}})
+ assert(sent==0 and ok==false and why=='stale_slot','unreadable destination still sent replacement: '..tostring(why))
+ FH.service.GetServerBuildSlots=function() error('synthetic slot read raises') end
+ ok,why=FA.UploadWishlist(101,'Wishlist',{{spellId=201172,quality=0,stacks=1}})
+ assert(sent==0 and ok==false and why=='stale_slot','a raising slot read refuses replacement: '..tostring(why))
+ FH.service.GetServerBuildSlots=function() return {[1]={name='Live',verified=true,echoes={}}} end
+ ok,why=FA.UploadWishlist(101,'Wishlist',{{spellId=201172,quality=0,stacks=1}})
+ assert(sent==0 and ok==false and why=='stale_slot','a missing destination row refuses replacement: '..tostring(why))
+ -- Control: a fully read destination without refusals is replaced once.
+ FH.service.GetServerBuildSlots=function()
+  return {[101]={name='Wishlist',verified=false,echoes={{spellId=201172,quality=0,stacks=1,locked=false}}}}
+ end
+ ok,why=FA.UploadWishlist(101,'Wishlist',{{spellId=201172,quality=0,stacks=2}})
+ assert(ok==true and sent==1,'control: a readable destination is replaced: '..tostring(why))
+ print('PASS updated client: refused intent is retained, never overwritten, and unreadable destinations are refused')
+end
+-- Updated client (third review, player wording): when the adapter's upload
+-- itself returns refused_entries (stubbed here on a newly imported draft),
+-- the controller keeps that stable machine token as its reason and the
+-- player sees what it means, never the token. The real trigger -- a server
+-- Wishlist with wanted and refused Echoes opened in the editor -- is covered
+-- with the real adapter in stale_server_slot_save.lua section 10 (Fable R1).
+do
+ Nexus=nil;NexusDB=nil;SlashCmdList=nil
+ local FH=dofile('tests/prototype/harness.lua')
+ FH.playerLevel=40
+ FH.AddEcho(201172,'Probe Echo',0,5)
+ FH.service.GetServerMaxSlots=function() return 10 end
+ FH.service.GetServerActiveDesign=function() return 0 end
+ FH.perks.serverActiveSlot=1
+ FH.perks.serverBuildSlots={[1]={name='Live',verified=true,echoes={}}}
+ FH.Boot()
+ FH.Advance(5)
+ local FA=Nexus.GameAdapter
+ local messages,backing={},{}
+ local store={State=function() return backing end,Settings=function() return {} end}
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=store,
+  accountRoot=function() return {} end,notify=function(t) messages[#messages+1]=tostring(t) end})
+ c.Initialize(FA)
+ local okImport=c.LoadImported({entries={{spellId=201172,quality=0,stacks=1,locked=false}},name='Plan R',class='MAGE'},'Plan R')
+ assert(okImport==true,'wording fixture: the draft is imported')
+ local data,mode=c.PrepareApply('Plan R',c.INTENT.SAVE_CHANGES)
+ assert(type(data)=='table','wording fixture: the save is prepared: '..tostring(mode))
+ local uploads=0
+ FA.UploadWishlist=function() uploads=uploads+1;return false,'refused_entries' end
+ local mark=#messages
+ local accepted,reason=c.AcceptApply(data)
+ local shown={}
+ for i=mark+1,#messages do shown[#shown+1]=messages[i] end
+ shown=table.concat(shown,'\n')
+ assert(uploads==1 and accepted==false and reason=='refused_entries','the controller keeps the machine reason: '..tostring(reason))
+ assert(not shown:find('refused_entries',1,true),'the player never sees the machine token: '..shown)
+ assert(shown:find('refuses some Echoes',1,true) and shown:find('remove those refusals',1,true),
+  'the player sees that saving would remove refused Echoes: '..shown)
+ print('PASS updated client: refused_entries is explained to the player')
+end
 print('PASS wishlist_loadout_selector_slots: declared six, five, none, unreadable, sparse and odd declarations; designed mirrors never listed; choice by slot number only; nothing written or activated checks='..checks)

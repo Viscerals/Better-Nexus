@@ -1,3 +1,5 @@
+-- EXPECT semantic replacement from accepted base bc5f4959: classified entry uses WAIT_WORLD
+-- during its settling opportunity; exact result and no-repeat guards stay.
 -- An Orb action whose one-Orb spend was already confirmed, interrupted by a
 -- dungeon loading screen (RDF) and then a reload, settles from its exact
 -- ownership result even when the total Orb balance moved afterwards for an
@@ -96,7 +98,7 @@ local function Stuck(opts)
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(.5);H.Fire('PLAYER_ENTERING_WORLD')
  if opts.inSession then opts.inSession(H,M,A,O,source) end
  H.Advance(2)
- check(M.Status().pending and not M.Status().running,'loading screen: the action stays unresolved and the run stops')
+ check(M.Status().state=='WAIT_WORLD' and M.Status().pending and H.Count('orb-spend')==1 and H.Count('take')==1,'loading screen: exact classified settling state, unresolved action never repeated; actual='..M.Status().state..' drift='..tostring(opts.inSession~=nil))
  check(H.service.SelectPerk(tonumber((r.selectedKey:match('^(%d+):'))))==false,'loading screen: the game refuses a pick while its latch is set')
  M=Reload(H)
  local calls=CountCalls(H)

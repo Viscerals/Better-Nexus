@@ -340,8 +340,19 @@ local echoDisplayReuse = nil
 -- The Echo fields the strict check rejected at the last scan: field -> reason.
 -- Current state only (never the last accepted one); see CaptureEchoSnapshot.
 local echoRejected = {}
+-- Presentation only. CaptureEchoSnapshot keeps an unreadable (nil) active
+-- slot as 0, as it always has for automation, so the activeSlot field and
+-- generation cannot show an unknown <-> known change that ReadSlots reports
+-- as activeKnown. known: that knownness at the last capture (nil before the
+-- first); generation: how often it changed between captures. Only
+-- A.PresentationRevisions reads it. Nothing is marked dirty, and the
+-- snapshot, ConsumeDirty and the stats are unchanged. It is held as
+-- echoGenerations.knownness, not as its own main-chunk local (this chunk is at
+-- the Lua 5.1 limit of 200 active locals). It is not one of ECHO_FIELDS, and
+-- echoGenerations is only read field by field, so nothing walks or exports it.
 local echoGenerations = {
     slots=0, granted=0, locked=0, discovery=0, activeSlot=0,
+    knownness = { known=nil, generation=0 },
 }
 local echoStatus = {
     slotRequests=0, notifications=0, reconciliations=0, scans=0, cacheHits=0,
@@ -883,8 +894,23 @@ function A.Board()
     pcall(A.ObserveChoiceRead,ok,ch,"adapter_board",not svc and "no_service" or type(getter)~="function" and "no_getter" or nil)
     if not ok then ch=nil end -- preserve SafeCall's original failed-read result
     if type(ch) ~= "table" or #ch == 0 then return nil end
+    -- A souvenir reveal waiting for its reply: binds the first new choice
+    -- that is its reply (ledger.RevealObserve), memory and bounded reads.
+    if ledger.reveal then pcall(ledger.RevealObserve, ch) end
+    if ledger.choiceSeen and ledger.choiceSeen[ch] == nil then ledger.choiceSeen[ch] = GetTime() end
     local cards, gi = {}, nil
     local sigParts = {}
+    -- D-ROLL-01: the position in the client's choice array of each projected
+    -- card, for A.Banish/A.Freeze. An entry without a spellId is skipped, so
+    -- after one a card's projected position is not its client slot. Weak keys:
+    -- a record lives as long as its card, and the cards and board a caller
+    -- receives keep their shape. Held in the mutators' ledger, not as another
+    -- main-chunk local (this chunk is at the Lua 5.1 limit of 200).
+    local rawSlots = ledger.boardSlots
+    if not rawSlots then
+        rawSlots = setmetatable({}, { __mode = "k" })
+        ledger.boardSlots = rawSlots
+    end
     for i = 1, #ch do
         local c = ch[i]
         projectionStatus.board.cards = projectionStatus.board.cards + 1
@@ -892,6 +918,12 @@ function A.Board()
             local card = {
                 spellId = c.spellId,
                 quality = c.quality or 0,
+                -- The rarity the offer actually reports: an exact integer
+                -- 0..4, else nil (`quality` above keeps its historical 0
+                -- default). Only the optional leveling pick reads it.
+                observedQuality = (type(c.quality) == "number"
+                    and c.quality == math.floor(c.quality)
+                    and c.quality >= 0 and c.quality <= 4) and c.quality or nil,
                 family = FamilyOf(c.spellId),
                 isFrozen = c.isFrozen and true or false,
                 isCarried = c.isCarried and true or false,
@@ -900,6 +932,7 @@ function A.Board()
                 justFrozen = c.justFrozen and true or false,
             }
             cards[#cards + 1] = card
+            rawSlots[card] = i
             if card.isGuaranteed and not gi then gi = #cards end
             sigParts[#sigParts + 1] = tostring(c.spellId)
                 .. (card.isFrozen and "F" or "") .. (card.isCarried and "C" or "")
@@ -918,8 +951,58 @@ function A.Board()
     if selfFreezeSig == sig and selfFreezeIndex and cards[selfFreezeIndex] then
         cards[selfFreezeIndex].justFrozen = true
     end
+    -- R5: whether the WHOLE raw choice is a strict three-card observation
+    -- (the leveling pick refuses a filtered subset); other readers ignore it.
+    -- memoryStage: the updated provider's souvenir stage, a VISIBLE memory
+    -- card (flag 3), so the planner does not wait for three cards there. By a
+    -- static reading of one captured client (perks.lua SHA-256 43e28dae...,
+    -- "Memory stage"; perks_service.lua SHA-256 3303632e..., see CONTRACTS.md;
+    -- offline only, no native result) the souvenir is shown alone or beside
+    -- carried cards and the three random cards stay hidden until it is given
+    -- up. Its absence proves nothing: a dropped fourth card can hide one.
+    local memoryStage = gi ~= nil and ledger.MemoryCardContract
+        and ledger.MemoryCardContract() == true or nil
+    -- Souvenir reveal (ledger.RevealMemory): revealSent, this lone souvenir
+    -- was already given up (one request per draw, never again); revealable,
+    -- a lone souvenir that has not been; revealBound, the three Echoes that
+    -- answered Nexus's own reveal; revealSettling, that choice is not yet
+    -- actionable (ledger.ChoiceActionable: no reveal or Take before).
+    local revealSent, revealable, settling = nil, nil, nil
+    if memoryStage and #ch == 1 and #cards == 1 then
+        local r = ledger.reveal
+        if (r and rawequal(r.ref, ch)) or ledger.RevealDoneFor(ch) then
+            revealSent = true
+        elseif ledger.RevealSnapshot(PerksTbl(), cards[1].spellId) then
+            -- Revealable only where RevealMemory would not refuse at once:
+            -- the game's own build must not ask for the souvenir, and the
+            -- choice must have settled (else revealSettling).
+            local svc = PS()
+            local wants = svc and rawget(svc, "WantsMoreOfEcho")
+            local okW, wanted = false, nil
+            if type(wants) == "function" then okW, wanted = pcall(wants, cards[1].spellId) end
+            if okW and not wanted then
+                if ledger.ChoiceActionable(ch) then revealable = true else settling = true end
+            end
+        end
+    end
+    local bound = ledger.revealBound
+    if bound and not rawequal(bound.ref, ch) then bound = nil end
+    if bound and not ledger.ChoiceActionable(ch) then settling = true end
+    -- An ordinary three-card draw on the updated provider waits for the same
+    -- later-frame rule before any action (ChoiceAdmission); revealSettling
+    -- makes the planner wait and the runtime decide again at the poll pace.
+    if not memoryStage and not bound and #ch == 3 and rawget(ch, 4) == nil
+        and ledger.MemoryCardContract() and not ledger.ChoiceActionable(ch) then
+        settling = true
+    end
     return { cards = cards, guaranteedIndex = gi, signature = sig,
-             idSignature = idSig }
+             idSignature = idSig,
+             memoryStage = memoryStage,
+             revealSent = revealSent, revealable = revealable,
+             revealBound = bound and true or nil,
+             revealSettling = settling,
+             strictObservation = ledger.LevelingStrictCards
+                 and ledger.LevelingStrictCards(ch) ~= nil or false }
 end
 
 ------------------------------------------------------------------------
@@ -1390,7 +1473,7 @@ function A.Owned()
     -- satisfy a later generation, and elapsed time alone never makes an empty
     -- snapshot authoritative. Replacing the granted table with a fresh empty
     -- table is the supported confirmed-empty signal.
-    local level = A.Level()
+    local level = tonumber(A.Level()) or 0 -- R6: a non-number level is not compared
     local ghost = (level <= 1 and distinct >= GHOST_OWNED)
     local currentResponse = ownedRequestGeneration == ownedGeneration
         and type(granted) == "table"
@@ -1457,6 +1540,8 @@ function A.RunBoundaryReset()
     ownedProjectionRevision = ownedProjectionRevision + 1
     pendingOwnPick, pendingOwnBaseline = nil, nil
     ownedGeneration = ownedGeneration + 1
+    -- A revealed board of the previous run is no admission in this one.
+    ledger.revealBound = nil
     ownedConfirmedGeneration = -1
     ownedRequestGeneration = -1
     ownedBaselineRef, ownedBaselineSig = nil, nil
@@ -1472,10 +1557,19 @@ end
 -- (A.RecheckSelect). It is the same request, but it does not use up the
 -- bounded owned-sync retries below.
 function A.RequestGranted(selectRecheck)
+    -- Session pause: no new read request, and no baseline, time or retry mark.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local svc = PS()
     if svc and svc.RequestGrantedPerks then
         if ownedRequestGeneration ~= ownedGeneration then
             local before = SafeCall(svc.GetGrantedPerks)
+            -- The read can run other code: no baseline and no request after
+            -- a Pause (or Pause and Resume) it raised.
+            if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+                or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false end
             ownedBaselineRef = before
             ownedBaselineSig = GrantedSignature(before)
             ownedRequestGeneration = ownedGeneration
@@ -3533,6 +3627,10 @@ function A.ForgottenWishlistPlans()
                 key = candidate.key,
                 assignmentId = candidate.assignmentId,
                 associationIndex = retained.loadoutSlot,
+                -- Removed from the first run. With no associationIndex it was
+                -- the first-run plan alone (A.ClearAssignmentVerified): its
+                -- origin is the first run, not a Saved Build index.
+                firstRun = retained.firstRun == true or nil,
                 mirrorSlot = candidate.slot,
                 rows = #(candidate.echoes or {}),
             }
@@ -3555,6 +3653,17 @@ end
 -- the caller is told which: the alternative is telling the player to remove
 -- whatever occupies it, and a removal would push this record further down its
 -- own list. A refusal here never asks for a destructive step.
+--
+-- A record removed from the first run alone carries no index (the shape
+-- A.ClearAssignmentVerified keeps). It goes back to the first run, and the
+-- result says so (detail.firstRun), only while the first run is still the
+-- destination and positively has nothing assigned (A.NoWishlistTarget), and
+-- its record is still the explicit Unassign or absent inside the write: a
+-- newer first-run plan or a Saved Build's assignment is never replaced. In
+-- every other case it lands on the lowest free Saved Build index as above
+-- and the first-run record is left exactly as it is; the result says that
+-- it came from the first run and what the first run holds
+-- (detail.fromFirstRun, detail.firstRunName).
 function A.RestoreForgottenWishlistPlan(selector)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     local state = Store and Store.State and Store.State()
@@ -3580,6 +3689,13 @@ function A.RestoreForgottenWishlistPlan(selector)
         return false, "nothing was removed in a way this can restore"
     end
     local landedOn, full = nil, false
+    local firstRunOnly = chosen.firstRun == true and chosen.associationIndex == nil
+    local firstRunOpen, firstRunName = false, nil
+    if firstRunOnly then
+        local okTarget, target = pcall(A.NoWishlistTarget)
+        firstRunOpen = okTarget and type(target) == "table" and target.state == "unassigned"
+            and type(target.destination) == "table" and target.destination.kind == "firstRun"
+    end
     local ok = UpdateStoreState(function(live)
         live.loadoutWishlists = live.loadoutWishlists or {}
         local list = RemovalList(live)
@@ -3587,6 +3703,16 @@ function A.RestoreForgottenWishlistPlan(selector)
         if type(retained) ~= "table" or type(retained.record) ~= "table" then
             return
         end
+        if firstRunOnly and firstRunOpen and retained.firstRun == true and retained.loadoutSlot == nil
+            and (live.firstRunWishlist == nil or live.firstRunWishlist == false) then
+            live.firstRunWishlist = retained.record
+            WishlistRoles.Wrote(nil, "first")
+            table.remove(list, chosen.position)
+            live.forgottenWishlist = list[1]
+            landedOn = "first"
+            return
+        end
+        firstRunName = type(live.firstRunWishlist) == "table" and live.firstRunWishlist.name or nil
         local index = retained.loadoutSlot
         if index == nil or live.loadoutWishlists[index] ~= nil then
             index = nil
@@ -3601,7 +3727,14 @@ function A.RestoreForgottenWishlistPlan(selector)
         end
         live.loadoutWishlists[index] = retained.record
         WishlistRoles.Wrote(nil, index)
-        if retained.firstRun and live.firstRunWishlist == nil then
+        -- The first-run record is refilled only for an INDEXED removal, which
+        -- took that record together with its Saved Build copy in one write
+        -- and puts both back. An entry removed from the first run alone has
+        -- no index: stored here under a Saved Build index, it leaves the
+        -- first-run record exactly as it is (absent after a later numbered
+        -- assignment as much as the explicit Unassign), so no plan waits to
+        -- be handed to a Saved Build the player did not choose.
+        if retained.firstRun and retained.loadoutSlot ~= nil and live.firstRunWishlist == nil then
             live.firstRunWishlist = retained.record
             WishlistRoles.Wrote(nil, "first")
         end
@@ -3618,9 +3751,12 @@ function A.RestoreForgottenWishlistPlan(selector)
         return false, "nothing was removed in a way this can restore"
     end
     MarkWishlistProjectionDirty()
+    if landedOn == "first" then return true, nil, {firstRun = true} end
     return true, nil, {loadoutSlot = landedOn,
         movedFrom = (tonumber(chosen.associationIndex) ~= landedOn)
-            and chosen.associationIndex or nil}
+            and chosen.associationIndex or nil,
+        fromFirstRun = firstRunOnly or nil,
+        firstRunName = firstRunOnly and firstRunName or nil}
 end
 
 -- What the supported client interface can do about a SERVER Wishlist. The
@@ -3649,6 +3785,7 @@ end
 function A.Wishlist(slots, context)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
+    A._wishlistNoteFacts = nil
     if slots == nil then slots = A.Slots() end
     if not slots or slots.activeKnown==false then
         local saved = Store and Store.State and Store.State()
@@ -3696,6 +3833,11 @@ function A.Wishlist(slots, context)
                 A._wishlistNote = A._wishlistNote
                     .. " Open the Wishlist Editor to choose and confirm its locked targets."
             end
+            -- Display facts of exactly this note: its reason and whether the
+            -- editor instruction follows (A.WishlistNoteFacts).
+            A._wishlistNoteFacts = {text = A._wishlistNote,
+                reason = tostring(reason or "locked roles are unavailable"),
+                pending = status == "evidence-pending"}
             return nil
         end
         return WishlistRoles.Wishlist(linked,"loadout-association",linked.evidenceSource=="verified-active")
@@ -3738,6 +3880,15 @@ function A.Wishlist(slots, context)
 end
 
 function A.WishlistNote() return A._wishlistNote end
+-- Display only: the facts of the identity-found note when `text` is exactly
+-- the current note (its reason, and whether the editor instruction follows);
+-- nil for any other text. The note itself is unchanged.
+function A.WishlistNoteFacts(text)
+    local facts = A._wishlistNoteFacts
+    if type(facts) ~= "table" or type(text) ~= "string" or text ~= A._wishlistNote
+        or facts.text ~= text then return nil end
+    return {reason = facts.reason, pending = facts.pending == true}
+end
 
 -- The retired flat locked-design table moved under a Wishlist's content key
 -- (AutomationRuntime and WishlistController do this once). That changes what
@@ -3848,6 +3999,26 @@ local function ReadAssignedWishlist()
         if result.note=="Restoring assigned Wishlist..." then result.state="restoring"
         elseif saved then result.state="unavailable"
         elseif emptySlot then result.emptySlot=true end
+        -- Positively known: nothing is assigned (the optional leveling pick
+        -- needs this, never "unassigned" alone). Only the two A.Wishlist
+        -- routes that mean "no assignment exists" qualify: no Saved Build in
+        -- use and no first-run plan, or a populated Saved Build with no
+        -- association. Loading, restoring, temporarily unavailable, identity
+        -- or lock-evidence notes, an empty Saved Build, a retained first-run
+        -- plan, an unknown active slot or owner all leave it unset.
+        if result.state=="unassigned" and Store and Store.State and type(active)=="number"
+            and type(result.owner)=="string" and result.owner~=""
+            and (state.firstRunWishlist==nil or state.firstRunWishlist==false)
+            and (state.loadoutWishlists==nil or type(state.loadoutWishlists)=="table") then
+            local slot=target and target>=1 and target<=(tonumber(slots.maxSlots) or 5) and target or nil
+            local note=result.note
+            if (not slot and note=="Choose or create a wishlist to begin your first run.")
+                or (slot and not emptySlot and IsPopulatedLoadout(slot,slots) and note=="Loadout "..tostring(slot)
+                    .." has no wishlist association. Set it in the Echo Journal.") then
+                result.knownUnassigned=true
+                result.unassignedKey=table.concat({result.owner,tostring(target or 0),tostring(active)},"|")
+            end
+        end
         return result
     end
     return AssignmentMeasure("assignment.projection", WishlistRoles.ProjectAssignment,
@@ -3856,6 +4027,182 @@ end
 
 function A.AssignedWishlist()
     return AssignmentMeasure("assignment.read", ReadAssignedWishlist)
+end
+
+-- What choosing "Auto-pick by rarity" instead of a Wishlist (the optional
+-- leveling pick, settings.autoPickLeveling) would act on now. Read-only: it
+-- writes, requests, selects and assumes nothing. `state` is
+--   "unassigned": the adapter positively knows nothing is assigned
+--       (A.AssignedWishlist's knownUnassigned, the runtime's own authority);
+--   "assigned": a resolved Wishlist is assigned and its stored record is the
+--       destination's own: a numbered Saved Build's association, or the
+--       first-run plan while no Saved Build is in use;
+--   "unknown" with a `reason`: loading, restoring, unavailable, an empty
+--       Saved Build, a first-run plan that a numbered Saved Build follows, a
+--       stored first-run plan that is not this destination's own and would
+--       be handed to it once its association goes, a native Wishlist slot
+--       with no kept Saved Build, an unknown owner or an unreadable
+--       assignment. Unknown is never treated as unassigned.
+-- `destination` names the target exactly ({kind = "savedBuild", slot, name}
+-- or {kind = "firstRun"}), `name` the assigned Wishlist, and `bound` what
+-- A.AssignmentBindingHolds compares before anything is removed: the owner
+-- and the destination's key, and for an assigned destination its current
+-- assignment-action token and the assignment's identity.
+function A.NoWishlistTarget()
+    local out = {state = "unknown", reason = "unreadable"}
+    local okRead, a = pcall(A.AssignedWishlist)
+    if not okRead or type(a) ~= "table" then return out end
+    if a.state == "loading" or a.state == "restoring" then
+        out.reason = a.state
+        return out
+    end
+    local slots = A.Slots()
+    local state = Store and Store.State and Store.State()
+    if type(slots) ~= "table" or slots.activeKnown == false or type(state) ~= "table" then
+        out.reason = "loading"
+        return out
+    end
+    if type(a.owner) ~= "string" or a.owner == "" then
+        out.reason = "owner"
+        return out
+    end
+    local active = tonumber(slots.activeSlot)
+    local selected, kept = WishlistRoles.SelectedSavedBuild(slots)
+    local target = kept and selected or active
+    local maxSlots = tonumber(slots.maxSlots) or 5
+    if type(target) ~= "number" or target < 0 or target > maxSlots then
+        out.reason = "no_saved_build"
+        return out
+    end
+    local key = target >= 1 and target or "first"
+    local row = target >= 1 and slots.bySlot and slots.bySlot[target] or nil
+    out.destination = target >= 1
+        and {kind = "savedBuild", slot = target, name = type(row) == "table" and row.name or nil}
+        or {kind = "firstRun"}
+    if a.knownUnassigned == true and type(a.unassignedKey) == "string" then
+        out.state, out.reason = "unassigned", nil
+        out.bound = {owner = a.owner, key = key}
+        return out
+    end
+    if a.emptySlot == true then
+        out.reason = "empty_slot"
+        return out
+    end
+    if a.state ~= "ready" then
+        out.reason = a.state == "unavailable" and "unavailable" or "not_confirmed"
+        return out
+    end
+    local record
+    if target >= 1 then
+        record = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[target] or nil
+        -- The Saved Build follows the first-run plan, not an association of
+        -- its own: its Unassign is the Echo Journal's, never guessed here.
+        if type(record) ~= "table" then
+            out.reason = "first_run_plan"
+            return out
+        end
+        -- A stored first-run plan is handed to a populated active Saved Build
+        -- that has no association (A.Wishlist's one automatic hand-off). It
+        -- is this destination's own only as the proven handoff pair of Saved
+        -- Build 1 (WishlistRoles.FirstRunHandoff). Any other first-run plan
+        -- would be assigned here the moment this association goes, and is
+        -- never removed on this destination's behalf: its Unassign is the
+        -- Echo Journal's.
+        if type(state.firstRunWishlist) == "table"
+            and not (target == 1 and WishlistRoles.FirstRunHandoff(state)) then
+            out.reason = "first_run_plan_pending"
+            return out
+        end
+    else
+        record = state.firstRunWishlist
+        if type(record) ~= "table" then
+            out.reason = "not_confirmed"
+            return out
+        end
+    end
+    out.state, out.reason, out.name = "assigned", nil, a.name
+    out.bound = {owner = a.owner, key = key, token = WishlistRoles.ActionToken(key),
+        identity = a.identity}
+    return out
+end
+
+-- Does `bound` (an A.NoWishlistTarget read's own binding) still hold? Read
+-- only. true, "assigned": the same owner and destination, no assignment
+-- action since (its token) and the same assignment. true, "already": the same
+-- owner and destination, by now positively unassigned, whatever happened in
+-- between; nothing is left to remove there. Otherwise false and the reason.
+-- A binding read as unassigned never answers "assigned": it carries no
+-- identity, and an assignment always has one.
+function A.AssignmentBindingHolds(bound)
+    if type(bound) ~= "table" or type(bound.owner) ~= "string" or bound.key == nil then
+        return false, "no_binding"
+    end
+    local now = A.NoWishlistTarget()
+    local current = type(now.bound) == "table" and now.bound or nil
+    if not current or current.owner ~= bound.owner or current.key ~= bound.key then
+        return false, now.state == "unknown" and now.reason or "changed"
+    end
+    if now.state == "unassigned" then return true, "already" end
+    if now.state ~= "assigned" or current.token ~= bound.token
+        or current.identity ~= bound.identity then
+        return false, "changed"
+    end
+    return true, "assigned"
+end
+
+-- Removes the assignment `bound` was read for, only while it still holds
+-- (A.AssignmentBindingHolds, read again here, immediately before the write).
+-- A destination already unassigned answers true, "already", and writes
+-- nothing. Anything else that does not hold answers false and a reason, and
+-- writes nothing.
+--   A numbered Saved Build's own association: the existing Unassign
+--   (A.ClearLoadoutWishlist), which keeps the removed plan recoverable.
+--   The first-run plan, and Saved Build 1's stamped copy of it (the proven
+--   handoff pair): ONE write removes every record that plan owns here (the
+--   first-run record, recorded as an explicit Unassign, and the stamped
+--   copy), so no later read hands it back, and keeps the exact plan as a
+--   recoverable entry in that same write (RememberRemoval, restorable by
+--   A.RestoreForgottenWishlistPlan). A first-run plan may have no server
+--   copy; A.ClearFirstRunWishlist keeps none, so it is not used here.
+-- No other Saved Build's assignment, no unrelated first-run plan and no
+-- setting is touched.
+function A.ClearAssignmentVerified(bound)
+    local holds, what = A.AssignmentBindingHolds(bound)
+    if not holds then return false, what end
+    if what == "already" then return true, "already" end
+    if A.DIAGNOSTIC_PASSIVE then return false, "write_failed" end
+    local key = bound.key
+    local state = Store and Store.State and Store.State()
+    if key ~= "first" and not (key == 1 and type(state) == "table"
+        and WishlistRoles.FirstRunHandoff(state)) then
+        if A.ClearLoadoutWishlist(key) ~= true then return false, "write_failed" end
+        return true
+    end
+    local removed = false
+    local wrote = UpdateStoreState(function(live)
+        local lists = type(live.loadoutWishlists) == "table" and live.loadoutWishlists or nil
+        local pair = lists ~= nil and WishlistRoles.FirstRunHandoff(live)
+        local record
+        if key == "first" then
+            record = live.firstRunWishlist
+        elseif pair then
+            record = lists[1]
+        end
+        if type(record) ~= "table" then return end
+        if pair then
+            lists[1] = nil
+            WishlistRoles.Wrote(nil, 1)
+        end
+        -- False records the explicit first-run Unassign (as A.ClearFirstRunWishlist).
+        live.firstRunWishlist = false
+        WishlistRoles.Wrote(nil, "first")
+        RememberRemoval(live, {record = record, loadoutSlot = pair and 1 or nil,
+            firstRun = true, source = "unassign"})
+        removed = true
+    end)
+    if not wrote or not removed then return false, "write_failed" end
+    MarkWishlistProjectionDirty()
+    return true
 end
 
 function A.GetLoadoutCandidates()
@@ -3901,20 +4248,25 @@ local function ReadSlots()
     for slot, s in pairs(raw) do
         if type(s) == "table" then
             projectionStatus.slots.slots = projectionStatus.slots.slots + 1
-            local echoes = {}
+            local echoes, refused = {}, {}
             local roleSourceValid = type(s.echoes) == "table"
+            local readComplete = roleSourceValid
             if type(s.echoes) == "table" then
                 -- Keep the existing slot projection, but do not derive roles
                 -- from a source whose malformed/sparse entries were omitted.
+                -- readComplete: the source list was read in full; unlike
+                -- roleSourceValid it is not cleared by a well-formed refusal
+                -- (avoid == true), so a mixed wanted+refused row is a known
+                -- row of wanted Echoes for the legacy assignment migration.
                 local sourceCount, lastIndex = 0, 0
                 for index in pairs(s.echoes) do
                     if type(index) == "number" then
                         sourceCount = sourceCount + 1
-                        if not PositiveInteger(index) then roleSourceValid = false end
+                        if not PositiveInteger(index) then roleSourceValid = false;readComplete = false end
                         if index > lastIndex then lastIndex = index end
                     end
                 end
-                if sourceCount ~= lastIndex then roleSourceValid = false end
+                if sourceCount ~= lastIndex then roleSourceValid = false;readComplete = false end
                 for i = 1, #s.echoes do
                     projectionStatus.slots.echoes =
                         projectionStatus.slots.echoes + 1
@@ -3924,8 +4276,24 @@ local function ReadSlots()
                         or (e.stacks ~= nil and not PositiveInteger(e.stacks))
                         or (e.quality ~= nil and NonNegativeInteger(e.quality) == nil) then
                         roleSourceValid = false
+                        readComplete = false
                     end
-                    if id then
+                    if e ~= nil and type(e) == "table" and e.avoid ~= nil
+                        and type(e.avoid) ~= "boolean" then
+                        readComplete = false
+                    end
+                    if id and e.avoid ~= nil and e.avoid ~= false then
+                        -- Updated client: a Wishlist row's refused Echo
+                        -- (avoid). It is never a target: it is kept apart
+                        -- (row.refused) and the row is not a complete role
+                        -- source, so it has no identity token and no Nexus
+                        -- upload replaces it. The Wishlist list still shows
+                        -- the row's wanted Echoes; the editor names the
+                        -- refusals at Save (Fable R1, WishlistController).
+                        refused[#refused + 1] = {spellId = id, stacks = tonumber(e.stacks) or 1,
+                            quality = tonumber(e.quality)}
+                        roleSourceValid = false
+                    elseif id then
                         if not catRead then cat, catRead = A.Catalog(), true end
                         echoes[#echoes + 1] = {
                             spellId = id, stacks = tonumber(e.stacks) or 1,
@@ -3946,6 +4314,8 @@ local function ReadSlots()
                 echoes = echoes,
                 suspectParse = (s.verified and #echoes == 0) and true or false,
                 roleSourceValid = roleSourceValid,
+                readComplete = readComplete,
+                refused = #refused > 0 and refused or nil,
             }
         end
     end
@@ -3967,6 +4337,54 @@ function A.Slots()
     return AssignmentMeasure("assignment.slots", ReadSlots)
 end
 
+-- What one numbered Saved Build is, as one comparable string: its slot, its
+-- name as the game reports it and everything it holds (every Echo with its
+-- stacks, quality and lock state, every refused Echo, and whether the game's
+-- list was complete), in an order that does not depend on the game's. nil
+-- when that cannot be read or the Saved Build holds nothing: an unknown
+-- target is never equal to anything. A slot number or a name alone
+-- identifies nothing (the same slot can be saved over, with the same name).
+-- `row` is this adapter's row for that slot (A.Slots().bySlot[slot]) when the
+-- caller already holds the read it belongs to; without one the slots are
+-- read now. Read only. The one definition for every assignment route: the
+-- Echo Journal's question, the editor's candidates and role picker
+-- (ui/JournalTab.lua, ui/WishlistEditor.lua) and the editor's Save & assign
+-- (core/WishlistController.lua).
+function A.SavedBuildIdentity(slot, row)
+    slot = tonumber(slot)
+    if not slot or slot < 1 then return nil end
+    if row == nil then
+        local ok, slots = pcall(A.Slots)
+        if not ok or type(slots) ~= "table" or type(slots.bySlot) ~= "table" then return nil end
+        row = slots.bySlot[slot]
+    end
+    if type(row) ~= "table" or type(row.name) ~= "string"
+        or type(row.echoes) ~= "table" or #row.echoes == 0 then
+        return nil
+    end
+    local function Parts(list)
+        local parts = {}
+        for i = 1, #list do
+            local echo = list[i]
+            local id = type(echo) == "table" and tonumber(echo.spellId) or nil
+            if not id then return nil end
+            parts[i] = string.format("%.0f:%s:%s:%s", id, tostring(tonumber(echo.stacks)),
+                tostring(tonumber(echo.quality)), tostring(echo.locked))
+        end
+        table.sort(parts)
+        return table.concat(parts, ",")
+    end
+    local held = Parts(row.echoes)
+    local refused = ""
+    if row.refused ~= nil then
+        refused = type(row.refused) == "table" and Parts(row.refused) or nil
+    end
+    if not held or not refused then return nil end
+    -- The name is length-prefixed: no name can imitate another field.
+    return table.concat({string.format("%.0f", slot), #row.name .. ":" .. row.name,
+        tostring(row.roleSourceValid), held, refused}, "|")
+end
+
 -- NOTE: this is a READ (asks the server to re-send slot data), so it has
 -- its own throttle and deliberately does NOT touch lastBuildOpAt.
 -- Sharing that guard was a real bug (2026-07-24): the background loop
@@ -3975,6 +4393,7 @@ end
 -- the time. Reads must never block writes.
 local lastSlotRequestAt = -10
 function A.RequestSlots()
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
     local svc = PS()
     if svc and svc.RequestServerBuildSlots and (GetTime() - lastSlotRequestAt) >= 3 then
         echoStatus.slotRequests = echoStatus.slotRequests + 1
@@ -4027,7 +4446,7 @@ function A.UnknownTomesForEchoes(echoes)
     if not cat or not svc or type(echoes) ~= "table" then return {} end
     local discovered = SafeCall(svc.GetDiscoveredEchoes)
     if type(discovered) ~= "table" then return {} end
-    local seen, out = {}, {}
+    local seen, found = {}, {}
     for _, entry in ipairs(echoes) do
         local spellId = tonumber(entry and (entry.spellId or entry.id))
         local row = spellId and cat.rows[spellId]
@@ -4044,11 +4463,25 @@ function A.UnknownTomesForEchoes(echoes)
             end
             if not known then
                 seen[lever] = true
-                out[#out + 1] = (lv and lv.tomeName) or ("Tome of " .. tostring(row.name or spellId))
+                -- A catalog tome name is data; without one the generated
+                -- "Tome of <Echo name or id>" stands in, and its Echo is kept
+                -- as provenance so a display can word it (out.generated).
+                local echo = tostring(row.name or spellId)
+                found[#found + 1] = (lv and lv.tomeName) and {text = lv.tomeName}
+                    or {text = "Tome of " .. echo, echo = echo}
             end
         end
     end
-    table.sort(out)
+    -- Sorted by the raw text, as before; generated[i] marks entry i.
+    table.sort(found, function(a, b) return a.text < b.text end)
+    local out = {}
+    for i, item in ipairs(found) do
+        out[i] = item.text
+        if item.echo then
+            out.generated = out.generated or {}
+            out.generated[i] = {echo = item.echo}
+        end
+    end
     return out
 end
 
@@ -4093,8 +4526,9 @@ function A.TomeStateObservation(unavailableReason)
     local pending = state and state.tomeTogglePending or {}
     local out = { rows={}, stale=#reasons > 0, reasons=reasons,
         catalogAvailable=cat ~= nil, serverFreshness="unverified" }
+    local nameFacts = {}
     for lever, lv in pairs(cat and cat.levers or {}) do
-        local names, seenNames = {}, {}
+        local names, seenNames, generatedIds, suppliedNames = {}, {}, {}, {}
         local yes, no, unreadable, known, invalidDiscovery = 0, 0, 0, false, false
         local members = lv.members or {}
         for i = 1, #members do
@@ -4102,6 +4536,10 @@ function A.TomeStateObservation(unavailableReason)
             local member = cat.rows[id]
             local name = member and member.name or ("Echo name unavailable (#" .. tostring(id) .. ")")
             if not seenNames[name] then names[#names + 1] = name; seenNames[name] = true end
+            -- A name is generated only when every member that gives these
+            -- bytes is generated; any supplied contributor keeps it literal.
+            if member and member.name then suppliedNames[name] = true
+            elseif generatedIds[name] == nil then generatedIds[name] = id end
             if type(discovered) == "table" then
                 local marker = discovered[id]
                 if marker == true or (type(marker) == "number" and marker == marker
@@ -4135,8 +4573,16 @@ function A.TomeStateObservation(unavailableReason)
             if known then discoveredKnown = true
             elseif not invalidDiscovery then discoveredKnown = false end
         end
-        local name = type(lv.tomeName) == "string" and lv.tomeName ~= ""
-            and lv.tomeName or ("Tome name unavailable: " .. table.concat(names, ", "))
+        local supplied = type(lv.tomeName) == "string" and lv.tomeName ~= ""
+        local name = supplied and lv.tomeName or ("Tome name unavailable: " .. table.concat(names, ", "))
+        -- Display facts (A.TomeNameFacts): which of these names this function
+        -- generated; supplied names, however they read, have none.
+        local memberIds, echoCopy = {}, {}
+        for i = 1, #names do
+            echoCopy[i] = names[i]
+            memberIds[i] = not suppliedNames[names[i]] and generatedIds[names[i]] or nil
+        end
+        nameFacts[lever] = {name = name, echoNames = echoCopy, nameGenerated = not supplied, memberIds = memberIds}
         -- The tome's own icon, else the first member Echo that has one; the
         -- source is stated, and with neither the Journal shows a neutral tile.
         local icon, iconSource = SpellIcon(lever), "tome spell"
@@ -4158,7 +4604,25 @@ function A.TomeStateObservation(unavailableReason)
         if a.name ~= b.name then return a.name < b.name end
         return a.lever < b.lever
     end)
+    A._tomeNameFacts = nameFacts
     return out
+end
+
+-- Display only: the facts of a tome row's names when `name` and `echoNames`
+-- are exactly those of the latest observation of `lever`: whether the tome
+-- name is the generated fallback, and at each Echo position the member ID of
+-- a generated member name (nil for a supplied name). nil for anything else.
+-- The observation, its names and rows are unchanged.
+function A.TomeNameFacts(lever, name, echoNames)
+    local facts = type(A._tomeNameFacts) == "table" and A._tomeNameFacts[lever] or nil
+    if type(facts) ~= "table" or facts.name ~= name or type(echoNames) ~= "table"
+        or #echoNames ~= #facts.echoNames then return nil end
+    local ids = {}
+    for i = 1, #echoNames do
+        if echoNames[i] ~= facts.echoNames[i] then return nil end
+        ids[i] = facts.memberIds[i]
+    end
+    return {nameGenerated = facts.nameGenerated == true, memberIds = ids}
 end
 
 -- values: "confirmed" (server mirror says disabled) or "pending" (our
@@ -4217,6 +4681,9 @@ function A.LeverMirrorKind(leverId)
 end
 
 function A.ToggleLever(leverId, wantDisabled)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if A.DIAGNOSTIC_PASSIVE then
         A.TomeObservationAttempt(leverId,wantDisabled,"passive",0,"not_evaluated")
         return false, "internal.6 passive diagnostic: write blocked"
@@ -4224,6 +4691,10 @@ function A.ToggleLever(leverId, wantDisabled)
     if A.TomeMutationPaused and A.TomeMutationPaused() then
         A.TomeObservationAttempt(leverId,wantDisabled,"pause",0,"not_evaluated")
         return false, "Tome of Echo transaction settling"
+    end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        A.TomeObservationAttempt(leverId,wantDisabled,"pause",0,"not_evaluated")
+        return false, "Nexus paused for this session"
     end
     local cat = A.Catalog()
     local svc = PS()
@@ -4249,6 +4720,12 @@ function A.ToggleLever(leverId, wantDisabled)
     if cur == (wantDisabled and true or false) then
         A.TomeObservationAttempt(leverId,wantDisabled,"already",lv.members[1],"not_evaluated",cur)
         return false, "already"
+    end
+    -- Final boundary: the reads above can run other code.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then
+        A.TomeObservationAttempt(leverId,wantDisabled,"pause",lv.members[1],"not_evaluated",cur)
+        return false, "Nexus paused for this session"
     end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
@@ -4413,17 +4890,23 @@ local function WatchLatches()
                 -- only while they could settle it (A.RecheckSelect). A flag
                 -- left by a voided Select holds every Echo action (InFlight),
                 -- and it is "a selection pending", not proof of which one.
+                -- R12: an unread post-send read is named as that alone: no
+                -- outside Select is claimed, a visible rise is not attributed
+                -- and no refresh is named (RecheckSelect skips it).
                 if callbacks and callbacks.OnStatus then
                     local seen = own and (own.count or 0) > (own.baseline or 0)
+                    local unread = own and own.postsend ~= nil and (own.competing or 0) == 0
                     local text
                     if own then
                         text = "Select still unresolved after 10s: the client's pending"
                             .. " flag is still set"
-                            .. (seen and " although a matching grant is visible"
+                            .. (unread and ", and Nexus could not read the granted Echoes right after sending it"
+                                or seen and " although a matching grant is visible"
                                 or " and its grant is not visible yet")
                             .. ". Nexus sends nothing new and waits"
                             .. ((own.competing or 0) > 0
-                                    and "; another selection of the same Echo was seen, so no grant can settle it"
+                                    and "; it cannot attribute a grant to this selection alone, so no grant can settle it"
+                                or unread and "; it cannot tell whether a later grant comes from this selection, so no grant can settle it"
                                 or seen and " for the flag to clear"
                                 or "; while Auto is ON it re-reads the granted Echoes")
                             .. ". The game gives no receipt for a selection, so this"
@@ -4460,6 +4943,12 @@ end
 -- counted as owned.
 function A.InFlight()
     return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
+end
+-- Read-only: true only while this adapter itself is inside a game service
+-- call (its own Select, Banish, Freeze, Reroll or Lock), so a post-hook can
+-- tell that call from the player's input.
+function A.SelfCalling()
+    return selfCalling == true
 end
 
 -- Read-only, for a caller that must not treat a loading screen as a result:
@@ -4545,8 +5034,17 @@ local function ConfirmAwaitingGrant()
     if now - own.sentAt >= selectRecovery.RECHECK_AFTER then own.overdue = true end
     local p = PerksTbl()
     local base = own.baseline or 0
+    -- R11 (R10-SPEC-01/R10-STANDARDS-01): an unreadable leveling post-send
+    -- read (`postsend = "unread"`) hid whether a copy of the spell already sat
+    -- above the baseline. No freshness, publication or acknowledgement
+    -- contract makes any LATER reply (a baseline-equal one included) evidence
+    -- of what it hid, so it is held like a competing Select: never proven,
+    -- never resent; a run boundary voids it. R12: its wait is named "unread";
+    -- "ambiguous" stays for competing evidence, which wins when both hold.
     if (own.competing or 0) > 0 then
         own.wait = "ambiguous"
+    elseif own.postsend ~= nil then
+        own.wait = "unread"
     elseif type(p) ~= "table" then
         own.wait = "latch_unknown"
     elseif own.phase ~= "grant" or p.pendingSelectSpellId ~= nil then
@@ -4608,6 +5106,15 @@ local function ResolveInFlight()
             inFlightKind, inFlightSig = nil, nil
             boardDirty = true
         end
+    elseif inFlightKind == "reveal" then
+        -- No client flag exists for it: a new choice, or the reply window
+        -- passing, ends the wait. The draw stays given up either way.
+        local r = ledger.reveal
+        local ch = type(p) == "table" and rawget(p, "currentChoice") or nil
+        if not r or not rawequal(ch, r.ref) or GetTime() - r.at > ledger.REVEAL_WINDOW then
+            inFlightKind, inFlightSig = nil, nil
+            boardDirty = true
+        end
     else
         inFlightKind, inFlightSig = nil, nil
         boardDirty = true
@@ -4629,7 +5136,8 @@ function A.RecheckSelect()
     if not own then return false end
     -- Nothing a refresh could settle: its grant is already visible (the
     -- wait is the client's flag), or the rise is ambiguous for good.
-    if (own.count or 0) > (own.baseline or 0) or (own.competing or 0) > 0 then
+    if (own.count or 0) > (own.baseline or 0) or (own.competing or 0) > 0
+        or own.postsend ~= nil then -- R11: an unread post-send is ambiguous for good
         return false
     end
     local now = GetTime()
@@ -4652,8 +5160,11 @@ end
 -- after that cleared another selection's flag -- and no matching grant is
 -- visible), "latch_after_grant" (a matching grant is visible, a Select flag
 -- is still set), "latch_unknown" (the Perks table cannot be read), "grant"
--- (no flag, no matching grant yet), "ambiguous" (an outside Select of the
--- same spell was seen; nothing settles it) or "run" (defensive: a grant of
+-- (no flag, no matching grant yet), "ambiguous" (competing evidence: an outside
+-- Select of the same spell was seen, or the post-send count already differed
+-- from the baseline; nothing settles it), "unread" (the leveling post-send read
+-- was unreadable and no competing evidence exists; nothing settles it and no
+-- refresh is sent) or "run" (defensive: a grant of
 -- another run). overdue: it has outlived the normal answer window (its
 -- watchdog expired, a world entry passed, or a poll saw RECHECK_AFTER seconds
 -- since the send). rechecks: read refreshes requested for it, not answers.
@@ -4723,8 +5234,314 @@ function A.OrbBlockReason(subject)
     return nil
 end
 
+-- Updated client (wow.export 0.2.19 capture, 3.3.5 / 12340). Every read
+-- below is memory only (rawget on the client's own Perks table and its rows;
+-- no metamethod, service or client callout), so the same reads can be made
+-- again at a send boundary. Fields of the ledger (main-chunk local limit).
+--
+-- The choice parser keeps Perks.currentSpecDraw = {chosen = n} while the
+-- shown draw is a specialization draw, nil on an ordinary draw. chosen 0
+-- chooses the run's specialization (the game's own auto-accept skips it;
+-- Nexus decides it like any draw, by the selected build). "choosing": chosen is 0, or the field is present
+-- but chosen is not a positive whole number (fail closed). "spec" (and the
+-- chosen value): a draw of the specialization already chosen. nil: no such
+-- field, or no readable Perks table.
+ledger.SpecDrawOf = function(perks)
+    if type(perks) ~= "table" then return nil end
+    local draw = rawget(perks, "currentSpecDraw")
+    if draw == nil then return nil end
+    local chosen = type(draw) == "table" and rawget(draw, "chosen") or nil
+    if type(chosen) == "number" and chosen >= 1 and chosen < math.huge
+        and chosen == math.floor(chosen) then
+        return "spec", chosen
+    end
+    return "choosing"
+end
+ledger.SpecDraw = function() return (ledger.SpecDrawOf(PerksTbl())) end
+ledger.SPEC_REASON = "the specialization choice is left to the player"
+ledger.MEMORY_GIVEN_UP = "the memory card would be given up"
+ledger.MEMORY_UNKNOWN = "the memory card state is not known; the choice is left to the player"
+-- The updated provider: flag 3 (isGuaranteed) is the MEMORY card, an Echo of
+-- the live loadout's engraved build; taking another card gives it up for the
+-- rest of the climb. It is recognized by its new loadout readers
+-- (GetServerActiveDesign, WantsMoreOfEcho). An older provider keeps the
+-- historical guaranteed-card meaning, and the memory rules do not apply.
+ledger.MemoryCardContract = function()
+    local svc = PS()
+    if type(svc) ~= "table" then return false end
+    return type(rawget(svc, "GetServerActiveDesign")) == "function"
+        or type(rawget(svc, "WantsMoreOfEcho")) == "function"
+end
+-- The visible memory card of a published choice: its spellId, false when the
+-- choice shows none, nil when the choice is not a readable table.
+ledger.ChoiceMemory = function(ch)
+    if type(ch) ~= "table" then return nil end
+    for i = 1, #ch do
+        local c = rawget(ch, i)
+        if type(c) == "table" and rawget(c, "isGuaranteed") then
+            return rawget(c, "spellId") or "?"
+        end
+    end
+    return false
+end
+-- What the admitted updated-client source cannot establish (independent
+-- Spec reviews of revisions 1 and 2):
+--   * whether a memory card is offered but hidden: the client drops a fourth
+--     card before it publishes currentChoice (perks_service.lua 188-190; the
+--     same lines are in the October source) and the memory card's wire order
+--     is not proven. The live rows' memoryTotal/memoryRemaining are parser
+--     defaults when absent and carry no binding to the current draw, so no
+--     cached value is taken as proof that nothing is hidden;
+--   * whether the game's own automatic pick is armed: its timer keeps the card
+--     it chose at the parse and re-checks neither its option nor the
+--     highlighted Wishlist when it fires (83-92, 197-225); no handle, state or
+--     ordering of it is readable, and the current design proves nothing about
+--     a design that armed it earlier.
+-- So on the updated provider: a board that shows a souvenir admits only a
+-- Take of that souvenir (or the souvenir lane's reveal); an ordinary draw
+-- admits ordinary actions once it is actionable (the later-frame rule that
+-- outlasts an armed auto-accept timer). The first point is accepted as a
+-- residual on the official design (a souvenir draw shows the souvenir face
+-- up, its three random cards face down) and the single client parser; it is
+-- not removed. The older provider keeps its earlier admission.
+ledger.UPDATED_UNAVAILABLE = "automatic rolling is not available with this game client; the choice is left to the player"
+-- The whole updated-client admission of one automatic choice action, memory
+-- only (rawget on the published choice). `spellId`: the card a Take would
+-- select (nil for the gate and for Reroll/Banish/Freeze). `sending`: at a send
+-- boundary an unreadable choice refuses. Returns true, or false and a reason.
+ledger.ChoiceAdmission = function(perks, contract, spellId, kind, sending)
+    -- A specialization draw (currentSpecDraw) is decided like any other draw,
+    -- as in 9095: its cards are Echo spells, and the selected build's exact
+    -- targets choose among them (2026-11-18: the earlier refusal was an
+    -- assumption from the game's own auto-accept comment, not a user rule).
+    if not contract then return true end
+    local ch = type(perks) == "table" and rawget(perks, "currentChoice") or nil
+    local visible = ledger.ChoiceMemory(ch)
+    if visible == nil or (type(ch) == "table" and #ch == 0) then
+        if sending then return false, "the game's selection state cannot be read" end
+        if kind == "gate" then return true end
+        return false, ledger.UPDATED_UNAVAILABLE
+    end
+    -- The three Echoes that answered Nexus's own souvenir reveal: the
+    -- souvenir was just given up, so no hidden one is shown or dropped there
+    -- (ledger.RevealObserve). A Take of one of them is admitted once that
+    -- choice is actionable (ledger.ChoiceActionable): the reply's own parse
+    -- may have armed the game's auto-accept timer, which the option and the
+    -- Auto gate do not cancel; the shared Select flag also separates the two
+    -- picks.
+    local bound = ledger.revealBound
+    if visible == false and bound and rawequal(ch, bound.ref) then
+        if kind == "gate" then return true end
+        if kind == "take" then
+            if not ledger.ChoiceActionable(ch) then return false, ledger.SETTLE_REASON end
+            for i = 1, #ch do
+                local c = rawget(ch, i)
+                if type(c) == "table" and rawget(c, "spellId") == spellId then return true end
+            end
+            return false, "not on board"
+        end
+        return false, ledger.UPDATED_UNAVAILABLE
+    end
+    -- An ordinary draw (no souvenir shown): ordinary Take, Reroll, Banish and
+    -- Freeze, as on the older provider. The game's own auto-accept timer may
+    -- have been armed at this choice's parse and is not cancelled by its
+    -- option, so an action waits until the choice is actionable (the same
+    -- later-frame rule as the reveal); the pending-select checks at each send
+    -- boundary stay as they are. For a Reroll, Banish or Freeze that rule is
+    -- the only ordering against such a timer: the pending-Select flag orders
+    -- a Take against it, not a mutation sent before the timer fires. Accepted residual: a souvenir dropped by the
+    -- client's four-entry trim is not visible to any reader (CONTRACTS.md).
+    if visible == false and #ch == 3 and rawget(ch, 4) == nil then
+        if kind == "gate" then return true end
+        if not ledger.ChoiceActionable(ch) then return false, ledger.SETTLE_REASON end
+        return true
+    end
+    -- A souvenir is shown: only a Take of the souvenir itself (or the
+    -- souvenir lane's reveal); the game offers no reroll, banish or freeze
+    -- until that decision. A board of other than three cards without a
+    -- souvenir is neither, and keeps its earlier refusal.
+    if kind == "take" then
+        if not visible then return false, ledger.MEMORY_UNKNOWN end
+        if visible ~= spellId then return false, ledger.MEMORY_GIVEN_UP end
+        return true
+    end
+    if kind == "gate" then
+        if visible then return true end
+        return false, ledger.MEMORY_UNKNOWN
+    end
+    return false, ledger.UPDATED_UNAVAILABLE
+end
+-- Admission of a Banish, Freeze or Reroll: the choice admission (above) and,
+-- at a send boundary, no Select pending in the game. Memory only.
+ledger.MutationAdmission = function(perks, contract, kind, sending)
+    local admitted, why = ledger.ChoiceAdmission(perks, contract, nil, kind, sending)
+    if not admitted then return false, why end
+    if sending and (type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil) then
+        return false, "a selection is pending in the game"
+    end
+    return true
+end
+-- Souvenir reveal (user requirement 2026-11-17: an unneeded souvenir is given
+-- up and the three hidden Echoes are chosen from). Static reading of the
+-- captured client (CONTRACTS.md, souvenir stage): the client's own give-up
+-- sends ProjectEbonhold.sendToServer(CS.REQUEST_PERK_MEMORY_DRAW, "") with
+-- CS.REQUEST_PERK_MEMORY_DRAW = 349; the souvenir is then lost for the climb.
+-- No reply opcode or request ID exists; the reply is read as the next
+-- published choice. Its own give-up flag is a file local, not readable, and
+-- the game's window keeps showing the souvenir until that reply.
+ledger.REVEAL_CODE = 349
+-- Seconds within which a new choice may be the reply to Nexus's reveal.
+ledger.REVEAL_WINDOW = 10
+-- The game's own auto-accept timer (perks_service.lua) is armed at a choice
+-- parse with the card it chose, adds each frame's elapsed time, and on the
+-- first frame its sum reaches 0.18 s calls Perks.SelectPerk, re-checking
+-- neither its option nor the Wishlist; switching the option off does not
+-- cancel it. A reveal sets no client flag, so a timer firing later in the
+-- same frame as Nexus's reveal would still pick the souvenir. Therefore a
+-- reveal, and a Take on a revealed board, act on a choice table only when it
+-- is actionable: observed for CHOICE_SETTLE (first observation is never
+-- before the parse) and on a frame strictly later than the first frame on
+-- which that held. In that first frame the timer's summed elapsed time
+-- already covers the settle, so it has fired in or before that frame, and
+-- its Select is pending (every send boundary refuses) or it was refused.
+-- Assumed, not proven here: GetTime() is constant within a frame, a shown
+-- frame's OnUpdate runs on every frame, and its elapsed time tracks GetTime().
+-- The bound: from its parse the timer's summed elapsed time is at least the
+-- GetTime() difference, and Nexus's first observation is never earlier than
+-- the parse, so any settle of at least 0.18 s covers it; 0.2 s adds a margin
+-- for the summed float steps. (It was 1.0 s, a margin with no further
+-- basis; tests/prototype/updated_provider_native_timer_order.lua races it.)
+ledger.CHOICE_SETTLE = 0.2
+ledger.SETTLE_REASON = "waiting for the game's own pick window to pass"
+-- The runtime treats exactly this refusal as superseded (decided again).
+A.SETTLE_REASON = ledger.SETTLE_REASON
+ledger.choiceSeen = setmetatable({}, { __mode = "k" })
+ledger.choiceSettledAt = setmetatable({}, { __mode = "k" })
+ledger.ChoiceSettled = function(ch)
+    local seen = type(ch) == "table" and ledger.choiceSeen[ch] or nil
+    if seen == nil or GetTime() - seen < ledger.CHOICE_SETTLE then return false end
+    if ledger.choiceSettledAt[ch] == nil then ledger.choiceSettledAt[ch] = GetTime() end
+    return true
+end
+ledger.ChoiceActionable = function(ch)
+    return ledger.ChoiceSettled(ch) and GetTime() > ledger.choiceSettledAt[ch]
+end
+-- Pacing only (decides nothing): when the published choice can next become
+-- actionable. The end of its settle period, or now while it is settled but
+-- not yet on a later frame (the next frame then). nil when it is actionable,
+-- not yet observed, or unreadable. Memory only.
+function A.ChoiceSettleDueAt()
+    local perks = PerksTbl()
+    local ch = type(perks) == "table" and rawget(perks, "currentChoice") or nil
+    local seen = type(ch) == "table" and ledger.choiceSeen[ch] or nil
+    if seen == nil then return nil end
+    local due = seen + ledger.CHOICE_SETTLE
+    local settledAt = ledger.choiceSettledAt[ch]
+    if settledAt ~= nil then
+        if GetTime() > settledAt then return nil end
+        return settledAt
+    end
+    return due
+end
+-- One reveal per souvenir draw, for the session: the run (ownedGeneration,
+-- advanced at each run boundary), the souvenir, the pending draw count and
+-- the owned total identify a draw. Never cleared.
+ledger.revealDone = {}
+ledger.GrantedTotal = function()
+    local svc = PS()
+    local granted = svc and SafeCall(svc.GetGrantedPerks)
+    if type(granted) ~= "table" then return nil end
+    local n = 0
+    for _, entries in pairs(granted) do
+        if type(entries) == "table" then n = n + #entries end
+    end
+    return n
+end
+ledger.RevealKey = function(perks, ch, granted)
+    local c = type(ch) == "table" and rawget(ch, 1) or nil
+    if type(perks) ~= "table" or type(c) ~= "table" or type(granted) ~= "number" then return nil end
+    return tostring(ownedGeneration) .. ":" .. tostring(rawget(c, "spellId")) .. ":"
+        .. tostring(rawget(perks, "pendingRollsCount")) .. ":" .. granted
+end
+-- Whether this lone souvenir's draw was already given up (bounded read).
+ledger.RevealDoneFor = function(ch)
+    local key = ledger.RevealKey(PerksTbl(), ch, ledger.GrantedTotal())
+    return key ~= nil and ledger.revealDone[key] == true
+end
+-- Memory only: the lone souvenir a reveal may give up, or nil and a reason.
+ledger.RevealSnapshot = function(perks, spellId)
+    if type(perks) ~= "table" then return nil, "the game's selection state cannot be read" end
+    if rawget(perks, "pendingSelectSpellId") ~= nil then return nil, "a selection is pending in the game" end
+    for _, f in ipairs({"pendingReroll", "pendingOrbReroll", "pendingBanishIndex", "pendingFreezeIndex"}) do
+        if rawget(perks, f) ~= nil then return nil, "an action is pending in the game" end
+    end
+    local ch = rawget(perks, "currentChoice")
+    if type(ch) ~= "table" or #ch ~= 1 or rawget(ch, 2) ~= nil then return nil, "the souvenir is not shown alone" end
+    local c = rawget(ch, 1)
+    if type(c) ~= "table" or not rawget(c, "isGuaranteed") or rawget(c, "spellId") ~= spellId then
+        return nil, "the souvenir changed"
+    end
+    local pe = PE()
+    local cs = type(pe) == "table" and rawget(pe, "CS") or nil
+    if type(cs) ~= "table" or rawget(cs, "REQUEST_PERK_MEMORY_DRAW") ~= ledger.REVEAL_CODE
+        or type(rawget(pe, "sendToServer")) ~= "function" then
+        return nil, "the souvenir reveal is not available on this client"
+    end
+    return ch
+end
+-- The first new choice after Nexus's reveal is its reply only when it comes
+-- within the window, shows exactly three unflagged Echoes, no Select is
+-- pending, and the pending draw count and the owned
+-- total are those of the request. Then, and only then, it is bound. Any
+-- other new choice ends the reveal unbound (ordinary admission applies).
+ledger.RevealObserve = function(ch)
+    local r = ledger.reveal
+    if not r or rawequal(ch, r.ref) then return end
+    if type(ch) ~= "table" then
+        if GetTime() - r.at > ledger.REVEAL_WINDOW then ledger.reveal = nil end
+        return
+    end
+    ledger.reveal = nil
+    if GetTime() - r.at > ledger.REVEAL_WINDOW then return end
+    local perks = PerksTbl()
+    -- A specialization marker on the reply does not refuse the binding: its
+    -- three Echoes are chosen from like any revealed board.
+    if type(perks) ~= "table" or rawget(perks, "pendingSelectSpellId") ~= nil then return end
+    if #ch ~= 3 or rawget(ch, 4) ~= nil then return end
+    for i = 1, 3 do
+        local c = rawget(ch, i)
+        if type(c) ~= "table" or rawget(c, "isGuaranteed") then return end
+        local id = rawget(c, "spellId")
+        if type(id) ~= "number" or id < 1 or id ~= math.floor(id) or id >= math.huge then return end
+    end
+    if rawget(perks, "pendingRollsCount") ~= r.rolls then return end
+    if ledger.GrantedTotal() ~= r.granted then return end
+    ledger.revealBound = { ref = ch, souvenir = r.spellId }
+end
+-- The admission state as one comparable string, for the leveling choice key.
+ledger.AdmissionKey = function()
+    local state, chosen = ledger.SpecDrawOf(PerksTbl())
+    return "spec:" .. tostring(state or "none") .. ":" .. tostring(chosen or "")
+        .. "|contract:" .. (ledger.MemoryCardContract() and "updated" or "legacy")
+end
+
 function A.OrdinaryBoardAllowed()
-    if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
+    -- The choice admission (ChoiceAdmission): on the updated provider a
+    -- shown souvenir admits only its own Take. Memory-only reads; the game's
+    -- own UI is not touched, so the player's manual choice stays available.
+    local admitted, why = ledger.ChoiceAdmission(PerksTbl(), ledger.MemoryCardContract(), nil, "gate")
+    if not admitted then return false, why end
+    -- A Start/Stop run (OrbAuto) owns the Orb token for its whole run, but
+    -- the ordinary flow on a free draw is not its Orb action: the ordinary
+    -- path (its own Take, ordinary Auto, the player's actions) is admitted
+    -- while the run has no Orb request awaiting the game's answer. Orb mode's
+    -- ownership blocks as before.
+    local orbOwned = A.Orbs and A.Orbs.IsOwned()
+    if orbOwned and A.Orbs.RunOwned and A.Orbs.RunOwned()
+        and Nexus.OrbAuto and Nexus.OrbAuto.OrdinaryOpen and Nexus.OrbAuto.OrdinaryOpen() then
+        orbOwned = false
+    end
+    if orbOwned or (Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)()) then
         return false, A.OrbBlockReason("Ordinary rolling")
             or "Orb refinement owns the current action; ordinary rolling is paused"
     end
@@ -4751,10 +5568,152 @@ function A.OrbCapability()
     return (orbs.ServiceState())
 end
 
-function A.Take(spellId)
+-- Strict identity of the client's raw current choice, for the leveling pick's
+-- final admission (R4C): count, each card's exact spellId, the TYPE and value
+-- of its quality (nil, 0, "4" and 7 all differ; BoardFingerprint coerces) and
+-- its flags. A field of the mutators' ledger, not a main-chunk local (the Lua
+-- 5.1 limit). nil when the read is not a table.
+ledger.LevelingChoiceKey = function(ch)
+    if type(ch) ~= "table" then return nil end
+    local parts = {}
+    for i = 1, #ch do
+        local c = ch[i]
+        if type(c) ~= "table" then
+            parts[i] = "?"
+        else
+            parts[i] = table.concat({type(c.spellId), tostring(c.spellId), type(c.quality), tostring(c.quality),
+                c.isFrozen and "F" or "-", c.isCarried and "C" or "-",
+                c.isGuaranteed and "G" or "-", c.justFrozen and "J" or "-"}, ":")
+        end
+    end
+    -- Updated client (independent Spec P1): the key binds the specialization
+    -- draw and the memory authority too, so a change to either with the same
+    -- card IDs refuses at raw2, raw3 and the final mirror.
+    return tostring(#ch) .. "|" .. table.concat(parts, ",") .. "|" .. ledger.AdmissionKey()
+end
+
+-- R5: the WHOLE raw choice as the leveling pick's selector input, or nil.
+-- Exactly three raw entries, each a table with a number spellId (positive
+-- integer) and a number quality (integer 0..4); any other raw entry refuses
+-- the whole board (never a filtered valid subset). Cards keep raw order.
+ledger.LevelingStrictCards = function(ch)
+    if type(ch) ~= "table" or #ch ~= 3 or ch[4] ~= nil then return nil end
+    -- A specialization draw is three ordinary offers (as in 9095); a board
+    -- with the memory card is not (checked per card below).
+    local memory = ledger.MemoryCardContract()
+    -- On the updated provider a board that shows a souvenir is not three
+    -- ordinary offers (checked per card below).
+    local cards = {}
+    for i = 1, 3 do
+        local c = ch[i]
+        if type(c) ~= "table" then return nil end
+        local id, q = c.spellId, c.quality
+        if type(id) ~= "number" or id ~= math.floor(id) or id < 1 or id >= math.huge then return nil end
+        if type(q) ~= "number" or q ~= math.floor(q) or q < 0 or q > 4 then return nil end
+        if memory and c.isGuaranteed then return nil end
+        cards[i] = {spellId = id, observedQuality = q, quality = q,
+            isFrozen = c.isFrozen and true or false, isCarried = c.isCarried and true or false,
+            isGuaranteed = c.isGuaranteed and true or false, justFrozen = c.justFrozen and true or false}
+    end
+    return cards
+end
+
+-- R6: the exact count of one spell in a granted table, or nil when the table is
+-- not readable (unreadable is never zero). Shared by the leveling baseline and
+-- its post-send check.
+ledger.LevelingCountIn = function(granted, spellId)
+    if type(granted) ~= "table" then return nil end
+    local n = 0
+    for _, entries in pairs(granted) do
+        if type(entries) == "table" then
+            for i = 1, #entries do
+                local e = entries[i]
+                if type(e) == "table" and tonumber(e.spellId) == spellId then n = n + 1 end
+            end
+        end
+    end
+    return n
+end
+
+-- R8 (R6-SPEC-03): plain-memory identity of the saved authority the Store
+-- reads for this owner (Store.State: NexusDB, db.chars[owner] or the plain-name
+-- row of db.chars): the root, its chars table and every row in it, the
+-- owner's row, its firstRunWishlist and each loadoutWishlists entry by
+-- reference or value, and the kept Saved Build. rawget/next/rawequal only:
+-- no metamethod, service or client callout, so it can be compared after the
+-- last service read. Fields of the ledger (main-chunk local limit).
+ledger.LevelingRootMark = function(owner)
+    local root = rawget(_G, "NexusDB")
+    local chars = type(root) == "table" and rawget(root, "chars") or nil
+    local row, lw, first = nil, nil, nil
+    if type(chars) == "table" and type(owner) == "string" then row = rawget(chars, owner) end
+    if type(row) == "table" then
+        lw = rawget(row, "loadoutWishlists")
+        first = rawget(row, "firstRunWishlist")
+    end
+    local mark = {root = root, chars = chars, row = row, lw = lw, first = first,
+        kept = WishlistRoles.keptSavedBuild, rows = {}, slots = {}}
+    for _, pair in ipairs({{chars, mark.rows}, {lw, mark.slots}}) do
+        if type(pair[1]) == "table" then
+            local k, v = next(pair[1])
+            while k ~= nil do pair[2][k] = v; k, v = next(pair[1], k) end
+        end
+    end
+    return mark
+end
+ledger.LevelingRootSame = function(mark, owner)
+    if type(mark) ~= "table" then return false end
+    local now = ledger.LevelingRootMark(owner)
+    for _, f in ipairs({"root", "chars", "row", "lw", "first", "kept"}) do
+        if not rawequal(now[f], mark[f]) then return false end
+    end
+    for _, set in ipairs({"rows", "slots"}) do
+        local a, b = mark[set], now[set]
+        for k, v in pairs(a) do if not rawequal(b[k], v) then return false end end
+        for k, v in pairs(b) do if not rawequal(a[k], v) then return false end end
+    end
+    return true
+end
+-- R9 (R8-SPEC-01): the native active slot exactly as ReadSlots reads it
+-- (PerkService GetServerActiveSlot, a non-negative integer), or nil when it is
+-- not known. The source has no memory mirror of it, so this is a bounded
+-- service read, taken at Take entry and once more after raw3 (never in the
+-- memory phase). A.Slots is not called: no kept-Saved-Build observation.
+ledger.LevelingActiveSlot = function(svc)
+    local active = tonumber(svc and SafeCall(svc.GetServerActiveSlot))
+    if active ~= nil and active >= 0 and active == math.floor(active) then return active end
+    return nil
+end
+
+-- `expect` (optional, the leveling pick only): {index=, quality=, verify=}.
+-- A.LevelingAdmissionPhase (R6): a memory-only diagnostic naming the current
+-- final-admission step, so tests can prove which seam they reached.
+-- After this function's own board read, the card must still be at that index
+-- with that observed rarity, and verify(board) -- given THIS final board
+-- observation, so the caller re-runs its whole-board choice on it -- must
+-- answer exactly true; otherwise nothing is sent ("leveling_offer_changed" /
+-- "leveling_authority_changed").
+function A.Take(spellId, expect)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    -- Updated client: which provider contract this Take is admitted under,
+    -- decided once (field reads only) and used again at the send boundary.
+    local memoryContract = ledger.MemoryCardContract()
+    -- Leveling pick (R4C): assignment projection revision (every real
+    -- assignment setter advances it through MarkWishlistProjectionDirty) and
+    -- owner at entry; compared again after the last callback-capable read.
+    local projectionMark = wishlistProjectionRevision
+    A.LevelingAdmissionPhase = expect ~= nil and "entry" or nil
+    local ownerMark = Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey()
+    -- R8: the saved root/owner row/association identity at entry (memory only).
+    local rootMark = expect ~= nil and ledger.LevelingRootMark(ownerMark) or nil
+    -- R9: the native active slot at entry (a service read; nil when unknown).
+    local activeMark = expect ~= nil and ledger.LevelingActiveSlot(PS()) or nil
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     -- Native Select admission: only a readable Perks table whose Select field
     -- is nil admits a Select, checked before the client is called. A flag the
@@ -4764,17 +5723,159 @@ function A.Take(spellId)
     local perks = PerksTbl()
     if type(perks) ~= "table" then return false, "the game's selection state cannot be read" end
     if perks.pendingSelectSpellId ~= nil then return false, "a selection is pending in the game" end
+    if expect ~= nil then A.LevelingAdmissionPhase = "board" end
     local board = A.Board()
     if not board then return false, "no board" end
-    local found = nil
+    local found, foundIndex = nil, nil
     for i = 1, #board.cards do
-        if board.cards[i].spellId == spellId then found = board.cards[i]; break end
+        if board.cards[i].spellId == spellId then found = board.cards[i]; foundIndex = i; break end
     end
     if not found then return false, "not on board" end
+    do
+        local admitted, why = ledger.ChoiceAdmission(PerksTbl(), memoryContract, spellId, "take")
+        if not admitted then return false, why end
+    end
     local svc = PS()
     -- The count before the Select is sent: the only later proof of its grant
     -- is the mirror rising above this.
-    local baseline = GrantedCountOf(spellId)
+    -- The leveling pick takes its own baseline later (R5: no granted read
+    -- between its selector observation and its key).
+    local baseline = expect == nil and GrantedCountOf(spellId) or 0
+    -- R17 (C02): the admitted raw1 strict choice key, hoisted to the Take's own
+    -- scope for the final mirror comparison before the Select (nil for an
+    -- ordinary Take, which never reads it).
+    local choiceMark = nil
+    if expect ~= nil then
+        if type(expect) ~= "table" then return false, "leveling_offer_changed" end
+        -- R5 final admission. Callouts first, in a fixed bounded order (no
+        -- loop): raw1 (the selector's actual input, strict whole raw board),
+        -- verify (runtime reads), owner identity, granted g1, raw2 == raw1,
+        -- granted g2 == g1 (the baseline), Orb gate, live level. Then
+        -- memory-only checks. A change made INSIDE the last callouts (g2,
+        -- Orb gate, level) to native Orb or level facts is not detectable
+        -- from this source; the choice is re-keyed once more at the final
+        -- 'mirror' step (R17, C02) immediately before the Select. No atomic
+        -- or memory-mirrored native observation exists.
+        A.LevelingAdmissionPhase = "raw1"
+        local raw1 = svc and SafeCall(svc.GetCurrentChoice)
+        local strict1 = ledger.LevelingStrictCards(raw1)
+        choiceMark = ledger.LevelingChoiceKey(raw1)
+        local chosen = strict1 and strict1[expect.index]
+        if not (strict1 and choiceMark and chosen and chosen.spellId == spellId
+            and chosen.observedQuality == expect.quality) then
+            return false, "leveling_offer_changed"
+        end
+        if expect.verify ~= nil then
+            A.LevelingAdmissionPhase = "verify"
+            local okVerify, pass = pcall(expect.verify, {cards = strict1, strictObservation = true})
+            if not okVerify or pass ~= true then return false, "leveling_authority_changed" end
+        end
+        -- Identity is a client callout (UnitName/realm): read here, before
+        -- the memory checks that would see what it changed.
+        A.LevelingAdmissionPhase = "final_owner"
+        if (Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey()) ~= ownerMark then
+            return false, "leveling_authority_changed"
+        end
+        A.LevelingAdmissionPhase = "g1"
+        local g1 = svc and SafeCall(svc.GetGrantedPerks)
+        if type(g1) ~= "table" then return false, "leveling_authority_changed" end
+        local sig1 = GrantedSignature(g1)
+        A.LevelingAdmissionPhase = "raw2"
+        if ledger.LevelingChoiceKey(svc and SafeCall(svc.GetCurrentChoice)) ~= choiceMark then
+            return false, "leveling_offer_changed"
+        end
+        -- The exact pre-send count: readable, and unchanged across the choice
+        -- re-read (nil, non-table, a throw or a drift is never zero).
+        A.LevelingAdmissionPhase = "g2"
+        local g2 = svc and SafeCall(svc.GetGrantedPerks)
+        if type(g2) ~= "table" or GrantedSignature(g2) ~= sig1 then
+            return false, "leveling_authority_changed"
+        end
+        baseline = ledger.LevelingCountIn(g2, spellId)
+        -- R6 (R5-SPEC-02): the whole raw choice once more AFTER g2, so a
+        -- change made inside the g2 service read refuses before the Select.
+        A.LevelingAdmissionPhase = "raw3"
+        if ledger.LevelingChoiceKey(svc and SafeCall(svc.GetCurrentChoice)) ~= choiceMark then
+            return false, "leveling_offer_changed"
+        end
+        -- R9 (R8-SPEC-01): the native active slot once more after g2/raw3. A
+        -- switch to another Saved Build (for example an assigned slot 2)
+        -- since entry, or an unknown slot, refuses: the known-unassigned key
+        -- was decided for the entry slot. The kept Saved Build is in rootMark.
+        A.LevelingAdmissionPhase = "slot"
+        local activeNow = ledger.LevelingActiveSlot(svc)
+        if activeMark == nil or activeNow ~= activeMark then
+            return false, "leveling_authority_changed"
+        end
+        -- Cap and Orb authority after every PerkService read.
+        A.LevelingAdmissionPhase = "orb"
+        if A.OrdinaryBoardAllowed() ~= true then return false, "leveling_authority_changed" end
+        A.LevelingAdmissionPhase = "level"
+        local liveLevel = A.Level()
+        if type(liveLevel) ~= "number" or liveLevel ~= math.floor(liveLevel)
+            or liveLevel < 2 or liveLevel > 79 then
+            return false, "leveling_authority_changed"
+        end
+        -- Memory only from here: native pending flag (existing ~= nil
+        -- contract, on the CURRENT Perks table), assignment revision,
+        -- current-run ownership confirmation, then the runtime's own final
+        -- authority (intent, master Auto, mode, pause, world holds).
+        A.LevelingAdmissionPhase = "memory"
+        local perksNow = PerksTbl()
+        if type(perksNow) ~= "table" or perksNow.pendingSelectSpellId ~= nil then
+            return false, "leveling_authority_changed"
+        end
+        if wishlistProjectionRevision ~= projectionMark then
+            return false, "leveling_authority_changed"
+        end
+        -- R8 (R6-SPEC-03): a same-owner NexusDB root, owner row, any chars row,
+        -- stored association or kept Saved Build replaced since entry (for
+        -- example inside g2, without a setter revision) refuses.
+        if not ledger.LevelingRootSame(rootMark, ownerMark) then
+            return false, "leveling_authority_changed"
+        end
+        if ownedConfirmedGeneration ~= ownedGeneration then return false, "leveling_authority_changed" end
+        if expect.final ~= nil then
+            local okFinal, passFinal = pcall(expect.final)
+            if not okFinal or passFinal ~= true then return false, "leveling_authority_changed" end
+        end
+    end
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- R17 (C02): the LAST memory-only observation before the native Select, after
+    -- expect.final and the pause boundary. The strict typed key of the current
+    -- `Perks.currentChoice` field (rawget: no metamethod, no service or client
+    -- callout; the field the provider publishes wholesale and that
+    -- GetCurrentChoice returns by reference) must equal the admitted raw1 key:
+    -- a republished table with changed values, an in-place mutation, a cleared
+    -- or malformed mirror refuses; a distinct value-identical republication
+    -- passes (a value key, never an identity refusal). No callout separates
+    -- this read from the Select in this source; no atomic or event-ordering
+    -- guarantee is claimed, and nothing is sent on refusal.
+    if expect ~= nil then
+        A.LevelingAdmissionPhase = "mirror"
+        local perksFinal = PerksTbl()
+        local mirror = type(perksFinal) == "table" and rawget(perksFinal, "currentChoice") or nil
+        if choiceMark == nil or ledger.LevelingChoiceKey(mirror) ~= choiceMark then
+            return false, "leveling_offer_changed"
+        end
+    end
+    -- No false attribution: a restored Orb receipt that could count this
+    -- Take's gain as its own outcome is kept as history first (memory only).
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.HistoryBeforeOrdinaryTake then
+        pcall(Nexus.OrbRuntime.HistoryBeforeOrdinaryTake)
+    end
+    -- Updated client (independent Spec P1): the visible memory card and the
+    -- memory authority once more, after every callback above (granted reads,
+    -- verify, owner, level, final, pause), from memory only; no callout
+    -- separates this read from the Select.
+    do
+        local perksSend = PerksTbl()
+        if type(perksSend) ~= "table" then return false, "the game's selection state cannot be read" end
+        local admitted, why = ledger.ChoiceAdmission(perksSend, memoryContract, spellId, "take", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
@@ -4791,21 +5892,56 @@ function A.Take(spellId)
             baseline = baseline, count = baseline, run = ownedGeneration,
             sentAt = GetTime(), phase = "latch", wait = "latch",
             competing = 0, entries = 0, rechecks = 0, early = 0 }
+        if expect ~= nil then
+            -- R6 (R5-SPEC-01): one granted read right after the send. A count
+            -- that already differs from the captured baseline cannot be
+            -- attributed to this Select (a pre-existing copy hidden from g2
+            -- looks the same as an immediate grant): the record is held
+            -- ambiguous (existing ConfirmAwaitingGrant rule), never proven,
+            -- replayed, cancelled or refunded. An unreadable read sets
+            -- `postsend = "unread"`: what it hid stays unattributable, so
+            -- ConfirmAwaitingGrant holds it ambiguous too (R11; no later
+            -- baseline-equal reply clears it).
+            A.LevelingAdmissionPhase = "postsend"
+            local now = ledger.LevelingCountIn(svc and SafeCall(svc.GetGrantedPerks), spellId)
+            if now == nil then
+                selectRecovery.record.postsend = "unread"
+            elseif now ~= baseline then
+                selectRecovery.record.competing = 1
+            end
+            A.LevelingAdmissionPhase = nil
+        end
         return true
     end
     return false, "refused"
 end
 
 function A.Banish(index0)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "banish")
+        if not admitted then return false, why end
+    end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     local board = A.Board()
     if not board then return false, "no board" end
     local card = board.cards[index0 + 1]
     if not card then return false, "no card" end
     if CardBlocked(card) then return false, "blocked card" end
+    -- D-ROLL-01: name the client slot this card was projected from by this
+    -- mutator's own read above, never a skipped neighbour's. A card A.Board()
+    -- did not project has no record and keeps its projected position, which
+    -- is its client slot whenever no entry was skipped.
+    local slots = ledger.boardSlots
+    local slot = slots and slots[card]
+    local clientIndex0 = slot and slot - 1 or index0
     local ch = A.Charges()
     if ch.banish <= 0 then return false, "no charges" end
     if ledger.banishThisPush then return false, "one per push" end
@@ -4814,8 +5950,17 @@ function A.Banish(index0)
         return false, "system off"
     end
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the whole admission once
+    -- more after Charges and every other callout, memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "banish", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
-    local ok = svc and SafeCall(svc.BanishPerk, index0)
+    local ok = svc and SafeCall(svc.BanishPerk, clientIndex0)
     selfCalling = false
     if ok then
         ledger.banish = math.max(0, (ledger.banish or 1) - 1)
@@ -4827,9 +5972,14 @@ function A.Banish(index0)
 end
 
 function A.Reroll()
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     local ch = A.Charges()
     if ch.reroll <= 0 then return false, "no charges" end
@@ -4842,6 +5992,13 @@ function A.Reroll()
     local used = d and NonNegativeInteger(d.usedRerolls)
     local total = d and NonNegativeInteger(d.totalRerolls)
     local board = A.Board()
+    -- Updated client: what a reroll does to the memory card is not stated by
+    -- the client source, so Nexus does not reroll a board that shows one, or
+    -- one whose memory state is not proven (ChoiceAdmission).
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "reroll")
+        if not admitted then return false, why end
+    end
     local attributable = used ~= nil and total ~= nil
         and board ~= nil and board.idSignature ~= nil
         -- A prior player/rival reroll can have advanced the board before its
@@ -4850,6 +6007,17 @@ function A.Reroll()
         and (not prior or (priorOutcome == "proven"
             and used == prior.used + 1 and total == prior.total))
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the same admission at the
+    -- send boundary, after Charges, RawRunData and Board (whose catalog reads
+    -- can run other code), from the raw published choice -- never the flags
+    -- the projection copied earlier. Memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "reroll", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
     local ok = svc and SafeCall(svc.RequestReroll)
     selfCalling = false
@@ -4867,6 +6035,78 @@ function A.Reroll()
         return true
     end
     return false, "refused"
+end
+
+-- Gives up a lone souvenir that the caller decided is not needed, once per
+-- draw, by the request the client's own give-up sends (ledger.REVEAL_CODE).
+-- `expect.verify()` re-decides on fresh reads (it may call out) and
+-- `expect.final()` re-checks the caller's authority from memory; both must
+-- return true. Refused (nothing sent) unless: the updated provider, the
+-- ordinary gate (specialization, Orb), no pause, nothing in flight, no
+-- reveal waiting, the souvenir shown alone and unchanged, no Select or other
+-- client action pending, the captured request code, the game's own build
+-- does not ask for the souvenir (WantsMoreOfEcho false), the owned Echoes
+-- readable, and this draw not already given up. The last checks are memory
+-- only, after every callout. A send is never retried, even if it fails.
+function A.RevealMemory(spellId, expect)
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    if not ledger.MemoryCardContract() then return false, "the souvenir reveal needs the updated game client" end
+    local allowed, reason = A.OrdinaryBoardAllowed()
+    if not allowed then return false, reason end
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
+    if A.InFlight() then return false, "in flight" end
+    if ledger.reveal then return false, "a souvenir reveal is waiting for its reply" end
+    if type(expect) ~= "table" or type(expect.verify) ~= "function" or type(expect.final) ~= "function" then
+        return false, "the reveal authority is missing"
+    end
+    local perks = PerksTbl()
+    local ch, why = ledger.RevealSnapshot(perks, spellId)
+    if not ch then return false, why end
+    local svc = PS()
+    local wants = svc and rawget(svc, "WantsMoreOfEcho")
+    if type(wants) ~= "function" then return false, "the game's own build cannot be read" end
+    local okW, wanted = pcall(wants, spellId)
+    if not okW or wanted then return false, "the game's own build asks for this souvenir" end
+    local granted = ledger.GrantedTotal()
+    if granted == nil then return false, "the owned Echoes cannot be read" end
+    local rolls = rawget(perks, "pendingRollsCount")
+    local key = ledger.RevealKey(perks, ch, granted)
+    if not key or ledger.revealDone[key] then return false, "this souvenir was already given up" end
+    local okV, pass = pcall(expect.verify)
+    if not okV or pass ~= true then return false, "reveal_decision_changed" end
+    -- Memory only from here: no callout separates these checks from the send.
+    local okF, passF = pcall(expect.final)
+    if not okF or passF ~= true then return false, "the reveal authority changed" end
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    if A.InFlight() or ledger.reveal then return false, "in flight" end
+    local perksSend = PerksTbl()
+    if not rawequal(perksSend, perks) then return false, "the game's selection state changed" end
+    local chSend, whySend = ledger.RevealSnapshot(perksSend, spellId)
+    if not chSend then return false, whySend end
+    if not rawequal(chSend, ch) or rawget(perksSend, "pendingRollsCount") ~= rolls
+        or not ledger.MemoryCardContract() then
+        return false, "the souvenir changed"
+    end
+    -- A choice re-published with the same cards keeps the board signature,
+    -- so a prepared reveal can reach here on a table the game just parsed.
+    if not ledger.ChoiceActionable(ch) then return false, "reveal_not_settled" end
+    local send = rawget(PE(), "sendToServer")
+    ledger.revealDone[key] = true
+    ledger.reveal = { ref = ch, spellId = spellId, rolls = rolls, granted = granted, at = GetTime() }
+    inFlightKind, inFlightSig = "reveal", nil
+    selfCalling = true
+    local ok = pcall(send, ledger.REVEAL_CODE, "")
+    selfCalling = false
+    if not ok then
+        -- Whether anything left is unknown; the draw stays given up here.
+        ledger.reveal = nil
+        inFlightKind, inFlightSig = nil, nil
+        return false, "the souvenir reveal request failed; it is not retried"
+    end
+    boardDirty = true
+    return true
 end
 
 -- Session-only, read-only settlement of an own reroll. A fresh server run
@@ -4918,9 +6158,18 @@ end
 -- WatchLatches/ResolveInFlight like every other mutator. Never at level
 -- 80 (no next board for a freeze to carry into). Never a blocked card.
 function A.Freeze(index0)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+    local memoryContract = ledger.MemoryCardContract()
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "freeze")
+        if not admitted then return false, why end
+    end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     if deadLatch.freeze then return false, "freeze dead this session" end
     if (UnitLevel("player") or 0) >= 80 then
@@ -4934,14 +6183,29 @@ function A.Freeze(index0)
     local card = board.cards[index0 + 1]
     if not card then return false, "no card" end
     if CardBlocked(card) then return false, "blocked card" end
+    -- D-ROLL-01: the client slot of this card, as in A.Banish.
+    local slots = ledger.boardSlots
+    local slot = slots and slots[card]
+    local clientIndex0 = slot and slot - 1 or index0
     local ch = A.Charges()
     if ch.freeze <= 0 or ch.trustworthy == false then return false, "no charges" end
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
+    -- Updated client (independent action review): the whole admission once
+    -- more after UnitLevel, Horizon, Board and Charges, memory only.
+    do
+        local admitted, why = ledger.MutationAdmission(PerksTbl(), memoryContract, "freeze", true)
+        if not admitted then return false, why end
+    end
     selfCalling = true
-    local ok = svc and SafeCall(svc.FreezePerk, index0)
+    local ok = svc and SafeCall(svc.FreezePerk, clientIndex0)
     selfCalling = false
     if ok then
         ledger.freeze = math.max(0, (ledger.freeze or 1) - 1)
+        -- The overlay marks a projected card (A.Board), so it keeps the
+        -- projected position, not the client slot.
         selfFreezeSig, selfFreezeIndex = board.signature, index0 + 1
         inFlightKind, inFlightSig = "freeze", board.signature
         return true
@@ -4956,6 +6220,7 @@ end
 function A.Activate(slot)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     local level = UnitLevel("player") or 0
     if level ~= 1 and level ~= 80 then return false, "not level 1/80" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -4974,10 +6239,19 @@ end
 function A.Save(slot, name)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if (UnitLevel("player") or 0) ~= 80 then return false, "not level 80" end
-    if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
+    -- Updated client: the service table is present but no longer exports
+    -- SaveServerBuildSlot. That absent capability is its own reason
+    -- ("save_unavailable"), read once here and never called, so a caller can
+    -- tell it from an ordinary refused call ("refused": the function exists
+    -- and declined or failed, or no service table is loaded yet) and from
+    -- spacing. Nothing is sent and no spacing window is started.
     local svc = PS()
-    local ok = svc and SafeCall(svc.SaveServerBuildSlot, slot, name)
+    local saveFn = svc and svc.SaveServerBuildSlot
+    if type(svc) == "table" and saveFn == nil then return false, "save_unavailable" end
+    if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
+    local ok = svc and SafeCall(saveFn, slot, name)
     if ok then lastBuildOpAt = GetTime(); return true end
     return false, "refused"
 end
@@ -5022,14 +6296,23 @@ function A.ServerWishlistTokenFor(name, echoes)
     return ServerSlotToken(tostring(name or "Nexus"), echoes)
 end
 
--- `expected` (optional): a set of tokens an editor accepts for an EXISTING slot
--- (slot > 0). The slot is read again immediately before the host call; a slot
--- that shows anything else, or nothing, is refused ("stale_slot") and nothing is
--- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
--- no set keeps the earlier behavior.
+-- Slot 0 creates a new Wishlist and its destination is never checked. Any slot
+-- above 0 replaces an EXISTING server Wishlist, so (updated client) it is sent
+-- only when the current slot list shows that row in full and the row refuses
+-- no Echo: an unreadable list, a missing row or a row read only in part is
+-- "stale_slot", and a row with refusals (or an incoming refused entry) is
+-- "refused_entries"; nothing is sent and the spacing clock does not start.
+-- `expected` (optional): a set of tokens an editor accepts for that existing
+-- slot. The slot is read again immediately before the host call; a slot that
+-- shows anything else is refused ("stale_slot") and nothing is sent. A caller
+-- that passes no set is checked only as above.
 function A.UploadWishlist(slot, name, echoes, expected)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
     local svc = PS()
@@ -5037,6 +6320,11 @@ function A.UploadWishlist(slot, name, echoes, expected)
     local catalog = A.Catalog and A.Catalog()
     for i = 1, #echoes do
         local e = echoes[i]
+        -- Updated client: a refused Echo (avoid) cannot travel in this upload,
+        -- which sends every entry as wanted. Refused; nothing is sent.
+        if type(e) == "table" and e.avoid ~= nil and e.avoid ~= false then
+            return false, "refused_entries"
+        end
         local id = type(e) == "table" and tonumber(e.spellId)
         local copies = type(e) == "table" and tonumber(e.stacks or 1)
         if not id or id <= 0 or id == math.huge or id ~= math.floor(id)
@@ -5064,6 +6352,19 @@ function A.UploadWishlist(slot, name, echoes, expected)
     for _, e in pairs(bySpell) do clean[#clean + 1] = e end
     table.sort(clean, function(a, b) return a.spellId < b.spellId end)
     if #clean == 0 then return false, "no valid echoes" end
+    -- Updated client (independent Spec P1): an existing server Wishlist is
+    -- replaced only when its current row is read in full. An unreadable slot
+    -- list (nil, a throw, a non-table), a missing row or a row that could not
+    -- be read in full is "stale_slot"; a row that refuses Echoes is
+    -- "refused_entries" (this upload would erase the refusals). Nothing is sent.
+    if (tonumber(slot) or 0) > 0 then
+        local okSlots, current = pcall(A.Slots)
+        local rows = okSlots and type(current) == "table" and current.bySlot or nil
+        local row = type(rows) == "table" and rows[tonumber(slot)] or nil
+        if type(row) ~= "table" then return false, "stale_slot" end
+        if type(row.refused) == "table" and #row.refused > 0 then return false, "refused_entries" end
+        if row.roleSourceValid == false then return false, "stale_slot" end
+    end
     if type(expected) == "table" and (tonumber(slot) or 0) > 0 then
         local current = A.ServerWishlistSlotToken(slot)
         if current == nil or not expected[current] then return false, "stale_slot" end
@@ -5076,6 +6377,9 @@ function A.UploadWishlist(slot, name, echoes, expected)
     -- list are treated as after a send. (Only this call; SafeCall is unchanged.)
     local upload = svc and svc.UploadServerBuildSlot
     if type(upload) ~= "function" then return false, "refused" end
+    -- Final boundary: the catalog and slot reads above can run other code.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     local called, ok = pcall(upload, tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if not called then
         lastBuildOpAt = GetTime()
@@ -5106,6 +6410,7 @@ local lastLockOpAt = -10
 function A.LockPerk(spellId)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
     if (GetTime() - lastLockOpAt) < 3 then return false, "spacing" end
@@ -5114,7 +6419,9 @@ function A.LockPerk(spellId)
     if ok then
         lastLockOpAt = GetTime()
         lockedProjectionRevision = lockedProjectionRevision + 1
-        if svc and svc.RequestGrantedPerks then SafeCall(svc.RequestGrantedPerks) end
+        -- A synchronous callback may have paused the session: the accepted
+        -- action stands, only this new ownership read is not sent.
+        if svc and svc.RequestGrantedPerks and not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then SafeCall(svc.RequestGrantedPerks) end
         return true
     end
     return false, "refused"
@@ -5123,6 +6430,7 @@ end
 function A.UnlockPerk(spellId)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
     if (GetTime() - lastLockOpAt) < 3 then return false, "spacing" end
@@ -5131,7 +6439,9 @@ function A.UnlockPerk(spellId)
     if ok then
         lastLockOpAt = GetTime()
         lockedProjectionRevision = lockedProjectionRevision + 1
-        if svc and svc.RequestGrantedPerks then SafeCall(svc.RequestGrantedPerks) end
+        -- A synchronous callback may have paused the session: the accepted
+        -- action stands, only this new ownership read is not sent.
+        if svc and svc.RequestGrantedPerks and not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then SafeCall(svc.RequestGrantedPerks) end
         return true
     end
     return false, "refused"
@@ -5142,10 +6452,18 @@ end
 ------------------------------------------------------------------------
 
 function A.SetSoloPicker()
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     local opt = OptSvc()
     if not (opt and opt.SetSetting and opt.GetSetting) then return false end
     local cur = SafeCall(function() return opt:GetSetting("autoAcceptLoadoutEchoes") end)
+    -- The read above can run other code: no lease and no option change after
+    -- a Pause (or a Pause and Resume) it raised.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     if cur then
         UpdateStoreState(function(state)
             if state.priorAutoAccept == nil then state.priorAutoAccept = true end
@@ -5218,7 +6536,7 @@ function A.Horizon()
     -- GetPendingRollsCount has PERSISTENT SIDE EFFECTS at level<=1 /
     -- loading screens (pick-counter reset, char-key latch): call guarded.
     if not pewDone then return nil end
-    if (UnitLevel("player") or 0) < 2 then return nil end
+    if (tonumber(UnitLevel("player")) or 0) < 2 then return nil end
     local svc = PS()
     local n = svc and SafeCall(svc.GetPendingRollsCount)
     if type(n) ~= "number" then return nil end
@@ -5425,14 +6743,17 @@ local function SlotsFingerprint(raw, maxSlots)
             local idPart, stackPart = NumberPart(spellId), NumberPart(stacks)
             if not idPart or not stackPart or not IntegerAtLeast(spellId, 1)
                 or not IntegerAtLeast(stacks, 1)
-                or (entry.locked ~= nil and type(entry.locked) ~= "boolean") then
+                or (entry.locked ~= nil and type(entry.locked) ~= "boolean")
+                or (entry.avoid ~= nil and type(entry.avoid) ~= "boolean") then
                 return nil, "slots:echo"
             end
             local lockPart = entry.locked == nil and "?"
                 or (entry.locked and "1" or "0")
-            echoParts[#echoParts + 1] = table.concat({
-                idPart, stackPart, lockPart,
-            }, ":")
+            -- Updated client: a Wishlist row's refused Echo (avoid). An entry
+            -- without the field keeps its earlier fingerprint exactly.
+            local parts = {idPart, stackPart, lockPart}
+            if entry.avoid ~= nil then parts[4] = entry.avoid and "A" or "a" end
+            echoParts[#echoParts + 1] = table.concat(parts, ":")
         end
         table.sort(echoParts)
         rows[#rows + 1] = table.concat({
@@ -5718,9 +7039,13 @@ local function CaptureEchoSnapshot()
         SlotsFingerprint, rawSlots, maxSlots)
 
     local activeSlot, activeField = 0, nil
+    -- Presentation only (echoKnownness): raw nil stays 0 in the field, but
+    -- only an accepted value that was read is a known active slot (ReadSlots).
+    local activeKnown = false
     if okActive then
         local value = rawActive == nil and 0 or tonumber(rawActive)
         if IntegerAtLeast(value, 0) then activeSlot, activeField = value, value end
+        activeKnown = rawActive ~= nil and activeField ~= nil
     end
     if activeField == nil then
         activeField = Rejected("activeSlot",
@@ -5778,7 +7103,7 @@ local function CaptureEchoSnapshot()
         locked=lockedSig,
         discovery=discoveredSig .. "|" .. disabledSig,
         activeSlot=activeField,
-    }, activeSlot, rejected
+    }, activeSlot, rejected, activeKnown
 end
 
 local function RefreshEchoAssociations()
@@ -5830,7 +7155,8 @@ local function ReconcileEchoState(markDirty, source, display)
         displayPE, displaySvc, displayGUID = PE(), PS(), DisplayReuseGUID()
     end
     echoStatus.scans = echoStatus.scans + 1
-    local ok, snapshot, activeSlot, rejected = pcall(CaptureEchoSnapshot)
+    local ok, snapshot, activeSlot, rejected, activeKnown =
+        pcall(CaptureEchoSnapshot)
     if not ok or type(snapshot) ~= "table" then
         -- An internal error of the capture itself (every field check is
         -- protected): nothing was read, so nothing is claimed either way.
@@ -5838,6 +7164,16 @@ local function ReconcileEchoState(markDirty, source, display)
         EchoReason("failure:" .. tostring(ok and "capture" or snapshot))
         return false, false
     end
+    -- Presentation only (echoKnownness): a change of the active slot's
+    -- knownness since the last capture, which the activeSlot field (raw nil
+    -- kept as 0) cannot show. No dirty mark, field generation, status count
+    -- or result changes here.
+    activeKnown = activeKnown == true
+    local knownness = echoGenerations.knownness
+    if knownness.known ~= nil and knownness.known ~= activeKnown then
+        knownness.generation = knownness.generation + 1
+    end
+    knownness.known = activeKnown
     -- The strict check's current verdict, field by field: rejected fields are
     -- reported as such (failures counts scans that rejected any field).
     echoRejected = {}
@@ -6274,7 +7610,12 @@ function A.PresentationRevisions()
         catalogRevision = revisions.Get(revisions.CATALOG_CHANGED)
             or catalogRevision
     end
-    return echoGenerations.slots, echoGenerations.activeSlot,
+    -- The active value adds the presentation-only knownness count
+    -- (echoKnownness.generation). Both only grow, so the sum changes exactly
+    -- when either does, and it equals the activeSlot generation while the
+    -- knownness has never changed.
+    return echoGenerations.slots,
+        echoGenerations.activeSlot + echoGenerations.knownness.generation,
         echoGenerations.granted, ownedProjectionRevision,
         wishlistProjectionRevision, catalogRevision,
         echoGenerations.locked, lockedProjectionRevision,
@@ -6499,7 +7840,11 @@ local function ReconcileLegacyAssignments()
             -- yields no candidate, or one of survivors, and neither is proof of
             -- what the slot holds.
             local row = slots.bySlot and slots.bySlot[wanted]
-            if type(row) == "table" and row.roleSourceValid == false then
+            -- readComplete, not roleSourceValid: a row whose only "invalid"
+            -- part is a well-formed refusal is read in full; its candidate
+            -- holds only the wanted Echoes (a refusal is never a target), and
+            -- uploads over it stay refused (refused_entries).
+            if type(row) == "table" and row.readComplete == false then
                 incomplete = true
             else
                 for _, c in ipairs(live) do
@@ -6597,7 +7942,9 @@ function A.Poll()
     ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
-    ReconcileLegacyAssignments()
+    -- The passive settlement above always runs. Under a session pause this
+    -- background repair waits, and the read requests below refuse.
+    if not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then ReconcileLegacyAssignments() end
     -- owned-sync retry loop: keep re-requesting granted until non-empty
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins

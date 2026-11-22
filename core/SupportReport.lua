@@ -694,9 +694,17 @@ local function signedCount(value)
     end
     return "?"
 end
+local function archivedCount(value)
+    if value==nil then return "not recorded" end
+    local text=bigCount(value)
+    return text=="?" and "unreadable" or text
+end
 local function codeText(value)
     if type(value) == "string" and #value <= 24 and value:find("^[%a_]+$") then return value end
     return value == nil and "none" or "unreadable"
+end
+local function archivedCode(value)
+    return value=="invalid" and "unreadable" or codeText(value)
 end
 local function hexText(value)
     if type(value) == "string" and #value <= 16 and value:find("^%x+$") then return value end
@@ -706,6 +714,24 @@ local function replyText(r)
     if type(r) ~= "table" then return "none" end
     return "(ordinal " .. bigCount(r.ord) .. ", fields " .. bigCount(r.nf) .. ", pending " .. bigCount(r.pd)
         .. ", balance " .. bigCount(r.ch) .. ", reported change " .. signedCount(r.dl) .. ")"
+end
+local function appendArchivedEntries(out,list)
+    local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
+    for index = math.max(1, #entries - 1), #entries do
+        local e = entries[index]
+        if type(e) == "table" then
+            local version=archivedCount(e.consentVersion)
+            local consent=(version=="not recorded" or version=="unreadable") and version
+                or "v"..version.." "..archivedCode(e.consentPolicy)
+            if version=="not recorded" and e.consentPolicy=="invalid" then consent="unreadable" end
+            out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. archivedCode(e.outcome)
+                .. "; kind=" .. archivedCode(e.kind) .. "; confidence=" .. archivedCode(e.confidence)
+                .. "; run observed spends=" .. archivedCount(e.spent) .. " limit=" .. archivedCount(e.limit)
+                .. "; attempt unknown exposure=" .. archivedCount(e.uncertain)
+                .. "; consent " .. consent
+                .. "; late events kept=" .. archivedCount(e.late) .. " seen=" .. archivedCount(e.lateN)
+        end
+    end
 end
 local function continueLines()
     local runtime = Nexus.OrbRuntime
@@ -718,16 +744,22 @@ local function continueLines()
     local adapter = Nexus.GameAdapter and Nexus.GameAdapter.Orbs
     local st = adapter and type(adapter.TransportStatus) == "function" and adapter.TransportStatus() or nil
     local pending = view.reason ~= "no_receipt"
-    local archived = type(archive.count) == "number" and archive.count > 0
+    local archived = (type(archive.count) == "number" and archive.count > 0)
+        or (archive.state~=nil and archive.state~="ok")
     if not (pending or archived or #log > 0) then return out end
-    out[#out + 1] = "  continue: stage=" .. codeText(view.stage)
-        .. "; available=" .. (view.eligible == true and "yes" or "no")
-        .. "; why not=" .. codeText(view.refusal or view.reason)
-        .. "; archive=" .. bigCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
+    out[#out + 1] = "  continue: stage=" .. codeText(view.liveStage or view.stage)
+        .. "; live=" .. (view.liveRecovery and "yes" or "no")
+        .. "; manualExitAvailable=" .. (view.eligible == true and "yes" or "no")
+        .. "; why not=" .. codeText(view.liveRefusal or view.refusal or view.reason)
+        .. "; archive=" .. archivedCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
     if type(st) == "table" then
         local c = type(st.counts) == "table" and st.counts or {}
         local r = type(st.rejects) == "table" and st.rejects or {}
         out[#out + 1] = "  strict reply path: listening=" .. (st.started == true and "yes" or "no")
+            .. "; choiceQuery=" .. (st.choiceQuery==true and "yes" or "no")
+            .. "; outgoingObserver=" .. (st.choiceObserver==true and "yes" or "no")
+            .. "; outgoingInstallAttempted=" .. (st.outgoingAttempted==true and "yes" or "no")
+            .. "; ownBare=" .. bigCount(st.ownBare) .. "; ownFramed=" .. bigCount(st.ownFramed)
             .. "; observed qualifying=" .. bigCount(c.Q) .. " admitted-unqualified=" .. bigCount(c.A) .. " rejected=" .. bigCount(c.R)
             .. "; not accepted: identity=" .. bigCount(r.identity) .. " sender=" .. bigCount(r.sender)
             .. " channel=" .. bigCount(r.channel) .. " segmented=" .. bigCount(r.segmented)
@@ -748,16 +780,7 @@ local function continueLines()
         end
     end
     if type(runtime.Archive) == "function" then
-        local list = runtime.Archive()
-        local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
-        for index = math.max(1, #entries - 1), #entries do
-            local e = entries[index]
-            if type(e) == "table" then
-                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
-                    .. "; spent=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
-                    .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
-            end
-        end
+        appendArchivedEntries(out,runtime.Archive())
     end
     return out
 end
@@ -783,7 +806,16 @@ function M.OrbLines()
         if type(runtime.RunnerView)=="function" then
             local runner=runtime.RunnerView()
             if type(runner)~="table" or runner.initialized~=true then
-                return {"Orb action: unknown (runtime not initialized; no loaded receipt)"}
+                local cold={"Orb action: unknown (runtime not initialized; no loaded receipt)"}
+                if type(runtime.ArchiveDiagnostics)=="function" then
+                    local archive=runtime.ArchiveDiagnostics()
+                    if type(archive)=="table" and ((type(archive.count)=="number" and archive.count>0)
+                        or (archive.state~=nil and archive.state~="ok")) then
+                        cold[#cold+1]="  archive="..archivedCount(archive.count).."/"..bigCount(archive.capacity).." ("..codeText(archive.state)..")"
+                        appendArchivedEntries(cold,archive)
+                    end
+                end
+                return cold
             end
         end
         if view.pending ~= true then
@@ -1218,7 +1250,7 @@ do
     local freshness=codeSet({"recent","stale","transition","unknown"})
     local reasons=codeSet({"observed","nil_response","malformed","no_service","no_getter",
         "read_failed","unobserved","read_blocked","clock_unavailable","stale","transition"})
-    local states=codeSet({"IDLE","READY","WAIT_OFFER","WAIT_SELECT","WAIT_RESULT","RECOVERY","PAUSED",
+    local states=codeSet({"IDLE","READY","WAIT_WORLD","WAIT_OFFER","WAIT_SELECT","WAIT_RESULT","RECOVERY","PAUSED",
         "STOPPED","FINISHED","COMPLETE","ROLLED_COMPLETE","OUT_OF_ORBS","NO_SOURCES","LIMIT","ERROR"})
     local capabilities=codeSet({"NO_ORB_SERVICE","MISSING_STATE","STATE_AWARE","MALFORMED"})
     local serviceStates=codeSet({"ABSENT","UNAVAILABLE","INVALID","UNKNOWN","PENDING","IDLE"})
@@ -1241,7 +1273,7 @@ do
             end
         end
         local runner=accessorFacts("OrbRuntime","RunnerView",{"initialized","state","running","pending",
-            "lifecycleObserved","epoch"}) or {}
+            "lifecycleObserved","epoch","uncertain","reserved","recoveries","unconfirmedResults","historyKnown"}) or {}
         return {
             "Echo choice: presence="..factCode(view.choicePresence,presence).." count="..factCount(view.choiceCount)
                 .." observed="..factFlag(view.observed)
@@ -1260,7 +1292,64 @@ do
             "Orb runner: initialized="..factFlag(runner.initialized).." state="..factCode(runner.state,states)
                 .." running="..factFlag(runner.running).." receipt="..factFlag(runner.pending)
                 .." lifecycleObserved="..factFlag(runner.lifecycleObserved).." ownerEpoch="..factCount(runner.epoch)
+                .." recoveryChecks="..factCount(runner.recoveries).." unconfirmedOutcomes="..factCount(runner.unconfirmedResults)
+                .." uncertainSpendExposure="..factCount(runner.uncertain)
+                .." reserved="..factCount(runner.reserved).." historyKnown="..factFlag(runner.historyKnown)
                 .." (session memory only; IDLE is not choice absence)",
+            -- The Start/Stop run's request, compared between its send and the
+            -- run's last read (OrbAuto.RequestView; client state only, never
+            -- proof of what the server did; redrawReturn is uninterpreted).
+            (function()
+                local q=accessorFacts("OrbAuto","RequestView",{"on","state","kind","age","rejoined","redrawReturn",
+                    "sameChoiceTable","choiceShown","sameCards","offerAtSend","offerNow","chargesAtSend","chargesNow",
+                    "redrawFlagAfterSend","redrawFlagNow","pickPendingNow"}) or {}
+                return "Orb Start/Stop request: on="..factFlag(q.on)
+                    .." state="..factCode(q.state,codeSet({"OFF","RUNNING","WAITING","DONE","STOPPED"}))
+                    .." kind="..factCode(q.kind,codeSet({"none","spend","redraw","select","take"}))
+                    .." age="..factAge(q.age).." rejoined="..factFlag(q.rejoined)
+                    .." redrawReturn="..factCode(q.redrawReturn,codeSet({"true","false","nil","other","error"}))
+                    .." sameChoiceTable="..factFlag(q.sameChoiceTable).." choiceShown="..factFlag(q.choiceShown)
+                    .." sameCards="..factFlag(q.sameCards)
+                    .." offerAtSend="..factFlag(q.offerAtSend).." offerNow="..factFlag(q.offerNow)
+                    .." chargesAtSend="..factCount(q.chargesAtSend).." chargesNow="..factCount(q.chargesNow)
+                    .." redrawFlagAfterSend="..factFlag(q.redrawFlagAfterSend).." redrawFlagNow="..factFlag(q.redrawFlagNow)
+                    .." pickPendingNow="..factFlag(q.pickPendingNow)
+                    .." (session memory only; client state, not server proof)"
+            end)(),
+            -- The run's redraw timing (OrbAuto.RedrawTimingView): seconds by
+            -- the client clock from Nexus's send of a redraw (and of its one
+            -- retry) to the pass on which it saw the redraw answered: a new
+            -- choice table (seen) or the choice cleared (cleared). What
+            -- Nexus observed on its own passes, not a server measurement.
+            (function()
+                local t=accessorFacts("OrbAuto","RedrawTimingView",{"first","retries","seen","cleared","picked","pending","recent"}) or {}
+                local function secs(n)
+                    if type(n)=="number" and n>=0 and n<=9999999 then return string.format("%.1fs",n) end
+                    return "unknown"
+                end
+                local items={}
+                pcall(function()
+                    if type(t.recent)~="table" then return end
+                    for i=1,8 do
+                        local e=t.recent[i]
+                        if type(e)~="table" then break end
+                        local item="first:"..secs(e.first)
+                        if e.retry~=nil then item=item..",retry:"..secs(e.retry) end
+                        items[#items+1]=item.."/"..factCode(e.state,codeSet({"seen","cleared","pending","pick"}))
+                    end
+                end)
+                local first,retries=factCount(t.first),factCount(t.retries)
+                local attempts=(first~="unknown" and retries~="unknown") and factCount(t.first+t.retries) or "unknown"
+                return "Orb redraw timing: redraws="..first.." retries="..retries.." attempts="..attempts
+                    .." newChoiceSeen="..factCount(t.seen).." choiceCleared="..factCount(t.cleared)
+                    .." pending="..factCount(t.pending)
+                    .." pickBeforeNewChoice="..factCount(t.picked)
+                    .." recent="..(#items>0 and table.concat(items,"; ") or "none")
+                    .." (session memory only, last 8 redraws, oldest first; client clock from Nexus's send"
+                    .." to the 0.2s pass on which it saw a new choice table (seen) or the choice cleared"
+                    .." with no new table (cleared; cause not shown), pending = time so far;"
+                    .." Nexus's own observation, not a server measurement)"
+            end)(),
         }
     end
 end
@@ -1842,6 +1931,9 @@ function M.Step(job)
                     .. "; state=" .. safeText(view.state, 32)
                     .. "; spent=" .. safeText(view.spent, 16)
                     .. "/" .. safeText(view.limit, 16)
+                    .. "; reserved=" .. safeText(view.reserved,16)
+                    .. "; unknown spend exposure=" .. safeText(view.uncertain,16)
+                    .. "; unconfirmed outcomes=" .. safeText(view.unconfirmedResults,16)
                     .. "; operations=" .. safeText(view.total, 16)
                 local history = Nexus.OrbHistory
                 if history and type(history.Rows) == "function" then
@@ -2140,12 +2232,18 @@ function M.StorageStatus()
 end
 
 -- What the player is told after a successful preparation. It states exactly
--- what has and has not happened.
+-- what has and has not happened. Visible page text only, never part of a
+-- report: its words come from Nexus.Localization (issues #143-#148); the
+-- report ID is inserted verbatim.
 function M.WrittenNotice(meta)
-    local id = type(meta) == "table" and meta.id or "?"
-    return "Report " .. safeText(id, 48) .. " is prepared in memory. WoW writes the "
+    local id = safeText(type(meta) == "table" and meta.id or "?", 48)
+    local localization = Nexus and Nexus.Localization
+    if localization and type(localization.Format) == "function" then
+        return (localization.Format("support.status.report_prepared", {id = id}))
+    end
+    return "Report " .. id .. " is prepared in memory. WoW writes the "
         .. "file when you reload, log out, or exit normally. It is not yet "
-        .. "verified on disk."
+        .. "verified on disk. Nexus does not reload or log out for you."
 end
 
 function M.FilePathHint()

@@ -30,9 +30,31 @@ could be cut, overlap a neighbour or leave the window.
 - **Fixed-size windows wider than the visible UI** are scaled to fit
   (`FitToScreen`). At scale 1 the UI is 1024 px wide on 4:3 screens and 960 px
   on 5:4 screens. This applies to the Wishlist editor and the Leaderboard.
+- **The Build Library window** (`Community`) is not scaled. Its status wraps
+  in full: every measured row, up to 20. Its controls and its minimum
+  list/detail body keep their size. Its layout is as tall as these need. While
+  that height fits the visible UI less a 24 px margin, the window shows all of
+  it. Otherwise the window is that tall and its content scrolls inside it:
+  with the bar at its right edge (shown only then), or with the mouse wheel
+  over the window outside the build list and details, which scroll on their
+  own. Each re-layout (UI size, font, status rows) keeps the scrolled place
+  inside the new range. A reported UI under 640x480 is not acted on. The
+  window width is unchanged: below 784 px of UI width the 760 px window is
+  wider than the UI less the margin.
 - One-line boxes are at least one 17 px line tall. That is the conservative
   line of a replacement face; the face measured natively for the Quick Start
   fit had 16.1 px lines.
+- **Owned fonts follow the native small font** (`LayoutMetrics.Panel`). The
+  three Nexus-owned font sizes are 10 / 12 / 14 at native 10 and scale with
+  `GameFontHighlightSmall` from 1x to 2x; the reference scale is held in that
+  range, so a native small font under 10 keeps exactly 10 / 12 / 14, and the
+  sizes never fall below them. Offline font models only; native NOT RUN.
+- **The charges cell follows the font.** The heading row's compact charges
+  cell is 72 px times the font scale (`chargesW`, never under 72), given only
+  in the room the shown heading leaves beside its 4 px gap; the heading form
+  is still fitted beside the 72 px minimum, so the chosen form is unchanged.
+  While the cell is narrower than the charges row, the row is shortened and
+  its hover shows the complete text. Offline font models only; native NOT RUN.
 
 Spell, identity and full-title tooltips are unchanged. Text is not sanitised
 any differently. Data, identity, Sync, selection, request counts, button
@@ -48,11 +70,16 @@ refusal states. The checks run at several effective UI sizes and font models:
 the default face, a 16 px face, and font scales 0.75 and 2. They resolve the
 real anchors into rectangles and check that content stays inside its frame,
 does not overlap, keeps every wrapped line, has a scroll range that reaches
-the last line, and recovers the complete text. The font models are offline
-models (`tests/prototype/layout_geometry_support.lua`), not native font
-measurement.
+the last line, and recovers the complete text. `ux_sync_status_fit` and
+`community_detail_layout` also check the Build Library window against the UI
+size. The whole window must lie inside it, and every control, the status, the
+list and the detail must be brought fully on screen through the window's own
+scroll bar and wheel. The font models are offline models
+(`tests/prototype/layout_geometry_support.lua`), not native font measurement.
 
 ## Native status
 
 NOT TESTED. Pixel fit, scroll bars, tooltips and clicks in the game client
-still need a native check of each window family at the supported scales.
+still need a native check of each window family at the supported scales. For
+the Build Library this includes clipping of its scrolled content, of the build
+list and of the detail body nested inside it, and the wheel routing between them.

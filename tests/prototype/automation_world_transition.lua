@@ -161,14 +161,40 @@ do
  assert(not H.Auto() and Label()=='Auto OFF','one click during a hold turns the selection OFF: '..Label())
 end
 
--- 9. Labels for the 72-pixel button: Auto --, Auto ON, Auto OFF. Size and
--- colours are unchanged. The fit of the labels is scenario 22.
+-- 9. Labels for the header button: Auto --, Auto ON, Auto OFF.
+-- Consent is unchanged. The OFF colour is now a neutral light grey (stale
+-- presentation pin updated, finish pass item E: the design's Auto OFF is the
+-- ordinary state, not red); the words still carry the state. The fit is
+-- scenario 22.
+-- v12 (Root's focused run stopped here: "header button size: 60x15"). The
+-- check asked for 84 x 22, the former fixed slot. In the approved compact
+-- header the control is as wide as the widest of its three labels with the
+-- room kept clear at its two ends (the draft's 16 pixels, never under the
+-- two 6-unit insets of the label fit), held to three tenths of the panel,
+-- and the draft's 22 pixels high; one design pixel is 284 / 420 unit. So
+-- every label is whole on one line in it, and it does not change size with
+-- the label it shows. Stated here from the draft and from the labels
+-- themselves (this harness measures a text at 6 units a byte), not read
+-- back from the slot table alone: 8 bytes x 6 + 12 = 60 wide, 15 high, in
+-- the 284-unit panel. The former 84 x 22 slot stays asked where it still
+-- applies, without the compact metrics (scenario 22).
 do
  local H=Boot();Nexus.Panel.Show();H.Advance(.5)
  assert(Label()=='Auto OFF','OFF label: '..Label())
  local btn=NexusPanel._autoBtn
- assert(btn:GetWidth()==72 and btn:GetHeight()==22,'button size unchanged: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight()))
- assert((btn:GetText() or ''):find('|cffe63c3c',1,true),'OFF colour unchanged')
+ local slots=Nexus.Panel.HeaderSlots()
+ local widest=0
+ for _,key in ipairs({'panel.button.auto_on','panel.button.auto_off','panel.button.auto_unknown'}) do
+  widest=math.max(widest,6*#(Nexus.Localization.Text(key)))
+ end
+ local function Design(px) return math.max(1,math.floor(px*284/420+0.5)) end
+ assert(type(slots)=='table' and slots.compact~=nil and widest==48 and btn:GetWidth()==widest+math.max(Design(16),12)
+  and btn:GetWidth()<=math.floor(NexusPanel:GetWidth()*0.3) and btn:GetHeight()==Design(22)
+  and btn:GetWidth()==slots.autoWidth and btn:GetHeight()==slots.height and rawget(btn,'_nexusWrapped')==nil,
+  'header button size: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight())..' for a widest label of '..widest
+   ..' in a panel of '..tostring(NexusPanel:GetWidth()))
+ assert((btn:GetText() or ''):find('|cffd9d9d9',1,true) and not (btn:GetText() or ''):find('|cffe63c3c',1,true),
+  'OFF is neutral light grey, not red')
  NexusPanel._autoBtn:Click();H.Advance(.5)
  assert(H.Auto() and Label()=='Auto ON','button click turns Auto ON: '..Label())
  assert((btn:GetText() or ''):find('|cff2ee62e',1,true),'ON colour unchanged')
@@ -623,14 +649,54 @@ do
  assert(l.state=='rejected' and Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the refused Take stays refused: '..tostring(l.state)..'/'..tostring(l.reason))
 end
 -- 22. The Auto labels fit the button's text budget: the widest label is
--- measured with the button's own font object against 72 px minus a 6 px
--- inset per side, across the LayoutMetrics font-scale range 0.75-2. When the
--- owned normal size does not fit, only the button's own font object is made
--- smaller (never below 9); the shared normal font, the 72x22 size and the
--- anchor stay unchanged, and all three button states use the fitted font.
+-- measured with the button's own font object against the button's width
+-- minus a 6 px inset per side, across the LayoutMetrics font-scale range
+-- 0.75-2. When the owned control-label size does not fit, only the button's
+-- own font object is made smaller (never below 9); the shared owned fonts and
+-- the header slot stay unchanged, and all three button states use the fitted
+-- font. The slot is the approved original-design header's (#163/#165: title,
+-- Auto, Options and Close on header line 1, Panel.HeaderSlots), which
+-- replaced the former fixed 84x22 TOPRIGHT -47/-7 place; the budget must be
+-- the width of that slot, never a constant of the old one.
 -- The measurement here is SIMULATED: the harness has no font renderer, so the
 -- doubles below model 0.55 em per visible character. Native pixel fit is not
 -- tested. (Last scenario: its CreateFont double is removed at the end.)
+-- v12 (the scenario stood behind scenario 9's stop in Root's focused run and
+-- has not executed since the compact header). Two policies are asked now,
+-- each where it applies.
+-- v17 (typography correction: the words on the panel's controls are one
+-- role, the owned 11-unit secondary font, a step under the 12-unit names
+-- and values). The Auto control's own font object is a copy of that role,
+-- and its labels are measured and fitted in it. So this scenario asks the
+-- fit, the width probe, the own font's parent and every base and fitted size
+-- of the secondary font. The owned normal font is still set at each text
+-- scale: it is what the panel's text scale and geometry follow
+-- (LayoutMetrics' runtime font scale, the draft's design pixels below). The
+-- secondary font is set beside it at 11 x the same scale, as the owned fonts
+-- are sized together (11 and 12 x one reference). Neither font stands in for
+-- the other. Both shared objects are asked to stay as set.
+-- COMPACT (the approved header, what a boot gives): the control is sized
+-- from its labels (the widest label on one line in the owned secondary font,
+-- with the draft's 16 pixels of room and never under the fit's two 6-unit
+-- insets), held to three tenths of the panel, so the widest label fits its
+-- budget at every text scale and NO font is made smaller: the button's own
+-- font object keeps the owned secondary size. The control's width is
+-- measured on another hidden text of the button (Panel.PrimaryWidth, made in
+-- the secondary font), so the same simulated renderer answers for that text
+-- too, at the owned secondary font's size; the harness's own 6-units-a-byte
+-- answer would not follow the text scale and the two measurements would
+-- disagree. EXPECT: at a scale where the label did not fit the fixed slot
+-- the check asked for a smaller own font ("only the button font is made
+-- smaller"); the compact header never shrinks a label.
+-- LEGACY (no compact metrics: LayoutMetrics.Compact withheld for the fit,
+-- as when the layout engine cannot give them): the former fixed 84 x 22
+-- slot and the former fit, asked exactly as this scenario asked them: the
+-- budget is that slot less 12, the widest label fits it, and where the
+-- owned secondary size does not fit only the button's own font object is
+-- made smaller, never under 9, the shared owned fonts unchanged. The fit is run
+-- through the panel's own one-shot font pass (Panel.ApplyOwnedFonts, with
+-- its done-flag cleared as ui_review_navigation V3a does); the legacy
+-- placement of the slot is LayoutFooter's and is not exercised here.
 do
  local H=Boot(function()
   CreateFont=function(name)
@@ -644,33 +710,117 @@ do
  Nexus.Panel.Show();H.Advance(.5)
  local btn=NexusPanel._autoBtn
  local probe=btn._nexusFitProbe
- local base,own=_G.NexusFontNormal,_G.NexusAutoButtonFont
- assert(probe and base and own and own~=base,'the button is measured with its own font object')
- assert(own.parent==base,'the own font inherits colour and shadow from the owned normal font')
+ -- base: the owned normal font, the text-scale driver. sec: the owned
+ -- secondary font, the controls' role, which the Auto font copies (v17).
+ local base,sec,own=_G.NexusFontNormal,_G.NexusFontSecondary,_G.NexusAutoButtonFont
+ assert(probe and base and sec and own and own~=base and own~=sec and sec~=base,
+  'the button is measured with its own font object, apart from the owned normal and secondary fonts')
+ assert(own.parent==sec,'the own font inherits colour and shadow from the owned secondary font, the controls\' role, not the normal one')
  local function Visible(t) return ((t or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
  probe.SetFontObject=function(self,o) self.fontObject=o end
  probe.GetStringWidth=function(self) local f=self.fontObject;return #Visible(self.text)*(f and f.size or 12)*0.55 end
+ -- (v12) The hidden text the compact control's width is measured on: the
+ -- same simulated renderer, at the size of the font it is made in, the
+ -- owned secondary font (v17; it was the normal font's).
+ local wide=btn._nexusWidthProbe and btn._nexusWidthProbe.text
+ assert(wide,'the compact control measures its labels on a hidden text of its own')
+ wide.GetFont=function() return sec.path,sec.size,sec.flags end
+ wide.GetStringWidth=function(self) return #Visible(self.text)*sec.size*0.55 end
  btn.SetNormalFontObject=function(self,o) self.normalFont=o end
  btn.SetHighlightFontObject=function(self,o) self.highlightFont=o end
  btn.SetDisabledFontObject=function(self,o) self.disabledFont=o end
+ local LABELS={}
+ for _,key in ipairs({'panel.button.auto_on','panel.button.auto_off','panel.button.auto_unknown'}) do
+  LABELS[#LABELS+1]=(Nexus.Localization.Text(key))
+ end
+ -- COMPACT.
  for i,scale in ipairs({0.75,1,1.25,1.5,2}) do
+  -- The text scale (normal 12 x scale) and, beside it, the controls' role
+  -- at the same scale (secondary 11 x scale).
   base:SetFont(base.path,12*scale,'')
+  sec:SetFont(sec.path,11*scale,'')
   local renders=Nexus.Panel.RenderStats().calls
   H.Offer(i%2==1 and OTHER or WANT);H.Advance(1) -- a new board: a render runs the footer layout
   assert(Nexus.Panel.RenderStats().calls>renders,'scale '..scale..': reached: the panel rendered again')
   local fit=btn._nexusFit
-  assert(fit and fit.budget==60 and fit.baseSize==12*scale,'scale '..scale..': measured against the current owned size, budget 72-2x6')
+  local slots=Nexus.Panel.HeaderSlots()
+  assert(type(slots)=='table' and tonumber(slots.autoWidth) and tonumber(slots.height),'scale '..scale..': the header names the Auto slot')
+  -- The slot itself, stated from the draft and the labels in this model:
+  -- the widest label's width in whole units and its room, within three
+  -- tenths of the panel; the draft's 22 pixels high; nothing wraps. The
+  -- labels are measured in the font they are drawn in, the secondary font;
+  -- the design pixels follow the text scale (the normal font).
+  local function Design(px) return math.max(1,math.floor(px*284/420*scale+0.5)) end
+  local widest=0
+  for _,label in ipairs(LABELS) do widest=math.max(widest,#label*sec.size*0.55) end
+  local want=math.ceil(widest)+math.max(Design(16),12)
+  assert(slots.compact~=nil and want<=math.floor(NexusPanel:GetWidth()*0.3) and slots.autoWidth==want and slots.height==Design(22)
+   and not slots.autoWraps and rawget(btn,'_nexusWrapped')==nil,
+   'scale '..scale..': the compact Auto control is its widest label and its room, the draft\'s height, whole on one line: '
+   ..tostring(slots.autoWidth)..'x'..tostring(slots.height)..', want '..want..'x'..Design(22)..' in a panel of '..tostring(NexusPanel:GetWidth()))
+  local budget=slots.autoWidth-12
+  assert(fit and fit.budget==budget and fit.baseSize==11*scale,
+   'scale '..scale..': measured against the current owned secondary size, budget = Auto slot width '..tostring(slots.autoWidth)..' - 2x6, got '
+   ..tostring(fit and fit.budget)..' at a base size of '..tostring(fit and fit.baseSize))
   assert(fit.fits and fit.width<=fit.budget,'scale '..scale..': the widest label fits: '..fit.width..' of '..fit.budget)
-  if 8*12*scale*0.55<=60 then
-   assert(fit.size==12*scale,'scale '..scale..': no reduction when the owned size fits: '..tostring(fit.size))
-  else
-   assert(fit.size<12*scale and fit.size>=9,'scale '..scale..': only the button font is made smaller: '..tostring(fit.size))
-  end
-  assert(own.size==fit.size and base.size==12*scale,'scale '..scale..': the shared normal font is unchanged')
+  assert(fit.size==11*scale,'scale '..scale..': the compact header never makes the label smaller: '..tostring(fit.size))
+  assert(own.size==fit.size and base.size==12*scale and sec.size==11*scale,'scale '..scale..': the shared normal and secondary fonts are unchanged')
   assert(btn.normalFont==own and btn.highlightFont==own and btn.disabledFont==own,'scale '..scale..': all three states use the fitted font')
   local point,rel,relPoint,x,y=btn:GetPoint(1)
-  assert(btn:GetWidth()==72 and btn:GetHeight()==22 and point=='BOTTOMLEFT' and x==8 and y==7,'scale '..scale..': size and anchor unchanged')
+  assert(btn:GetWidth()==slots.autoWidth and btn:GetHeight()==slots.height and point=='TOPRIGHT'
+   and rel==NexusPanel and relPoint=='TOPRIGHT' and x==-slots.auto and y==-slots.top,
+   'scale '..scale..': Auto keeps its header slot: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight())
+   ..' '..tostring(point)..' '..tostring(x)..'/'..tostring(y))
  end
+ -- LEGACY: the former fixed slot and fit, with the compact metrics withheld.
+ local metrics=Nexus.LayoutMetrics
+ local compact=metrics.Compact
+ metrics.Compact=nil
+ local okLegacy,whyLegacy=pcall(function()
+  local slots=Nexus.Panel.HeaderSlots()
+  assert(type(slots)=='table' and slots.compact==nil and slots.autoWidth==84 and slots.height==22,
+   'without the compact metrics the header names the former fixed Auto slot, 84 x 22: '
+   ..tostring(type(slots)=='table' and slots.autoWidth)..'x'..tostring(type(slots)=='table' and slots.height))
+  local budget=slots.autoWidth-12
+  local reduced=0
+  for _,scale in ipairs({0.75,1,1.25,1.5,2}) do
+   base:SetFont(base.path,12*scale,'')
+   sec:SetFont(sec.path,11*scale,'')
+   btn:SetSize(slots.autoWidth,slots.height)
+   NexusPanel._nexusOwnedFonts=false
+   Nexus.Panel.ApplyOwnedFonts()
+   local fit=btn._nexusFit
+   assert(fit and fit.budget==budget and fit.baseSize==11*scale,
+    'legacy, scale '..scale..': measured against the current owned secondary size, budget = Auto slot width '..tostring(slots.autoWidth)..' - 2x6, got '
+    ..tostring(fit and fit.budget)..' at a base size of '..tostring(fit and fit.baseSize))
+   assert(fit.fits and fit.width<=fit.budget,'legacy, scale '..scale..': the widest label fits: '..fit.width..' of '..fit.budget)
+   -- The widest label ("Auto OFF", 8 characters) at the owned secondary size
+   -- in this model: 48.4 x scale against the budget of 72, so the scales
+   -- 1.5 (72.6) and 2 (96.8) are the two that need the smaller own font.
+   if 8*11*scale*0.55<=budget then
+    assert(fit.size==11*scale,'legacy, scale '..scale..': no reduction when the owned size fits: '..tostring(fit.size))
+   else
+    reduced=reduced+1
+    assert(fit.size<11*scale and fit.size>=9,'legacy, scale '..scale..': only the button font is made smaller: '..tostring(fit.size))
+   end
+   assert(own.size==fit.size and base.size==12*scale and sec.size==11*scale,'legacy, scale '..scale..': the shared normal and secondary fonts are unchanged')
+   assert(btn.normalFont==own and btn.highlightFont==own and btn.disabledFont==own,'legacy, scale '..scale..': all three states use the fitted font')
+  end
+  assert(reduced==2,'legacy: the two largest text scales are the ones that need the smaller own font: '..reduced)
+ end)
+ metrics.Compact=compact
+ assert(okLegacy,whyLegacy)
+ -- Back in the compact header: the next render sizes the control from its
+ -- labels again and the own font is the owned secondary size again.
+ base:SetFont(base.path,12,'')
+ sec:SetFont(sec.path,11,'')
+ local renders=Nexus.Panel.RenderStats().calls
+ H.Offer(WANT);H.Advance(1)
+ local slots=Nexus.Panel.HeaderSlots()
+ assert(Nexus.Panel.RenderStats().calls>renders and slots.compact~=nil and btn:GetWidth()==slots.autoWidth and btn:GetHeight()==slots.height
+  and btn._nexusFit and btn._nexusFit.size==11 and own.size==11 and base.size==12 and sec.size==11,
+  'after the legacy fit the compact control and the owned size are back: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight())
+  ..' own '..tostring(own.size))
  CreateFont=nil
 end
 print('PASS Auto selection kept across a same-session loading screen with actions held until settled; whatever still waited at the leave (runtime action or adapter latch) holds automation until player input, a run boundary or a Take grant, with the reason shown; unclassified entry and logout revoke; compact Auto labels')

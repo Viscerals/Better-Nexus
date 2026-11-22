@@ -1215,6 +1215,10 @@ do
     -- is still shown; the chooser is then hidden before Accept.
     NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
     check(request~=nil,'C2 setup fresh current replacement request for the later name')
+    local leave,why=editor.SuspendForWorkspace()
+    check(leave==false and why:find('Plan alternatives',1,true)
+        and Popup.shown[REPLACE]==request and NexusEditorFrame:IsShown(),
+        'real deferred Flexible Plan replacement blocks workspace leave until accepted or canceled')
     PoolRow(B).count:SetText('4')
     check(Shows(B,1,'4','Set *'),'C2 setup count typed after consent stays pending without Set')
     NexusFlexiblePlanHide:Click()

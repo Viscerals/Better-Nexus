@@ -68,21 +68,37 @@ local saveTop,saveBottom,saveX=rect(save)
 check(listBottom-footerTop==8,'8px between list and footer')
 check(footerBottom-saveTop==6,'6px between footer and Save')
 check(listX==674 and footerX==674 and saveX==674,'pane widths and left edges align')
-local function lines(first,second)
- local text=footer:GetText();local a,b=text:match('^([^\n]+)\n([^\n]+)$')
- check(a==first and b==second,'exact two deliberate summary lines: '..text)
+-- The footer's lines, in order. #173 item 4: the planned rolled copies
+-- total always leads line 1; the other parts follow on lines that fit the
+-- width (measured; this harness measures bytes at 6px, so the bullet counts
+-- three glyphs here). The footer is at least 28px and as high as its
+-- lines (14px each here), growing up from its place above Save; the list
+-- keeps 8px above it with fewer whole rows, so no count is clipped.
+local function lines(...)
+ local want={...};local got={}
+ for line in (footer:GetText()..'\n'):gmatch('(.-)\n')do got[#got+1]=line end
+ check(#got==#want,'exact deliberate summary lines: '..footer:GetText())
+ for i=1,#want do check(got[i]==want[i],'summary line '..i..': '..tostring(got[i])) end
  -- Harness uses a conservative 6px ASCII glyph width. Bullet is one glyph.
- for _,line in ipairs({a,b})do
+ for _,line in ipairs(got)do
   local ascii=line:gsub(' \226\128\162 ',' * ')
   check(#ascii*6<=footer:GetWidth(),'summary line fits fixed footer width')
  end
+ check(footer:GetHeight()==math.max(28,#got*14),'the footer is as high as its '..#got..' lines: '..footer:GetHeight())
+ local fTop,fBottom=rect(footer)
+ local lTop,lBottom=rect(area)
+ -- Whole rows only: at least 8px (exactly 8 at the 28px footer), less than
+ -- one more row.
+ check(lBottom-fTop>=8 and lBottom-fTop<8+24 and fBottom-saveTop==6,'list, footer and Save keep 8px+ and 6px gaps')
+ if footer:GetHeight()==28 then check(lBottom-fTop==8,'exactly 8px at the 28px footer') end
+ check(area:GetHeight()==math.floor((408+28-footer:GetHeight())/24)*24,'the list shows the whole rows left above it')
 end
 lines('Planned rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
 H.locked={{spellId=200080,stacks=5},{spellId=200081,stacks=1}}
 H.Notify();A.Poll();r.Refresh()
 -- Two occupied locked records (holding 5 and 1 copies) occupy two of the six
 -- slots: "Currently locked" counts records, not the six held copies.
-lines('Currently locked: 2/6  \226\128\162  Planned rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
+lines('Planned rolled copies: 79/79','Currently locked: 2/6  \226\128\162  Locked targets: 6/6','85 Echo/quality entries')
 H.locked={};H.Notify();A.Poll();r.Refresh()
 local function visible()
  local t={};for _,row in ipairs(area.children)do

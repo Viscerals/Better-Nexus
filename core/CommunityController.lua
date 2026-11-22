@@ -8,6 +8,260 @@ local Identity = assert(Nexus.Identity,
 
 local Controller = {}
 
+-- Full UI localization (library family): the visible sentences this
+-- controller produces for chat and the Library status lines resolve through
+-- the Nexus.Localization seam when produced (looked up per call). Reasons
+-- returned to callers stay their raw English: they are compared and recorded
+-- (PeerRecord, SupportIncidents, tests); ShownReason below is the display
+-- form a view prints, never an input to any comparison.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+
+-- Raw reason (exact bytes as returned and shown) -> key of its shown clause.
+local REASON_KEYS = {
+    ["build catalog unavailable"]="library.error.catalog_unavailable",
+    ["catalog maintenance unavailable"]="library.error.catalog_maintenance_unavailable",
+    ["build storage refused"]="library.error.build_storage_refused",
+    ["saved-loadout storage refused"]="library.error.saved_loadout_storage_refused",
+    ["storage refused"]="library.error.storage_refused",
+    ["build evidence is unavailable"]="library.error.build_evidence_unavailable",
+    ["locked Echo resolver is unavailable"]="library.error.locked_resolver_unavailable",
+    ["locked Echo record lookup failed"]="library.error.locked_lookup_failed",
+    ["locked Echo resolution failed"]="library.error.locked_resolution_failed",
+    ["record identity is unavailable"]="library.error.record_identity_unavailable",
+    ["locked Echo evidence is unavailable"]="library.error.locked_evidence_unavailable",
+    ["adapter not ready"]="library.error.adapter_not_ready",
+    ["no wishlist selected to post"]="library.error.no_source_selected",
+    ["title is too long"]="library.error.title_too_long",
+    ["description is too long"]="library.error.description_too_long",
+    ["title contains unsafe text"]="library.error.title_unsafe",
+    ["description contains unsafe text"]="library.error.description_unsafe",
+    ["A Share is already waiting for local saving."]="library.error.share_already_waiting",
+    ["local save failed"]="library.error.local_save_failed",
+    ["Share stopped: the player or catalog changed"]="library.error.share_stopped_owner_changed",
+    ["queue rejected"]="library.error.queue_rejected",
+    ["build not found"]="library.error.build_not_found",
+    ["not found"]="library.error.not_found",
+    ["not your build"]="library.error.not_your_build",
+    ["Sync status unavailable"]="library.error.sync_status_unavailable",
+    ["Share is not terminal"]="library.error.share_not_terminal",
+    ["the record is too large to send; a retry cannot change that"]="library.error.share_too_large",
+    ["Share is not retryable"]="library.error.share_not_retryable",
+    ["not retryable"]="library.error.not_retryable",
+    ["build changed since the failed Share"]="library.error.share_build_changed",
+    ["Retry Share is not offered for a listing made from a Saved Build; a Saved Build's Share action is separate and asks for its own confirmation"]="library.error.retry_saved_build_listing",
+    ["player or catalog changed"]="library.error.player_or_catalog_changed",
+    ["Sync retry failed"]="library.error.sync_retry_failed",
+    ["not a saved loadout"]="library.error.not_saved_loadout",
+    ["that build has no echoes"]="library.error.build_no_echoes",
+    ["that build has no ordinary echoes"]="library.error.build_no_ordinary_echoes",
+    ["invalid Discord build link"]="library.error.invalid_discord_link",
+    ["Paste a Discord channel or message link from discord.com/channels/."]="library.error.discord_link_hint",
+    ["saved loadouts update from the server; edit the server loadout itself to change its Echoes"]="library.error.saved_loadout_echoes_from_server",
+    ["this Echo list is read-only because a DPS record is attached; share a new build for different Echoes"]="library.error.echo_list_read_only",
+    ["no active wishlist"]="library.error.no_active_wishlist",
+    ["Echo roles cannot be read"]="library.error.echo_roles_unreadable",
+    ["server Saved Builds cannot be deleted here"]="library.error.saved_build_not_deletable",
+    ["Sync queue rejected withdrawal"]="library.error.withdrawal_rejected",
+    ["Sync withdrawal failed"]="library.error.withdrawal_failed",
+    ["Sync unavailable"]="library.error.sync_unavailable",
+    ["local build removal refused"]="library.error.local_removal_refused",
+}
+-- Full-UI remainder (v3): the raw reasons other owners produce and this
+-- Library (and the Leaderboard) shows: core/CandidateEvidence.lua Copy/Open
+-- checks, core/Sync.lua / core/SyncSession.lua request and Share queue
+-- reasons, core/SyncWire.lua transport waits, Share outcome codes, and the
+-- Share source refusals below (ShareRoles). Each English equals the raw bytes;
+-- the producers keep and compare their raw text. Shown through the seam's
+-- display phrasebook (Localization.Phrase); any other text stays verbatim.
+local REASON_PHRASES = {
+    ["record categories disagree on locked Echo evidence"]="library.reason.record_categories_locked_disagree",
+    ["locked Echo fingerprint does not match its evidence"]="library.reason.locked_fingerprint_mismatch",
+    ["independently verified current Copy authority is unavailable"]="library.reason.copy_authority_unavailable",
+    ["ordinary Echo evidence is unavailable"]="library.reason.ordinary_evidence_unavailable",
+    ["locked Echo evidence must be a dense array"]="library.reason.locked_evidence_dense",
+    ["ordinary Echo evidence must be a dense array"]="library.reason.ordinary_evidence_dense",
+    ["ordinary Echo evidence is still syncing"]="library.reason.ordinary_evidence_syncing",
+    ["locked Echo evidence has more rows than Nexus reads"]="library.reason.locked_rows_too_many",
+    ["ordinary Echo evidence contains locked-role data"]="library.reason.ordinary_has_locked_data",
+    ["locked Echo evidence is invalid"]="library.reason.locked_evidence_invalid",
+    ["ordinary Echo evidence is invalid"]="library.reason.ordinary_evidence_invalid",
+    ["a locked Echo row holds more copies than Nexus reads"]="library.reason.locked_row_too_many_copies",
+    ["ordinary Echo evidence exceeds 79 copies"]="library.reason.ordinary_over_79",
+    ["build Echo evidence must be a dense array"]="library.reason.build_evidence_dense",
+    ["record build identity is invalid"]="library.reason.record_build_identity_invalid",
+    ["record fingerprint is invalid"]="library.reason.record_fingerprint_invalid",
+    ["record fingerprint does not match its Echo evidence"]="library.reason.record_fingerprint_mismatch",
+    ["record categories disagree on resolved build identity"]="library.reason.record_categories_build_disagree",
+    ["record fingerprint is unavailable"]="library.reason.record_fingerprint_unavailable",
+    ["record and catalog identities do not match"]="library.reason.record_catalog_identity_mismatch",
+    ["record and catalog build IDs do not match"]="library.reason.record_catalog_build_id_mismatch",
+    ["locked Echo record is invalid"]="library.reason.locked_record_invalid",
+    ["locked Echo record category is invalid"]="library.reason.locked_record_category_invalid",
+    ["historical locked evidence is not current copy authority"]="library.reason.historical_locked_not_authority",
+    ["record identity changed"]="library.reason.record_identity_changed",
+    ["record evidence changed"]="library.reason.record_evidence_changed",
+    ["record projection changed"]="library.reason.record_projection_changed",
+    ["record Echo evidence changed"]="library.reason.record_echo_evidence_changed",
+    ["record evidence unavailable"]="library.reason.record_evidence_unavailable",
+    ["record projection unavailable"]="library.reason.record_projection_unavailable",
+    ["record evidence is unavailable"]="library.reason.record_evidence_is_unavailable",
+    ["record revision is unavailable"]="library.reason.record_revision_unavailable",
+    ["record evidence binding is inconsistent"]="library.reason.record_binding_inconsistent",
+    ["record evidence provider is invalid"]="library.reason.record_evidence_provider_invalid",
+    ["record revision provider is invalid"]="library.reason.record_revision_provider_invalid",
+    ["record evidence provider is ambiguous"]="library.reason.record_evidence_provider_ambiguous",
+    ["candidate evidence is unavailable"]="library.reason.candidate_evidence_unavailable",
+    ["unsupported candidate evidence contract"]="library.reason.candidate_contract_unsupported",
+    ["record validation is unavailable"]="library.reason.record_validation_unavailable",
+    ["record validation failed"]="library.reason.record_validation_failed",
+    ["the build's Echo list is not in your library"]="library.reason.request_not_in_library",
+    ["this is your own build"]="library.reason.request_own_build",
+    ["the build owner is not verified"]="library.reason.request_owner_unverified",
+    ["the locked Echo roles are already known"]="library.reason.request_roles_known",
+    ["a request for this build is already waiting"]="library.reason.request_already_waiting",
+    ["Sync is in Manual mode. Press Sync Now, then request again"]="library.reason.request_manual_mode",
+    ["not connected to the Nexus sync channel"]="library.reason.request_not_connected",
+    ["the request queue is full"]="library.reason.request_queue_full",
+    ["invalid build ID"]="library.reason.request_invalid_build_id",
+    ["shared data preparation failed; see /nexus log errors"]="library.reason.sync_prep_failed",
+    ["shared data is preparing; try Sync again when ready"]="library.reason.sync_preparing",
+    ["not connected to the sync channel"]="library.reason.sync_not_connected",
+    ["sync request already queued"]="library.reason.sync_already_queued",
+    ["please wait a few seconds between syncs"]="library.reason.sync_cooldown",
+    ["Nexus is paused for this session. Type /nexus resume, then Sync again."]="library.reason.sync_paused_resume",
+    ["Nexus paused for this session"]="library.reason.sync_paused",
+    ["relay unauthorized"]="library.reason.share_relay_unauthorized",
+    ["no echoes"]="library.reason.share_no_echoes",
+    ["too large"]="library.reason.share_too_large",
+    ["invalid prepared build"]="library.reason.share_invalid_prepared",
+    ["stale prepared build"]="library.reason.share_stale_prepared",
+    ["sync queue full"]="library.reason.share_queue_full",
+    ["duplicate suppressed"]="library.reason.share_duplicate_suppressed",
+    ["already queued"]="library.reason.share_already_queued",
+    ["queued"]="library.reason.share_queued",
+    ["queued after retry"]="library.reason.share_queued_after_retry",
+    ["retry stopped"]="library.reason.share_retry_stopped",
+    ["share retry expired"]="library.reason.share_retry_expired",
+    ["share retry attempts exhausted"]="library.reason.share_retry_exhausted",
+    ["share source changed"]="library.reason.share_source_changed",
+    ["superseded by newer Share Build"]="library.reason.share_superseded",
+    ["explicit reset"]="library.reason.share_explicit_reset",
+    ["send attempt"]="library.reason.share_send_attempt",
+    ["bounded retry admitted"]="library.reason.share_retry_admitted",
+    ["transport admitted"]="library.reason.share_transport_admitted",
+    ["combat"]="library.reason.transport_combat",
+    ["CTL bandwidth"]="library.reason.transport_bandwidth",
+    ["dropped"]="library.outcome.dropped",
+    ["expired"]="library.outcome.expired",
+    ["superseded"]="library.outcome.superseded",
+    ["reset"]="library.outcome.reset",
+    ["rejected"]="library.outcome.rejected",
+    ["sent-attempted"]="library.outcome.sent_attempted",
+    ["throttle-exhausted"]="library.outcome.throttle_exhausted",
+    ["not-queued"]="library.outcome.not_queued",
+    ["stopped"]="library.outcome.stopped",
+    ["Echo role validation is unavailable"]="library.reason.roles_validation_unavailable",
+    ["no source selected"]="library.reason.share_no_source",
+    ["the source has no Echoes"]="library.reason.share_source_empty",
+    ["no role choice is saved for this exact content"]="library.reason.evidence_no_role_choice",
+    ["the source states two qualities for one Echo, and the saved role evidence does not match that exact content"]="library.reason.evidence_two_qualities",
+    ["Choose locked targets in the Wishlist Editor; the saved role choice is unavailable"]="library.reason.evidence_choose_in_editor",
+    ["associated loadout is not active; locked roles remain unknown"]="library.reason.evidence_loadout_inactive",
+    ["waiting for authoritative locked-Echo evidence"]="library.reason.evidence_waiting_authoritative",
+    ["no verified active loadout for locked-Echo evidence"]="library.reason.evidence_no_verified_active",
+    ["active loadout is not verified; locked-Echo evidence is pending"]="library.reason.evidence_active_unverified",
+    ["wishlist does not exactly match the verified active loadout; locked roles remain unknown"]="library.reason.evidence_not_exact_match",
+    ["active loadout contains malformed Echo evidence"]="library.reason.evidence_malformed",
+    ["active loadout contains conflicting Echo quality evidence"]="library.reason.evidence_conflicting_quality",
+    ["active loadout exceeds the supported Echo count"]="library.reason.evidence_too_many",
+    ["waiting for synchronized permanent locked-Echo evidence"]="library.reason.evidence_waiting_sync",
+    ["permanent locked-Echo counts do not fit the exact active loadout"]="library.reason.evidence_counts_mismatch",
+    ["locked evidence cannot establish at most 79 ordinary and 6 locked copies"]="library.reason.evidence_envelope",
+}
+local EVIDENCE_REASONS = {
+    ["no role choice is saved for this exact content"]="library.reason.evidence_no_role_choice",
+    ["the source states two qualities for one Echo, and the saved role evidence does not match that exact content"]="library.reason.evidence_two_qualities",
+    ["Choose locked targets in the Wishlist Editor; the saved role choice is unavailable"]="library.reason.evidence_choose_in_editor",
+    ["associated loadout is not active; locked roles remain unknown"]="library.reason.evidence_loadout_inactive",
+    ["waiting for authoritative locked-Echo evidence"]="library.reason.evidence_waiting_authoritative",
+    ["no verified active loadout for locked-Echo evidence"]="library.reason.evidence_no_verified_active",
+    ["active loadout is not verified; locked-Echo evidence is pending"]="library.reason.evidence_active_unverified",
+    ["wishlist does not exactly match the verified active loadout; locked roles remain unknown"]="library.reason.evidence_not_exact_match",
+    ["active loadout contains malformed Echo evidence"]="library.reason.evidence_malformed",
+    ["active loadout contains conflicting Echo quality evidence"]="library.reason.evidence_conflicting_quality",
+    ["active loadout exceeds the supported Echo count"]="library.reason.evidence_too_many",
+    ["waiting for synchronized permanent locked-Echo evidence"]="library.reason.evidence_waiting_sync",
+    ["permanent locked-Echo counts do not fit the exact active loadout"]="library.reason.evidence_counts_mismatch",
+    ["locked evidence cannot establish at most 79 ordinary and 6 locked copies"]="library.reason.evidence_envelope",
+}
+local REASON_FORMATS = {
+    {format="%s contains a server Echo row that cannot be read, so its copies are not complete. Nothing was shared.",
+        key="library.error.share_server_row_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s contains an Echo row that cannot be read. Nothing was shared.",
+        key="library.error.share_row_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s states its locked Echoes in a form that cannot be read. Nothing was shared.",
+        key="library.error.share_locked_list_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s contains a locked Echo row that cannot be read. Nothing was shared.",
+        key="library.error.share_locked_row_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s states its locked Echoes in two lists that do not agree. Nothing was shared. Save the source again, then share it.",
+        key="library.error.share_locked_lists_disagree", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s has a saved locked-target plan that cannot be read. Open the Wishlist in the Wishlist Editor and save its locked targets again. Nothing was shared.",
+        key="library.error.share_plan_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s has two saved locked-target plans that do not agree. Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same locked targets. Nothing was shared.",
+        key="library.error.share_plans_disagree", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s changed after its saved locked-target plan was made, so the plan does not match it. Open the Wishlist in the Wishlist Editor and save it again. Nothing was shared.",
+        key="library.error.share_plan_outdated", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s matches a saved locked-target plan, but Nexus cannot tell which server Wishlist that plan belongs to (it was renamed, changed or copied), so its locked Echoes are not known. Open the Wishlist in the Wishlist Editor and save it again. Nothing was shared.",
+        key="library.error.share_plan_unbound", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s states locked Echoes that differ from its saved locked-target plan. Nothing was shared. Save the source again, then share it.",
+        key="library.error.share_plan_differs", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s contains an Echo copy count that cannot be read. Nothing was shared.",
+        key="library.error.share_count_unreadable", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s has no ordinary Echoes to share.",
+        key="library.error.share_no_ordinary", fields={"label"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s has %d ordinary and %d locked Echo copies (%d total). A Share holds at most %d ordinary, %d locked and %d total. Nothing was shared and the source is unchanged.",
+        key="library.error.share_envelope", fields={"label", "ordinary", "locked", "total", "max_ordinary", "max_locked", "max_total"}, nested={label={["This source"]="library.value.this_source"}}},
+    {format="%s has %d Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_marked_ordinary_quality", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+    {format="%s has %d Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_marked_ordinary_saved_build", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+    {format="%s has %d Echo copies. The server copy marks all of them as ordinary, which is not role information: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_marked_ordinary_wishlist", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+    {format="%s has %d Echo copies. It does not say which copies are locked: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_unstated_quality", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+    {format="%s has %d Echo copies. It does not say which copies are locked: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_unstated_saved_build", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+    {format="%s has %d Echo copies. It does not say which copies are locked: a Share holds at most %d ordinary copies, so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. Nothing was shared and the source is unchanged.",
+        key="library.error.share_roles_unstated_wishlist", fields={"label", "total", "max_ordinary", "max_locked", "why"}, nested={label={["This source"]="library.value.this_source"}, why=EVIDENCE_REASONS}},
+}
+-- Share outcome codes (core/Sync.lua Operation terminals) -> display words.
+local OUTCOME_KEYS = {dropped="library.outcome.dropped", expired="library.outcome.expired",
+    superseded="library.outcome.superseded", reset="library.outcome.reset",
+    rejected="library.outcome.rejected", ["sent-attempted"]="library.outcome.sent_attempted",
+    ["throttle-exhausted"]="library.outcome.throttle_exhausted", ["not-queued"]="library.outcome.not_queued",
+    stopped="library.outcome.stopped"}
+local reasonBook
+local function ReasonBook()
+    local L = Nexus.Localization
+    if not (L and type(L.PhraseBook) == "function") then return nil end
+    if not reasonBook or reasonBook.seam ~= L then
+        reasonBook = L.PhraseBook({exact = REASON_PHRASES, formats = REASON_FORMATS})
+        reasonBook.seam = L
+    end
+    return reasonBook
+end
+local function ShownReason(reason)
+    local key = type(reason) == "string" and REASON_KEYS[reason] or nil
+    if key and Nexus.Localization then return T(key) end
+    local book = type(reason) == "string" and ReasonBook() or nil
+    if book then return (Nexus.Localization.Phrase(reason, book)) end
+    return reason
+end
+Nexus.CommunityInternals.ShownReason = ShownReason
+-- The compiled display book, for parity tests (read only).
+Nexus.CommunityInternals.ReasonBook = ReasonBook
+
 local function Measure(name, callback, ...)
     local performance = Nexus and Nexus.Performance
     if performance and type(performance.Measure) == "function" then
@@ -132,27 +386,29 @@ function Controller.New(options)
                     local detail = outcome.detail
                     -- A semantic refusal already counted the copies it
                     -- refused: say them, and say which shape was counted.
+                    -- Full-UI remainder (v3): the chat line is display only;
+                    -- the codes, counts and operation stay verbatim slots and
+                    -- the SupportIncidents record below keeps its raw fields.
                     if reason == "SEMANTIC_ENVELOPE" and type(detail) == "table" then
                         local evidence = Nexus and Nexus.LoadoutEvidence
                         local limits = evidence
                             and type(evidence.SemanticLimits) == "function"
                             and evidence.SemanticLimits() or nil
-                        reason = string.format(
-                            "%s (%s record: %s ordinary, %s locked, %s total Echo copies)",
-                            reason, tostring(detail.representation or "unknown"),
-                            tostring(detail.ordinary), tostring(detail.locked),
-                            tostring(detail.total))
+                        local args = {code = reason,
+                            representation = tostring(detail.representation or "unknown"),
+                            ordinary = tostring(detail.ordinary), locked = tostring(detail.locked),
+                            total = tostring(detail.total)}
                         if limits then
-                            reason = reason .. string.format(
-                                "; at most %d ordinary copies, and %d copies in one locked row, are stored",
-                                tonumber(limits.ordinary) or 79,
-                                tonumber(limits.lockedRowStacks) or 120)
+                            args.max_ordinary = string.format("%d", tonumber(limits.ordinary) or 79)
+                            args.max_locked = string.format("%d", tonumber(limits.lockedRowStacks) or 120)
+                            reason = TF("library.chat.catalog_envelope_limits", args)
+                        else
+                            reason = TF("library.chat.catalog_envelope_nothing_saved", args)
                         end
-                        reason = reason .. ". Nothing was saved and the source is unchanged"
                     end
                     local label = tostring(retained
                         and retained.operation or "mutation")
-                    notify("Catalog " .. label .. " failed: " .. reason)
+                    notify(TF("library.chat.catalog_failed", {operation = label, reason = tostring(reason)}))
                     -- A validation refusal is not a Lua exception, so the
                     -- Errors page never sees it and a support report built
                     -- from errors alone says "no errors recorded" while the
@@ -189,8 +445,8 @@ function Controller.New(options)
                     local completed, completeWhy = pcall(
                         retained.onComplete, outcome)
                     if not completed then
-                        notify("Catalog completion failed: "
-                            .. tostring(completeWhy or "unknown"))
+                        notify(TF("library.chat.catalog_completion_failed",
+                            {reason = tostring(completeWhy or "unknown")}))
                     end
                 end
             end)
@@ -401,7 +657,10 @@ function Controller.New(options)
         return matched, total
     end
 
-    local function FilterSettings()
+    -- The saved build filters, or nil when none exist and `create` is not
+    -- true. Issue #144 passivity: only an explicit filter choice (SetFilter)
+    -- creates the table; reading the view (Filters) never writes to it.
+    local function FilterSettings(create)
         if type(options.filterSettings) == "function" then
             local filters = options.filterSettings()
             if type(filters) == "table" then return filters end
@@ -412,8 +671,9 @@ function Controller.New(options)
         local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
         local root = type(writable) == "function"
             and writable(NexusDB, {"buildFilters"}) or NexusDB
-        root.buildFilters = type(root.buildFilters) == "table"
-            and root.buildFilters or {}
+        if type(root.buildFilters) == "table" then return root.buildFilters end
+        if create ~= true then return nil end
+        root.buildFilters = {}
         return root.buildFilters
     end
 
@@ -749,26 +1009,35 @@ function Controller.New(options)
         return nil, reason ~= "" and reason or nil, result
     end
 
-    function M.Filters()
-        local settings = FilterSettings()
+    -- An explicit filter choice also stores the defaults and the legacy
+    -- fields older readers expect, in place, so legacy and future preference
+    -- fields keep their table identity: current-class and qualification
+    -- restrictions stay on unless explicitly false, the page size is 20 and
+    -- the legacy class field is current. The view derives the same values
+    -- without writing them (M.Filters).
+    local function SaveFilterDefaults(settings)
         local currentClass = CurrentClass()
-        -- Add new filters in place so legacy and future preference fields keep
-        -- their table identity. Current-class and qualification restrictions
-        -- remain on by default; only an explicit false opts out.
-        if settings.currentClassOnly == nil then
-            settings.currentClassOnly = true
-        end
+        if settings.currentClassOnly == nil then settings.currentClassOnly = true end
         if settings.qualifiedOnly == nil then settings.qualifiedOnly = true end
-        local page = tonumber(settings.page)
-        settings.page = page and page >= 1 and math.floor(page) or 1
         settings.pageSize = 20
-        -- Keep the legacy class field current for older readers. The additive
-        -- boolean decides whether the projection uses it.
         if currentClass and settings.classFilter ~= currentClass then
             settings.classFilter = currentClass
         end
+    end
+
+    -- The view's filters: a copy of the saved choices with the defaults
+    -- derived (page at least 1, page size 20, current-class and
+    -- qualification restrictions on unless explicitly false). Issue #144
+    -- passivity: reading them never creates, normalizes or writes the saved
+    -- filters; only SetFilter does.
+    function M.Filters()
+        local settings = FilterSettings(false) or {}
+        local currentClass = CurrentClass()
         local out = {}
         for key, value in pairs(settings) do out[key] = value end
+        local page = tonumber(settings.page)
+        out.page = page and page >= 1 and math.floor(page) or 1
+        out.pageSize = 20
         out.currentClassOnly = settings.currentClassOnly ~= false
         out.qualifiedOnly = settings.qualifiedOnly ~= false
         if out.currentClassOnly then out.classFilter = currentClass
@@ -782,16 +1051,18 @@ function Controller.New(options)
             if not currentClass or NormalizeClass(value) ~= currentClass then
                 return false
             end
-            local settings = FilterSettings()
+            local settings = FilterSettings(true)
             settings.classFilter = currentClass
             settings.page = 1
+            SaveFilterDefaults(settings)
             return true
         end
         if key == "currentClassOnly" or key == "qualifiedOnly" then
             if type(value) ~= "boolean" then return false end
-            local settings = FilterSettings()
+            local settings = FilterSettings(true)
             settings[key] = value
             settings.page = 1
+            SaveFilterDefaults(settings)
             return true
         end
         if key == "page" then
@@ -799,7 +1070,9 @@ function Controller.New(options)
             if not value or value < 1 or value ~= math.floor(value) then
                 return false
             end
-            FilterSettings().page = value
+            local settings = FilterSettings(true)
+            settings.page = value
+            SaveFilterDefaults(settings)
             return true
         end
         local valid = (key == "search" and type(value) == "string")
@@ -808,9 +1081,10 @@ function Controller.New(options)
                 and (value == "dps" or value == "recent"
                     or value == "title"))
         if not valid then return false end
-        local settings = FilterSettings()
+        local settings = FilterSettings(true)
         settings[key] = value
         settings.page = 1
+        SaveFilterDefaults(settings)
         return true
     end
 
@@ -1336,8 +1610,8 @@ function Controller.New(options)
     -- kept as generated) exactly this description while the mirror carried
     -- exactly this marker: the marker's length, the marker, the description.
     -- The catalog field holds 2048 bytes. A witness written here is at most
-    -- 1181: length 2 + ":" 1 + an EditBuild title 80 + a generated
-    -- description 1098 (42 fixed + a catalog Wishlist name 1024 + two
+    -- 1199: length 2 + ":" 1 + an EditBuild title 80 + a generated
+    -- description 1116 (60 fixed + a catalog Wishlist name 1024 + two
     -- catalog integers of at most 16 digits). One over 2048 is not recorded.
     local function SavedDescriptionWitness(marker, description)
         if type(description) ~= "string" then return nil end
@@ -1372,8 +1646,11 @@ function Controller.New(options)
         end
         local description = "No Wishlist assigned yet."
         if current.destinationName then
+            -- EchoProgress counts the Wishlist's copies found in this Saved
+            -- Build (UserText.COUNT_UNITS.savedBuild): not planned copies and
+            -- not copies rolled this run.
             description = string.format(
-                "Assigned Wishlist: %s - target progress (%d/%d).",
+                "Assigned Wishlist: %s - %d/%d Wishlist copies in this Saved Build.",
                 tostring(current.destinationName), current.progress,
                 current.destinationTotal)
         end
@@ -1467,12 +1744,17 @@ function Controller.New(options)
         end
         local signature = table.concat(signatureParts, "|")
         local desiredPublishedId = published and published.id or nil
+        -- A description this build would generate differently (an earlier
+        -- build's unqualified text) is described again although the signature
+        -- is unchanged; text kept as the owner's is returned as it is.
+        local description, witness = SavedMirrorDescription(old, current)
         if not old or old._savedSignature ~= signature
             or old.recordBuildId ~= recordBuildId
-            or old.publishedBuildId ~= desiredPublishedId then
+            or old.publishedBuildId ~= desiredPublishedId
+            or (type(old.description) == "string"
+                and old.description ~= description) then
             local stamp = NextStamp(old and old.lastModified or 0)
             local localOwner = CurrentVerifiedOwnerKey()
-            local description, witness = SavedMirrorDescription(old, current)
             local record = {
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,
@@ -2965,22 +3247,23 @@ function Controller.New(options)
     local function BaseShareStatusText(id)
         local s = M.ShareStatus(id)
         if not s then return nil end
+        -- The quoted title is data; the quotes and "this build" are code-owned.
         local name = type(s.title) == "string" and s.title ~= ""
-            and ("\"" .. s.title .. "\"") or "this build"
+            and ("\"" .. s.title .. "\"") or T("library.value.this_build")
         if s.localPending then
             -- Two different waits: the record is not yet submitted, or the one
             -- submitted local write is not yet settled. Neither can be cancelled
             -- safely from here, and neither needs a second Share.
-            return "preparing", "Preparing " .. name .. " to share — not sent yet. "
-                .. (s.localStage == "saving"
-                    and "The local save is submitted; the catalog has not finished it. "
-                    or "The local catalog is finishing earlier work first. ")
-                .. "The same request continues by itself. Do not share it again."
+            -- One key per sentence, joined with the English single spaces.
+            return "preparing", TF("library.status.share_preparing", {name=name}) .. " "
+                .. T(s.localStage == "saving" and "library.status.share_preparing_saving"
+                    or "library.status.share_preparing_catalog") .. " "
+                .. T("library.status.share_preparing_continues")
                 .. (function()
                     -- A saved Off mode is stated now, not only at the refusal.
                     local policy = Nexus and Nexus.SyncModePolicy
                     if policy and type(policy.Mode) == "function" and policy.Mode() == "off" then
-                        return " Your saved Sync mode is Off: it will be saved locally and not sent."
+                        return " " .. T("library.status.share_preparing_mode_off")
                     end
                     return ""
                 end)()
@@ -2990,39 +3273,47 @@ function Controller.New(options)
             local evidence = Nexus and Nexus.LoadoutEvidence
             local limits = evidence and type(evidence.PlanLimits) == "function"
                 and evidence.PlanLimits() or nil
+            local shown
             if why == "SEMANTIC_ENVELOPE" and limits then
-                why = string.format("the local catalog refused %d ordinary and %d locked Echo copies; "
-                    .. "a Share holds at most %d ordinary, %d locked and %d total",
-                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0,
-                    limits.ordinary, limits.locked, limits.total)
+                shown = TF("library.error.share_semantic_envelope", {
+                    ordinary=tostring(math.floor(tonumber(s.ordinaryCopies) or 0)),
+                    locked=tostring(math.floor(tonumber(s.permanentCopies) or 0)),
+                    max_ordinary=tostring(math.floor(tonumber(limits.ordinary) or 0)),
+                    max_locked=tostring(math.floor(tonumber(limits.locked) or 0)),
+                    max_total=tostring(math.floor(tonumber(limits.total) or 0))})
+            else
+                shown = ShownReason((why:gsub("%.+$", "")))
             end
             -- The draft statement is made only when the form really has it.
             local kept = failedShareDraft and failedShareDraft.id == s.id
-            return "refused", "Not shared: " .. name .. " — " .. why:gsub("%.+$", "")
-                .. ". Nothing was saved or sent."
-                .. (kept and " The Share form keeps the title, description and source." or "")
+            return "refused", TF("library.status.share_not_shared", {name=name, reason=shown})
+                .. (kept and " " .. T("library.status.share_form_kept") or "")
         end
         if s.sendCompleted == true then
-            return "sent", "Sent " .. name .. " — peer receipt not confirmed."
+            return "sent", TF("library.status.share_sent", {name=name})
         end
         if s.terminal == true then
-            local why = tostring(s.outcome or "stopped")
+            -- Sync's outcome code and reason, each in its display words
+            -- (raw when unknown); the raw values are what Sync compares.
+            local outcome = tostring(s.outcome or "stopped")
+            local why = OUTCOME_KEYS[outcome] and T(OUTCOME_KEYS[outcome]) or ShownReason(outcome)
             if type(s.reason) == "string" and s.reason ~= "" and s.reason ~= "none"
-                and s.reason ~= why then
-                why = why .. " (" .. s.reason .. ")"
+                and s.reason ~= outcome then
+                why = TF("library.status.share_outcome_reason",
+                    {outcome = tostring(why), reason = tostring(ShownReason(s.reason))})
             end
             local retryable = M.CanRetryShare(s.id)
-            return "stopped", "Saved " .. name .. " locally — not sent: " .. why
-                .. (retryable and ". Open the build to use Retry Share." or ".")
+            return "stopped", TF(retryable and "library.status.share_stopped_retryable"
+                or "library.status.share_stopped", {name=name, reason=why})
         end
         if s.retryPending == true then
-            return "queued", "Saved " .. name .. " locally — the Sync queue is full. One bounded retry is pending."
+            return "queued", TF("library.status.share_queue_full", {name=name})
         end
         if s.queueAdmitted == true then
-            return "queued", "Saved " .. name .. " locally — queued for sharing."
+            return "queued", TF("library.status.share_queued", {name=name})
         end
-        return "saved", "Saved " .. name .. " locally — not queued: "
-            .. tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "") .. "."
+        return "saved", TF("library.status.share_not_queued", {name=name,
+            reason=ShownReason((tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "")))})
     end
 
     -- The base sentence, plus the locked-target limit when some answers for
@@ -3034,8 +3325,10 @@ function Controller.New(options)
         local s = M.ShareStatus(id)
         local partial = s and tonumber(s.lockedRolesOrdinaryOnly) or 0
         if partial > 0 then
-            text = text .. string.format(" %d answer%s for requesters that did not state locked-target support (for example an older Nexus version) carried the ordinary targets only.",
-                partial, partial == 1 and "" or "s")
+            -- English chooses "answer" or "answers"; that choice stays here
+            -- (two keys), with the count shown as before.
+            text = text .. " " .. TF(partial == 1 and "library.status.share_ordinary_only_one"
+                or "library.status.share_ordinary_only_many", {count=Nexus.Localization.Count(partial)})
         end
         return state, text
     end
@@ -3078,12 +3371,50 @@ function Controller.New(options)
         if tostring(status.version or "") ~= representedVersion then
             return false, "build changed since the failed Share"
         end
+        -- Retry Share is not offered for a listing made from a Saved Build
+        -- (sourceSavedBuildId): it would send the listing again without the
+        -- confirmation that a Saved Build's Share action asks for. No
+        -- equivalent route is promised: import cleanup can remove the Saved
+        -- Build mirror while this listing stays; a later Share of the mirror
+        -- sends the mirror's current title, description and Echoes, which
+        -- can differ from this failed listing; and EditBuild can also share
+        -- an edited revision of this owned listing. Checked last: every
+        -- other refusal keeps its reason, and a Share-form build is unchanged.
+        if build.sourceSavedBuildId ~= nil then
+            return false, "Retry Share is not offered for a listing made from"
+                .. " a Saved Build; a Saved Build's Share action is separate"
+                .. " and asks for its own confirmation"
+        end
         return true, nil, status
     end
 
-    function M.RetryShare(id)
+    -- The context a Retry is shown in: saved data, catalog, verified owner and
+    -- the catalog's preparation binding (as PublishImportedBuild keeps them).
+    function M.RetryShareContext()
+        local catalog = Catalog()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        return {database=NexusDB, catalog=catalog, owner=CurrentVerifiedOwnerKey(),
+            binding=preparation and preparation.binding or nil}
+    end
+
+    -- `expected`, when given, is M.RetryShareContext() as the Retry was shown:
+    -- a click that arrives after the player, saved data, catalog or binding
+    -- changed queues nothing (fail closed). Admission, retryOnFull and the
+    -- summary budget are the existing ones.
+    function M.RetryShare(id, expected)
         local retryable, retryWhy = M.CanRetryShare(id)
         if not retryable then return false, retryWhy end
+        if type(expected) == "table" then
+            local now = M.RetryShareContext()
+            if expected.database ~= now.database or expected.catalog ~= now.catalog
+                or expected.owner ~= now.owner
+                or expected.binding ~= nil and expected.binding ~= now.binding then
+                PeerRecord("share_retry_action", {id=tostring(id),
+                    outcome="rejected", reason="player or catalog changed"})
+                return false, "player or catalog changed"
+            end
+        end
         id = tostring(id)
         local record = LoadBuild(id)
         local sync = Nexus and Nexus.Sync
@@ -3327,7 +3658,9 @@ function Controller.New(options)
             pendingPublications[id] = nil
             -- Existing polling callers consume the terminal receipt. A renderer
             -- that already received its callback starts a new explicit update.
-            if type(onComplete) ~= "function" then return prior.ok, prior.value end
+            if type(onComplete) ~= "function" then
+                return prior.ok, prior.value, nil, prior.admission
+            end
         end
         local source = LoadBuild(id)
         if Identity.SavedMirrorKind(source) ~= "saved" then
@@ -3386,6 +3719,13 @@ function Controller.New(options)
         source.publishedBuildId = publishedId
         source.recordBuildId = publishedId
         source.lastPublishedAt = stamp
+        -- The context this Share was confirmed in, as EditBuild keeps it: a
+        -- commit that settles after the player, saved data or catalog changed
+        -- is saved locally but queues nothing.
+        local catalog, database = Catalog(), NexusDB
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        local binding = preparation and preparation.binding
         local operation = {state="pending",ok=nil,value=nil,finalized=false}
         local function Finish(ok, value)
             if operation.finalized then return end
@@ -3393,17 +3733,44 @@ function Controller.New(options)
             operation.state, operation.ok, operation.value = "complete", ok,
                 value
             if ok then
-                BroadcastIfPossible(record)
+                -- Saved locally is not queued, and queued is not sent. This
+                -- is the owner's explicit Share of this exact listing: it is
+                -- tracked as one, without a queue-full retry, and its actual
+                -- admission or final refusal (saved mode, size, Sync
+                -- unavailable) is kept for the caller.
+                local admission = {localSaved=true,queueAdmitted=false}
+                local current = catalog and type(catalog.ManualPreparationStatus) == "function"
+                    and catalog.ManualPreparationStatus() or nil
+                if database ~= NexusDB or catalog ~= Catalog()
+                    or localOwner ~= CurrentVerifiedOwnerKey()
+                    or binding ~= nil and (not current or binding ~= current.binding) then
+                    admission.queueReason = "player or catalog changed"
+                else
+                    local admitted, reason, status = BroadcastIfPossible(record, {explicit=true})
+                    admission.queueAdmitted, admission.queueReason = admitted == true, reason
+                    admission.shareStatus = status
+                end
+                operation.admission = admission
+                -- The same hand-off of this listing's DPS best. Its local
+                -- admission is kept apart from the summary's: "queued" when a
+                -- linked record was admitted for sending (queued is not sent),
+                -- "none" when the call reported false: no eligible linked
+                -- record, or every eligible one refused (mode, queue, checks or
+                -- budget), which the completion line leaves unsaid; "unknown"
+                -- when it raised or returned no answer (not proof that nothing
+                -- was queued).
                 local D = Nexus.DpsCapture
                 if D and D.BroadcastBestForBuild then
-                    pcall(D.BroadcastBestForBuild, publishedId)
+                    local called, sentLinked = pcall(D.BroadcastBestForBuild, publishedId)
+                    admission.linkedDps = not called and "unknown"
+                        or sentLinked == true and "queued"
+                        or sentLinked == false and "none" or "unknown"
                 end
             end
             if operation.onComplete then
-                operation.onComplete(ok, value, operation.ticket)
+                operation.onComplete(ok, value, operation.ticket, operation.admission)
             end
         end
-        local catalog = Catalog()
         if not (catalog and type(catalog.BeginCatalogMaintenance) == "function"
             and type(catalog.MaintenanceReplaceRow) == "function"
             and type(catalog.CommitMaintenance) == "function") then
@@ -3441,7 +3808,7 @@ function Controller.New(options)
             end, catalog.CommitMaintenance(handle))
         if committed then
             Finish(true, publishedId)
-            return true, publishedId
+            return true, publishedId, nil, operation.admission
         end
         if commitWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             operation.ticket = ticket
@@ -3542,10 +3909,11 @@ function Controller.New(options)
             if finished then return end
             finished, outcome.localPending, outcome.localSaved = true, false, committed == true
             if not committed then
-                outcome.message = "Build update failed: " .. tostring(why or "storage refused")
+                outcome.message = TF("library.chat.edit_update_failed", {
+                    reason=tostring(ShownReason(why or "storage refused"))})
                 return
             end
-            outcome.message = "Build details saved locally."
+            outcome.message = T("library.chat.edit_saved_locally")
             if savedKind ~= "ordinary" then return end
             local current = catalog and type(catalog.ManualPreparationStatus) == "function"
                 and catalog.ManualPreparationStatus() or nil
@@ -3559,8 +3927,9 @@ function Controller.New(options)
                 outcome.queueAdmitted, outcome.queueReason = admitted == true, reason
             end
             outcome.message = outcome.queueAdmitted
-                and "Build details saved locally and queued. Peer storage confirmation is unavailable."
-                or "Build details saved locally; not queued: " .. tostring(outcome.queueReason)
+                and T("library.chat.edit_saved_queued")
+                or TF("library.chat.edit_saved_not_queued", {
+                    reason=tostring(ShownReason(outcome.queueReason))})
         end
         local saved, saveWhy, ticket = SaveBuild(b, function(terminal)
             Complete(terminal.committed == true, terminal.reason)
@@ -3571,7 +3940,7 @@ function Controller.New(options)
             -- mutation whose terminal ticket settles it; the reason lets a
             -- caller distinguish the retained state from a completed save.
             outcome.localPending = true
-            outcome.message = "Build update accepted. Waiting to save locally; nothing has been sent."
+            outcome.message = T("library.chat.edit_update_pending")
             return true, saveWhy, outcome
         end
         if not saved then return false, saveWhy or "build storage refused" end
@@ -3782,15 +4151,18 @@ function Controller.New(options)
     -- Friendly error messages
     ------------------------------------------------------------------------
 
+    -- Adapter error code -> key of its shown clause (an unlisted code is
+    -- shown as given).
     local FRIENDLY_ERRORS = {
-        spacing = "the server is busy -- try again in a moment",
-        refused = "the server refused the change",
-        ["no echoes"] = "that build has no echoes",
-        ["no valid echoes"] = "none of its echoes are valid",
+        spacing = "library.error.lockin_server_busy",
+        refused = "library.error.lockin_server_refused",
+        ["no echoes"] = "library.error.build_no_echoes",
+        ["no valid echoes"] = "library.error.lockin_no_valid_echoes",
     }
 
     local function Friendly(err)
-        return FRIENDLY_ERRORS[tostring(err)] or tostring(err)
+        local key = FRIENDLY_ERRORS[tostring(err)]
+        return key and T(key) or tostring(err)
     end
 
     local function CopyLockInEchoes(echoes)
@@ -3806,15 +4178,15 @@ function Controller.New(options)
 
     local function TryLockIn(title, echoes, replacePending)
         if not (Adapter and type(Adapter.UploadWishlist) == "function") then
-            notify("|cffff6060Nexus:|r couldn't lock in: adapter not ready")
+            notify("|cffff6060Nexus:|r " .. TF("library.chat.lockin_failed", {reason=ShownReason("adapter not ready")}))
             pendingLockIn = nil
             return false, "adapter not ready"
         end
         local ok, err = Adapter.UploadWishlist(0, title, echoes)
         if ok then
             local displayTitle = Identity.DisplaySafeText(
-                tostring(title or ""), 1024, false) or "this build"
-            notify("|cff4dff80Nexus:|r locked in '"..displayTitle.."'.")
+                tostring(title or ""), 1024, false) or T("library.value.this_build")
+            notify("|cff4dff80Nexus:|r " .. TF("library.chat.lockin_done", {name=displayTitle}))
             pendingLockIn = nil
             refreshView()
             return true
@@ -3825,7 +4197,7 @@ function Controller.New(options)
             end
             return false, err
         end
-        notify("|cffff6060Nexus:|r couldn't lock in: "..Friendly(err))
+        notify("|cffff6060Nexus:|r " .. TF("library.chat.lockin_failed", {reason=Friendly(err)}))
         pendingLockIn = nil
         return false, err
     end
@@ -3850,7 +4222,7 @@ function Controller.New(options)
         local pending = pendingLockIn
         if not pending then return end
         if pending.tries >= 12 then
-            notify("|cffff6060Nexus:|r couldn't lock in: "..Friendly("spacing"))
+            notify("|cffff6060Nexus:|r " .. TF("library.chat.lockin_failed", {reason=Friendly("spacing")}))
             pendingLockIn = nil
             return false, "expired"
         end
@@ -3877,7 +4249,7 @@ function Controller.New(options)
         if not build then return nil end
         if type(build.echoes) ~= "table" or #build.echoes == 0 then
             M.RequestLoadout(selectedId)
-            notify("|cff7fd5ffNexus:|r this build is still completing its background sync. Try again shortly.")
+            notify("|cff7fd5ffNexus:|r " .. T("library.chat.build_still_syncing"))
             return nil
         end
 
@@ -3904,14 +4276,14 @@ function Controller.New(options)
             end
         end
         if #echoes == 0 then
-            notify("|cffff6060Nexus:|r nothing left to lock in -- every Echo in this build is already locked.")
+            notify("|cffff6060Nexus:|r " .. T("library.chat.lockin_nothing_left"))
             return nil
         end
         if skippedLocked > 0 or skippedOverflow > 0 then
-            notify(string.format(
-                "|cffff9040Nexus:|r locking in %d / 79 Echoes -- %d already locked (skipped), %d didn't fit "
-                    .. "(skipped). Use |cffffd200Load into Editor|r instead if you need to design locked "
-                    .. "slots for the rest.", total, skippedLocked, skippedOverflow))
+            local count = Nexus.Localization.Count
+            notify("|cffff9040Nexus:|r " .. TF("library.chat.lockin_partial", {
+                count=count(total), locked=count(skippedLocked), overflow=count(skippedOverflow),
+                action="|cffffd200" .. T("library.label.lockin_load_into_editor") .. "|r"}))
         end
         return {title=build.title,echoes=echoes}
     end

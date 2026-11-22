@@ -740,6 +740,50 @@ end
 
 local pendingEnforcements = setmetatable({}, {__mode="k"})
 
+-- Timestamp-only runs (user-approved 2026-11-20). A default-mode run that
+-- removed nothing and would change no saved metadata except nextMaintenanceAt
+-- writes nothing: saving only that time cost one full catalog publication
+-- (every row, its index and witness prepared again). Its next-run time is
+-- kept here, in this session only, and the start of a run honors the later
+-- of it and the saved one. A reload loses it, so the next session evaluates
+-- once more (the same bounded counting run, which again writes nothing).
+-- Any removal, marker observation, mode or schema change is saved as before.
+local sessionNextMaintenanceAt = setmetatable({}, {__mode="k"})
+
+local function SameValue(a, b, seen)
+    if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+    seen = seen or {}
+    if seen[a] == b then return true end
+    seen[a] = b
+    for key, value in pairs(a) do
+        if not SameValue(value, rawget(b, key), seen) then return false end
+    end
+    for key in pairs(b) do
+        if rawget(a, key) == nil then return false end
+    end
+    return true
+end
+
+-- The prepared metadata equals the saved one in every field except
+-- nextMaintenanceAt (both plain tables, no metatables).
+local function TimestampOnlyMetadata(saved, prepared)
+    if type(saved) ~= "table" or type(prepared) ~= "table"
+        or getmetatable(saved) ~= nil or getmetatable(prepared) ~= nil then
+        return false
+    end
+    for key, value in pairs(prepared) do
+        if key ~= "nextMaintenanceAt" and not SameValue(value, rawget(saved, key)) then
+            return false
+        end
+    end
+    for key in pairs(saved) do
+        if key ~= "nextMaintenanceAt" and rawget(prepared, key) == nil then
+            return false
+        end
+    end
+    return true
+end
+
 local function PrepareMetadata(source, summary, now, changed, firstSeen)
     local meta = DeepCopy(type(source) == "table" and source or {})
     meta.schemaVersion = SCHEMA_VERSION
@@ -907,8 +951,11 @@ function Retention.Enforce(database, reason)
         pendingOverlayScans[database] = nil
         local now = EpochNow()
         local prior = priorMeta and priorMeta.last
-        local nextMaintenanceAt = tonumber(
-            priorMeta and priorMeta.nextMaintenanceAt) or 0
+        -- The saved schedule, or this session's later one (see
+        -- TimestampOnlyMetadata): whichever is later.
+        local nextMaintenanceAt = math.max(tonumber(
+            priorMeta and priorMeta.nextMaintenanceAt) or 0,
+            sessionNextMaintenanceAt[database] or 0)
         if type(prior) == "table" and prior.contentUnlimited == true
             and now > 0 and nextMaintenanceAt > now then
             local summary = Copy(prior)
@@ -980,6 +1027,20 @@ function Retention.Enforce(database, reason)
             dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
                 evictions.firstSeen),
         } or nil
+        -- A run that removed nothing and whose saved metadata would differ
+        -- only in nextMaintenanceAt commits no override: the catalog's own
+        -- no-op check then publishes nothing (a change some other owner
+        -- staged is still published as before, without this time). The
+        -- next-run time is kept for this session only.
+        if overrides and not changed
+            and TimestampOnlyMetadata(priorMeta, overrides.dataRetention) then
+            local result = FinishEnforcement(database, owner, transaction,
+                summary, changed, nil)
+            if type(result) == "table" and result.blocked ~= true then
+                sessionNextMaintenanceAt[database] = nextMaintenanceAt
+            end
+            return result
+        end
         return FinishEnforcement(database, owner, transaction, summary,
             changed, overrides)
     end
@@ -1208,6 +1269,19 @@ function Retention.Stats(database)
     database = AuthorityDatabase(database)
     local meta = DurablePayload(database, "dataRetention")
     return type(meta) == "table" and Copy(meta.last) or nil
+end
+
+-- Read-only: when the next default-mode run is due, the later of the saved
+-- time and this session's (timestamp-only runs keep theirs in the session),
+-- or nil when neither is known. Starts no work and writes nothing.
+function Retention.NextMaintenanceAt(database)
+    database = AuthorityDatabase(database)
+    local meta = DurablePayload(database, "dataRetention")
+    local saved = type(meta) == "table" and tonumber(meta.nextMaintenanceAt) or nil
+    local session = type(database) == "table" and sessionNextMaintenanceAt[database] or nil
+    if saved == nil then return session end
+    if session == nil then return saved end
+    return math.max(saved, session)
 end
 
 -- Read-only count of retention markers that wait for their locally recorded

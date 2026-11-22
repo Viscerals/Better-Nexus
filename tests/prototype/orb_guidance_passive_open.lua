@@ -146,10 +146,12 @@ local function Recovery(open)
  -- change and the adapter polls.
  H.Notify();A.Poll()
  for _=1,12 do H.Advance(.25) end
- -- The HUD names the unresolved earlier Orb action and suggests no start.
+ -- The HUD suggests no start. The earlier action's saved receipt no longer
+ -- holds ordinary rolling while the live Orb service shows no offer (user
+ -- decision, 2026-11-19): the HUD shows the ordinary rolling state.
  Nexus.RequestRecompute();H.Advance(.5)
  local g=(Nexus.Panel._lastModel or {}).orbGuidance or {}
- check(g.state=='orb-run','the HUD shows the unresolved Orb action: '..tostring(g.state))
+ check(g.state=='rolling' and M.Status().pending,'the HUD shows ordinary rolling; the receipt is kept: '..tostring(g.state))
  check(not tostring(g.text):find('Review Orbs',1,true) and not tostring(g.text):find('Start',1,true),
   'with its recovery reason, not a start suggestion: '..tostring(g.text))
  return Snapshot(H,M)

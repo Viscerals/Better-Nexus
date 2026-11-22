@@ -78,7 +78,9 @@ ProjectEbonhold.OrbService.ConfirmSpend=function()
  receiptAtSpend=row and row.orbRefinement and row.orbRefinement.pending and true or false
  stats.mutations=stats.mutations+1;return true
 end
-Click(3)
+-- Start/Stop rework (2026-11-19): the window's Start runs the session-only automation,
+-- which writes no receipt; the earlier runtime's own persistence is checked through its API.
+assert(Nexus.OrbRuntime.Start(3))
 local row=NexusDB.chars[Key()]
 assert(type(row)=='table' and row.orbRefinement.maxOrbs==3,'the authorized owner created the row; limit preserved')
 assert(stats.mutations==1 and receiptAtSpend==true,'one spend, and its receipt was durable before it ('..stats.mutations..')')
@@ -144,7 +146,9 @@ for _,case in ipairs({{'transient success',function()return true end},{'writer f
  owner.UpdateStateV1=case[2]
  stats.mutations=0
  assert(Snapshot().canStart==true,'fixture: display cannot foresee a failing writer')
- local notice=Click(4)
+ -- Start/Stop rework: the earlier runtime's persistence refusal, through its API (the
+ -- window's Start runs the session-only automation, which writes no receipt).
+ local _,notice=Nexus.OrbRuntime.Start(4);notice=tostring(notice or '')
  assert(stats.mutations==0 and notice:find('Could not preserve Orb preferences/recovery state',1,true),case[1]..': refused: '..notice)
  assert(NexusDB.chars[Key()]==nil and Nexus.OrbRuntime.Status().config.maxOrbs==nil,case[1]..': no row, and the refused limit is not shown as saved')
 end

@@ -86,11 +86,16 @@ check(noCatalogOk,'missing optional catalog keeps existing lifecycle behavior: '
 H.Advance(.0025)
 
 -- An owner change inside preparation must be seen by the later full query.
+-- Direct upvalues are checked before descending, so the holder is the nearest
+-- closure that names the seam.
 local function find(fn,name,seen)
     if type(fn)~='function' or seen[fn] then return end;seen[fn]=true
     for i=1,255 do
         local n,v=debug.getupvalue(fn,i);if not n then break end
         if n==name then return v,fn,i end
+    end
+    for i=1,255 do
+        local n,v=debug.getupvalue(fn,i);if not n then break end
         if type(v)=='function' then local a,b,c=find(v,name,seen);if a then return a,b,c end end
     end
 end
@@ -105,24 +110,38 @@ for _,frame in ipairs(H.frames) do
     end
 end
 check(type(store)=='function','real lifecycle preparation seam exists')
-local boundRoot=NexusDB
-local gateRefused=false
+-- LuaJIT may compile an assigned-once local function into a trace as a
+-- constant, so a compiled caller keeps calling it after debug.setupvalue.
+-- Discard compiled traces after each rewrite; plain Lua has no jit table.
+local function setSeam(fn)
+    debug.setupvalue(holder,index,fn)
+    if type(jit)=='table' and type(jit.flush)=='function' then jit.flush() end
+    local _,live=debug.getupvalue(holder,index)
+    return live==fn
+end
+local boundRoot,replacement=NexusDB,nil
+local entries,gateRefused=0,false
 C.ManualPreparationStatus=function(...)
     local status,identity=real(...)
     local caller=debug.getinfo(2,'S')
-    if caller and caller.source:match('core/MainLifecycle%.lua$') and not status.ownerAgrees then
+    if caller and caller.source:match('core/MainLifecycle%.lua$') and not status.ownerAgrees
+        and replacement~=nil and NexusDB==replacement then
         gateRefused=true
     end
     return status,identity
 end
-debug.setupvalue(holder,index,function(...)
+local injected=setSeam(function(...)
+    entries=entries+1
     local result=store(...)
-    NexusDB=T.Profile(0,0)
+    replacement=T.Profile(0,0); NexusDB=replacement
     return result
 end)
 H.Advance(.0025)
-debug.setupvalue(holder,index,store)
+local restored=setSeam(store)
 C.ManualPreparationStatus=real
+check(injected and restored,'preparation seam rewrite is installed and restored')
+check(entries==1,'the lifecycle update ran the injected preparation slice once: '..entries)
+check(replacement~=nil and replacement~=boundRoot and NexusDB==replacement,'the bound root was replaced inside preparation')
 check(gateRefused,'later full lifecycle query observes a root replaced after counter read')
 check(Nexus.StartupStatus().syncGateHashesReady==false,'fresh hash gate prevents Sync from consuming the replaced source')
 check(Nexus.BuildHashCache.Legacy()==nil,'no old digest served after replaced root')

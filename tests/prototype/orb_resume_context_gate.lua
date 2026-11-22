@@ -20,6 +20,9 @@ check(M.Status().canResume and M.CompactStatus().canResume,'unrelated display ac
 A.Orbs.Read=read
 check(M.Resume(),'fresh original context still resumes')
 check(H.Count('orb-spend')==1,'no new spend while original receipt is held')
-M.Pause();local mini=Nexus.OrbPanel.ShowMini();check(mini.stop:IsEnabled(),'Stop remains available')
-mini.stop:Click();check(M.Status().pending and F.Serialize(Nexus.Store.State().orbRefinement.pending)==receipt,'Stop retains original pending evidence')
+-- Start/Stop surfaces (2026-11-19, 9106 field report): the surfaces offer no Stop
+-- for the earlier runtime's paused or held run (a recovery action that sent
+-- nothing); its runtime Stop keeps the receipt as before.
+M.Pause();local mini=Nexus.OrbPanel.ShowMini();H.Advance(.3);check(not mini.stop:IsEnabled() and not mini.pause:IsShown() and not mini.resume:IsShown(),'the mini offers no Stop, Pause or Resume for that run')
+M.Stop();check(M.Status().pending and F.Serialize(Nexus.Store.State().orbRefinement.pending)==receipt,'Stop retains original pending evidence')
 print('PASS orb_resume_context_gate checks='..checks)

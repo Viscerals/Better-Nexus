@@ -424,4 +424,778 @@ C.scenario('A11 UX-05 no confirmation where nothing can be replaced: first-run t
  C.guard(Auto() and Creates()==0 and spends==0,'A11: Auto stays ON; nothing uploaded or spent')
 end)
 
+-- D7: a waiting Auto-ON question is bound to the Saved Build it represents
+-- (its slot, name and contents when the chooser showed it), not to the slot
+-- number or the name alone. Answered after that slot was saved over, renamed,
+-- emptied, removed or became unreadable, it assigns nothing and asks the
+-- player to choose again; a fresh question then names what the slot holds.
+-- The active Saved Build is not part of it (A9), and the character check
+-- stays first (A10). EXPECT here fails on the D7 preimage (18f1944e) by
+-- design: there the accept wrote the captured slot number whatever it held.
+-- Oracles: the counted writers, the Store, the chat line, the chooser frame
+-- and the confirmation shown. Synthetic host services; no native claim.
+local CHANGED='That Saved Build changed or could not be read'
+local REPLACED={{spellId=201172,quality=0,stacks=1},{spellId=201174,quality=0,stacks=1}}
+-- The game now reports other Saved Build rows (fresh tables, as a re-send).
+local function ServerNow(change)
+ local rows=H.Clone(H.perks.serverBuildSlots)
+ change(rows)
+ H.perks.serverBuildSlots=rows;H.Notify();A.Poll();H.Advance(1)
+end
+-- W-Free clicked in the chooser for Saved Build 2 with Auto ON: the waiting
+-- question, or nil when none was asked.
+local function AskWFree(tag)
+ C.setup(Auto() and OpenPicker(),tag..': fixture: Auto is ON and the chooser is open for Saved Build 2')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil,tag..': fixture: the chooser lists W-Free')
+ if not row then return nil end
+ H.popup=nil
+ row.nameButton:Click()
+ local p=H.popup
+ return (p~=nil and p.which==CONSENT) and p or nil
+end
+local function Refused(said)
+ return said:find(CHANGED,1,true)~=nil and said:find('Nothing was assigned',1,true)~=nil
+  and said:find('choose again',1,true)~=nil
+end
+
+C.scenario('A12 D7 the Saved Build in the named slot was replaced while the question waited: nothing is assigned; a fresh question assigns',function()
+ Boot()
+ TurnAutoOn()
+ local p=AskWFree('A12')
+ C.setup(p~=nil and V.Names(Asked(p) or '','Fire PvE'),'A12: fixture: the question names Saved Build Fire PvE')
+ if not p then return end
+ local facts,settings=Facts(),Settings()
+ -- Another build is saved over slot 2 before the answer.
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','A12 said='..said..' facts='..Facts())
+ C.expect(Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'A12: the answer for the replaced Saved Build calls no assignment writer and stores nothing',Facts())
+ C.expect(Refused(said),'A12: it says the Saved Build changed, that nothing was assigned and to choose again',said)
+ C.expect(not NexusWishlistOnlyPicker:IsShown(),'A12: the chooser that still named the old Saved Build is closed')
+ C.guard(Auto() and Settings()==settings and Creates()==0 and spends==0,'A12: Auto stays ON; no setting, upload or spend')
+ -- The fresh question names what slot 2 holds now, and its answer assigns it.
+ local again=AskWFree('A12b')
+ local asked=Asked(again)
+ print('OBSERVED','A12b confirmation='..tostring(asked))
+ C.expect(again~=nil and again~=p and asked~=nil and V.Names(asked,'W-Free') and V.Names(asked,'Frost PvP'),
+  'A12b: choosing again asks a new question naming the Saved Build the slot holds now',asked)
+ if not again then return end
+ said=Heard(function() Accept(again) end)
+ C.expect(writes.SetLoadoutWishlist==1 and Writes()==1 and Stored(2)~=nil and Stored(2).name=='W-Free' and Stored(3)==nil,
+  'A12b: the fresh answer assigns W-Free to Saved Build 2, once',Facts())
+ C.expect(said:find("'W-Free' is now the Wishlist for Saved Build 'Frost PvP'",1,true)~=nil,'A12b: and says so with both names',said)
+end)
+
+C.scenario('A13 D7 the same slot and the same name with other contents is not the Saved Build that was asked about',function()
+ Boot()
+ TurnAutoOn()
+ local p=AskWFree('A13')
+ C.setup(p~=nil,'A13: fixture: the click asks first')
+ if not p then return end
+ local facts=Facts()
+ -- Saved over under the same name: one Echo gained a stack, one was added.
+ ServerNow(function(rows) rows[2]={name='Fire PvE',verified=true,
+  echoes={{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','A13 said='..said..' facts='..Facts())
+ C.expect(Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'A13: an equal name does not stand in for the Saved Build: nothing is written',Facts())
+ C.expect(Refused(said),'A13: the player is told to choose again',said)
+ C.guard(Auto(),'A13: Auto stays ON')
+end)
+
+C.scenario('A14 D7 the named Saved Build was renamed while the question waited: the name asked about is no longer its name',function()
+ Boot()
+ TurnAutoOn()
+ local p=AskWFree('A14')
+ C.setup(p~=nil,'A14: fixture: the click asks first')
+ if not p then return end
+ local facts=Facts()
+ ServerNow(function(rows) rows[2].name='Fire Raid' end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','A14 said='..said..' facts='..Facts())
+ C.expect(Writes()==0 and Facts()==facts and Stored(2)==nil and Refused(said),
+  'A14: nothing is assigned under the old name; the player is told to choose again',said)
+end)
+
+C.scenario('A15 D7 a named Saved Build that is gone, empty or unreadable at the answer cannot be proved: nothing is assigned',function()
+ Boot()
+ TurnAutoOn()
+ local world=H.Clone(H.perks.serverBuildSlots)
+ local function Restore() H.perks.serverBuildSlots=H.Clone(world);H.Notify();A.Poll();H.Advance(1) end
+ local cases={
+  {'gone',function() ServerNow(function(rows) rows[2]=nil end) end},
+  {'empty',function() ServerNow(function(rows) rows[2]={name='Fire PvE',verified=true,echoes={}} end) end},
+  -- No Saved Build data at all at the moment of the answer.
+  {'unreadable',function() H.perks.serverBuildSlots=nil end},
+ }
+ for _,case in ipairs(cases) do
+  local tag='A15 '..case[1]
+  local p=AskWFree(tag)
+  C.setup(p~=nil,tag..': fixture: the click asks first')
+  if not p then return end
+  local facts,before=Facts(),Writes()
+  case[2]()
+  local said=Heard(function() Accept(p) end)
+  print('OBSERVED',tag..' said='..said..' facts='..Facts())
+  C.guard(Facts()==facts and Stored(2)==nil,tag..': nothing is stored',Facts())
+  C.expect(Writes()==before and Refused(said),
+   tag..': no assignment writer is called and the player is told to choose again',said)
+  Restore()
+ end
+ C.guard(Auto() and Creates()==0 and spends==0,'A15: Auto stays ON; nothing uploaded or spent')
+end)
+
+C.scenario('A16 D7 control: the same Saved Build re-sent, other slots changed and another one active still assigns the named one',function()
+ Boot()
+ TurnAutoOn()
+ -- Saved Build 2 holds two Echoes, so their order can differ between reads.
+ ServerNow(function(rows) rows[2]={name='Fire PvE',verified=true,
+  echoes={{spellId=201175,quality=0,stacks=1},{spellId=201172,quality=0,stacks=2}}} end)
+ local p=AskWFree('A16')
+ C.setup(p~=nil,'A16: fixture: the click asks first')
+ if not p then return end
+ local settings=Settings()
+ -- The same Saved Build 2 arrives again in fresh tables with its Echoes in
+ -- the other order; Saved Build 1 is renamed, Saved Build 3 is saved over
+ -- and becomes the active one.
+ ServerNow(function(rows)
+  rows[2]={name='Fire PvE',verified=true,
+   echoes={{spellId=201172,quality=0,stacks=2},{spellId=201175,quality=0,stacks=1}}}
+  rows[1].name='One renamed'
+  rows[3]={name='Arena 2',verified=true,echoes=H.Clone(REPLACED)}
+ end)
+ H.perks.serverActiveSlot=3;H.Notify();A.Poll();H.Advance(1)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','A16 said='..said..' facts='..Facts())
+ C.guard(writes.SetLoadoutWishlist==1 and Writes()==1 and Stored(2)~=nil and Stored(2).name=='W-Free'
+  and Stored(1)==nil and Stored(3)==nil,'A16: the unchanged named Saved Build 2 is assigned, once, and no other',Facts())
+ C.guard(said:find("'W-Free' is now the Wishlist for Saved Build 'Fire PvE'",1,true)~=nil
+  and said:find(CHANGED,1,true)==nil,'A16: it says so and reports no change',said)
+ C.guard(Auto() and Settings()==settings and Creates()==0 and spends==0,'A16: Auto stays ON; no setting, upload or spend')
+end)
+
+C.scenario('A17 D7 control: the character check still comes first when the Saved Build changed as well',function()
+ Boot()
+ TurnAutoOn()
+ local p=AskWFree('A17')
+ C.setup(p~=nil,'A17: fixture: the click asks first')
+ if not p then return end
+ local facts=Facts()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local store=Nexus.Store
+ local key=store.CurrentOwnerKey
+ store.CurrentOwnerKey=function() return 'someone-else@elsewhere' end
+ local said=Heard(function() Accept(p) end)
+ store.CurrentOwnerKey=key
+ C.guard(Writes()==0 and Facts()==facts and said:find('Nothing was assigned',1,true)~=nil,
+  'A17: the answer for another character assigns nothing and says why',said)
+ C.guard(Auto(),'A17: Auto stays ON')
+end)
+
+C.scenario('A18 D7 a chooser left open over a replaced Saved Build asks nothing under the old name',function()
+ Boot()
+ TurnAutoOn()
+ C.setup(Auto() and OpenPicker(),'A18: fixture: Auto is ON and the chooser is open for Saved Build 2 (Fire PvE)')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil,'A18: fixture: the chooser lists W-Free')
+ if not row then return end
+ local facts=Facts()
+ -- Slot 2 is saved over while the chooser stays open.
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ C.setup(NexusWishlistOnlyPicker:IsShown() and row:IsVisible(),'A18: fixture: the chooser is still open on its captured target')
+ H.popup=nil
+ local said=Heard(function() row.nameButton:Click() end)
+ print('OBSERVED','A18 said='..said..' popup='..tostring(H.popup and Asked(H.popup)))
+ C.expect(H.popup==nil and Refused(said),'A18: no question is asked under the old name; the player is told to choose again',said)
+ C.guard(Writes()==0 and Facts()==facts and Auto(),'A18: nothing is assigned; Auto stays ON',Facts())
+end)
+
+-- Review F-5: the same identity also covers the click that assigns at once.
+-- With Auto OFF no question waits, but a chooser left open still shows the
+-- Saved Build it was opened for. EXPECT fails on the pin 6950edb3 by design
+-- (the click wrote the captured slot and the line named the old build). The
+-- unchanged-target control with Auto OFF is A7.
+C.scenario('A19 F-5 Auto OFF: a chooser left open over a replaced Saved Build assigns nothing under the old name; choosing again assigns the current one',function()
+ Boot()
+ C.setup(not Auto() and OpenPicker(),'A19: fixture: Auto is OFF and the chooser is open for Saved Build 2 (Fire PvE)')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil,'A19: fixture: the chooser lists W-Free')
+ if not row then return end
+ local facts,settings=Facts(),Settings()
+ -- Slot 2 is saved over while the chooser stays open.
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ C.setup(NexusWishlistOnlyPicker:IsShown() and row:IsVisible(),'A19: fixture: the chooser is still open on its captured target')
+ H.popup=nil
+ local said=Heard(function() row.nameButton:Click() end)
+ print('OBSERVED','A19 said='..said..' facts='..Facts())
+ C.expect(H.popup==nil and Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'A19: the click for the replaced Saved Build calls no writer and stores nothing',Facts())
+ C.expect(Refused(said) and not NexusWishlistOnlyPicker:IsShown(),
+  'A19: the player is told to choose again and the stale chooser is closed',said)
+ -- Choosing again assigns at once, to what the slot holds now, as Auto OFF does.
+ C.setup(OpenPicker(),'A19b: fixture: the chooser is opened again')
+ row=PickerRow('W-Free')
+ C.setup(row~=nil,'A19b: fixture: the chooser lists W-Free')
+ if not row then return end
+ H.popup=nil
+ said=Heard(function() row.nameButton:Click() end)
+ print('OBSERVED','A19b said='..said..' facts='..Facts())
+ C.expect(H.popup==nil and writes.SetLoadoutWishlist==1 and Writes()==1 and Stored(2)~=nil and Stored(2).name=='W-Free'
+  and said:find("'W-Free' is now the Wishlist for Saved Build 'Frost PvP'",1,true)~=nil,
+  'A19b: one more click assigns W-Free to the current Saved Build 2 without a question and names it',said)
+ C.guard(not Auto() and Settings()==settings and Creates()==0 and spends==0,'A19: Auto stays OFF; no setting, upload or spend')
+end)
+
+-- D7 (N-4): the editor's Save & assign of a new plan is bound to the Saved
+-- Build its draft captured (slot, name and contents), not to the slot number.
+-- Saved over or renamed between the capture, the confirmation and the accept:
+-- nothing is uploaded or assigned, and saving again asks for the Saved Build
+-- the slot holds now. EXPECT here fails on the pin fccc12f5 by design (the
+-- accept compared the slot number, the assignment tokens and "holds Echoes"
+-- only, so the replacement received the Wishlist under the old name). GUARD
+-- holds on both: gone, empty and unreadable were already refused before the
+-- upload; the same Saved Build, another active slot, the first-run target and
+-- Save changes keep their behaviour. The spaced retry is ux_save_retry_intent
+-- R9/R10. Real editor controls and StaticPopup handlers; no native claim.
+local function NotSaved(said)
+ return said:find('Not saved',1,true)~=nil and said:find('Nothing was uploaded',1,true)~=nil
+end
+-- A new draft for the active Saved Build 2 and its Create & assign question.
+local function AskCreate(tag,name)
+ NewDraft(name)
+ local p=Apply()
+ C.setup(p~=nil and type(p.data)=='table' and type(p.data.confirmation)=='table'
+  and p.data.confirmation.intent=='saveAndAssign' and p.data.confirmation.destinationKey=='savedBuild:2',
+  tag..': fixture: Create & assign asks, bound to Saved Build 2')
+ return p
+end
+
+C.scenario('B1 N-4 Save & assign, Auto ON: Saved Build 2 was replaced after the confirmation: nothing is uploaded or assigned; saving again asks for the build there now',function()
+ Boot()
+ TurnAutoOn()
+ local p=AskCreate('B1','N4 replaced')
+ if not p then return end
+ C.setup(V.Names(Asked(p) or '','Fire PvE'),'B1: fixture: the confirmation names Fire PvE')
+ local facts,settings=Facts(),Settings()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','B1 said='..said..' creates='..Creates()..' facts='..Facts())
+ C.expect(Creates()==0 and Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'B1: the answer for the replaced Saved Build uploads nothing and assigns nothing',Facts())
+ C.expect(NotSaved(said),'B1: it says not saved and that nothing was uploaded or assigned',said)
+ C.guard(Auto() and Settings()==settings and spends==0,'B1: Auto stays ON; no setting or spend')
+ -- Saving again offers a new confirmation naming what slot 2 holds now.
+ local again=Apply()
+ local asked=Asked(again)
+ print('OBSERVED','B1b confirmation='..tostring(asked))
+ C.expect(again~=nil and again~=p and asked~=nil and V.Names(asked,'Frost PvP') and not V.Names(asked,'Fire PvE')
+  and again.data.confirmation.destinationKey=='savedBuild:2',
+  'B1b: saving again asks for Saved Build 2 as it is now, by its current name',asked)
+ if not again then return end
+ Accept(again)
+ C.expect(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='N4 replaced' and Stored(3)==nil,'B1b: that answer uploads once and assigns Saved Build 2',Facts())
+end)
+
+C.scenario('B2 N-4 Save & assign: the same slot and name with other contents is not the Saved Build that was confirmed',function()
+ Boot()
+ local p=AskCreate('B2','N4 contents')
+ if not p then return end
+ local facts=Facts()
+ ServerNow(function(rows) rows[2]={name='Fire PvE',verified=true,
+  echoes={{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','B2 said='..said..' creates='..Creates()..' facts='..Facts())
+ C.expect(Creates()==0 and Writes()==0 and Facts()==facts and Stored(2)==nil,
+  'B2: an equal name and slot do not stand in for the Saved Build: nothing is uploaded or assigned',Facts())
+ C.expect(NotSaved(said),'B2: it says not saved',said)
+end)
+
+C.scenario('B3 N-4 Save & assign: the confirmed Saved Build was renamed before the accept',function()
+ Boot()
+ local p=AskCreate('B3','N4 renamed')
+ if not p then return end
+ local facts=Facts()
+ ServerNow(function(rows) rows[2].name='Fire Raid' end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','B3 said='..said..' creates='..Creates()..' facts='..Facts())
+ C.expect(Creates()==0 and Writes()==0 and Facts()==facts and Stored(2)==nil and NotSaved(said),
+  'B3: nothing is uploaded or assigned under the old name',said)
+end)
+
+C.scenario('B4 N-4 Save & assign: Saved Build 2 was replaced after the draft began: no confirmation under the old name; the next one names the build there now',function()
+ Boot()
+ NewDraft('N4 early')
+ local facts=Facts()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local p
+ local said=Heard(function() p=Apply() end)
+ print('OBSERVED','B4 said='..said..' confirmation='..tostring(p and Asked(p)))
+ C.expect(p==nil and NotSaved(said) and Creates()==0 and Writes()==0 and Facts()==facts,
+  'B4: no confirmation is offered for the Saved Build the draft no longer matches; nothing is sent',said)
+ local again=Apply()
+ local asked=Asked(again)
+ C.expect(again~=nil and asked~=nil and V.Names(asked,'Frost PvP') and not V.Names(asked,'Fire PvE'),
+  'B4: the next attempt asks for Saved Build 2 as it is now',asked)
+ if not again then return end
+ Accept(again)
+ C.expect(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Stored(2)~=nil and Stored(2).name=='N4 early',
+  'B4: that answer uploads once and assigns Saved Build 2',Facts())
+end)
+
+C.scenario('B5 N-4 controls: gone, empty or unreadable at the accept sends nothing (as before); the same Saved Build re-sent is assigned',function()
+ Boot()
+ local world=H.Clone(H.perks.serverBuildSlots)
+ local function Restore() H.perks.serverBuildSlots=H.Clone(world);H.Notify();A.Poll();H.Advance(1) end
+ NewDraft('N4 controls')
+ local cases={
+  {'gone',function() ServerNow(function(rows) rows[2]=nil end) end},
+  {'empty',function() ServerNow(function(rows) rows[2]={name='Fire PvE',verified=true,echoes={}} end) end},
+  {'unreadable',function() H.perks.serverBuildSlots=nil end},
+ }
+ for _,case in ipairs(cases) do
+  local tag='B5 '..case[1]
+  local p=Apply()
+  C.setup(p~=nil,tag..': fixture: Create & assign asks')
+  if not p then return end
+  local facts=Facts()
+  case[2]()
+  local said=Heard(function() Accept(p) end)
+  print('OBSERVED',tag..' said='..said..' creates='..Creates())
+  C.guard(Creates()==0 and Writes()==0 and Facts()==facts and Stored(2)==nil,
+   tag..': nothing is uploaded or assigned',Facts())
+  Restore()
+ end
+ -- The same Saved Build 2 arrives again in fresh tables; other slots change.
+ local p=Apply()
+ C.setup(p~=nil,'B5 same: fixture: Create & assign asks')
+ if not p then return end
+ ServerNow(function(rows)
+  rows[2]={name='Fire PvE',verified=true,echoes={{spellId=201175,quality=0,stacks=1}}}
+  rows[1].name='One renamed'
+  rows[3]={name='Arena 2',verified=true,echoes=H.Clone(REPLACED)}
+ end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','B5 same said='..said..' facts='..Facts())
+ C.guard(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='N4 controls' and Stored(1)==nil and Stored(3)==nil,
+  'B5 same: the unchanged Saved Build 2 is assigned, once, and no other',Facts())
+end)
+
+C.scenario('B6 N-4 control: another Saved Build becoming active does not retarget or stop the captured destination',function()
+ Boot()
+ local p=AskCreate('B6','N4 active')
+ if not p then return end
+ H.perks.serverActiveSlot=3;H.Notify();A.Poll();H.Advance(1)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','B6 said='..said..' facts='..Facts())
+ C.guard(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='N4 active' and Stored(3)==nil,'B6: the captured Saved Build 2 is assigned, not the active one',Facts())
+end)
+
+C.scenario('B7 N-4 control: the first-run target carries no Saved Build identity and is unaffected by slot changes',function()
+ Boot()
+ H.perks.serverActiveSlot=0;H.Notify();A.Poll();H.Advance(1)
+ NewDraft('N4 first')
+ local p=Apply()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ if p then Accept(p) end
+ local first=Nexus.Store.State().firstRunWishlist
+ print('OBSERVED','B7 creates='..Creates()..' facts='..Facts())
+ C.guard(Creates()==1 and type(first)=='table' and first.name=='N4 first' and Stored(2)==nil and Stored(3)==nil,
+  'B7: the new plan is uploaded once and is the first-run target; no Saved Build is assigned',Facts())
+end)
+
+C.scenario('B8 N-4 control: Save changes (Create unassigned) writes no destination, so a replaced Saved Build does not stop it',function()
+ Boot()
+ NewDraft('N4 unassigned')
+ local facts=Facts()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local only=EditorButton('Create unassigned')
+ local p=Click(only)
+ C.setup(p~=nil,'B8: fixture: Create unassigned asks for confirmation')
+ if not p then return end
+ Accept(p)
+ print('OBSERVED','B8 creates='..Creates()..' facts='..Facts())
+ C.guard(Creates()==1 and Writes()==0 and Facts()==facts,'B8: it uploads once and writes no destination',Facts())
+end)
+
+-- D7 (N-4), the opened-Wishlist path: an existing Wishlist opened from the
+-- Echo Journal for a numbered Saved Build that does not hold it (the editing
+-- context of BeginWishlist), saved with Save & assign. That save newly assigns
+-- the Saved Build, so it is bound to the Saved Build captured when the editor
+-- opened and to the one its confirmation named. D1-D3 were written after the
+-- repair, so no failing run of them is recorded. By source reading they are
+-- EXPECTED to fail on the N-4 preimage fccc12f5 (there the slot number, the
+-- assignment tokens and "holds Echoes" were the only checks), and each is
+-- EXPECTED to fail when its guard is removed (the author's proposed
+-- controlled removals M1, M2 and M5; predictions, not executed). D4 and D5
+-- are GUARD: the Wishlist a Saved Build already holds keeps its Save changes
+-- whatever that Saved Build now contains (proposed removal M4 is EXPECTED to
+-- break D4; not executed), and an assignment made elsewhere still refuses
+-- through the assignment tokens. Only removal M3, of the check after the
+-- upload (ux_save_assignment_result PU1/PU2), has an observed run.
+-- Real Journal controls open the editor; real editor controls and StaticPopup
+-- handlers save. Synthetic host services; no native claim.
+local function Sent(slot) local n=0;for _,a in ipairs(H.actions) do if a[1]=='upload' and a[2]==slot then n=n+1 end end;return n end
+local function SelectedRow(id)
+ for _,f in ipairs(H.frames) do if f:IsVisible() and f.plus and f.data and f.data.spellId==id then return f end end
+ return nil
+end
+-- Role choices saved for this character, as one comparable count.
+local function RoleChoices()
+ local s=Nexus.Store.State() or {};local n=0
+ for _ in pairs(type(s.wishlistRoleChoices)=='table' and s.wishlistRoleChoices or {}) do n=n+1 end
+ return n
+end
+-- W-Free (server Wishlist 107) opened through the Journal chooser's edit
+-- control for the active Saved Build 2, which does not hold it, with one more
+-- copy: the editor offers Save & assign with Save changes beside it.
+local function OpenWFreeForBuild2(tag)
+ C.setup(OpenPicker(),tag..': fixture: the Wishlist chooser is open for Saved Build 2 (Fire PvE)')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil and row.gear~=nil,tag..': fixture: the chooser lists W-Free with its edit control')
+ if not (row and row.gear) then return nil end
+ row.gear:Click()
+ local line=SelectedRow(201174)
+ C.setup(NexusEditorFrame~=nil and NexusEditorFrame:IsShown() and line~=nil,tag..': fixture: the editor shows W-Free')
+ if not line then return nil end
+ line.plus:Click()
+ Nexus.WishlistEditor.Refresh()
+ local save,changes=EditorButton('Save & assign'),EditorButton('Save changes')
+ C.setup(save~=nil and changes~=nil and save~=changes,tag..': fixture: Save & assign with Save changes beside it')
+ return save,changes
+end
+-- Its Save & assign question, bound to Saved Build 2.
+local function AskSaveAssign(tag,save)
+ local p=Click(save)
+ C.setup(p~=nil and p.which=='WISHLISTREALIZER_UPDATE_WISHLIST' and type(p.data)=='table'
+  and type(p.data.confirmation)=='table' and p.data.confirmation.intent=='saveAndAssign'
+  and p.data.confirmation.destinationKey=='savedBuild:2',tag..': fixture: Save & assign asks, bound to Saved Build 2')
+ return p
+end
+
+C.scenario('D1 N-4 opened Wishlist, Auto ON: Saved Build 2 was replaced after the confirmation: no upload, role or assignment; saving again names the build there now',function()
+ Boot()
+ TurnAutoOn()
+ local save=OpenWFreeForBuild2('D1')
+ if not save then return end
+ local p=AskSaveAssign('D1',save)
+ if not p then return end
+ C.setup(V.Names(Asked(p) or '','Fire PvE'),'D1: fixture: the confirmation names Fire PvE')
+ local facts,settings,roles=Facts(),Settings(),RoleChoices()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','D1 said='..said..' sent='..Sent(107)..' facts='..Facts())
+ C.expect(Sent(107)==0 and Writes()==0 and Facts()==facts and Stored(2)==nil and RoleChoices()==roles,
+  'D1: the answer for the replaced Saved Build uploads nothing, assigns nothing and saves no role choice',Facts())
+ C.expect(NotSaved(said),'D1: it says not saved and that nothing was uploaded or assigned',said)
+ C.guard(Auto() and Settings()==settings and spends==0 and Creates()==0,'D1: Auto stays ON; no setting, spend or new Wishlist')
+ -- Saving again offers a new confirmation naming what slot 2 holds now.
+ local again=Click(save)
+ local asked=Asked(again)
+ print('OBSERVED','D1b confirmation='..tostring(asked))
+ C.expect(again~=nil and again~=p and asked~=nil and V.Names(asked,'Frost PvP') and not V.Names(asked,'Fire PvE')
+  and again.data.confirmation.destinationKey=='savedBuild:2',
+  'D1b: saving again asks for Saved Build 2 as it is now, by its current name',asked)
+ if not again then return end
+ Accept(again)
+ C.expect(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='W-Free' and Stored(3)==nil,'D1b: that answer uploads once and assigns W-Free to Saved Build 2',Facts())
+end)
+
+C.scenario('D2 N-4 opened Wishlist: the same name with other contents, then a rename, each after a confirmation: nothing is sent either time',function()
+ Boot()
+ local save=OpenWFreeForBuild2('D2')
+ if not save then return end
+ local cases={
+  {'same name, other contents',function(rows) rows[2]={name='Fire PvE',verified=true,
+   echoes={{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}} end},
+  -- The second question names that changed build; it is then renamed.
+  {'renamed',function(rows) rows[2].name='Fire Raid' end},
+ }
+ for _,case in ipairs(cases) do
+  local tag='D2 '..case[1]
+  local p=AskSaveAssign(tag,save)
+  if not p then return end
+  local facts=Facts()
+  ServerNow(case[2])
+  local said=Heard(function() Accept(p) end)
+  print('OBSERVED',tag..' said='..said..' sent='..Sent(107)..' facts='..Facts())
+  C.expect(Sent(107)==0 and Writes()==0 and Facts()==facts and Stored(2)==nil and NotSaved(said),
+   tag..': nothing is uploaded or assigned and it says not saved',said)
+ end
+ C.guard(not Auto() and Creates()==0 and spends==0,'D2: Auto stays OFF; nothing else is sent or spent')
+end)
+
+C.scenario('D3 N-4 opened Wishlist: Saved Build 2 was replaced after the editor opened: no confirmation under the captured name; the next one names the build there now',function()
+ Boot()
+ local save=OpenWFreeForBuild2('D3')
+ if not save then return end
+ local facts=Facts()
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local p
+ local said=Heard(function() p=Click(save) end)
+ print('OBSERVED','D3 said='..said..' confirmation='..tostring(p and Asked(p)))
+ C.expect(p==nil and NotSaved(said) and Sent(107)==0 and Writes()==0 and Facts()==facts,
+  'D3: no confirmation is offered for the Saved Build the editor no longer matches; nothing is sent',said)
+ local again=Click(save)
+ local asked=Asked(again)
+ C.expect(again~=nil and asked~=nil and V.Names(asked,'Frost PvP') and not V.Names(asked,'Fire PvE'),
+  'D3: the next attempt asks for Saved Build 2 as it is now',asked)
+ if not again then return end
+ Accept(again)
+ C.expect(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Stored(2)~=nil and Stored(2).name=='W-Free',
+  'D3: that answer uploads once and assigns W-Free to Saved Build 2',Facts())
+end)
+
+C.scenario('D4 N-4 control: Save changes of the Wishlist its Saved Build already holds is not stopped by that Saved Build changing',function()
+ Boot()
+ C.setup(A.SetLoadoutWishlist(2,107)==true and Stored(2)~=nil and Stored(2).name=='W-Free',
+  'D4: fixture: Saved Build 2 holds W-Free',Facts())
+ H.Notify();A.Poll();H.Advance(1)
+ C.setup(OpenPicker(),'D4: fixture: the Journal strip is shown for Saved Build 2')
+ local design=_G.NexusAssociatedWishlistDesignButton
+ C.setup(design~=nil and design:IsVisible() and design:IsEnabled(),'D4: fixture: the edit control of the assigned Wishlist')
+ if not design then return end
+ design:Click()
+ local line=SelectedRow(201174)
+ C.setup(NexusEditorFrame~=nil and NexusEditorFrame:IsShown() and line~=nil,'D4: fixture: the editor shows W-Free')
+ if not line then return end
+ line.plus:Click()
+ Nexus.WishlistEditor.Refresh()
+ local changes=EditorButton('Save changes')
+ C.setup(changes~=nil and EditorButton('Save & assign')==nil,'D4: fixture: the bound plan offers Save changes only')
+ if not changes then return end
+ local w=Writes()
+ -- Saved Build 2 is saved over before the confirmation, and renamed after it.
+ ServerNow(function(rows) rows[2]={name='Frost PvP',verified=true,echoes=H.Clone(REPLACED)} end)
+ local p=Click(changes)
+ C.setup(p~=nil and type(p.data)=='table' and p.data.intent=='saveChanges','D4: fixture: the Save changes confirmation')
+ if not p then return end
+ ServerNow(function(rows) rows[2].name='Frost Raid' end)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','D4 said='..said..' sent='..Sent(107)..' facts='..Facts())
+ C.guard(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Writes()==w+1
+  and Stored(2)~=nil and Stored(2).name=='W-Free' and Stored(3)==nil,
+  'D4: the save uploads once and refreshes the assignment Saved Build 2 already had',Facts())
+ C.guard(not NotSaved(said),'D4: it is not refused',said)
+end)
+
+C.scenario('D5 N-4 control: an assignment made elsewhere after the confirmation still refuses through the assignment tokens',function()
+ Boot()
+ local save=OpenWFreeForBuild2('D5')
+ if not save then return end
+ local p=AskSaveAssign('D5',save)
+ if not p then return end
+ local ok=A.SetLoadoutWishlistIdentity(2,'Other plan',H.Clone(E3))
+ C.setup(ok,'D5: fixture: Saved Build 2 is assigned Other plan elsewhere')
+ local facts,w=Facts(),Writes()
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','D5 said='..said..' sent='..Sent(107)..' facts='..Facts())
+ C.guard(Sent(107)==0 and Writes()==w and Facts()==facts and Stored(2)~=nil and Stored(2).name=='Other plan',
+  'D5: the newer choice is kept; nothing is uploaded or written',Facts())
+ C.guard(said:find('that choice is kept',1,true)~=nil,'D5: it says the assignment changed and is kept',said)
+end)
+
+-- Reviews N-5 and D7-S5: the name in a Save & assign question is the name of
+-- the Saved Build the question is bound to, from one read.
+--   N-5 (X1, X2): a Journal chooser left open keeps the name it was opened
+--     with. Its edit control passed that name to the editor while the editor
+--     read the identity of whatever the slot held by then, so the question
+--     named the earlier build (or the empty-slot placeholder) and the answer
+--     assigned the build now there.
+--   D7-S5 (N1, N2, N4): a destination captured while its slot was empty or
+--     missing kept the captured name (the emptied build's, "Saved Build N" or
+--     the placeholder) after a Saved Build was saved into it.
+-- EXPECT here fails on the pin da28a28d by design (the wrong name is shown;
+-- the assignment itself was already bound). GUARD holds on both: an empty or
+-- unreadable slot still gets nothing, the same editor still saves once the
+-- slot has Echoes, and a late replacement is still refused (N3, and N4's
+-- last step). The initially-populated replacement controls are B1, B4, D1
+-- and D3. Real Journal and editor controls; no native claim.
+local function Says(text,name) return text~=nil and text:find(name,1,true)~=nil end
+-- The chooser's edit control for W-Free, then one more copy and the editor's
+-- Save & assign control.
+local function EditWFree(tag,row)
+ row.gear:Click()
+ local line=SelectedRow(201174)
+ C.setup(NexusEditorFrame~=nil and NexusEditorFrame:IsShown() and line~=nil,tag..': fixture: the editor shows W-Free')
+ if not line then return nil end
+ line.plus:Click()
+ Nexus.WishlistEditor.Refresh()
+ local save=EditorButton('Save & assign')
+ C.setup(save~=nil,tag..': fixture: the Save & assign control')
+ return save
+end
+local function Populate2(name,echoes) return function(rows) rows[2]={name=name,verified=true,echoes=H.Clone(echoes)} end end
+local function Empty2(name) return function(rows) rows[2]={name=name,verified=true,echoes={}} end end
+
+C.scenario('X1 N-5 a chooser left open over a Saved Build that was saved over: the editor it opens asks under the name of the build now there',function()
+ Boot()
+ TurnAutoOn()
+ C.setup(OpenPicker(),'X1: fixture: the Wishlist chooser is open for Saved Build 2 (Fire PvE)')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil and row.gear~=nil,'X1: fixture: the chooser lists W-Free with its edit control')
+ if not (row and row.gear) then return end
+ -- Slot 2 is saved over while the chooser stays open.
+ ServerNow(Populate2('Frost PvP',REPLACED))
+ C.setup(NexusWishlistOnlyPicker:IsShown() and row:IsVisible(),'X1: fixture: the chooser is still open on its captured target')
+ local save=EditWFree('X1',row)
+ if not save then return end
+ local facts=Facts()
+ local p=Click(save)
+ local asked=Asked(p)
+ print('OBSERVED','X1 confirmation='..tostring(asked))
+ C.setup(p~=nil and type(p.data)=='table' and type(p.data.confirmation)=='table'
+  and p.data.confirmation.destinationKey=='savedBuild:2','X1: fixture: Save & assign asks, bound to Saved Build 2')
+ if not p then return end
+ C.expect(V.Names(asked,'Frost PvP') and not V.Names(asked,'Fire PvE'),
+  'X1: the question names the Saved Build that is in the slot and bound, not the one the chooser was opened for',asked)
+ C.guard(Sent(107)==0 and Writes()==0 and Facts()==facts,'X1: nothing is sent before the answer',Facts())
+ Accept(p)
+ C.guard(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='W-Free' and Stored(3)==nil,'X1: the answer uploads once and assigns W-Free to Saved Build 2',Facts())
+ C.guard(Auto() and spends==0,'X1: Auto stays ON; nothing is spent')
+end)
+
+C.scenario('X2 N-5 a chooser left open over an empty slot that was filled: the editor it opens asks under the name of the build now there',function()
+ Boot()
+ ServerNow(Empty2('Old Fire'))
+ C.setup(OpenPicker(),'X2: fixture: the Wishlist chooser is open over the empty Saved Build slot 2')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil and row.gear~=nil,'X2: fixture: the chooser lists W-Free with its edit control')
+ if not (row and row.gear) then return end
+ -- A Saved Build is saved into slot 2 while the chooser stays open.
+ ServerNow(Populate2('Frost PvP',REPLACED))
+ C.setup(NexusWishlistOnlyPicker:IsShown() and row:IsVisible(),'X2: fixture: the chooser is still open on its captured target')
+ local save=EditWFree('X2',row)
+ if not save then return end
+ local p=Click(save)
+ local asked=Asked(p)
+ print('OBSERVED','X2 confirmation='..tostring(asked))
+ C.setup(p~=nil,'X2: fixture: Save & assign asks')
+ if not p then return end
+ C.expect(V.Names(asked,'Frost PvP') and not Says(asked,'Empty Saved Build slot') and not V.Names(asked,'Old Fire'),
+  'X2: the question names the Saved Build now in the slot, not the empty-slot placeholder or the old name',asked)
+ Accept(p)
+ C.guard(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Stored(2)~=nil and Stored(2).name=='W-Free',
+  'X2: the answer uploads once and assigns W-Free to Saved Build 2',Facts())
+end)
+
+C.scenario('N1 D7-S5 new plan: an emptied slot with an old name, then another named build saved into it: the question and the receipt name that build',function()
+ Boot()
+ ServerNow(Empty2('Old Fire'))
+ NewDraft('N6 named')
+ local facts=Facts()
+ -- Still empty, then unreadable: nothing is offered and nothing is sent.
+ local p
+ local said=Heard(function() p=Apply() end)
+ C.guard(p==nil and Creates()==0 and Writes()==0 and Facts()==facts and said:find('is empty',1,true)~=nil,
+  'N1: while slot 2 is empty no confirmation is offered and nothing is sent',said)
+ local world=H.perks.serverBuildSlots
+ H.perks.serverBuildSlots=nil
+ said=Heard(function() p=Apply() end)
+ H.perks.serverBuildSlots=world
+ C.guard(p==nil and Creates()==0 and Writes()==0 and Facts()==facts,
+  'N1: while the Saved Builds are unreadable no confirmation is offered and nothing is sent',said)
+ -- Another build is saved into slot 2.
+ ServerNow(Populate2('Frost PvP',REPLACED))
+ p=Apply()
+ local asked=Asked(p)
+ print('OBSERVED','N1 confirmation='..tostring(asked))
+ C.setup(p~=nil and type(p.data)=='table' and type(p.data.confirmation)=='table'
+  and p.data.confirmation.destinationKey=='savedBuild:2','N1: fixture: Create & assign asks, bound to Saved Build 2')
+ if not p then return end
+ C.expect(V.Names(asked,'Frost PvP') and not V.Names(asked,'Old Fire'),
+  'N1: the question names the Saved Build now in the slot, not the emptied one',asked)
+ said=Heard(function() Accept(p) end)
+ print('OBSERVED','N1 said='..said..' facts='..Facts())
+ C.guard(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Writes()==1 and Stored(2)~=nil
+  and Stored(2).name=='N6 named' and Stored(3)==nil,'N1: the same editor saves once the slot has Echoes, and assigns it',Facts())
+ C.expect(Says(said,"'N6 named'") and Says(said,'Frost PvP') and not Says(said,'Old Fire'),
+  'N1: the receipt names the Saved Build that was assigned, not the emptied one',said)
+end)
+
+C.scenario('N2 D7-S5 new plan: a missing slot, then a named build saved into it: the question and the receipt name that build',function()
+ Boot()
+ ServerNow(function(rows) rows[2]=nil end)
+ NewDraft('N6 missing')
+ ServerNow(Populate2('Storm Tank',REPLACED))
+ local p=Apply()
+ local asked=Asked(p)
+ print('OBSERVED','N2 confirmation='..tostring(asked))
+ C.setup(p~=nil,'N2: fixture: Create & assign asks')
+ if not p then return end
+ C.expect(V.Names(asked,'Storm Tank'),'N2: the question names the Saved Build now in the slot, not a slot placeholder',asked)
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','N2 said='..said..' facts='..Facts())
+ C.guard(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Stored(2)~=nil and Stored(2).name=='N6 missing',
+  'N2: the save uploads once and assigns Saved Build 2',Facts())
+ C.expect(Says(said,"'N6 missing'") and Says(said,'Storm Tank'),'N2: the receipt names the Saved Build that was assigned',said)
+end)
+
+C.scenario('N3 D7-S5 control: a formerly empty slot filled, confirmed, then saved over under the same name before the answer: still refused',function()
+ Boot()
+ ServerNow(Empty2('Fire PvE'))
+ NewDraft('N6 late')
+ ServerNow(Populate2('Fire PvE',E2))
+ local p=Apply()
+ C.setup(p~=nil and V.Names(Asked(p) or '','Fire PvE'),'N3: fixture: Create & assign asks, naming Fire PvE')
+ if not p then return end
+ local facts=Facts()
+ -- The same name, other contents, while the question waits.
+ ServerNow(Populate2('Fire PvE',{{spellId=201175,quality=0,stacks=2},{spellId=201172,quality=0,stacks=1}}))
+ local said=Heard(function() Accept(p) end)
+ print('OBSERVED','N3 said='..said..' creates='..Creates()..' facts='..Facts())
+ C.guard(Creates()==0 and Writes()==0 and Facts()==facts and Stored(2)==nil and NotSaved(said),
+  'N3: the late replacement is refused: nothing is uploaded or assigned',said)
+ local again=Apply()
+ C.guard(again~=nil and V.Names(Asked(again) or '','Fire PvE'),'N3: saving again asks for the build now in the slot')
+ if not again then return end
+ Accept(again)
+ C.guard(Creates()==1 and writes.SetLoadoutWishlistIdentity==1 and Stored(2)~=nil and Stored(2).name=='N6 late',
+  'N3: that answer uploads once and assigns Saved Build 2',Facts())
+end)
+
+C.scenario('N4 D7-S5 opened Wishlist: the editor opened over an empty slot, then a named build saved into it: the question names that build; a late replacement is refused',function()
+ Boot()
+ ServerNow(Empty2('Old Fire'))
+ C.setup(OpenPicker(),'N4: fixture: the Wishlist chooser is open over the empty Saved Build slot 2')
+ local row=PickerRow('W-Free')
+ C.setup(row~=nil and row.gear~=nil,'N4: fixture: the chooser lists W-Free with its edit control')
+ if not (row and row.gear) then return end
+ local save=EditWFree('N4',row)
+ if not save then return end
+ local facts=Facts()
+ local p
+ local said=Heard(function() p=Click(save) end)
+ C.guard(p==nil and Sent(107)==0 and Writes()==0 and Facts()==facts and said:find('is empty',1,true)~=nil,
+  'N4: while slot 2 is empty no confirmation is offered and nothing is sent',said)
+ ServerNow(Populate2('Frost PvP',REPLACED))
+ p=Click(save)
+ local asked=Asked(p)
+ print('OBSERVED','N4 confirmation='..tostring(asked))
+ C.setup(p~=nil,'N4: fixture: Save & assign asks once the slot has Echoes')
+ if not p then return end
+ C.expect(V.Names(asked,'Frost PvP') and not Says(asked,'Empty Saved Build slot') and not V.Names(asked,'Old Fire'),
+  'N4: the question names the Saved Build now in the slot, not the empty-slot placeholder or the old name',asked)
+ -- Saved over again while this question waits: refused, as for any bound build.
+ ServerNow(Populate2('Storm Tank',E3))
+ said=Heard(function() Accept(p) end)
+ C.guard(Sent(107)==0 and Writes()==0 and Facts()==facts and NotSaved(said),
+  'N4: the late replacement is refused: nothing is uploaded or assigned',said)
+ local again=Click(save)
+ local asked2=Asked(again)
+ C.guard(again~=nil and V.Names(asked2,'Storm Tank') and not V.Names(asked2,'Frost PvP'),
+  'N4: saving again asks for the build now in the slot',asked2)
+ if not again then return end
+ Accept(again)
+ C.guard(Sent(107)==1 and writes.UpdateWishlistAssociationAfterSave==1 and Stored(2)~=nil and Stored(2).name=='W-Free',
+  'N4: that answer uploads once and assigns W-Free to Saved Build 2',Facts())
+end)
+
 C.finish('(Save & assign names its captured destination and Auto\'s existing consequence; cancel/stale/Save changes write none; the Auto-ON picker asks first)')

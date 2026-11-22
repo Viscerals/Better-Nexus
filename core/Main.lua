@@ -20,8 +20,275 @@ local panelProgressCache = {valid=false}
 local selectedPreviewCache = {valid=false}
 local activeFingerprintCache = {valid=false}
 
+local CHAT_PREFIX = "|cff7fd5ffNexus:|r "
+
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff7fd5ffNexus:|r " .. (Nexus.UserText and Nexus.UserText.Message(msg) or tostring(msg)))
+    DEFAULT_CHAT_FRAME:AddMessage(CHAT_PREFIX .. (Nexus.UserText and Nexus.UserText.Message(msg) or tostring(msg)))
+end
+
+-- Full-UI localization (v3): the /nexus status lines below that Print
+-- composes from raw English (TARGET: ..., OWNED this run: ...) are said
+-- through this UserText phrase source. Their English is the line UserText's
+-- legacy rewrite showed before (TARGET: -> WISHLIST:, synced -> server
+-- confirmed); the composition here is unchanged.
+local TARGET_SOURCES = {["Echo Wishlist build"] = "command.value.target_source_designed",
+    ["active loadout"] = "command.value.target_source_active", ["wishlist"] = "command.value.target_source_wishlist"}
+local ASSIGNMENT_NOTES = {["Restoring assigned Wishlist..."] = "orb.status.restoring_assignment",
+    ["Waiting for loadout data..."] = "orb.assignment.waiting_loadout",
+    ["Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."] = "orb.assignment.needs_locked_targets",
+    ["First-run wishlist target"] = "orb.assignment.first_run_target",
+    ["First-run wishlist data is temporarily unavailable; waiting for the server mirror."] = "orb.assignment.first_run_unavailable",
+    ["Choose or create a wishlist to begin your first run."] = "orb.assignment.choose_or_create"}
+local STATUS_PHRASES = {exact = {["TARGET: none -- advisor only"] = "command.chat.status_target_none"}, formats = {
+    {format = "TARGET: %s (your %s) -- %d echoes", key = "command.chat.status_target",
+        fields = {"name", "source", "count"}, nested = {source = TARGET_SOURCES}},
+    {format = "TARGET: none -- advisor only  (%s)", key = "command.chat.status_target_none_note",
+        fields = {"note"}, nested = {note = ASSIGNMENT_NOTES}},
+    {format = "OWNED this run: %d echoes (synced).", key = "command.chat.status_owned_synced", fields = {"count"}},
+    {format = "OWNED this run: %d echoes (not synced yet).", key = "command.chat.status_owned_unsynced", fields = {"count"}},
+}}
+local statusBook
+local NOTE_HEAD = "TARGET: none -- advisor only  ("
+local function StatusPhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    if not statusBook or statusBook.seam ~= L then
+        statusBook = L.PhraseBook(STATUS_PHRASES)
+        statusBook.seam = L
+    end
+    -- The adapter's identity-found note inside the advisor-only line: said
+    -- from the adapter's own facts, whole, as this line always showed it
+    -- (UserText.IdentityNote). Any other note keeps the book's route below.
+    if #text > #NOTE_HEAD + 1 and text:sub(1, #NOTE_HEAD) == NOTE_HEAD and text:sub(-1) == ")" then
+        local user = Nexus.UserText
+        local note = user and type(user.IdentityNote) == "function" and user.IdentityNote(text:sub(#NOTE_HEAD + 1, -2), true)
+        if note then
+            local line, source = L.Format("command.chat.status_target_none_note", {note = note})
+            if source == "candidate" then return line, true end
+        end
+    end
+    return L.Phrase(text, statusBook)
+end
+Nexus.MainStatusPhrase = StatusPhrase
+-- The chat lines core/AutomationRuntime.lua and core/GameAdapter.lua print
+-- through Print (options.print / OnStatus), after an optional coloured
+-- "Nexus:" tag of their own that stays code-owned. An Auto hold reason is
+-- shown through UserText.Recognized (its words otherwise).
+-- RUNTIME-CHAT BEGIN (generated from the fragment)
+local RUNTIME_PHRASES = {exact = {
+    ["select: the client's pending flag is still set after 10s with no result observed; it no longer holds other Echo actions, and Nexus sends no Select while it is set."] = "adapter.chat.outside_select_pending",
+    ["Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits for the flag to clear. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_seen",
+    ["Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits; it cannot attribute a grant to this selection alone, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_seen_competing",
+    ["Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; while Auto is ON it re-reads the granted Echoes. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_unseen",
+    ["Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; it cannot attribute a grant to this selection alone, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_unseen_competing",
+    ["Select: the game still shows a selection pending after 10s with no result observed; Nexus sends no Echo action until it clears."] = "adapter.chat.selection_pending_held",
+    ["I couldn't create the first Saved Build automatically. Open Echo Journal > My Builds and save this finished run into a Saved Build slot before resetting."] = "automation.chat.first_run_create_failed",
+    ["your first run is finished, but Nexus found no free Saved Build slot. Save this loadout manually in Echo Journal > My Builds before resetting."] = "automation.chat.first_run_no_slot",
+    ["the first-run Saved Build write was not confirmed before the reset. Open Echo Journal > My Builds and verify/save the loadout manually before relying on automated convergence."] = "automation.chat.first_run_unconfirmed_reset",
+    ["Nexus cannot safely choose or overwrite a Saved Build while none is active. Open Echo Journal > My Builds, save this finished run into a slot, and activate that slot before resetting."] = "automation.chat.no_active_saved_build",
+}, formats = {
+    {format = "unlocked %s -- %s is acquired and ready to replace it.",
+        key = "automation.chat.unlocked_ready", fields = {"old", "new"}},
+    {format = "couldn't unlock %s: %s",
+        key = "automation.chat.unlock_failed", fields = {"echo", "error"}},
+    {format = "lock request sent for %s; waiting for server confirmation.",
+        key = "automation.chat.lock_sent", fields = {"echo"}},
+    {format = "couldn't lock %s: %s",
+        key = "automation.chat.lock_failed", fields = {"echo", "error"}},
+    {format = "Save sent — %s. Checking the Saved Build now. Still needed: %s.",
+        key = "automation.chat.save_sent", fields = {"change", "needed"}, nested = {change = {["loadout improved"]="automation.value.loadout_improved", ["first completed run"]="automation.value.first_completed_run"}, needed = {["none"]="automation.value.none_needed"}}},
+    {format = "No improvement run — not saving. Still needed: %s.",
+        key = "automation.chat.no_improvement", fields = {"needed"}, nested = {needed = {["none"]="automation.value.none_needed"}}},
+    {format = "first run complete. Nexus is attempting to store it in Saved Build %s. Wait for the confirmation message before resetting; if it does not confirm, save this finished loadout manually in Echo Journal > My Builds.",
+        key = "automation.chat.first_run_storing", fields = {"slot"}},
+    {format = "first run saved to Saved Build %s. Activate that slot in My Builds before starting the next run.",
+        key = "automation.chat.first_run_saved", fields = {"slot"}},
+    {format = "I couldn't confirm that your first completed run was stored in Saved Build %s. Open Echo Journal > My Builds and save this finished loadout into a slot before resetting.",
+        key = "automation.chat.first_run_not_confirmed", fields = {"slot"}},
+    {format = "Auto is ON but paused: %s",
+        key = "automation.chat.auto_on_paused", fields = {"reason"}, nested = {reason = true}},
+    {format = "%s: the client's pending flag is still set after 10s with no result observed -- no longer waited on (it is honoured again if the flag clears)",
+        key = "adapter.chat.action_pending_released", fields = {"action"}},
+}}
+-- RUNTIME-CHAT END
+local runtimeBook
+local function RuntimePhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    local tag, body = text:match("^(|c%x%x%x%x%x%x%x%xNexus:|r )(.*)$")
+    tag, body = tag or "", body or text
+    local reason = body:match("^Auto is ON but paused: (.*)$")
+    if reason then
+        local user = Nexus.UserText
+        local shown, source = L.Format("automation.chat.auto_on_paused",
+            {reason = user and type(user.Recognized) == "function" and user.Recognized(reason) or reason})
+        if source == "unavailable" then return text, false end
+        return tag .. shown, true
+    end
+    if not runtimeBook or runtimeBook.seam ~= L then
+        runtimeBook = L.PhraseBook(RUNTIME_PHRASES)
+        runtimeBook.seam = L
+    end
+    local shown, known = L.Phrase(body, runtimeBook)
+    if known then return tag .. shown, true end
+    return text, false
+end
+Nexus.MainRuntimePhrase = RuntimePhrase
+function Nexus.MainRuntimeBook()
+    RuntimePhrase("")
+    return runtimeBook
+end
+-- The main panel's status lines core/AutomationRuntime.lua sets
+-- (SetStatus); the panel says model.status through UserText.Message. "auto
+-- paused: <reason>" shows its reason through UserText.Recognized.
+-- RUNTIME-STATUS BEGIN (generated from the fragment)
+local RUNTIME_STATUS = {exact = {
+    ["Banish refused -- trying another action"] = "automation.status.banish_refused",
+    ["Choose or create a wishlist to begin your first run"] = "automation.status.choose_or_create",
+    ["error (see /nexus err)"] = "automation.status.error_see_err",
+    ["final-search Banish refused -- re-evaluating"] = "automation.status.final_banish_refused",
+    ["final-search Reroll refused -- taking held Echo"] = "automation.status.final_reroll_refused",
+    ["finishing run — Echo count not synchronized yet"] = "automation.status.finishing_count_unsynced",
+    ["finishing final Echo selections"] = "automation.status.finishing_final_selections",
+    ["First run complete — no free Saved Build slot; save manually before resetting"] = "automation.status.first_run_no_free_slot",
+    ["First run not confirmed — save it manually in My Builds before resetting"] = "automation.status.first_run_not_confirmed",
+    ["First run complete — save/activate it in My Builds before resetting"] = "automation.status.first_run_save_activate",
+    ["First run complete — save it manually in My Builds before resetting"] = "automation.status.first_run_save_manually",
+    ["First-run wishlist active — Saved Build will be created by normal server progression"] = "automation.status.first_run_wishlist_active",
+    ["active loadout changed before save -- write cancelled"] = "automation.status.loadout_changed_cancelled",
+    ["No wishlist set -- advisor only"] = "automation.status.no_wishlist_advisor",
+    ["No wishlist set -- not saving"] = "automation.status.no_wishlist_not_saving",
+    ["Ordinary Automation stays OFF while the Orb operation is active or unresolved."] = "automation.status.orb_keeps_auto_off",
+    ["Auto stays OFF while Nexus is paused. Resume Nexus first."] = "automation.status.paused_keeps_auto_off",
+    ["Reroll refused -- taking the least-harmful Echo"] = "automation.status.reroll_refused",
+    ["save data matched, but active loadout changed — not claiming overwrite"] = "automation.status.save_matched_loadout_changed",
+    ["Save sent — checking server"] = "automation.status.save_sent_checking",
+    ["Save request sent; server confirmation not received. Check My Builds before resetting."] = "automation.status.save_unconfirmed",
+    ["saved loadout unchanged — no current run observed"] = "automation.status.saved_unchanged_no_run",
+    ["waiting for board"] = "automation.status.waiting_board",
+    ["waiting for ProjectEbonhold"] = "automation.status.waiting_project_ebonhold",
+    ["waiting for slot data"] = "automation.status.waiting_slot_data",
+    ["Auto stays OFF: its overwrite warning is unavailable."] = "automation.status.warning_keeps_auto_off",
+}, formats = {
+    {format = "%sBanished%s echo #%d", key = "automation.status.banished_echo", fields = {"open", "close", "index"}},
+    {format = "%sFroze%s echo #%d -- waiting for board to update", key = "automation.status.froze_echo", fields = {"open", "close", "index"}},
+    {format = "Working toward '%s' — run complete, no improvement (%s)", key = "automation.status.no_improvement", fields = {"wishlist", "detail"}},
+    {format = "First run saved to Saved Build %s — activate it in My Builds before resetting", key = "automation.status.first_run_saved", fields = {"slot"}},
+    {format = "Save complete — server confirmed Active Loadout %s", key = "automation.status.save_confirmed", fields = {"slot"}},
+    {format = "first-run save sent to Saved Build %s -- confirming", key = "automation.status.first_run_save_sent", fields = {"slot"}},
+    {format = "Save sent to Active Loadout %d — checking server (+%ss)", key = "automation.status.save_sent_checking_seconds", fields = {"slot", "seconds"}},
+    {format = "finishing run — %d/79 Echoes", key = "automation.status.finishing_count", fields = {"count"}},
+}}
+-- RUNTIME-STATUS END
+local runtimeStatusBook
+local function RuntimeStatusPhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    local reason = text:match("^auto paused: (.*)$")
+    if reason then
+        local user = Nexus.UserText
+        local shown, source = L.Format("automation.status.auto_paused",
+            {reason = user and type(user.Recognized) == "function" and user.Recognized(reason) or reason})
+        if source == "unavailable" then return text, false end
+        return shown, true
+    end
+    if not runtimeStatusBook or runtimeStatusBook.seam ~= L then
+        runtimeStatusBook = L.PhraseBook(RUNTIME_STATUS)
+        runtimeStatusBook.seam = L
+    end
+    return L.Phrase(text, runtimeStatusBook)
+end
+Nexus.MainRuntimeStatusPhrase = RuntimeStatusPhrase
+function Nexus.MainRuntimeStatusBook()
+    RuntimeStatusPhrase("")
+    return runtimeStatusBook
+end
+if Nexus.UserText and type(Nexus.UserText.AddPhraseSource) == "function" then
+    Nexus.UserText.AddPhraseSource(StatusPhrase)
+    Nexus.UserText.AddPhraseSource(RuntimePhrase)
+    Nexus.UserText.AddPhraseSource(RuntimeStatusPhrase)
+end
+
+-- Full-UI localization, chat family. A reviewed chat line resolves through
+-- the Nexus.Localization seam, looked up at call time. Its English (base)
+-- text takes Print's path exactly as the former literal did, the
+-- UserText.Message rewrite included, so English output keeps its bytes. A
+-- translated (candidate) text follows the same code-owned prefix and never
+-- runs through that English-only rewrite. Slash command words, setting
+-- values, codes, versions and names enter only through text slots or as
+-- literal command text and are never translated.
+local function PrintText(text, source)
+    if source == "candidate" then
+        DEFAULT_CHAT_FRAME:AddMessage(CHAT_PREFIX .. tostring(text))
+    else
+        Print(text)
+    end
+end
+
+-- The seam's text for a key (and its source), or the key itself when the
+-- seam is absent (it is loaded by the TOC before this file).
+local function UiText(key)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" then return key, "base" end
+    local text, source = localization.Text(key)
+    return text, source
+end
+
+local function UiFormat(key, arguments)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" then return key, "unavailable" end
+    local text, source = localization.Format(key, arguments)
+    return text, source
+end
+
+-- A count slot record; unknown (never 0) without the seam.
+local function Count(value)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" then return {known=false} end
+    return localization.Count(value)
+end
+
+local function Say(key) PrintText(UiText(key)) end
+
+-- `legacy`, when given, is the exact English line for a slot value the
+-- template cannot carry (a name above the text-slot bound): it keeps the
+-- line instead of the seam's unavailable status.
+local function SayFormat(key, arguments, legacy)
+    local text, source = UiFormat(key, arguments)
+    if source == "unavailable" and legacy ~= nil then return Print(legacy) end
+    PrintText(text, source)
+end
+
+-- A colour code owned here around one reviewed line.
+local function SayColored(key, color)
+    local text, source = UiText(key)
+    PrintText(color .. text .. "|r", source)
+end
+
+-- A reviewed text of several chat lines (block): one chat line per line.
+local function SayLines(key)
+    local text, source = UiText(key)
+    for line in (tostring(text) .. "\n"):gmatch("(.-)\n") do PrintText(line, source) end
+end
+
+-- One reviewed line, then the reviewed session-only sentence when the saved
+-- root is read-only: two whole sentences on one chat line, joined here.
+local function SayWithSessionNote(text, source, sessionOnly)
+    if sessionOnly then
+        local note, noteSource = UiText("command.chat.session_only_note")
+        text = text .. " " .. note
+        if noteSource == "candidate" then source = "candidate" end
+    end
+    PrintText(text, source)
+end
+
+-- "candidate" while a translation is active, for data lines (names) that
+-- may hold translated labels; "base" (Print's path) in English.
+local function ActiveSource()
+    local localization = Nexus.Localization
+    local active = type(localization) == "table" and type(localization.ActiveLanguage) == "function"
+        and localization.ActiveLanguage() or nil
+    return (active ~= nil and active ~= localization.DEFAULT_LANGUAGE) and "candidate" or "base"
 end
 
 local function DisplayUntrusted(value, maxBytes, allowEmpty, allowLineBreaks)
@@ -483,7 +750,10 @@ local function BuildHudDisplayModel(base)
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
     HudPhaseFinish("hud.phase.assignment", phaseStarted)
     if assignment then
-        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot}
+        -- knownUnassigned: the adapter's positive fact, for the display of a
+        -- selected Auto-pick by rarity (Panel.RarityModeFacts). Display only.
+        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot,
+            knownUnassigned=assignment.knownUnassigned==true or nil}
     end
     if baseSnapshot.level == nil then
         input.level = DisplayCall(Adapter and Adapter.Level) or 0
@@ -502,6 +772,21 @@ local function BuildHudDisplayModel(base)
 
     local capture = Nexus.DpsCapture
     local player = UnitName and UnitName("player") or nil
+    -- Display only: the name this same read returned, kept when it is a
+    -- nonempty string other than the client's Unknown placeholder. It grants
+    -- no identity, owner or Store authority; no other game read is made.
+    if type(player) == "string" and player ~= "" and player ~= "Unknown"
+        and not (type(UNKNOWNOBJECT) == "string"
+            and player == UNKNOWNOBJECT) then
+        input.character = player
+    end
+    -- Presentation fact only: this same validated capture (nil included)
+    -- for the HUD's session-scoped destination cache. No other read; no
+    -- model, Store or assignment change.
+    local destinationPanel = Panel or Nexus.Panel
+    if destinationPanel then
+        DisplayCall(destinationPanel.ObserveDestinationCharacter, input.character, "capture")
+    end
     local progress = type(baseSnapshot.progress) == "table"
         and baseSnapshot.progress or {}
     local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
@@ -687,8 +972,10 @@ EnsureAutomationRuntime = function()
         buildProgress=BuildProgress,buildPanelProgress=BuildPanelProgress,
         appendAudit=AppendAudit,appendAutoLockEvent=AppendAutoLockEvent,
         print=Print,recordError=RecordError,now=GetTime,
+        -- The raw status line: Panel owns its user-text presentation and
+        -- converts it once (UserText.Message is not idempotent).
         onStatus=function(value)
-            if Panel and Panel.SetStatus then Panel.SetStatus(Nexus.UserText and Nexus.UserText.Message(value) or value) end
+            if Panel and Panel.SetStatus then Panel.SetStatus(value) end
         end,
     })
     return AutomationRuntime
@@ -818,6 +1105,7 @@ EnsureMainLifecycle = function()
         bindDependencies=BindLifecycleDependencies,
         ensureAutomation=function() return Automation() end,
         print=Print,
+        printText=PrintText,
         recordError=RecordError,
         recordStoreError=RecordStoreError,
         errorText=ErrorText,
@@ -842,17 +1130,31 @@ EH:RegisterEvent("CHAT_MSG_CHANNEL")
 EH:RegisterEvent("PLAYER_REGEN_DISABLED")
 EH:RegisterEvent("PLAYER_REGEN_ENABLED")
 EH:SetScript("OnEvent", function(_, event, ...)
+    local lifecycle = Lifecycle()
     if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
         local adapter=Adapter or Nexus.GameAdapter
         local observe=adapter and adapter.ObserveChoiceWorldEvent
         if type(observe)=="function" then pcall(observe,event) end
+        -- The HUD's cached destination character holds only inside this
+        -- world session: leave/logout block it, entering admits a fresh
+        -- existing capture. Presentation only.
+        local panel=Panel or Nexus.Panel
+        local observeDestination=panel and panel.ObserveDestinationCharacter
+        if type(observeDestination)=="function" then pcall(observeDestination,nil,event) end
         -- A loading screen inside this session keeps Auto selected and holds
         -- actions; logout or an unclassified entry turns it OFF.
-        if AutomationRuntime and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
+        -- Only an initialized runtime observes the world boundary. Before
+        -- start-up completes (Store admission, DiagnosticLogs.Init) a runtime
+        -- that Help's guide constructed early is treated exactly like the
+        -- absent one: its roll-record boundary would otherwise write
+        -- diagnostics into a saved root the Store has not admitted. The slash
+        -- and panel Auto toggles wait for initialization and the guide never
+        -- changes Auto, so there is no selection to hold or revoke yet.
+        if AutomationRuntime and lifecycle and lifecycle.IsInitialized()
+            and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
             Panel.SetAuto(false)
         end
     end
-    local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnEvent(event, ...) end
 end)
 -- CHAT_MSG_WHISPER is not registered here: no handler reads it (the addon
@@ -864,19 +1166,28 @@ EH:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local function CommandAuto()
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then
-        Print("Ordinary Automation stays OFF while an Orb run is active or unresolved. Stop and settle that operation first.")
+    if Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)() then
+        Say("command.chat.auto_blocked_by_orb")
         return false
     end
     local runtime = Automation()
+    -- The reply follows the request: only an attempt to turn Auto ON (it
+    -- was OFF before this toggle) can be the one the pause refused.
+    local wasEnabled = runtime and runtime.AutoEnabled() or false
     local enabled = runtime and runtime.ToggleAuto() or false
-    Print("Automation " .. (enabled and "ON" or "OFF"))
+    if not wasEnabled and not enabled
+        and Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        Say("command.chat.auto_blocked_by_pause")
+        if Panel.SetAuto then Panel.SetAuto(enabled) end
+        return
+    end
+    Say(enabled and "command.chat.automation_on" or "command.chat.automation_off")
     if Panel.SetAuto then Panel.SetAuto(enabled) end
 end
 
 local function CommandRestore()
-    Print(Adapter.RestoreAutoAccept() and "client auto-accept restored"
-        or "nothing to restore")
+    Say(Adapter.RestoreAutoAccept() and "command.chat.auto_accept_restored"
+        or "command.chat.nothing_to_restore")
     RequestRecompute()
 end
 
@@ -927,12 +1238,44 @@ local function StartupFailureLine(status)
     return "Startup failure: " .. table.concat(parts, "; ")
 end
 
+-- The facts of Nexus.RollingStatusLines (defined below; the diagnostic page
+-- keeps its English lines) said in chat through the seam: /nexus status,
+-- /nexus policy and /nexus trace. Strategy and policy names are data.
+-- Read-only, like the lines.
+local function SayRollingStatus()
+    local runtime = Automation()
+    local status = runtime and runtime.RollingPolicyStatus and runtime.RollingPolicyStatus()
+    if status then
+        if status.changePending then
+            SayFormat("command.chat.rolling_strategy_pending",
+                {strategy=tostring(status.inForce), selected=tostring(status.requested)})
+        else
+            SayFormat("command.chat.rolling_strategy", {strategy=tostring(status.inForce)})
+        end
+        local policy = status.lastPolicy and tostring(status.lastPolicy)
+            or UiText("command.value.rolling_decision_none")
+        if status.lastFallback then
+            SayFormat("command.chat.rolling_last_decision_fallback",
+                {policy=policy, reason=tostring(status.lastFallback)})
+        else
+            SayFormat("command.chat.rolling_last_decision", {policy=policy})
+        end
+    end
+    local recorder = Nexus.RollRecorder
+    local trace = recorder and recorder.Status and recorder.Status()
+    if trace then
+        SayFormat(trace.enabled and "command.chat.roll_recording_on" or "command.chat.roll_recording_off",
+            {saved=tostring(trace.retained or 0), limit=tostring(trace.cap or "?"),
+                failed=tostring(trace.failed), dropped=tostring(trace.dropped)})
+    end
+end
+
 local function CommandStatus()
     local startup=type(Nexus.StartupStatus)=="function" and Nexus.StartupStatus()
     if startup and startup.state~="ready" then
-        Print(startup.state=="failed"
-            and "Local controls ready; shared data preparation failed (see /nexus log errors)."
-            or "Local controls ready; Community, Leaderboard and Sync are preparing in the background.")
+        Say(startup.state=="failed"
+            and "command.chat.status_shared_failed"
+            or "command.chat.status_shared_preparing")
         local capacity = Nexus.LoadingStatus and type(Nexus.LoadingStatus.CapacityText)=="function"
             and Nexus.LoadingStatus.CapacityText(startup) or nil
         if capacity then Print(capacity) end
@@ -952,9 +1295,13 @@ local function CommandStatus()
     local wishlist = Adapter.Wishlist()
     local slots = Adapter.Slots()
     local owned = Adapter.Owned()
-    Print("v" .. Nexus.VERSION .. " build=" .. Nexus.RuntimeBuildLabel()
-        .. " -- level " .. Adapter.Level()
-        .. ", auto " .. ((Automation() and Automation().AutoEnabled()) and "ON" or "OFF"))
+    -- The version, build label and level are data; only the words around
+    -- them are reviewed text. Concatenation keeps the former conversions.
+    local version, build = "" .. Nexus.VERSION, "" .. Nexus.RuntimeBuildLabel()
+    local level = "" .. Adapter.Level()
+    SayFormat((Automation() and Automation().AutoEnabled())
+        and "command.chat.status_version_auto_on" or "command.chat.status_version_auto_off",
+        {version=version, build=build, level=level})
     if wishlist then
         local source = (wishlist.source == "designed" and "Echo Wishlist build")
             or (wishlist.source == "active" and "active loadout") or "wishlist"
@@ -968,7 +1315,7 @@ local function CommandStatus()
         Print("TARGET: none -- advisor only" .. (note and ("  (" .. note .. ")") or ""))
     end
     if not slots then
-        Print("LOADOUTS: slot data not loaded yet (waiting on the server).")
+        Say("command.chat.status_loadouts_waiting")
     else
         local snapshots, designs = 0, 0
         for _, slot in pairs(slots.bySlot) do
@@ -979,26 +1326,34 @@ local function CommandStatus()
         local active = slots.activeSlot
         if active ~= 0 and slots.bySlot[active] then
             local slot = slots.bySlot[active]
-            Print(string.format("ACTIVE slot %d '%s': %s, %d echoes", active,
-                (slot.name ~= "" and slot.name) or "?",
+            local slotName = (slot.name ~= "" and slot.name) or "?"
+            local legacy = string.format("ACTIVE slot %d '%s': %s, %d echoes", active,
+                slotName,
                 slot.verified and "Saved Build with confirmed saved-run behavior"
                     or "desired plan (not a saved-run guarantee)",
-                #slot.echoes))
+                #slot.echoes)
+            SayFormat(slot.verified and "command.chat.status_active_saved_build"
+                or "command.chat.status_active_desired_plan",
+                {slot=string.format("%d", active), name=string.format("%s", slotName),
+                    count=Count(#slot.echoes)}, legacy)
         else
-            Print("ACTIVE: no build activated right now.")
+            Say("command.chat.status_active_none")
         end
-        Print(string.format("READABLE: %d confirmed Saved Build(s), %d desired Wishlist plan(s)",
-            snapshots, designs))
+        SayFormat("command.chat.status_readable", {saved=Count(snapshots),
+            plans=Count(designs)})
         if wishlist and Ratchet and Ratchet.BestSlot then
             local plan = Strategy.Compile(catalog, wishlist, Store.Settings())
             local best = Ratchet.BestSlot(slots, plan, catalog)
-            Print(best and ("Saved-build activation candidate: slot " .. best .. " when the server permits activation.")
-                or "No confirmed Saved Build yet; complete and save your first run.")
+            if best then
+                SayFormat("command.chat.status_activation_candidate", {slot="" .. best})
+            else
+                Say("command.chat.status_no_saved_build")
+            end
         end
     end
     Print(string.format("OWNED this run: %d echoes (%s).", owned.distinct or 0,
         owned.synced and "synced" or "not synced yet"))
-    for _, line in ipairs(Nexus.RollingStatusLines and Nexus.RollingStatusLines() or {}) do Print(line) end
+    SayRollingStatus()
 end
 
 local function CommandWishlist()
@@ -1008,33 +1363,39 @@ local function CommandWishlist()
         if note then
             Print(note)
         else
-            Print("no wishlist detected -- running as advisor only.")
-            Print("Design one in the Echo Journal: 'New Wishlist' (the 'Echo Wishlist'")
-            Print("section), pick its echoes, and save it. The addon reads that build.")
+            Say("command.chat.wishlist_none_detected")
+            SayLines("command.chat.wishlist_design_hint")
         end
         return
     end
     local catalog = Adapter.Catalog()
-    local source = (wishlist.source == "designed" and "your Echo Wishlist build")
-        or (wishlist.source == "active" and "your active loadout")
-        or "your wishlist"
+    local source = UiText((wishlist.source == "designed" and "command.value.wishlist_source_designed")
+        or (wishlist.source == "active" and "command.value.wishlist_source_active")
+        or "command.value.wishlist_source_other")
     local families = {}
     for _, echo in ipairs(wishlist.entries) do families[echo.family] = true end
     local familyCount = 0
     for _ in pairs(families) do familyCount = familyCount + 1 end
+    local unnamed = UiText("main.value.unnamed_wishlist")
     local displayName = DisplayUntrusted(
-        (wishlist.name ~= "" and wishlist.name) or "(unnamed)",
-        1024, false) or "(unnamed)"
-    Print(string.format("reading |cff7fff7f'%s'|r (from %s) -- %d echoes, %d families",
-        displayName, source, #wishlist.entries, familyCount))
+        (wishlist.name ~= "" and wishlist.name) or unnamed,
+        1024, false) or unnamed
+    -- The name keeps its code-owned colour and quotes around it (a slot).
+    SayFormat("command.chat.wishlist_reading",
+        {name="|cff7fff7f'" .. displayName .. "'|r", source=source,
+            echoes=Count(#wishlist.entries), families=Count(familyCount)},
+        string.format("reading |cff7fff7f'%s'|r (from %s) -- %d echoes, %d families",
+            displayName, source, #wishlist.entries, familyCount))
     local names = {}
     for _, echo in ipairs(wishlist.entries) do
         local row = catalog and catalog.rows[echo.spellId]
-        names[#names + 1] = (row and row.name or ("spell " .. echo.spellId))
+        names[#names + 1] = (row and row.name
+            or UiFormat("main.value.unknown_spell", {id="" .. echo.spellId}))
             .. (echo.stacks > 1 and (" x" .. echo.stacks) or "")
     end
     table.sort(names)
-    Print("  " .. table.concat(names, ", "))
+    -- Data (Echo names); in a translation they may hold translated labels.
+    PrintText("  " .. table.concat(names, ", "), ActiveSource())
 end
 
 local function CommandProgress(showMissing)
@@ -1042,53 +1403,67 @@ local function CommandProgress(showMissing)
     local wishlist = Adapter.Wishlist()
     local owned = Adapter.Owned()
     if not wishlist then
-        Print("no wishlist set -- advisor only, nothing to track.")
+        Say("command.chat.progress_no_wishlist")
         return
     end
     local plan = Strategy.Compile(catalog,
         WishlistWithLockTargets(wishlist, catalog), Store.Settings())
     local have, total, missing = WishlistProgress(plan, owned, catalog)
     local percent = (total > 0) and math.floor(have / total * 100 + 0.5) or 0
-    Print(string.format("this run: |cff7fff7f%d/%d|r echoes (%d%%) -- %d still short",
-        have, total, percent, #missing))
-    if showMissing and #missing > 0 then Print("  " .. table.concat(missing, ", ")) end
+    -- The coloured have/total pair is a code-owned slot.
+    SayFormat("command.chat.progress_this_run",
+        {progress=string.format("|cff7fff7f%d/%d|r", have, total),
+            percent=string.format("%d", percent), short=Count(#missing)})
+    if showMissing and #missing > 0 then
+        PrintText("  " .. table.concat(missing, ", "), ActiveSource())
+    end
 end
 
 local function CommandDps()
     local capture = Nexus.DpsCapture
-    if not capture then Print("DPS capture module not loaded"); return end
+    if not capture then Say("command.chat.dps_module_missing"); return end
     if capture.IsDetailsAvailable() then
-        Print("|cff4dff80DPS capture is active.|r")
-        Print("Fight the Lich King or hit a training dummy to record your best.")
+        SayColored("command.chat.dps_active", "|cff4dff80")
+        Say("command.chat.dps_record_hint")
     else
-        Print("|cffff9040Details! damage meter is not installed.|r")
-        Print("Install Details! to enable DPS tracking on your builds.")
+        SayColored("command.chat.dps_details_missing", "|cffff9040")
+        Say("command.chat.dps_install_details")
     end
     if Nexus.lastDpsNote then
         local identity = Nexus and Nexus.Identity
         local displayNote = identity and identity.DisplaySafeText
             and identity.DisplaySafeText(
                 Nexus.lastDpsNote, 2048, true, true) or nil
-        if displayNote then Print("Last session: " .. displayNote) end
+        if displayNote then
+            SayFormat("command.chat.dps_last_session", {note=displayNote},
+                "Last session: " .. displayNote)
+        end
     end
     local wishlist = Adapter.Wishlist()
     if wishlist and capture.GetEchoKey then
-        Print("Selected wishlist key: " .. tostring(capture.GetEchoKey(wishlist.entries)))
+        local key = tostring(capture.GetEchoKey(wishlist.entries))
+        SayFormat("command.chat.dps_selected_key", {key=key}, "Selected wishlist key: " .. key)
     end
     if capture.GetCurrentEchoKey then
-        Print("Current tracked Echo key: " .. tostring(capture.GetCurrentEchoKey()))
+        local key = tostring(capture.GetCurrentEchoKey())
+        SayFormat("command.chat.dps_current_key", {key=key}, "Current tracked Echo key: " .. key)
     end
-    Print("Open /nexus log and select DPS for the full capture trace.")
+    Say("command.chat.dps_log_hint")
 end
 
 local function CommandSync()
     if Nexus.Sync then
         local ok, err = Nexus.Sync.RequestSync()
-        Print(ok == nil and tostring(err or "preparing sync data")
-            or ok and "asking other players for their builds -- results appear in /nexus builds"
-            or tostring(err))
+        -- A reason Sync returns is its own text and is shown as before.
+        if ok == nil and not err then
+            Say("command.chat.sync_preparing")
+        elseif ok == nil or not ok then
+            Print(tostring(err))
+        else
+            Say("command.chat.sync_requested")
+        end
     else
-        Print("sync unavailable")
+        Say("command.chat.sync_unavailable")
     end
 end
 
@@ -1136,14 +1511,24 @@ end
 -- for this session and the reply says it is not saved.
 local function CommandAnchor(settings, argument)
     local readOnly = Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
-    local sessionOnly = type(readOnly) == "function" and readOnly()
-        and " for this session only (saved data is kept unchanged and read-only)" or ""
+    local sessionOnly = type(readOnly) == "function" and readOnly() and true or false
     if argument == "off" or argument == nil then
         settings.anchorSpellId = nil
-        Print("Adaptive Power preference cleared" .. sessionOnly)
+        Say(sessionOnly and "command.chat.anchor_cleared_session" or "command.chat.anchor_cleared")
     else
-        settings.anchorSpellId = tonumber(argument)
-        Print("Adaptive Power preference set to " .. tostring(settings.anchorSpellId) .. sessionOnly)
+        -- Only an exact positive integer is a spell ID (the saved-root rule:
+        -- finite, whole, > 0; no upper bound is assumed). Anything else keeps
+        -- the previous preference and says the command's usage.
+        local spell = tonumber(argument)
+        if not (type(spell) == "number" and spell == spell
+            and spell < math.huge and spell == math.floor(spell) and spell > 0) then
+            -- The command syntax is protocol: a code-owned slot.
+            SayFormat("command.chat.usage", {usage="/nexus anchor <spell ID>|off"})
+            return
+        end
+        settings.anchorSpellId = spell
+        SayFormat(sessionOnly and "command.chat.anchor_set_session" or "command.chat.anchor_set",
+            {spell=tostring(settings.anchorSpellId)})
     end
     RequestRecompute()
 end
@@ -1173,11 +1558,50 @@ function Nexus.RollingStatusLines()
     return lines
 end
 
-local function CommandHelp()
+-- /nexus reference (and any unknown command): the full reference pages, the
+-- optional manual, with the command summary. Read-only, also during loading.
+local function CommandReference()
     if Nexus.Help then Nexus.Help.Show() end
-    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs | policy | trace")
-    Print("Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.")
-    Print("Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.")
+    -- The command syntax is protocol: it is a code-owned slot, never translated.
+    SayFormat("command.chat.reference_commands",
+        {commands="/nexus help | guide | reference | editor | panel | status | loading | orbs | policy | trace"})
+    SayFormat("command.chat.reference_rolling_permissions",
+        {reroll="/nexus reroll on|off", freeze="/nexus freeze on|off"})
+    SayFormat("command.chat.reference_rolling_strategy",
+        {policy="/nexus policy adaptive|released", trace="/nexus trace"})
+    Say("command.chat.reference_session_pause")
+    -- Random Roll: said through its key; its rule and limits are two reviewed
+    -- texts passed as text slots and the command syntax is a code-owned slot
+    -- like the lines above. The legacy line keeps the exact English when the
+    -- seam cannot carry it. Passive: it reads and changes nothing.
+    local randomRollRule = UiText("command.chat.reference_random_roll_rule")
+    local randomRollLimits = UiText("command.chat.reference_random_roll_limits")
+    SayFormat("command.chat.reference_random_roll",
+        {command="/nexus leveling on|off", rule=randomRollRule, limits=randomRollLimits},
+        "/nexus leveling on|off -- Random Roll: optional, off by default. With no Wishlist at levels 2-79 "
+        .."Auto takes the highest-rarity offer (first current offer on a tie); needs Auto ON and autoPick; "
+        .."no reroll or spending; no new pick at level 80.")
+end
+
+-- /nexus help and /nexus tutorial (design/current "Nexus Setup Alternative":
+-- Help and Setup open the coach at the step you were on): Guided setup
+-- through Help's own route (Help.OpenGuide), also during loading. Opening it
+-- changes nothing. The reply says where the full manual moved, as the design
+-- asks for this changed habit. When the coach does not open (an Auto warning
+-- waits for its answer, or it is not loaded), Help.OpenGuide has printed why
+-- and nothing else opens: the reply only names the retry and the separate
+-- /nexus reference, which stays the player's own choice.
+local function CommandHelp()
+    local help = Nexus.Help
+    if not (help and type(help.OpenGuide) == "function") then
+        Say("command.chat.help_unavailable")
+        return
+    end
+    if help.OpenGuide() == true then
+        Say("command.chat.help_opened")
+        return
+    end
+    Say("command.chat.help_not_opened")
 end
 
 EnsureMainCommands = function()
@@ -1192,18 +1616,24 @@ EnsureMainCommands = function()
         end,
         notInitialized=function()
             local status=type(Nexus.StartupStatus)=="function" and Nexus.StartupStatus()
-            Print(status and status.state=="failed"
-                and ("Startup stopped: "..tostring(status.reason or "validation failed"))
-                or "Preparing local saved data; controls unlock after validation completes.")
+            if status and status.state=="failed" then
+                -- The reason is a code (data); its absent default is reviewed text.
+                local reason = status.reason and tostring(status.reason)
+                    or UiText("command.value.startup_validation_failed")
+                SayFormat("command.chat.startup_stopped", {reason=reason},
+                    "Startup stopped: "..reason)
+            else
+                Say("command.chat.startup_preparing")
+            end
             local line = status and status.state=="failed" and StartupFailureLine(status)
             if line then Print(line) end
             if status and status.reason=="LEGACY_DISPOSITION_REAUTH_REQUIRED" then
                 local lifecycle=Lifecycle()
                 local recovery=lifecycle and lifecycle.LegacyRecoveryStatus and lifecycle.LegacyRecoveryStatus()
                 if recovery and recovery.state=="preserved" then
-                    Print("Older data is preserved. Type /reload to start Nexus with your current setup.")
+                    Say("command.chat.legacy_preserved_reload")
                 elseif recovery and recovery.state=="waiting" then
-                    Print("Older saved data needs your decision. Type /nexus legacy to review it. Nothing is changed unless you confirm.")
+                    Say("command.chat.legacy_waiting")
                 end
             end
         end,
@@ -1215,12 +1645,12 @@ EnsureMainCommands = function()
             legacy=function(_,normalized)
                 local lifecycle=Lifecycle()
                 if not (lifecycle and lifecycle.LegacyRecoveryOffer) then
-                    Print("No older-data decision is waiting.")
+                    Say("command.chat.legacy_not_waiting")
                     return
                 end
                 local code=normalized:match("^legacy%s+keep%s+(%S+)%s*$")
                 if normalized~="legacy" and not normalized:match("^legacy%s+keep%s*$") and not code then
-                    Print("Use /nexus legacy to review older saved data, then /nexus legacy keep <code>.")
+                    Say("command.chat.legacy_usage")
                     return
                 end
                 local result
@@ -1231,31 +1661,45 @@ EnsureMainCommands = function()
                 end
                 local state=result.state
                 if state=="notWaiting" then
-                    Print("No older-data decision is waiting.")
+                    Say("command.chat.legacy_not_waiting")
                 elseif state=="offer" then
-                    Print("Older saved data (WishlistRealizerDB) was found next to your current data. Your current setup is unchanged. Nothing is deleted, imported or merged.")
-                    Print(string.format("Found: %d tables, about %d bytes of data. Code: %s",
-                        tonumber(result.tables) or 0, tonumber(result.bytes) or 0, tostring(result.code)))
-                    Print("Confirming stores a complete copy in an archive inside your saved data and then clears WishlistRealizerDB. Another addon that reads that variable would find it empty.")
-                    Print("To keep your current setup and do this, type: /nexus legacy keep "..tostring(result.code))
-                    Print("Then type /reload.")
+                    Say("command.chat.legacy_offer_found")
+                    local resultCode = tostring(result.code)
+                    SayFormat("command.chat.legacy_offer_size",
+                        {tables=string.format("%d", tonumber(result.tables) or 0),
+                            bytes=string.format("%d", tonumber(result.bytes) or 0), code=resultCode},
+                        string.format("Found: %d tables, about %d bytes of data. Code: %s",
+                            tonumber(result.tables) or 0, tonumber(result.bytes) or 0, resultCode))
+                    Say("command.chat.legacy_offer_effect")
+                    -- The command with its code is protocol: a code-owned slot.
+                    local command = "/nexus legacy keep "..resultCode
+                    SayFormat("command.chat.legacy_offer_confirm", {command=command},
+                        "To keep your current setup and do this, type: "..command)
+                    Say("command.chat.legacy_offer_reload")
                 elseif state=="blocked" then
-                    Print("The older saved data cannot be kept automatically ("..tostring(result.reason)
-                        ..(result.detail and (": "..tostring(result.detail)) or "").."). Nothing was changed. Your current setup is unchanged.")
+                    local reason = tostring(result.reason)
+                        ..(result.detail and (": "..tostring(result.detail)) or "")
+                    SayFormat("command.chat.legacy_blocked", {reason=reason},
+                        "The older saved data cannot be kept automatically ("..reason
+                            .."). Nothing was changed. Your current setup is unchanged.")
                 elseif state=="alreadyPreserved" or (state=="preserved" and not code) then
-                    Print("Older data is already preserved. Type /reload to start Nexus with your current setup.")
+                    Say("command.chat.legacy_already_preserved")
                 elseif state=="preserved" then
-                    Print("Older data preserved separately (code "..tostring(result.code).."). Your current setup is unchanged. Type /reload to start Nexus with it.")
+                    local resultCode = tostring(result.code)
+                    SayFormat("command.chat.legacy_preserved_code", {code=resultCode},
+                        "Older data preserved separately (code "..resultCode.."). Your current setup is unchanged. Type /reload to start Nexus with it.")
                 else
                     if result.reason=="ROLLBACK_INCOMPLETE" then
-                        Print("The older data is safe in the archive, but the older copy could not be put back (ROLLBACK_INCOMPLETE). Type /reload; nothing is lost.")
+                        Say("command.chat.legacy_rollback_incomplete")
                     else
-                        Print("Older data was not changed: "..tostring(result.reason)..".")
+                        local reason = tostring(result.reason)
+                        SayFormat("command.chat.legacy_not_changed", {reason=reason},
+                            "Older data was not changed: "..reason..".")
                     end
                     if result.reason=="INPUT_DRIFT" then
-                        Print("The saved data changed. Type /reload, then /nexus legacy again.")
+                        Say("command.chat.legacy_input_drift")
                     elseif result.reason=="NO_OFFER" or result.reason=="CODE_MISMATCH" then
-                        Print("Type /nexus legacy for the current code.")
+                        Say("command.chat.legacy_current_code")
                     end
                 end
             end,
@@ -1266,13 +1710,35 @@ EnsureMainCommands = function()
                 if Nexus.SupportReportUI then
                     Nexus.SupportReportUI.Show()
                 else
-                    print("|cffff6060Nexus:|r the support report view is not "
+                    -- Without the seam (a broken install) the English stays.
+                    local text = Nexus.Localization
+                        and UiText("command.chat.report_view_missing")
+                        or ("the support report view is not "
                         .. "loaded. Reinstall the addon folder, or send the "
                         .. "text of the error you are seeing.")
+                    print("|cffff6060Nexus:|r " .. text)
                 end
             end,
             loading=function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end
+            end,
+            -- Session pause (answered before the initialization gate). Only
+            -- the session barrier changes: no step, save, send or toggle.
+            sessionPause=function(_,normalized)
+                local pause=Nexus.SessionPause
+                if not pause then Say("command.chat.pause_unavailable");return end
+                local was=pause.IsPaused()
+                if normalized=="pause" then
+                    pause.Pause()
+                    Say(was and "command.chat.pause_already" or "command.chat.pause_started")
+                elseif normalized=="resume" then
+                    pause.Resume()
+                    Say(was and "command.chat.resume_done" or "command.chat.resume_not_paused")
+                elseif pause.IsPaused() then
+                    Say("command.chat.pause_status_paused")
+                else
+                    Say("command.chat.pause_status_running")
+                end
             end,
             auto=function() CommandAuto() end,
             -- Rolling strategy selector. The saved setting is written at once;
@@ -1282,47 +1748,48 @@ EnsureMainCommands = function()
                     settings.rollingPolicy=value
                     RequestRecompute()
                     local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
-                    local sessionOnly=type(readOnly)=="function" and readOnly()
-                        and " This session only: saved data is kept unchanged and read-only." or ""
-                    Print("Rolling strategy selected: "..value..". It applies at the next safe action boundary; no pending action is cleared or repeated."..sessionOnly)
+                    local sessionOnly=type(readOnly)=="function" and readOnly() and true or false
+                    local text, source = UiFormat("command.chat.policy_selected", {strategy=value})
+                    SayWithSessionNote(text, source, sessionOnly)
                 elseif value~=nil then
-                    Print("Use /nexus policy adaptive|released")
+                    SayFormat("command.chat.usage", {usage="/nexus policy adaptive|released"})
                 end
-                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                SayRollingStatus()
                 if value==nil then
-                    Print("adaptive = experimental strategy (default). released = the earlier strategy. See /nexus help.")
+                    Say("command.chat.policy_values")
                 end
             end,
             -- Automatic local roll record: open it, switch it, or clear it.
             trace=function(settings,_,value)
                 local recorder=Nexus.RollRecorder
-                if not recorder then Print("The roll recorder is not loaded.") return end
+                if not recorder then Say("command.chat.trace_recorder_missing") return end
                 if value=="off" or value=="on" then
                     settings.rollTrace=(value=="on")
                     local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
-                    local sessionOnly=type(readOnly)=="function" and readOnly()
-                        and " This session only: saved data is kept unchanged and read-only." or ""
-                    Print("Local roll recording is now "..value..". Nothing is ever sent from this computer."..sessionOnly)
+                    local sessionOnly=type(readOnly)=="function" and readOnly() and true or false
+                    local text, source = UiText(value=="on" and "command.chat.trace_now_on" or "command.chat.trace_now_off")
+                    SayWithSessionNote(text, source, sessionOnly)
                 elseif value=="clear" then
                     local ok=Nexus.DiagnosticLogs and Nexus.DiagnosticLogs.Clear(recorder.HISTORY)
-                    Print(ok and "Local roll record cleared." or "The local roll record could not be cleared.")
+                    Say(ok and "command.chat.trace_cleared" or "command.chat.trace_clear_failed")
                 elseif value~=nil then
-                    Print("Use /nexus trace, /nexus trace on|off|clear")
+                    SayFormat("command.chat.usage", {usage="/nexus trace, /nexus trace on|off|clear"})
                     return
                 end
-                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                SayRollingStatus()
                 if value==nil then
                     if Nexus.LogViewer then
                         Nexus.LogViewer.Show("trace")
-                        Print("The Roll trace tab holds the report. Copy each page in order and send it privately, never in public.")
+                        Say("command.chat.trace_tab_hint")
                     else
-                        Print("log viewer unavailable")
+                        Say("command.chat.log_viewer_unavailable")
                     end
                 end
             end,
             rollingOption=function(settings,_,argument)
                 if not argument or (argument.value~="on" and argument.value~="off") then
-                    Print("Use /nexus reroll on|off, /nexus freeze on|off, or /nexus currentlocks on|off")
+                    SayFormat("command.chat.rolling_option_usage", {reroll="/nexus reroll on|off",
+                        freeze="/nexus freeze on|off", currentlocks="/nexus currentlocks on|off"})
                     return
                 end
                 local key=argument.option=="currentlocks" and "useCurrentLocksForUntagged"
@@ -1330,20 +1797,49 @@ EnsureMainCommands = function()
                 settings[key]=argument.value=="on"
                 RequestRecompute()
                 local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
-                local sessionOnly=type(readOnly)=="function" and readOnly()
-                    and " This session only: saved data is kept unchanged and read-only." or ""
+                local sessionOnly=type(readOnly)=="function" and readOnly() and true or false
+                local text, source
                 if argument.option=="currentlocks" then
-                    Print("Unmarked Wishlist locked targets: " .. (argument.value=="on"
-                        and "suggest current matching locked Echoes on opening/import."
-                        or "choose intended locked targets manually.") .. " Existing confirmed plans are unchanged." .. sessionOnly)
-                else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate." .. sessionOnly) end
+                    text, source = UiText(argument.value=="on" and "command.chat.current_locks_on"
+                        or "command.chat.current_locks_off")
+                else
+                    -- The option and its value are the command's own words (protocol).
+                    text, source = UiFormat("command.chat.rolling_permission",
+                        {option=argument.option, value=argument.value})
+                end
+                SayWithSessionNote(text, source, sessionOnly)
+            end,
+            -- Optional "Auto-pick while leveling": the explicit on/off setter
+            -- and its status. It writes one exact boolean into the settings
+            -- this session runs with (the saved settings, or a read-only
+            -- root's session view), and never selects Auto, resumes a pause
+            -- or grants a resource. English only: no translation key has
+            -- this meaning yet.
+            leveling=function(settings,_,value)
+                if value=="on" or value=="off" then
+                    settings.autoPickLeveling=(value=="on")
+                    RequestRecompute()
+                elseif value~=nil then
+                    Print("usage: /nexus leveling on|off")
+                    return
+                end
+                local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                local sessionOnly=type(readOnly)=="function" and readOnly() and true or false
+                local on=type(settings)=="table" and settings.autoPickLeveling==true
+                Print("Random Roll: "..(on and "ON" or "OFF")
+                    ..((value and sessionOnly) and " (this session only: saved data is read-only)" or ""))
+                Print("Random Roll (optional, off by default) picks by rarity, not at random: with no Wishlist "
+                    .."assigned, at levels 2 to 79, Auto takes the highest-rarity Echo offered, the first current "
+                    .."offer on a tie. It needs Auto ON and autoPick; turning it on does not turn Auto ON. It never "
+                    .."rerolls, banishes, freezes, spends, saves or uses Orbs, and makes no new pick at level 80. "
+                    .."/nexus leveling on|off")
             end,
             prototype=function()
-                Print("Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus help explains each mode.")
+                Say("command.chat.prototype_intro")
                 Print("/nexus reroll on|off | /nexus freeze on|off | /nexus log errors")
                 local wire=Nexus.SyncWire and Nexus.SyncWire.Stats()
                 if wire then Print("Wire: "..tostring(wire.policy).."; CTL="..tostring(wire.available).."; suspended="..tostring(wire.suspended)) end
-                Print("Back up WTF and your previous Nexus folder before testing. No native gameplay acceptance is claimed.")
+                Say("command.chat.prototype_backup")
             end,
             panel=function() Panel.Toggle() end,
             restore=function() CommandRestore() end,
@@ -1354,11 +1850,11 @@ EnsureMainCommands = function()
             missing=function() CommandProgress(true) end,
             editor=function()
                 if Nexus.WishlistEditor then Nexus.WishlistEditor.Toggle()
-                else Print("wishlist editor unavailable") end
+                else Say("command.chat.editor_unavailable") end
             end,
             syncdebug=function()
                 if Nexus.LogViewer then Nexus.LogViewer.Show("sync")
-                else Print("log viewer unavailable") end
+                else Say("command.chat.log_viewer_unavailable") end
             end,
             probe=function(_, _, target)
                 if target ~= "" and Nexus.Sync and Nexus.Sync.SendStatusTo then
@@ -1371,36 +1867,36 @@ EnsureMainCommands = function()
             end,
             nameplate=function()
                 if Nexus.Nameplate then
-                    Print("Mouseover tooltip: active.")
-                    Print("Nexus users seen in shared records are tagged, with leaderboard data when available.")
-                else Print("Nameplate module not loaded.") end
+                    Say("command.chat.nameplate_active")
+                    Say("command.chat.nameplate_tagging")
+                else Say("command.chat.nameplate_missing") end
             end,
             dps=function() CommandDps() end,
             sync=function() CommandSync() end,
             builds=function()
                 if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Toggle()
-                else Print("Nexus Builds unavailable") end
+                else Say("command.chat.builds_unavailable") end
             end,
             leaderboard=function()
                 if Nexus.Leaderboard then Nexus.Leaderboard.Toggle()
-                else Print("Nexus Leaderboard unavailable") end
+                else Say("command.chat.leaderboard_unavailable") end
             end,
             errors=function()
                 if Nexus.LogViewer then Nexus.LogViewer.Show("errors")
-                else Print("log viewer unavailable") end
+                else Say("command.chat.log_viewer_unavailable") end
             end,
             performance=function()
                 if Nexus.LogViewer then Nexus.LogViewer.Show("perf")
-                else Print("performance diagnostics unavailable") end
+                else Say("command.chat.performance_unavailable") end
             end,
             logclear=function()
                 local ok, cleared = pcall(ClearDiagnosticLogs, "state")
-                Print(ok and cleared and "diagnostic history cleared"
-                    or "could not clear diagnostic history")
+                Say(ok and cleared and "command.chat.logclear_done"
+                    or "command.chat.logclear_failed")
             end,
             log=function()
                 if Nexus.LogViewer then Nexus.LogViewer.Toggle()
-                else Print("log viewer unavailable") end
+                else Say("command.chat.log_viewer_unavailable") end
             end,
             err=function() CommandErr() end,
             undemote=function()
@@ -1410,17 +1906,32 @@ EnsureMainCommands = function()
             end,
             overlay=function()
                 if Nexus.WishlistOverlay then Nexus.WishlistOverlay.Toggle()
-                else Print("overlay unavailable") end
+                else Say("command.chat.overlay_unavailable") end
             end,
             anchor=function(settings, _, argument)
                 CommandAnchor(settings, argument)
             end,
             help=function() CommandHelp() end,
+            reference=function() CommandReference() end,
+            -- /nexus guide: the guided setup coach through Help's own route
+            -- (Help.OpenGuide), which refuses in chat while an Auto warning
+            -- waits. /nexus help and /nexus tutorial open the same coach
+            -- (CommandHelp); /nexus reference opens the reference pages.
+            guide=function()
+                local help = Nexus.Help
+                local opened = help and type(help.OpenGuide) == "function"
+                    and help.OpenGuide() == true
+                Say(opened and "command.chat.guide_opened"
+                    or "command.chat.guide_not_opened")
+            end,
             update=function()
                 local status = Nexus.Updates and Nexus.Updates.Status and Nexus.Updates.Status()
-                if not status then Print("Update status is unavailable."); return end
-                Print(status.detail)
-                Print("Releases page: " .. status.url)
+                if not status then Say("command.chat.update_unavailable"); return end
+                -- Updates.Status words its detail through the seam and says
+                -- whether a translation is in it (detailSource).
+                PrintText(status.detail, status.detailSource)
+                SayFormat("command.chat.update_releases_page", {url="" .. status.url},
+                    "Releases page: " .. status.url)
                 if Nexus.Panel and Nexus.Panel.ShowUpdateStatus then Nexus.Panel.ShowUpdateStatus() end
             end,
         },
@@ -1434,5 +1945,5 @@ SLASH_NEXUS3 = "/wr"   -- legacy alias kept for muscle memory
 SlashCmdList["NEXUS"] = function(message)
     local commands = EnsureMainCommands and EnsureMainCommands()
     if commands then return commands.Dispatch(message) end
-    Print("not initialized yet")
+    Say("command.chat.not_initialized")
 end

@@ -132,6 +132,8 @@ local sampleTicker     = 0
 local lastTargetGUID   = nil
 local lastTargetName   = nil
 local sessionCategory  = nil
+-- The session pause transitions when this combat's capture began (issue #171).
+local sessionPauseEpoch = 0
 local MAX_DEBUG_LINES   = 120
 local DEBUG_TRIM_AT     = 150
 local DEBUG_TEXT_BYTES  = 2048
@@ -1094,7 +1096,16 @@ local function NpcIdFromGUID(guid)
     if id then return tonumber(id) end
     -- Some 3.3.5 cores expose a simple Creature-<entry>-... form.
     id = guid:match("[Cc]reature[^%d]+(%d+)")
-    return tonumber(id)
+    if id then return tonumber(id) end
+    -- The legacy 3.3.5a hexadecimal form, creature units only: exactly "0x",
+    -- the F130 high part, a six-digit hexadecimal entry and a six-digit
+    -- counter (16 digits after "0x"), with nothing before or after. Only the
+    -- entry is converted; the 64-bit GUID never becomes a Lua number. Any
+    -- other prefix, length or digit is not an entry, and the name check below
+    -- still applies to it.
+    local entry = guid:match("^0x[Ff]130(%x%x%x%x%x%x)%x%x%x%x%x%x$")
+    if entry then return tonumber(entry, 16) end
+    return nil
 end
 
 local function ClassifyTarget(guid, name)
@@ -2745,7 +2756,10 @@ function DPS.PumpSyncHash()
     end
     local applied = DpsDigest.PumpPending(DpsDigest.CLAIMS_PER_PUMP)
     local quick = false
-    if applied then _, quick = DpsDigest.RebuildSmallDirty() end
+    if applied then
+        local _
+        _, quick = DpsDigest.RebuildSmallDirty()
+    end
     local ready, progressed = DpsDigest.PumpBuckets()
     ready = ready and applied
     progressed = progressed or quick or not applied
@@ -3482,9 +3496,13 @@ local function FindCharacterRow(rows, name)
     -- Some legacy/UI callers know only the displayed name. Realm-qualified
     -- storage remains collision-free; the read fallback selects the strongest
     -- matching row when that caller cannot express a realm.
+    -- The fixed name's key is computed once for the whole scan; equality with
+    -- a non-nil key is exactly Identity.SamePlayer's contract.
+    local nameKey = Identity.PlayerKey(name)
     for _, candidate in pairs(rows) do
         if type(candidate) == "table"
-            and Identity.SamePlayer(candidate.player, name)
+            and nameKey ~= nil
+            and Identity.PlayerKey(candidate.player) == nameKey
             and BetterRow(candidate, row) then
             row = candidate
         end
@@ -3823,6 +3841,15 @@ end
 
 local function CommitSession(category)
     inCombat = false
+    -- The session pause transitions when this capture began (issue #171).
+    -- The final sample, the Echo reads and the Community calls below run other
+    -- code; a Pause (or Pause and Resume) inside any of them ends this capture
+    -- before its first write, its share and its later page cleanup.
+    local captureEpoch = sessionPauseEpoch
+    local function Crossed()
+        local pause = Nexus.SessionPause
+        return pause ~= nil and (pause.IsPaused() or pause.Status().epoch ~= captureEpoch)
+    end
     Debug("combat end; category=" .. tostring(category) .. ", target=" .. tostring(lastTargetName))
     if not category then
         Nexus.lastDpsNote = "ignored: target was not a training dummy or the Lich King"
@@ -3950,6 +3977,11 @@ local function CommitSession(category)
             Debug(Nexus.lastDpsNote)
             return
         end
+        if Crossed() then
+            Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+            Debug(Nexus.lastDpsNote)
+            return
+        end
         local personalRow = {
             dps = dpsFloor, level = level, ts = stamp,
             duration = elapsed, player = player,
@@ -3979,6 +4011,8 @@ local function CommitSession(category)
             -- retained page creation and this removal are two catalog
             -- mutations, and the second must not race the first's candidate.
             local function RemoveSupersededPage(currentId)
+                -- A new catalog removal: not after a pause transition.
+                if Crossed() then return end
                 local oldBuildId = previousCharacterBest
                     and previousCharacterBest.buildId
                 if not (oldBuildId and oldBuildId ~= currentId and C
@@ -4040,25 +4074,34 @@ local function CommitSession(category)
         if Nexus.DataRetention and Nexus.DataRetention.Request then
             Nexus.DataRetention.Request("personal DPS best committed")
         end
-        local catLabel = category == "lk" and "Lich King" or "Training Dummy"
-        local rawSetLabel = build and build.title or "current Echo set"
+        -- Issues #143-#148: the chat words come from Nexus.Localization at
+        -- this display boundary; the build title, the DPS figure (formatted
+        -- here) and the colour codes are inserted around them unchanged.
+        local L10n = Nexus.Localization
+        local catLabel = L10n.Text(category == "lk" and "leaderboard.value.category_lk"
+            or "leaderboard.value.category_dummy")
+        local fallbackSet = L10n.Text("leaderboard.value.current_echo_set")
+        local rawSetLabel = build and build.title or fallbackSet
         local setLabel = Identity and Identity.DisplaySafeText
             and Identity.DisplaySafeText(rawSetLabel, 1024, false)
-            or "current Echo set"
+            or fallbackSet
+        local dpsText = dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
+            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
+            or tostring(dpsFloor)
         -- A read-only saved root keeps this record for the session only;
         -- the player is told so, here and in the DPS note below.
-        print(string.format(
-            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r%s",
-            tostring(setLabel), catLabel,
-            dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
-            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
-            or tostring(dpsFloor),
-            StorageReadOnly() and " |cffffc040(session only: saved data is read-only, so this record is not kept after a reload)|r" or ""))
+        print("|cff7fd5ffNexus:|r |cff4dff80"
+            .. L10n.Format("leaderboard.chat.new_best", {
+                build = tostring(setLabel), category = catLabel, dps = dpsText})
+            .. "|r"
+            .. (StorageReadOnly() and (" |cffffc040"
+                .. L10n.Text("leaderboard.chat.new_best_session_only") .. "|r") or ""))
 
         -- Global comparison is only meaningful when the exact current Echo
         -- set is already a published community build.
         local characterNow = CharacterBestStore()[category][pk]
-        if characterNow == personalRow and Sync and Sync.BroadcastDpsRecord then
+        if characterNow == personalRow and Sync and Sync.BroadcastDpsRecord
+            and not Crossed() then
             pcall(Sync.BroadcastDpsRecord, {
                 protocolVersion = PROTOCOL_VERSION, fingerprint = key,
                 echoes = snap, category = category, dps = dpsFloor,
@@ -4567,10 +4610,32 @@ end
 -- Events
 ------------------------------------------------------------------------
 
-function DPS.OnCombatStart() StartSession() end
+-- The whole-addon session pause (issue #171): only a combat that no pause
+-- transition crossed is recorded. Paused at its start, paused or resumed
+-- during it, or paused and resumed between two samples, it records nothing,
+-- shares nothing and leaves earlier records unchanged; the next complete
+-- combat is eligible under the unchanged rules.
+function DPS.OnCombatStart()
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused when this combat started"
+        return
+    end
+    StartSession()
+    sessionPauseEpoch = pause and pause.Status().epoch or 0
+end
 
 function DPS.OnCombatEnd()
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= sessionPauseEpoch) then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     local category = sessionCategory or ClassifyTarget(lastTargetGUID, lastTargetName)
     CommitSession(category)
@@ -4579,6 +4644,13 @@ end
 
 function DPS.OnUpdate(elapsed)
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     sampleTicker = sampleTicker + (elapsed or 0)
     if sampleTicker >= SAMPLE_INTERVAL then

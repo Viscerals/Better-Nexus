@@ -15,6 +15,216 @@ This file has two parts.
 
 ## Current rolling and Orb contract (authoritative)
 
+- **Start/Stop Orb automation (`Nexus.OrbAuto`, user-authorized rework of
+  2026-11-19; it lives in core/OrbRuntime.lua).** These rules replace the
+  earlier Orb run controls wherever the two differ below.
+  - **Controls.** The player's controls are Start and Stop only. There is no
+    Orb maximum, as an option or as a zero-limit stand-in. A maximum saved by an
+    earlier version is kept in saved data but is neither shown nor applied.
+  - **Each pass while ON, for the active loadout's Wishlist:**
+    - An Orb offer (the game's `OrbService.IsOfferPending` and a published
+      three-card choice) is answered with a needed Echo (`OrbPolicy.Decide`,
+      targets only).
+    - An offer without a needed Echo is redrawn with the game's own Orb redraw
+      (`OrbService.CanRerollOffer` / `RerollOffer`, one Orb).
+    - With nothing on the table, one Orb is spent on the first safe surplus
+      source (`OrbPolicy.Sources`) to open a draw.
+    - A free (ordinary) draw with a needed Echo is taken once through the
+      ordinary Take (`GameAdapter.Take` and all its admissions), with no Orb.
+      Ordinary Auto does not need to be ON and no setting changes. The pick is
+      settled by the ordinary adapter's own Select record; a pick it voids on
+      the same published choice ends the run, and the same published choice is
+      never taken twice.
+    - A free draw without a needed Echo stays with the ordinary flow: the
+      player, or ordinary Auto when it is ON, exactly as without a run. No Orb
+      is spent over it, and the run sends nothing to dismiss or redraw it.
+      After its normal resolution the run continues.
+  - **Ordinary Auto alongside a run.** Start leaves ordinary Auto and its
+    settings as they are. The run blocks ordinary rolling only while one of its
+    own requests awaits the game's answer (`OrbAuto.OrdinaryOpen`); the
+    ordinary-board gate still refuses an Orb offer or an unknown Orb state, and
+    the adapter's single in-flight gate keeps one Echo action at a time between
+    the two.
+  - **Balance.** The Orb balance is only affordability (at least one Orb), never
+    proof of an outcome. A balance that rises or has not dropped changes
+    nothing.
+  - **One request in flight.** It counts as answered when the game replaces its
+    published choice. A request the game does not answer is not repeated: after
+    8 s one read-only refresh is requested, after 20 s the run says it is
+    waiting, and Stop ends it. That wait says only what Nexus observed ("Nexus
+    did not see an answer to the earlier Orb request"), never that the game
+    did not answer: an unchanged published choice fits a request the game
+    never answered, an answer the client never published, a change made in
+    place, or a redraw the client refused; the client state cannot tell them
+    apart (9107 field report).
+  - **A refused pick ends the run.** The client clears its pending-pick flag
+    (`Perks.pendingSelectSpellId`) when a pick's result arrives. A refused
+    result keeps the same published choice table, and an Orb offer still
+    stands (client reference `perks_service.lua`). A pick of the run (an Orb
+    choice or a free-draw Take) whose flag the client cleared, with that same
+    choice still published, is answered as refused. The run ends with "The
+    game did not take the chosen Echo", the pick is never sent again, and a
+    new Start is the player's own decision. Before this rule the run waited on
+    the pick indefinitely while the cards stayed visible.
+  - **How a run ends.**
+    - Normally: a complete Wishlist, no Orbs, no eligible source, or no redraw
+      available.
+    - With its reason: Stop, a game refusal, a loadout (slot) switch, or logout.
+  - **Start refuses, with an existing sentence, when:**
+    - local character data is not durable;
+    - an Orb action of this session is unresolved;
+    - a game action is pending, or a non-Orb choice without a needed Echo is
+      open;
+    - there is nothing to do (unless an Orb offer is open).
+  - **Session-only.** The run writes no receipt. After a reload, Start is a
+    fresh run on the current game state.
+  - **Stop and an immediate Start.** Stop ends every further action of the
+    run at once. A request the run already sent and whose answer was not seen
+    is not forgotten: a new Start rejoins it as the request in flight, so no
+    second Orb, choice or pick is sent before its answer, which is then handled
+    as usual. While the run is stopped its existing update frame keeps
+    observing that request's answer (no action is sent), so a request answered
+    while stopped, even one whose choice was then resolved, is not waited on:
+    that Start is a fresh run. An answer published and resolved within one
+    observation (0.2 s) leaves no trace in the client state; the rejoined run
+    then waits, sends nothing again, and says "Nexus did not see an answer".
+    That fact is unobservable here.
+  - **Old receipts.** A restored older receipt is never what holds a new Start
+    or an actionable ordinary pick (user decision on the 9106 field report).
+    - While the live Orb service shows no offer (IDLE, or no Orb service), no
+      check of this session is under way and the current state was readable,
+      it does not block ordinary rolling. An open Orb offer, an unknown Orb
+      state or an unreadable current state still blocks it.
+    - This supersedes the narrower ordinary-rolling release of c57e08a6 and
+      ce49e85b (test.9103/9104) for restored receipts; that predicate now
+      applies only while the live Orb service is not IDLE or ABSENT, where the
+      ordinary-board gate refuses anyway.
+    - It is kept unchanged. Before an ordinary Take is sent, a receipt whose
+      recorded choice or matched pick could count that Take's gain as its own
+      outcome is kept as history (`OrbRuntime.HistoryBeforeOrdinaryTake`), so
+      nothing is attributed to it.
+    - Its loadout, lock and upload block (`BlocksOrdinary`) is unchanged until
+      a Start, which keeps it as history: kept unchanged, its passive recovery
+      stops, and it blocks nothing while the Orb service shows no offer.
+  - **The run's own wait.** While a run's own request awaits the game's
+    answer, ordinary actions wait with the run's sentence ("... is paused: Orb
+    refinement owns the current action."), not an older receipt's text.
+  - **Window.** The Orb window shows no maximum, Max, usage-against-maximum,
+    approval, Pause, Resume, Continue, target review or Advanced exclusions.
+  - **Surfaces (9106 field report: "Stop appears to do nothing").** The Orb
+    window, the main-panel strip and the mini panel operate the one runner:
+    Stop is offered exactly while it is ON (or while a run of the earlier
+    runtime is actually running, which no surface can start any more) and
+    ends it. The earlier runtime's Pause and Resume, its Stop of a paused or
+    restored record (a recovery action that sent nothing and only re-marked
+    that record) and the close notice "Use Pause or Stop" are not offered.
+    The record's history words, Details, the dismissal of a settled run, the
+    passive mini panel and the next run's visibility are unchanged.
+  - **Updated provider: the minimal native state (`OrbAdapter.RunAdmission`).**
+    - A spend needs no published choice.
+    - A choice or redraw needs:
+      - the game's Orb offer flag;
+      - no specialization field;
+      - exactly three cards and no fourth;
+      - no memory card (`isGuaranteed`), which is left to the player.
+    - The older provider keeps `ClientAdmission`.
+  - **Residuals.**
+    - The engine's own waiting and status sentences are not in the Orb phrase
+      book, so they show in English in every language. Localization is held.
+    - An unstarted restored receipt still shows its earlier recovery text, which
+      names the removed Continue control.
+    - The internals of `RerollOffer` are not in the admitted client reference.
+    - A memory card that the client's four-entry trim drops before it publishes
+      the choice is not visible to any reader. It is not established whether an
+      Orb draw can carry one. This is the same accepted residual as on the
+      ordinary path, now applied to Orb choices and redraws.
+    - A Start while a restored receipt's own Orb offer is still open answers or
+      redraws that offer, because an open Orb offer is work. The frozen receipt
+      does not record that outcome: nothing is attributed to it, and its
+      outcome evidence is not added.
+    - `O.Redraw` does not interpret `RerollOffer`'s return value: the admitted
+      client reference has no `OrbService` source and its own "Use Orbs"
+      button ignores the return too, so the contract of `true`, `false` and
+      `nil` is not established. A redraw that publishes no new choice waits as
+      unanswered (it gets only the single retry below); a new choice table is
+      handled whatever the return was.
+    - Redraw-wait diagnostic (9107 field report). `OrbAuto.RequestView`, and
+      the support report's "Orb Start/Stop request" line, record for the
+      request in flight (or carried by Stop):
+      - what the client showed at its send and at the run's last read: same
+        choice table, same cards, Orb offer flag, Orb charges, and the client's
+        own `Perks.pendingOrbReroll` flag;
+      - `RerollOffer`'s raw return code.
+      It is memory only, read-only and uninterpreted: client state, not proof
+      of what the server did. It sends nothing and changes no behavior.
+    - Redraw outcomes (user-approved behavior, 2026-11-19). A genuinely new
+      acknowledged offer (a choice message, which always publishes a new
+      table) is used, once, whether its cards are new or repeated; a request
+      with no choice message waits. A single retry was approved only when the
+      game reliably confirms a redraw did not go through, and the admitted
+      provider has no such signal:
+      - `Perks.pendingOrbReroll` is set by `PerkService.MarkOrbReroll`, whose
+        caller (the Orb service) is not in the reference;
+      - it is cleared only by the choice message, together with a new table;
+      - no refusal message, handler or flag exists for it ("a dropped orb
+        request only leaves the next reveal auto-shown").
+      A set or cleared flag, an unchanged board, an idle state and a `false` or
+      `nil` return are therefore not treated as a refusal. The missing native
+      fact is a refusal signal for `RerollOffer`.
+    - One retry of an overdue redraw (user-approved, 2026-11-19, superseding
+      the refusal-signal condition above, with its disclosed risk: the first
+      redraw's answer can still arrive late, and a second Orb can be spent).
+      The game's `OrbService.RerollOffer` returns nothing, lowers the shown
+      Orb count at once and asks for the charge count; a request the server
+      drops answers with that count alone, so a dropped redraw and a slow one
+      look the same to the client. On a pass where the redraw is overdue (the
+      existing no-answer point, `ANSWER_GIVEUP`) and no eligible needed Echo is
+      shown, the same redraw is sent once more through the ordinary adapter
+      `Redraw`, only when this read still shows the same Orb offer, the same
+      cards and the same known Orb count as at its send, with no pick or other
+      Echo action in flight. An unchanged count is not proof the first redraw
+      failed. A new choice table is always consumed first, as the answer.
+      - The retry belongs to that redraw: it is kept across Stop and Start
+        (nothing is sent while stopped) and is never given again; a later,
+        independent redraw has its own. A retry refused before it is sent
+        keeps it.
+    - Redraw timing (user-approved diagnostic, 2026-11-19).
+      `OrbAuto.RedrawTimingView` and the support report's one "Orb redraw
+      timing" line record, for each redraw the run put in flight, the
+      client-clock seconds (`GetTime`) from Nexus's send, and from its one
+      retry, to the run pass on which Nexus saw the redraw answered:
+      - `seen`: a new, non-nil choice table;
+      - `cleared`: the choice cleared with no new table. The client state does
+        not show why, and it is never counted as a new choice seen.
+      A redraw with neither is `pending` (time so far). A redraw followed by a
+      pick sent before either is `pick`. The view and the line also give the
+      counts of first sends, retries, attempts, new choices seen, cleared
+      choices and pending redraws. The run's own handling of the answer is
+      unchanged.
+      - It is recorded only on the existing send and answer paths, including
+        an answer seen while stopped or by Start.
+      - It is session memory only (the last 8 redraws), never saved or sent.
+      - It sends, reads, schedules and decides nothing.
+      - It is Nexus's own observation at its pass cadence, not a server
+        measurement.
+      - No other request kind is retried, and no timer, limit, text or prompt
+        is added.
+    - Visible offer during a pending redraw (user direction, 2026-11-19;
+      corrected after the High review of 221d38fa). The client answers a
+      redraw only with a new choice table (`perks_service.lua` 119-123, 192).
+      Its banish handler (438-443) changes a card in place without answering
+      it. So while a redraw has no new choice table seen, it stays the pending
+      request, and the only action is the normal eligible pick:
+      - when the visible Orb offer holds a needed Echo, it is chosen through
+        the same adapter Select and its own checks (the Orb offer flag, three
+        cards, a selectable card, an unchanged board key, client admission, no
+        pick pending), with no spend;
+      - with no eligible pick nothing is sent, whatever the card values, until
+        the redraw is overdue; then only its one retry above;
+      - a pick refused before it is sent keeps the redraw as the pending
+        request.
+      A redraw that leaves no needed Echo shown still waits.
+
 - **No inferred guarantee.** There are no guaranteed future Echo rolls. A saved
   or verified build is evidence of identity, contents and ownership only. It
   predicts no future offer. `isGuaranteed` on a board card is an observed flag of
@@ -41,6 +251,64 @@ This file has two parts.
   Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
   actual charges and the per-action permissions are its inputs. Actions:
   `take`, `freeze`, `banish`, `reroll`, `wait`. Action `index` is 1-based.
+- **Optional leveling pick (`settings.autoPickLeveling`).** Off unless exactly
+  `true` (absent is not a default; read-only roots adopt only a saved `true`).
+  Set only by `/nexus leveling on|off` or its Automation settings row; it never
+  turns Auto ON. It decides only where the planner waits with an advisor plan,
+  no Wishlist, and `AssignedWishlist().knownUnassigned == true` (no Saved Build
+  in use and no first-run plan, or a populated Saved Build with no association;
+  every loading, restoring, unavailable, empty-slot or unknown state refuses).
+  `Policy.DecideLevelingRarity` takes the highest `observedQuality` (exact
+  integer 0..4 from `GameAdapter.Board`; any card without one refuses the whole
+  board) at live level 2..79, first card on a tie. The intent uses the existing
+  prepare/preauthorize/submit/settle lifecycle; preauthorization re-runs the
+  selector on the fresh board and re-reads mode, `autoPick == true`, live level
+  and the unassigned key, and `GameAdapter.Take(spellId, expect)` checks index,
+  rarity and authority after its own board read. Ownership readiness: the
+  mode decides only with `owned.synced == true` and preauthorization re-reads
+  it; at submission `Take` needs a readable granted mirror for the exact
+  pre-send count (nil, non-table or a throwing read is unknown, never zero) and
+  `ownedConfirmedGeneration == ownedGeneration`. User-facing name: Random Roll
+  (it picks by highest rarity, never at random; the key, command and policy ID
+  are unchanged). Final admission (R5), callouts first in a fixed bounded
+  order: `raw1` (the strict whole raw choice, exactly three tables with numeric
+  integer spellId and quality 0..4, is the selector's actual input), the
+  runtime verifier, owner identity, granted `g1`, a strict typed choice key
+  `raw2 == raw1`, granted `g2` with the same signature as `g1` (the exact
+  baseline), R6: a third strict choice key `raw3 == raw1` after `g2`, the Orb
+  gate, live level 2..79; then memory-only checks: current
+  `Perks` table with `pendingSelectSpellId == nil`, unchanged
+  `wishlistProjectionRevision`, current-run generation, and `expect.final`
+  (same prepared intent, master Auto, mode, `autoPick`, pause epoch, world and
+  user holds); then the pause boundary; then R17 (C02): the last memory-only
+  observation, phase `mirror`, immediately before the native Select: the strict
+  typed key of the current `Perks.currentChoice` field (`rawget`, no metamethod,
+  no callout; the field the provider publishes wholesale and that
+  `GetCurrentChoice` returns by reference) must equal the admitted `raw1` key. A
+  republished table with changed values, an in-place mutation, a cleared or
+  malformed mirror refuses with `leveling_offer_changed`; a distinct
+  value-identical republication passes (a value key, never an identity
+  refusal). The decision-time board carries `strictObservation`; a filtered
+  subset is refused. Any failure sends nothing. R6 settlement: right after a
+  successful leveling Select, one granted read compares the spell's exact count
+  with the captured baseline; an unreadable mirror or a different count marks
+  the adapter's own record `competing`, so `ConfirmAwaitingGrant` holds it
+  `ambiguous` (never proven, never replayed, cancelled or refunded).
+  `GameAdapter.LevelingAdmissionPhase` is a memory-only diagnostic naming the
+  current admission step. Trust boundary (BLOCKED, not
+  claimed safe): the source has no atomic or memory-mirrored native
+  observation, so a change made inside the last callouts (`g2`, Orb gate,
+  level) to native Orb or level facts is not detected, and a change to the
+  choice between the `mirror` read and the native Select is not detected
+  either (no callout separates them in this source; Lua event preemption is
+  neither asserted nor excluded). Loaded provider identity, archive precedence
+  and server cadence are not established by this source. The
+  missing contract is a precondition-carrying native Select or event-maintained
+  revisions of those facts. Level 1 is idle (no tome
+  setup); at 80 and above nothing new is decided and nothing is saved or
+  searched, while a sent intent settles by the existing rules. No reroll,
+  banish, freeze, Orb, tome, lock, activation, save or load is added. Offline
+  evidence only; native offer origin and rarity range are not established.
 - **Ordinary-board gate.** `GameAdapter.OrdinaryBoardAllowed()` guards `Take`,
   `Banish`, `Reroll`, `Freeze` and automatic rolling. It blocks while Orb mode
   owns or has an unresolved action. When an `OrbService` exists it also requires
@@ -55,8 +323,26 @@ This file has two parts.
   so that permit was removed.) The automation loop evaluates again when this gate
   changes.
 - **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
-  behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
-  or erased. Recovery after reload is passive. The only exit is the player's
+  behind `GameAdapter.Orbs`. An unresolved command is never replayed or refunded.
+  Within an approved session run, bounded recovery may retain an unresolved
+  receipt in the archive and continue with a new attempt from actual ownership:
+  at most two recovery checks per run, with every uncertain spend still counted
+  toward the same approved maximum. It requires two qualifying quiet balance
+  replies, refreshed ownership, and an exact empty-choice response observed after
+  requesting the current choice, beside unchanged assignment, owner, loadout and
+  locks and no active action. Own request framing must be passively observable;
+  a framed-empty outgoing send invalidates that check. Automatic history leaves
+  two entries and 12,288 bytes for explicit recovery under the existing archive
+  caps. Observed build completion never fabricates per-operation attribution.
+  The session-only quiet permission must remain valid through the next spend's
+  final owner guard; newer uncertain choice evidence invalidates its empty fact.
+  A newer admitted empty reply can restore that fact only with the other current
+  guards unchanged. No added query or allowance reset follows the archive.
+  Nil choice data alone is unknown; timers authorize
+  no recovery. No result or owned Echo is inferred. Stop and Pause cancel further
+  actions; loading preserves only existing session authorization. See
+  `docs/ORB_BOUNDED_RECOVERY.md`. Recovery after logout/reload remains passive.
+  The restored receipt's explicit exit is the player's
   explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a spend this client
   observed (the one-Orb decrement seen with the offer; no server reply carries a
   spend identity, so Nexus never states it as server-confirmed; the saved
@@ -66,9 +352,297 @@ This file has two parts.
   count, the limit and the configured maximum, archives the saved receipt
   unchanged in the character row key `orbRecoveryArchive`, sends no spend and no
   choice (only the read-only refresh requests that Recheck also sends) and is
-  never automatic. A passive observer of the game's own addon-message prefix
-  feeds its strict check; it registers no handler, replaces nothing and sends
-  nothing.
+  never automatic. An incoming passive observer of the game's own addon-message
+  prefix feeds its strict check; it registers no opcode handler and sends
+  nothing. The separate live check requests the current choice and observes
+  outgoing sends with a secure post-hook. That hook may change the global
+  function identity; the original transport implementation is still invoked.
+- **Orb client admission.** `OrbAdapter.ClientAdmission()` decides whether Orb
+  mode may act on the loaded game client. It is memory only (`rawget` on
+  `ProjectEbonhold`, its `PerkService` and its `Perks`; no getter or callout)
+  and returns `true`, or `false`, a reason text and a fixed code:
+  - `updated_client`: `PerkService` holds a `GetServerActiveDesign` or a
+    `WantsMoreOfEcho` member of any type. These are the two updated-provider
+    markers that the ordinary path also reads.
+  - `spec_draw`: neither marker is present, but `Perks.currentSpecDraw` is,
+    with any value. The client keeps that field after the draw is answered,
+    until its next Echo choice.
+  - `unreadable`: `ProjectEbonhold`, `PerkService` or `Perks` is not a table.
+
+  On a refusal Orb mode starts nothing, spends nothing and chooses nothing; the
+  game's own Orb and choice windows are not touched. There is no positive
+  exception: a visible memory card (flag 3) is not taken either, and three
+  ordinary-looking cards are not proof that no memory card was offered. A
+  client with neither marker and no specialization field is the older provider
+  and keeps the Orb contract above.
+
+  Where it is read: `OrbRuntime` preflight (so `Prepare`, `Start`, `Confirm` and
+  the window's `canStart` / `startReason` give the same reason); `Confirm` once
+  more immediately before ordinary Auto is switched off; `OrbAdapter.Acquire`
+  and `Rebind`; `Resume` of a kept receipt whose three-card offer is open,
+  before ordinary Auto is switched off; the runtime before a spend receipt is
+  created and before a choice is decided; `OrbAdapter.Spend` immediately before
+  `ConfirmSpend`; `OrbAdapter.Select` after validation and again immediately
+  before `SelectPerk`. `Spend` and `Select` return `REJECTED` with the boundary
+  status `CLIENT_CONTRACT`. A start refused by the preflight, or by `Confirm`'s
+  check immediately before the switch, leaves ordinary Auto, the Orb ownership,
+  the balance and every choice unchanged; a client that is already refused when
+  the player starts is always refused there. One narrow race remains: the
+  switch to Auto OFF and `Acquire`'s own fresh read run other code, so if the
+  provider markers or the specialization field appear only after `Confirm`'s
+  check, `OrbAdapter.Acquire` refuses after ordinary Auto has already been
+  switched off. Auto then stays off until the player turns it on again; no
+  ownership is taken, no receipt is created, and no Orb or choice is sent. A
+  refused choice pauses
+  the run and keeps the receipt and its counted spend with no selection attempt
+  recorded; the player's own choice settles it through the existing result
+  path. Recovery authority, budgets and the read-only recovery requests are
+  unchanged and are not gated by this rule.
+
+  Basis and limits. The rule rests on a static reading of one captured client:
+  `perks_service.lua` (SHA-256
+  `3303632eedb997f121b6ac5fa155bd6041b3f17190d71fb7c8b71dd670bd7c51`) and
+  `orb_of_lost_memories.lua` (SHA-256
+  `c08c0d096d8893a7969a974f63006a223e98179471ece9532cd3a6aad8930fe8`). A later
+  extraction, made after the launcher changed two game archives, holds the same
+  bytes for both. In that source every Echo choice, an Orb draw included,
+  passes through one parser that marks a memory card, drops a fourth card
+  before it publishes the choice and records a specialization draw, and the Orb
+  service's pending value is a count of owed draws that does not identify the
+  shown cards. Not established: whether the server ever sends a memory card, a
+  specialization token or a four-card list in an Orb draw; the order in which
+  the game loads its archives; any server behaviour. The older provider is
+  recognized only by the absence of both markers and of the field, so a client
+  that renames them would be read as the older provider. Offline evidence only;
+  no native result. The three refusal texts are English and uncatalogued.
+- **Ordinary draws (updated provider; restored 2026-11-17).** On the updated
+  provider (either marker above) a published choice of exactly three cards
+  with no memory card (flag 3) is an ordinary draw: the gate is open, and
+  `Take`, `Reroll`, `Banish`, `Freeze` and the strict leveling pick are
+  admitted as on the older provider (`ChoiceAdmission`, `MutationAdmission`,
+  `LevelingStrictCards`), once the choice is actionable (`ChoiceActionable`,
+  below; until then `Board()` sets `revealSettling`, the planner waits with
+  `waiting for the game's own pick window to pass` and the runtime decides
+  again at the poll pace; the optional leveling pick waits the same way).
+  Every existing send guard stays (pending native Select, in-flight action,
+  session pause, Orb gate, the final memory-only admission). For a Reroll,
+  Banish or Freeze the later-frame rule is the only ordering against an armed
+  auto-accept timer: the client's pending-Select flag orders a Take against
+  the timer's Select, but not a mutation sent before the timer fires. A send
+  refused only by that rule (for example after the game republished the same
+  cards as a new table) is superseded and decided again, never kept as a
+  rejected intent. A specialization draw (`currentSpecDraw`, the initial
+  draw at level 10 or a draw of the chosen specialization) is decided like
+  any draw, as in 9095: its cards are Echo spells and the selected build's
+  exact targets choose among them; with no target among them the normal
+  planner decides. (A refusal added on 2026-11-16 rested on the game's own
+  auto-accept comment, not on a user rule, and was removed on 2026-11-18.)
+  At level 10 the souvenir stage can arrive with that draw: a needed
+  souvenir is taken, an unneeded one is revealed and its reply chosen from,
+  with or without a specialization marker on the reply. The planner's waits
+  carry the gate's own reason (for example `orb state not yet known`); only
+  a gate without one says the generic Orb sentence. Accepted
+  residual, not removed: the client parser drops the last of four parsed
+  entries, and its stage layout allows three cards already on the table
+  beside a souvenir, so such a stage would be published as three cards with
+  no souvenir. The official design describes a souvenir draw as one face-up
+  souvenir with three face-down random cards, and one parser is shipped; no
+  native observation of that case exists. A board of other than three cards
+  without a memory card keeps its refusal.
+- **Souvenir stage (updated provider).** When the published choice shows a
+  memory card, the only ordinary-path choice action is a `GameAdapter.Take`
+  of that card; every other Take, and every Reroll, Banish and Freeze, is
+  refused there (the game offers none until the souvenir decision).
+  `GameAdapter.Board()` sets `memoryStage = true` when that provider shows a
+  flagged card, `nil` otherwise. On a
+  `memoryStage` board (1 to 4 cards) `EchoWeaver.DecideNexus` does not wait
+  for three cards. After its usual gates (Orb hold, plan, ownership sync,
+  pending action, horizon, lock sync) it returns a `take` of the souvenir only
+  when exactly one card is flagged, that card is selectable and its exact
+  spell ID is still outstanding (rolled plus counted locked copies
+  subtracted). An unneeded souvenir is given up for the three hidden Echoes
+  (souvenir reveal, below) when the board is `revealable` and a Wishlist
+  target is still missing. Unneeded is by exact spell id: every rarity of an
+  Echo is its own spell (the client's build matching and Nexus's targets both
+  use the exact id), so a lower tier never fulfils another tier's target, and
+  the reveal loses only that souvenir (the client's confirmation names it); a
+  different tier of its family still missing is no reason to hold it.
+  Otherwise it waits with the reason `souvenir: take
+  it or draw three random Echoes; the choice is left to the player`: nothing
+  missing, a souvenir the game's own build asks for, two flagged cards, or a
+  carried card beside the souvenir (giving it up or taking another card
+  gives the souvenir up). The game's own choice window is not touched. The Take keeps every existing
+  send guard (pending native Select, in-flight action, session pause, the
+  final memory-only admission before `SelectPerk`). The older provider is
+  unchanged (`memoryStage` is nil; a one-card board still waits).
+- **Souvenir reveal (updated provider; user requirement of 2026-11-17).**
+  Nexus sends `REQUEST_PERK_MEMORY_DRAW` only through
+  `GameAdapter.RevealMemory(spellId, expect)`, for an action `reveal` the
+  planner decides as above. It is a sacrifice, not a reroll: the souvenir is
+  lost for the climb. `Board()` marks a lone souvenir (exactly one published
+  card, flagged) `revealable` only when the request would not be refused at
+  once (`RevealSnapshot`: no Select, Reroll, Orb redraw, Banish or Freeze
+  pending, `CS.REQUEST_PERK_MEMORY_DRAW == 349` and a `sendToServer`
+  function; a specialization draw does not refuse it) and the game's `WantsMoreOfEcho(souvenir)` returns
+  no true value (a missing or thrown read refuses); `revealSent` when this draw was already given up.
+  `RevealMemory` sends nothing unless all of these hold again: the updated
+  provider, the ordinary gate (`OrdinaryBoardAllowed`: the choice admission
+  and the Orb gates; a specialization draw is not refused), no session pause or
+  passive mode, nothing in flight and no reveal waiting, the lone souvenir
+  unchanged, `WantsMoreOfEcho` not true, the owned total readable, and this draw
+  (the run's `ownedGeneration`, souvenir, pending draw count, owned total) not
+  already given up. Then the
+  runtime's `verify` decides again on fresh reads (the Wishlist plan probed
+  again, board, rolled and locked ownership, level, horizon) and must again
+  return this reveal; a changed decision supersedes the intent and a fresh
+  decision follows. After it, memory only: the runtime's `final` (master Auto,
+  `autoPick == true`, this prepared intent, no pause, world hold or player
+  action), the pause epoch, nothing in flight, the same `Perks` table and the
+  same souvenir table, the same pending draw count. The request is
+  `sendToServer(349, "")`, once per draw for the session: the draw is marked
+  given up before the send, so a refused, failed or unanswered request is
+  never repeated. The reveal is in flight (`InFlight`) until a new choice or
+  `REVEAL_WINDOW` (10 s); the runtime intent stays on that board and is never
+  resent; the board then waits with `souvenir given up; waiting for the three
+  revealed Echoes`.
+  The first new choice is bound to the reveal (`revealBound`) only when it
+  arrives within the window, shows exactly three unflagged Echoes with valid
+  IDs, no Select is pending, and the pending draw count and the owned total
+  equal those of the request; a specialization marker on the reply does not
+  refuse the binding. Any other new choice ends
+  the reveal unbound, and the ordinary updated-provider admission applies
+  (an ordinary three-card draw, above). On a bound board `ChoiceAdmission` admits a Take of one
+  of its three Echoes (entry and send boundary); Reroll, Banish and Freeze
+  stay refused, and the planner decides with no search (`canBanish`,
+  `canFreeze`, `canReroll` false): a needed Echo, else a filler.
+  The game's own auto-accept timer (`perks_service.lua`) is armed at a choice
+  parse with the card it chose, fires on the first frame after 0.18 s through
+  `Perks.SelectPerk` (refused only when a pick is pending or the card is not
+  on the current choice) and re-checks neither its option nor the Wishlist,
+  so switching the option off, as the existing Auto gate and solo-picker
+  lease do, does not cancel an armed timer. The reveal sets no client flag:
+  a timer firing later in the same frame as Nexus's reveal would still pick
+  the souvenir. Nexus therefore reveals, and takes from a revealed board, only
+  on a choice table that is actionable (`ChoiceActionable`): observed for
+  `CHOICE_SETTLE` (0.2 s: the timer's 0.18 s plus a margin for summed frame
+  steps; it was 1 s; first observation is never before the parse), and on
+  a frame strictly later than the first frame in which that held (compared
+  by `GetTime()` values). In that first settled frame the
+  timer's summed elapsed time already covers the settle, so it fired in or
+  before that frame; by the next frame its Select is pending (every send
+  boundary refuses) or it was refused. `Board()` marks a choice that is not
+  yet actionable `revealSettling`, the planner waits with `waiting for the
+  game's own pick window to pass` and the runtime decides again at the poll
+  pace; `RevealMemory` (`reveal_not_settled`, superseded and decided again)
+  and the revealed-board `ChoiceAdmission` refuse it at the send boundary.
+  Assumed, not proven offline (the harness models them by construction):
+  `GetTime()` is constant within a frame, a shown frame's `OnUpdate` runs on
+  every frame, and its elapsed time tracks `GetTime()`. For the Take the client's shared
+  Select flag also separates the two picks in either order; for the reveal
+  only the frame rule does.
+  A run boundary (`RunBoundaryReset`) advances the run identity in the draw
+  key, so a later run's souvenir draw is not taken as given up, and ends any
+  revealed-board binding.
+  Basis and limits: static reading of the captured `perks.lua` (above;
+  `RequestMemoryDraw`, `PlayMemoryGiveUp`) and `projectebonhold.lua`
+  (`REQUEST_PERK_MEMORY_DRAW = 349`); no reply opcode, request ID or refusal
+  exists there, so the reply is inferred to be the next published choice
+  (`SEND_PLAYER_PERK_CHOICE`). The game's window is not told: it keeps
+  showing the souvenir until that reply, and a player click there in that
+  window is not excluded. A reload forgets the session's given-up draws. Not
+  established: the server's reply, refusal or timing, whether the reply can
+  carry carried cards or a fourth card, and the native window's state after a
+  reveal it did not start. Offline evidence only
+  (`tests/prototype/automation_souvenir_reveal.lua`, including a model of the
+  timer from the captured source and a single long frame with Nexus before
+  the timer); no native result. The new reasons are
+  English and uncatalogued.
+
+  Basis and limits. A static reading of one captured client: `perks.lua`
+  (SHA-256 `43e28daef02a1f95d344eaca880bde2ce1794a0e821113837c5bfc5d5b98b8a2`,
+  the "Memory stage" comment and `LayoutMemoryStage`) and `perks_service.lua`
+  (the SHA-256 above: flag 3 parsing, the dropped fourth card). The wow.export
+  version of this extraction is not recorded, and whether this `perks.lua`
+  predates the launcher's archive change is not established. Not established:
+  the server's wire order of the souvenir, whether it can be the dropped
+  fourth card, and the native timing of the client's own automatic pick.
+  Offline evidence only (`tests/prototype/automation_souvenir_stage.lua`); no
+  native result. The wait reason is English and uncatalogued (language work
+  deferred). Live user diagnostic on test.9097-a8c00d3a (summary supplied by
+  the coordinator): two own Takes of needed souvenirs were proven granted, and
+  an unneeded souvenir waited; this is native evidence for the Take and the
+  hand-off of that build only.
+- **Auto Save, unavailable client.** `GameAdapter.Save` returns
+  `false, "save_unavailable"` when the `PerkService` table is present and has no
+  `SaveServerBuildSlot` member. Nothing is called, sent or timed for it. The
+  captured `perks_service.lua` named above exports no such member. The reason is
+  distinct from `"refused"` (the member exists and declined or failed, or no
+  service table is loaded) and from `"spacing"`. On `save_unavailable` the
+  automation sets one status, prints one notice and makes no further save
+  attempt for that level-80 visit: the memory-only flag
+  `save.unavailableVisit` is cleared when the level leaves 80 and at a run
+  boundary, never saved, and is not a success (`savedThisVisit`, the
+  verification fields and `lastSaveStatus` are not touched). An ordinary
+  refusal keeps its earlier handling. Whether the updated client offers a
+  manual save is not established. Offline evidence only.
+- **Attribution-only explicit exit.** A stopped receipt, restored or from the
+  current session, may use that same checked Continue path when a fresh exact
+  distinct chosen gain is actually owned and attribution alone prevents
+  confirmation. The flag alone is insufficient. Original loadout, owner, locks,
+  current binding and quiet native state are rechecked through the actual atomic
+  save. It archives the unchanged receipt as `ACK_UNCONFIRMED`, confidence `NONE`,
+  keeps observed spend and unknown exposure separately without refund or double
+  charge, ends the old run and only then releases ordinary rolling. It sends no
+  spend, selection or automatic Resume, and consumes no fresh live allowance.
+  Completion from actual ownership and exhaustion of two live checks do not
+  remove this finite explicit exit. Archive/save refusal keeps receipt and gate.
+- **Restored receipt without an open Orb offer.** One restored class does not
+  block ordinary rolling (`OrbRuntime.BlocksOrdinaryRolling`, read by the chat
+  and panel Auto toggles, the HUD guidance and the final ordinary-board gate).
+  The receipt was restored after a reload; this client observed its spend with
+  its offer, or recorded the first Orb offer seen after its request while the
+  spend is still unconfirmed (not proof that it was this action's reply; a later
+  Orb offer blocks again);
+  it has no recorded choice; the last passive read of the same character showed no
+  Orb offer; no offer was matched to it in this session; and no Continue check
+  is under way. No ownership result can settle such a receipt, so an ordinary
+  Take is never counted as its outcome, and the adapter's own Take is not kept
+  as the receipt's raw pick evidence (a manual pick still is). An Orb offer
+  that appears, an unreadable state, or the live game service reporting an
+  offer or an unknown state blocks again. The receipt, its spend and exposure,
+  the Resume and Start refusals, Continue and the loadout, lock and upload
+  blocks (`BlocksOrdinary`) are unchanged. Nothing is sent or replayed. An
+  unconfirmed spend stays unconfirmed and reserved, and Continue still refuses
+  it (`spend_unconfirmed`); a receipt whose offer was never seen stays blocked.
+  Consequence: once ordinary rolling has changed ownership, a late arrival of
+  the original offer no longer equals the receipt's ownership, so it is not
+  matched to the receipt (`OFFER_UNMATCHED`) and that action cannot be
+  confirmed afterwards; Continue remains its exit.
+- **Recovery authority.** Retained completed states survive lifecycle holds and
+  cannot reopen limit approval. Eligible held receipts have the explicit checked
+  Continue exit; an ineligible entry preserves the automatic owner. Equivalent
+  current owed-offer orders share the strict one-choice Resume guards. A revoked
+  post-archive permit stays revoked; unknown reads retain unclassified evidence.
+  Only classified fresh choice evidence updates that fact. Host-false consumes
+  the one-use permit, whereas pre-host refusal does not. Budget/resource terminals
+  precede permit waits. Optional capability absence is explicit, and a real
+  outgoing-hook attempt is latched once per adapter lifetime, including failure.
+- **Retained attribution.** The current character's bounded unconfirmed archive
+  supplies source/pair uncertainty across approvals and passive reloads. Own and
+  observed choices apply it before saving. A late snapshot explained by retained
+  attempts may hold attribution, including a compound delta with the current
+  result; it never confirms an operation. Unrelated deltas remain blocked.
+- **Downgrades.** New receipts carrying attribution risk or unknown exposure use
+  `attributionFormat=1` and retain their real GUID in `attributionOwner`, with
+  legacy `guid` absent. The original loadout and other observations are unchanged.
+  Read-only source inspection of public `a43cf27` Runtime+Adapter shows that it
+  cannot interpret that owner identity: its existing owner guard retains the
+  pending receipt and ordinary-action blocker, and refuses its no-choice Continue.
+  That exact pair was not executed; archive-key retention tests establish a
+  separate data-preservation boundary. The current owner validates and reads the
+  versioned identity. Unknown/conflicting versions fail closed. This is a local
+  receipt representation, with no global Store migration or fabricated facts.
+  Archive byte retention alone is a separate, weaker compatibility claim.
 - **Passive readiness diagnostics.** `GameAdapter.OwnershipTrustView()` and
   `OrbRuntime.ReadinessView()` return a new table of scalars and fixed codes.
   The first holds the current generation facts and, separately, what the last

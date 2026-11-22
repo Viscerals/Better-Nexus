@@ -26,7 +26,9 @@ local function Unknown(name)
  assert(s.state=='unknown' and Nexus.Updates.GetCandidate()==nil and Nexus.Updates.GetVisibleNotice()==nil,name..': unknown, no candidate: '..s.detail)
  assert(#notices==0,name..': no notification ('..#notices..')')
  assert(NexusDB.updateAdvisory==nil,name..': no saved advisory')
- assert(s.url=='https://github.com/Viscerals/Better-Nexus/releases' and s.menu=='Update status unknown - open Releases page',name..': the configured Releases page')
+ -- Owner-approved item 12 (#175): the plain menu row; unknown is said as no
+ -- verified update information, never latest, and the Releases page is kept.
+ assert(s.url=='https://github.com/Viscerals/Better-Nexus/releases' and s.menu=='Version and updates: no verified update info',name..': the configured Releases page')
  assert(not s.detail:lower():find('up to date',1,true) and s.detail:find('not proof that this build is the latest',1,true),name..': neither available nor latest')
 end
 

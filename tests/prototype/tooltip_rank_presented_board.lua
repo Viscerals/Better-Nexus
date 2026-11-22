@@ -18,6 +18,10 @@
 -- scores keep sharing one rank, one above the presented entries with a
 -- higher score, while the board orders them by the earlier record (tie
 -- semantics); an unknown player has no rank; no game action.
+-- R4 (top-100 display): the window shows the first 100 presented rows
+-- (EXPECT, fails at d14fa7eb); the tooltip rank and score of a character
+-- below the cut, and the shared rank of a tie across position 100, are the
+-- full presented board's (GUARD).
 -- Real TOC boot, DPS owner, Leaderboard window and annotation body; saved data
 -- from leaderboard_fixture_support.lua. Like the frozen repro, the hidden
 -- legacy row is written into the served bucket as an artificial saved row
@@ -174,4 +178,45 @@ end)
 
 tip:Release()
 C.guard(#H.actions==0,'no game action',#H.actions)
-C.finish('(the tooltip rank agrees with the presented board; lookup, visibility, identity and ties unchanged)')
+
+-- R4. A board longer than the Leaderboard's 100 displayed rows. The window
+-- shows the first 100; the tooltip still ranks every character on the full
+-- presented board: a character below the cut keeps its rank and score, and
+-- characters tied across position 100 keep sharing one rank.
+C.scenario('R4 below the display cut',function()
+ local list={}
+ for i=1,130 do
+  local dps=60000-i*100
+  if i>=98 and i<=103 then dps=60000-100*100 end
+  list[i]={name=string.format('Rank%03d',i),class=i%2==0 and 'PRIEST' or 'MAGE',dps={dummy=dps},locked=0}
+ end
+ fx=L.New({players=list})
+ H=F.Boot(fx:Install(F.Database()))
+ for _=1,200 do H.Advance(.05,.05) end
+ D,LB=Nexus.DpsCapture,Nexus.Leaderboard
+ tip=V.Tooltip('ArtificialRankTooltip')
+ L.Open(H,'dummy')
+ local board=Board()
+ C.setup(#board==130 and board[100].dps==board[101].dps,'R4: fixture: 130 presented rows with a tie across position 100',#board)
+ local rows,total=L.RenderedRows(H)
+ C.expect(total==100 and V.Plain(rows[100].player)==board[100].player,
+  'R4: the Leaderboard window shows the first 100 presented rows',total)
+ local tied={}
+ for _,name in ipairs({'Rank098','Rank100','Rank101','Rank103'}) do
+  local info=D.GetPlayerInfo(name) or {}
+  tied[#tied+1]=name..'='..printable(info.rank)
+  C.guard(info.rank==BoardRank(board,name) and info.rank==98 and info.dps==50000,
+   'R4: '..name..' at the cut shares the tied rank 98 and keeps its score',printable(info.rank)..'/'..printable(info.dps))
+ end
+ local below=D.GetPlayerInfo('Rank120') or {}
+ print('OBSERVED','R4 tooltip',table.concat(tied,' '),'Rank120='..printable(below.rank))
+ C.guard(below.rank==120 and below.rank==BoardRank(board,'Rank120') and below.dps==48000 and below.category=='dummy',
+  'R4: a character below the cut keeps its full-board rank and score',printable(below.rank)..'/'..printable(below.dps))
+ local shown,line=TooltipRank('Rank120',120)
+ C.guard(shown,'R4: the unit tooltip says "120th on leaderboard" below the cut',line)
+ shown,line=TooltipRank('Rank101',98)
+ C.guard(shown,'R4: and "98th on leaderboard" for a tied character just past the cut',line)
+ tip:Release()
+ C.guard(#H.actions==0,'R4: no game action',#H.actions)
+end)
+C.finish('(the tooltip rank agrees with the presented board, also below the 100-row display cut; lookup, visibility, identity and ties unchanged)')

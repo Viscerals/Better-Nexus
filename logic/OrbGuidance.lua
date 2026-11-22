@@ -28,13 +28,64 @@ Nexus = Nexus or {}
 local G = {}
 Nexus.OrbGuidance = G
 
+-- A reason in its English wording (UserText.EnglishMessage): the model
+-- keeps English, whatever the language; G.Shown says it at the display.
 local function Text(value)
     local user = Nexus.UserText
-    if user and type(user.Message) == "function" then
-        local ok, text = pcall(user.Message, value)
+    local english = user and (user.EnglishMessage or user.Message)
+    if type(english) == "function" then
+        local ok, text = pcall(english, value)
         if ok and type(text) == "string" then return text end
     end
     return tostring(value or "")
+end
+
+-- Full-UI localization (v3): the exact English texts this module puts in
+-- the model, and their keys. The panel shows a text through G.Shown.
+local SHOWN_KEYS = {
+    ["This client does not expose Orb mode."] = "orb.guidance.no_orb_mode",
+    ["The last Echo action has no confirmed result yet."] = "orb.guidance.last_action_unconfirmed",
+    ["The game has not confirmed an Echo action yet."] = "orb.guidance.action_not_confirmed",
+    ["An Echo choice is open in the game window."] = "orb.guidance.choice_open",
+    ["No assigned Wishlist: Orb guidance needs one."] = "orb.guidance.no_plan",
+    ["Waiting for the game to confirm the last Echo action."] = "orb.guidance.waiting_confirm",
+    ["Rolled targets are complete. Orbs do not fill locked slots."] = "orb.guidance.locks_only",
+    ["Normal rolls finished. This client does not expose Orb mode."] = "orb.guidance.finished_no_orbs",
+    ["Normal rolls finished. Review Orbs for remaining rolled targets."] = "orb.guidance.finished",
+    ["Normal rolls finished. Target progress is not available."] = "orb.guidance.finished_unknown",
+}
+G.SHOWN_KEYS = SHOWN_KEYS
+local OPEN_TAIL = ". Open Orbs to inspect it."
+-- A reason another owner recognizes (UserText's reasons and phrase sources,
+-- e.g. the Orb runtime's block sentences), else the text as it is.
+local function Recognized(text)
+    local user = Nexus.UserText
+    if user and type(user.Recognized) == "function" then
+        local ok, shown = pcall(user.Recognized, text)
+        if ok and type(shown) == "string" then return shown end
+    end
+    return text
+end
+-- A guidance or blocker text of G.Project as the player reads it, in the
+-- active language. Display only: the model, its states and comparisons keep
+-- the English. A text no rule knows is shown unchanged.
+function G.Shown(text)
+    if type(text) ~= "string" then return text end
+    local L = Nexus.Localization
+    if type(L) ~= "table" or type(L.Text) ~= "function" then return text end
+    local key = SHOWN_KEYS[text]
+    if key then
+        local shown, source = L.Text(key)
+        if type(shown) == "string" and source ~= "unavailable" then return shown end
+        return text
+    end
+    if #text > #OPEN_TAIL and text:sub(-#OPEN_TAIL) == OPEN_TAIL and type(L.Format) == "function" then
+        local shown, source = L.Format("orb.guidance.state_open_orbs",
+            {reason = Recognized(text:sub(1, -#OPEN_TAIL - 1))})
+        if type(shown) == "string" and source ~= "unavailable" then return shown end
+        return text
+    end
+    return Recognized(text)
 end
 
 -- obs fields (all optional; absent means unknown):
@@ -120,7 +171,13 @@ function G.Observe(progress, intent, plan, known)
     local A = Nexus.GameAdapter
     local obs = {plan = plan and true or false, intent = intent}
     if A then
-        if type(A.OrbBlockReason) == "function" then
+        -- The reason names a block only while the Orb runtime blocks ordinary
+        -- rolling (a restored receipt that no longer does keeps its Orb view).
+        local orb = Nexus.OrbRuntime
+        local rolling = orb and type(orb.BlocksOrdinaryRolling) == "function" and orb.BlocksOrdinaryRolling
+        local okRolling, blocked = true, true
+        if rolling then okRolling, blocked = pcall(rolling) end
+        if type(A.OrbBlockReason) == "function" and not (okRolling and blocked == false) then
             local ok, why = pcall(A.OrbBlockReason, "Ordinary rolling")
             if ok and type(why) == "string" and why ~= "" then obs.orbBlock = why end
         end

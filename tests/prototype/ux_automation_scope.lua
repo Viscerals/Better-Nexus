@@ -12,7 +12,10 @@
 -- Auto ON board shows its three cards and no charges.
 -- Categories (view_regression_support): EXPECT is behaviour added in M3 (it
 -- fails on the accepted predecessor ea3268a8); GUARD already holds there and
--- must keep holding; SETUP is the fixture. Real TOC boot, runtime, Panel,
+-- must keep holding; SETUP is the fixture. The exact Close caption of the
+-- Welcome's dismissal (P10, P11, WelcomeDismissal) is also an EXPECT, of the
+-- newer Close label (formerly Later), and only identifies that control. Real
+-- TOC boot, runtime, Panel,
 -- Help, QuickStart and Journal controls; synthetic host services only.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('ux_automation_scope')
@@ -23,7 +26,7 @@ local E1={{spellId=201172,quality=0,stacks=1}}
 
 local function Reset()
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
- NexusHelpWindow=nil;NexusQuickStart=nil;NexusPanel=nil;NexusEditorFrame=nil
+ NexusHelpWindow=nil;NexusQuickStart=nil;NexusGuidedSetup=nil;NexusGuidedSetupEscape=nil;NexusPanel=nil;NexusEditorFrame=nil
  ProjectEbonholdEchoJournal=nil;EchoJournalMicroButton=nil;NexusOverwriteWarning=nil
  NexusActiveWishlistSelector=nil;NexusWishlistOnlyPicker=nil;NexusLoadoutAssociationPanel=nil
 end
@@ -81,10 +84,25 @@ local function Settings()
  return table.concat(keys,';')
 end
 local function Auto() return Nexus.RecomputeStats().autoEnabled==true end
+-- Issue #169: the Auto hover is short, and the complete scope is one
+-- deliberate click away (Options > Auto explained, the Help Auto page with
+-- the current values). This reads both: the hover, then that page through
+-- the real Options row, which is closed again.
 local function AutoTooltip()
  local button=NexusPanel and NexusPanel._autoBtn
  if not button then return '' end
  local lines=V.TooltipLines(function() button:GetScript('OnEnter')(button) end)
+ for _,item in ipairs(Nexus.Panel.MoreMenuItems(NexusPanel._menuBtn)) do
+  if item.text=='Auto explained (full details)' and type(item.func)=='function' then
+   item.func(item)
+   if _G.NexusHelpWindow and NexusHelpWindow:IsShown() then
+    -- The whole shown Auto page (all of Help's parts, V.HelpShown), with the
+    -- "Auto right now" lines appended at its end, not only its first part.
+    lines[#lines+1]=V.HelpShown(NexusHelpWindow)
+    Nexus.Help.Hide()
+   end
+  end
+ end
  return V.Plain(table.concat(lines,'\n'))
 end
 -- A print listener that never raises into the scenario: what was said and
@@ -102,8 +120,29 @@ local function ChildButton(parent,text)
  end
  return nil
 end
+-- The Welcome's dismissal (P10, P11), found by its label only to identify
+-- it: its exact Close caption is a collected EXPECT, never a gate or skip.
+-- Only after that EXPECT failed may the real legacy Later control of an
+-- earlier cut stand in, so the original closing checks still run on a real
+-- control there; the failed Close EXPECT stays in the failure set. A Welcome
+-- with neither control is a collected SETUP failure, not a silent skip.
+local function WelcomeDismissal(where)
+ local close=ChildButton(NexusQuickStart,'Close')
+ if C.expect(close~=nil,where..': its dismissal reads exactly Close') then return close end
+ local later=ChildButton(NexusQuickStart,'Later')
+ C.setup(later~=nil,where..': fixture: it has a dismissal control (Close, or legacy Later after the failed Close EXPECT)')
+ return later
+end
 local function Offer(cards) H.Board(cards);H.Notify();H.Advance(1.2) end
--- The HUD's card rows as shown.
+-- The HUD's card rows as shown. The Play offer cards (Claude Design full UI)
+-- replace the shown rows with the same current choices: each shown card is
+-- read as its visible name, quality and tag lines, in that order.
+-- The approved compact panel (design draft "Nexus compact panel"): a
+-- selected row shows its tag's words after a star (the offer block's own
+-- mark standing on the row: card.star), which stands where the tag's
+-- code-owned "> " stood. The tag as the player reads it is that mark and the
+-- words, so a shown star is read as the "> " it replaces; a tag's words
+-- without the star are not a marker.
 local function CardRows()
  local f=NexusPanel
  local cards={}
@@ -112,8 +151,35 @@ local function CardRows()
    if r.kind=='FontString' and r~=f._rollStatus and r~=f._rollRec and r~=f._chargesText
     and r:IsShown() and V.Plain(r:GetText() or '')~='' then cards[#cards+1]=V.Plain(r:GetText()) end
   end
+  for _,card in ipairs(f._offerCards or {}) do
+   if card:IsShown() then
+    local parts={}
+    for _,key in ipairs({'name','quality','tag'}) do
+     local text=V.Plain(card[key]:GetText() or '')
+     if key=='tag' and text~='' and card.star and card.star:IsShown() then text='> '..text end
+     if text~='' then parts[#parts+1]=text end
+    end
+    if #parts>0 then cards[#cards+1]=table.concat(parts,' ') end
+   end
+  end
  end
  return cards
+end
+-- A shown row or card that carries the manual (Auto OFF) Take marker: the
+-- row's ">> " prefix, or the card's visible Wishlist pick tag, its last line.
+local function ManualMarker(line)
+ local tag=Nexus.Readout and Nexus.Readout.OFFER_PICK_TAG
+ return line:find('^>> ')~=nil or (type(tag)=='string' and line:sub(-#tag)==tag)
+end
+-- The first-use coach's close control, as the design shows it: a visible "X"
+-- whose hover names Close (quickstart_seen_guard's lookup), so another "X"
+-- cannot stand in for it.
+local function CoachClose(coach)
+ for _,c in ipairs(coach and coach.children or {}) do
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X'
+   and type(c.tip)=='string' and c.tip:find('^Close') then return c end
+ end
+ return nil
 end
 
 C.scenario('P1 the Auto hover states the scope in plain words; hovering acts, requests and writes nothing',function()
@@ -192,17 +258,43 @@ C.scenario('P5 M2 N9: the charges line explains "?" and "~" on hover; hovering c
  C.setup(not Auto(),'P5: fixture: Auto is OFF')
  Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
  local charges=NexusPanel._chargesText
- C.setup(charges~=nil and charges:IsShown(),'P5: fixture: the charges line is shown on the Auto OFF board')
  local hover=NexusPanel._chargesHover
- local before=Counters()
+ -- Count disclosure (approved main-panel design: "Counts stay behind
+ -- Details", the compact charges among them). The charges are counts, so
+ -- with Details closed, as the panel opens, the line and its hover are not
+ -- on the Auto OFF board although the model carries the read; with Details
+ -- open they are, and the hover is read there; closed again, they are gone.
+ -- Details is opened and closed through the panel's own toggle (what its
+ -- Details control calls: memory only), the committed model is rendered
+ -- again after each toggle (as play_panel_summary S1 does after its Details
+ -- click), and Details is closed again also when the open part raises. The
+ -- guard on the hover keeps its own window: the counters are taken right
+ -- before the hover and compared right after it, as before.
+ local P=Nexus.Panel
+ local function Line() return charges~=nil and charges:IsShown() and true or false end
+ local function Hit() return hover~=nil and hover:IsShown() and true or false end
+ local carried=type(P._lastModel)=='table' and type(P._lastModel.charges)=='table'
+ C.setup(carried,'P5: fixture: the Auto OFF board\'s model carries the charges the decision read')
+ C.expect(P._playDetails~=true and not Line() and not Hit(),
+  'P5: with Details closed the charges line and its hover are not on the Auto OFF board',tostring(Line())..'/'..tostring(Hit()))
  local text=''
- if hover and hover:GetScript('OnEnter') then
-  text=V.Plain(table.concat(V.TooltipLines(function() hover:GetScript('OnEnter')(hover) end),'\n'))
- end
- print('OBSERVED','P5 legend='..text)
- C.expect(hover~=nil and hover:IsShown() and text:find('?: the game has not reported that count yet',1,true)~=nil
-  and text:find('~: estimated',1,true)~=nil,'P5: hovering the charges line explains "?" and "~"',text)
- C.guard(Same(Counters(),before),'P5: hovering acts, requests and sends nothing',Show(Counters()))
+ local ok,err=pcall(function()
+  C.setup(P.TogglePlanDetails()==true and P.Render(P._lastModel)==true and Line(),
+   'P5: fixture: with Details open the charges line is shown on the Auto OFF board')
+  local before=Counters()
+  if hover and hover:GetScript('OnEnter') then
+   text=V.Plain(table.concat(V.TooltipLines(function() hover:GetScript('OnEnter')(hover) end),'\n'))
+  end
+  print('OBSERVED','P5 legend='..text)
+  C.expect(Hit() and text:find('?: the game has not reported that count yet',1,true)~=nil
+   and text:find('~: estimated',1,true)~=nil,'P5: hovering the charges line explains "?" and "~"',text)
+  C.guard(Same(Counters(),before),'P5: hovering acts, requests and sends nothing',Show(Counters()))
+ end)
+ if P._playDetails==true then P.TogglePlanDetails() end
+ if not ok then error(err,0) end
+ C.setup(P.Render(P._lastModel)==true,'P5: fixture: the committed model rendered again after Details was closed')
+ C.expect(P._playDetails~=true and not Line() and not Hit(),
+  'P5: closed again, the charges line and its hover are gone from the board',tostring(Line())..'/'..tostring(Hit()))
 end)
 
 C.scenario('P6 M2 N7: the Panel route closes the open editor only when it opens; it requests nothing',function()
@@ -230,20 +322,138 @@ C.scenario('P7 M2 N7: an Auto ON board shows its three cards and no charges line
   'P7: and carries and shows no charges')
 end)
 
-C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip',function()
+-- P8: the click only asks the game's button for the page (a request, never
+-- an observed open page). The route (JournalTab.OpenBuilds, unchanged)
+-- settles at once, then at 0.10 s and last at 0.35 s: through C_Timer.After
+-- when the client has it, otherwise through the Journal's own settle frame
+-- (NexusJournalSettleDriver). Its words on the page are read once that last
+-- settle ran. Both paths are run, each on its own boot:
+--   'frame'  C_Timer is absent (as in the harness). Only that frame's own
+--            OnUpdate is called, in a bounded loop of 0.05 s steps while it is
+--            shown; the synthetic clock H.now moves with it. No other frame's
+--            OnUpdate runs (never H.Advance), so every counter and line
+--            observed comes from the route. The frame must belong to this
+--            boot: the global name outlives a boot (Reset keeps it).
+--   'timer'  C_Timer is ready: a test-local recording timer of the one shape
+--            the Journal uses, After(delay, callback), installed only around
+--            the click and its settles. It runs nothing itself; the scenario
+--            runs the recorded callbacks once each, in due order, with H.now
+--            moved to each due time. This is an offline fixture only: no
+--            claim about the client's C_Timer availability.
+-- The prior global C_Timer is restored afterwards on both paths.
+local SETTLE_DRIVER='NexusJournalSettleDriver'
+-- This boot's settle frame: the global, only while it is one of the current
+-- harness's frames (never a frame of an earlier boot).
+local function CurrentSettleDriver()
+ local named=rawget(_G,SETTLE_DRIVER)
+ if named==nil then return nil end
+ for _,f in ipairs(H.frames) do if rawequal(f,named) then return f end end
+ return nil
+end
+local function RecordingTimer()
+ local t={queue={},delays={},count=0}
+ t.api={After=function(delay,fn)
+  t.count=t.count+1
+  t.delays[#t.delays+1]=tostring(delay)
+  t.queue[#t.queue+1]={due=H.now+(tonumber(delay) or 0),order=t.count,fn=fn}
+ end}
+ return t
+end
+-- Runs the recorded callbacks once each, earliest first (bounded).
+local function DrainTimer(t)
+ local ran,errors=0,{}
+ while #t.queue>0 and ran<64 do
+  table.sort(t.queue,function(a,b) if a.due~=b.due then return a.due<b.due end return a.order<b.order end)
+  local entry=table.remove(t.queue,1)
+  if entry.due>H.now then H.now=entry.due end
+  ran=ran+1
+  local ok,err=pcall(entry.fn)
+  if not ok then errors[#errors+1]=tostring(err) end
+ end
+ return ran,errors
+end
+-- Calls the settle frame's own OnUpdate while it is shown (bounded).
+local function DriveSettleFrame(driver,tick,limit)
+ local ticks=0
+ while driver:IsShown() and ticks<limit do
+  ticks=ticks+1
+  H.now=H.now+.05
+  tick(driver,.05)
+ end
+ return ticks
+end
+local UNCONFIRMED='could not confirm that the Echoes page is open'
+local OPEN_CLAIM='The Echoes page is open.'
+local function JournalCoach(path)
+ local tag=path=='timer' and ' (C_Timer ready)' or ''
+ local prior=rawget(_G,'C_Timer')
  BootSetup()
  local journal,micro=JournalHost()
  -- The game's button toggles the page: here it was open and closes again.
  micro:SetScript('OnClick',function() journal:Hide() end)
  Nexus.Help.Show('start')
  local assign=ChildButton(NexusHelpWindow,'Assign Wishlist...')
- C.setup(assign~=nil,'P8: fixture: Help offers Assign Wishlist...')
- local before=Counters()
- local said=Said(function() if assign then assign:Click() end end)
- print('OBSERVED','P8 said='..said)
- C.expect(said:find('could not confirm that the Echoes page is open',1,true)~=nil
-  and not said:find('The Echoes page is open.',1,true),'P8: no claim that the page is open when Nexus cannot see it',said)
- C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing',Show(Counters()))
+ C.setup(assign~=nil,'P8: fixture: Help offers Assign Wishlist...'..tag)
+ local idle=CurrentSettleDriver()
+ C.setup(not (idle and idle:IsShown()),'P8: fixture: no Journal settle of this boot is queued before the click'..tag)
+ local before,settings=Counters(),Settings()
+ local timer=path=='timer' and RecordingTimer() or nil
+ rawset(_G,'C_Timer',timer and timer.api or nil)
+ local ok,err=pcall(function()
+  local clicked=Said(function() if assign then assign:Click() end end)
+  C.guard(not clicked:find(OPEN_CLAIM,1,true),'P8: the click alone claims no open page'..tag,clicked)
+  C.guard(Same(Counters(),before),'P8: the route acts, requests and sends nothing'..tag,Show(Counters()))
+  local settled,observed,again='','',nil
+  if timer then
+   local last=false
+   for _,d in ipairs(timer.delays) do if tonumber(d)==0.35 then last=true end end
+   C.setup(last,'P8: fixture: the click queued the route\'s last settle (0.35 s) on the ready timer'..tag,
+    table.concat(timer.delays,','))
+   local driver=CurrentSettleDriver()
+   C.guard(not (driver and driver:IsShown()),'P8: with the timer ready the Journal settle frame is not used'..tag)
+   local ran,errors=0,{}
+   settled=Said(function() ran,errors=DrainTimer(timer) end)
+   C.guard(#errors==0,'P8: each timer callback runs without error'..tag,table.concat(errors,' | '))
+   C.guard(#timer.queue==0,'P8: every recorded callback ran once and none is left'..tag,tostring(#timer.queue))
+   observed='C_Timer.After (test-local recording timer) delays='..table.concat(timer.delays,',')..' ran='..ran
+   again=function() DrainTimer(timer) end
+  else
+   local driver=CurrentSettleDriver()
+   local tick=driver and driver:GetScript('OnUpdate')
+   if C.setup(driver~=nil and driver:IsShown() and type(tick)=='function',
+    'P8: fixture: the click queued a settle on this boot\'s own Journal settle frame (in H.frames, shown, with its OnUpdate)',
+    'driver='..tostring(driver~=nil)..' global='..tostring(rawget(_G,SETTLE_DRIVER)~=nil)) then
+    local ticks=0
+    settled=Said(function() ticks=DriveSettleFrame(driver,tick,40) end)
+    C.guard(not driver:IsShown(),'P8: the settle frame is idle once the route has settled',tostring(ticks)..' ticks')
+    observed='settle frame '..SETTLE_DRIVER..' (this boot) ticks='..ticks
+    -- Its OnUpdate called again: nothing is left to run.
+    again=function() for _=1,10 do H.now=H.now+.05;tick(driver,.05) end end
+   else
+    observed='settle frame not observed: no settle was driven'
+   end
+  end
+  local said=clicked..(clicked~='' and settled~='' and ' / ' or '')..settled
+  print('OBSERVED','P8 path='..observed..' priorC_Timer='..tostring(prior~=nil)..' said='..said)
+  C.expect(said:find(UNCONFIRMED,1,true)~=nil and not said:find(OPEN_CLAIM,1,true),
+   'P8: no claim that the page is open when Nexus cannot see it'..tag,said)
+  C.guard(select(2,said:gsub(UNCONFIRMED,''))<=1,'P8: the unconfirmed notice is said at most once'..tag,said)
+  C.guard(Same(Counters(),before) and Settings()==settings,
+   'P8: the route and its settles act, request, send and change no setting'..tag,Show(Counters()))
+  local later=again and Said(again) or ''
+  C.guard(not later:find('Echoes page',1,true),'P8: a settled route says nothing more about the page'..tag,later)
+  C.guard(Same(Counters(),before),'P8: and still acts, requests and sends nothing'..tag,Show(Counters()))
+ end)
+ rawset(_G,'C_Timer',prior)
+ if not ok then error(err,0) end
+end
+
+C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip',function()
+ JournalCoach('frame')
+end)
+
+C.scenario('P8 M2 N3: the Journal coach claims an open Echoes page only when Nexus sees its strip (C_Timer ready)',function()
+ JournalCoach('timer')
 end)
 
 C.scenario('P9 M2 N4: the replay\'s routes wait for start-up as Help\'s do; the replay stays open',function()
@@ -265,24 +475,44 @@ C.scenario('P9 M2 N4: the replay\'s routes wait for start-up as Help\'s do; the 
  C.guard(#H.sent==sent and #H.actions==actions,'P9: nothing is performed or sent')
 end)
 
-C.scenario('P10 M2 N5: Setup / Welcome keeps an open first-time Welcome first-time; closing it records it',function()
+C.scenario('P10 M2 N5: secondary Welcome does not dismiss the primary first-use coach',function()
  Reset()
  local F=dofile('tests/prototype/format5_support.lua')
  H=F.Boot(F.Database())
  for _=1,40 do
-  if NexusQuickStart and NexusQuickStart:IsShown() then break end
+  if NexusGuidedSetup and NexusGuidedSetup:IsShown() then break end
   if Nexus.RequestRecompute then Nexus.RequestRecompute() end
   H.Advance(.05,.05)
  end
  local function Title() return NexusQuickStart and NexusQuickStart.title and V.Plain(NexusQuickStart.title:GetText() or '') or '' end
- C.setup(NexusQuickStart and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus','P10: fixture: the first-time Welcome is open',Title())
+ local coach=NexusGuidedSetup
+ C.setup(coach and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: fixture: the first-time guided coach is open')
  local sent,actions=#H.sent,#H.actions
+ -- Accepted setup family (ui/QuickStart.lua M.SetupFamilyGiveWay): windows of
+ -- one strata never draw through each other, so the informational Welcome
+ -- takes the coach's place by a display-only hide (GuidedSetupUI.Hide) that
+ -- records no first use and keeps the coach's first-use callback. Nothing
+ -- re-shows the coach on its own; the player reopens it by a real route.
  local shown=Nexus.QuickStart.ShowSetup()
- C.expect(shown and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus',
-  'P10: Setup / Welcome leaves the open first-time Welcome as it is',Title())
- local later=ChildButton(NexusQuickStart,'Later')
- if later then later:Click() end
- C.expect(rawget(NexusDB,'hasSeenQuickStart')==true,'P10: closing it records the first-time acknowledgement')
+ C.expect(shown and NexusQuickStart:IsShown() and Title()=='Nexus setup (information only)'
+  and not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: secondary Setup / Welcome takes the coach\'s place without dismissing first use',Title())
+ local dismiss=WelcomeDismissal('P10: the informational Welcome')
+ if dismiss then dismiss:Click() end
+ C.guard(not NexusQuickStart:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: closing the informational Welcome records no first-use acknowledgement')
+ -- The coach's own real route (the Options Setup / Welcome row's call) brings
+ -- it back with its first-use callback kept (GuidedSetupUI.Show).
+ local reopened=Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.Show and Nexus.GuidedSetupUI.Show()
+ C.expect(reopened==true and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: the coach reopens through its real route, first use still not acknowledged')
+ local coachClose=CoachClose(coach)
+ if coachClose then coachClose:Click() end
+ C.expect(not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==true,
+  'P10: the first-use coach records acknowledgement only on its deliberate Close',
+  'button='..tostring(coachClose~=nil)..' durable='..tostring(Nexus.QuickStart.CanRecordSeen())
+   ..' seen='..tostring(rawget(NexusDB,'hasSeenQuickStart')))
  C.guard(#H.sent==sent and #H.actions==actions and not Auto(),'P10: nothing is performed, sent or enabled')
 end)
 
@@ -293,8 +523,8 @@ C.scenario('P11 reading Help and the replay acts, requests, sends and writes not
  Nexus.Help.Show('rolling');Nexus.Help.Hide()
  local shown=Nexus.QuickStart.ShowSetup()
  C.setup(shown,'P11: fixture: the replay opens')
- local later=ChildButton(NexusQuickStart,'Later')
- if later then later:Click() end
+ local dismiss=WelcomeDismissal('P11: the replay')
+ if dismiss then dismiss:Click() end
  C.guard(Same(Counters(),before) and Settings()==settings and rawget(NexusDB,'hasSeenQuickStart')==seen and not Auto(),
   'P11: Help and the replay leave actions, requests, sends, settings, seen state and Auto unchanged',Show(Counters()))
 end)
@@ -307,6 +537,7 @@ local function OpenMoreMenu()
  CloseDropDownMenus=CloseDropDownMenus or function() end
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
+ -- Every entry is a direct Options choice (native QA test.163008).
  return captured
 end
 local function MenuItem(items,prefix)
@@ -336,7 +567,7 @@ C.scenario('P12 UX-10 the Automation settings submenu shows every permission; on
  print('OBSERVED','P12 submenu='..text:gsub('\n',' / '))
  C.expect(text:find('Auto: OFF',1,true)~=nil and text:find('Allow Reroll (autoReroll): on',1,true)~=nil
   and text:find('Allow Freeze (autoFreeze): on',1,true)~=nil and text:find('Take needed Echoes (autoPick): on',1,true)~=nil
-  and text:find('Banish (autoBanish): on',1,true)~=nil and text:find('(autoDisable): on',1,true)~=nil
+  and text:find('Banish (autoBanish): on',1,true)~=nil and text:find('Auto-manage Tome Echoes',1,true)~=nil
   and text:find('(autoSave): on',1,true)~=nil and text:find('Lock Wishlist Echoes (autoLockEchoes): off',1,true)~=nil
   and text:find('Activate a Saved Build: never',1,true)~=nil and text:find('autoActivate value is not used',1,true)~=nil
   and text:find('Orb runs: never by Auto',1,true)~=nil,
@@ -364,6 +595,21 @@ C.scenario('P12 UX-10 the Automation settings submenu shows every permission; on
   'P12: reopened, the row shows Reroll off',again and again.text)
  if again then again.func() end
  C.guard(SettingsMap().autoReroll=='true','P12: the same row turns it back on')
+ local tome=MenuItem((MenuItem(OpenMoreMenu(),'Automation settings') or {}).menuList,'Auto-manage Tome Echoes')
+ if C.setup(tome and tome.checked==true and type(tome.func)=='function','P12: Tome control is checkable and initially on') then
+  local beforeTome=SettingsMap()
+  tome.func()
+  local afterTome=SettingsMap()
+  local onlyTome=afterTome.autoDisable=='false'
+  for k,v in pairs(beforeTome) do if k~='autoDisable' and afterTome[k]~=v then onlyTome=false end end
+  for k,v in pairs(afterTome) do if k~='autoDisable' and beforeTome[k]~=v then onlyTome=false end end
+  C.expect(onlyTome,'P12: turning Tome automation off changes only its saved permission')
+  local off=MenuItem((MenuItem(OpenMoreMenu(),'Automation settings') or {}).menuList,'Auto-manage Tome Echoes')
+  C.expect(off and off.checked==false,'P12: reopened, the Tome control stays unchecked')
+  if off and type(off.func)=='function' then off.func() end
+  C.guard(SettingsMap().autoDisable=='true' and Same(Counters(),before) and not Auto(),
+   'P12: re-enabling Tome automation leaves master Auto and action counters unchanged')
+ end
  -- The locked-Echo option is set in the editor: its row opens it, changing nothing.
  local sub2=MenuItem(OpenMoreMenu(),'Automation settings')
  local lock=sub2 and MenuItem(sub2.menuList,'Lock Wishlist Echoes')
@@ -472,9 +718,10 @@ end)
 C.scenario('P16 UX-10 Help lists the Automation scope and the tome paragraph; the editor actions are named as shown',function()
  BootPlan()
  local before,settings=Counters(),Settings()
- Nexus.Help.Show('rolling');local rolling=V.Plain(NexusHelpWindow.body:GetText() or '')
- Nexus.Help.Show('start');local start=V.Plain(NexusHelpWindow.body:GetText() or '')
- Nexus.Help.Show('wishlists');local lists=V.Plain(NexusHelpWindow.body:GetText() or '')
+ -- Each page is its whole shown document (all of Help's parts, V.HelpShown).
+ Nexus.Help.Show('rolling');local rolling=V.HelpShown(NexusHelpWindow)
+ Nexus.Help.Show('start');local start=V.HelpShown(NexusHelpWindow)
+ Nexus.Help.Show('wishlists');local lists=V.HelpShown(NexusHelpWindow)
  Nexus.Help.Hide()
  local R=Nexus.Readout
  C.expect(rolling:find('What Auto may do:',1,true)~=nil and rolling:find('(autoLockEchoes) is off by default',1,true)~=nil
@@ -489,6 +736,111 @@ C.scenario('P16 UX-10 Help lists the Automation scope and the tome paragraph; th
   and lists:find('also offers Save & assign',1,true)~=nil,
   'P16: Help names the editor actions as they are shown',start)
  C.guard(Same(Counters(),before) and Settings()==settings and not Auto(),'P16: reading Help acts, requests, sends and changes nothing')
+end)
+
+-- P17 (J4, issue #131): one boot composes the journey from the shared origins
+-- of ux_manual_recommendation R1 (its boards and marked Needed card), this
+-- file's passive reads (P1, P11, P12) and P15's real Auto warning, then the
+-- real explicit Yes, with hud_roll_footprint's runtime Take observed only by the
+-- harness action log (synthetic; no native action). GUARD: the composition is
+-- not claimed to fail on an earlier cut. Its discriminators: No keeps the next
+-- board manual, only the later Yes enables Auto, and the first action then
+-- targets the board shown at acceptance, never the earlier board's target.
+-- Native input and server effects are NOT_RUN.
+C.scenario('P17 J4 a manual Needed card, passive reads and No keep Auto OFF; only a later explicit Yes acts, on the current board',function()
+ BootPlan()
+ local prefs=type(NexusDB)=='table' and rawget(NexusDB,'overwriteWarnings') or nil
+ if type(prefs)=='table' then prefs.auto=nil end
+ C.setup(not Auto(),'P17: fixture: Auto is OFF and the Auto warning is not suppressed')
+ -- The one card the runtime marked as its Take target (its own model), or nil.
+ local function Highlighted()
+  local m=Nexus.Panel._lastModel
+  local cards=type(m)=='table' and type(m.cards)=='table' and m.cards or {}
+  local n,at=0,nil
+  for i=1,3 do if type(cards[i])=='table' and cards[i].highlight==true then n=n+1;at=i end end
+  return n==1 and at or nil
+ end
+ -- The shown card rows that carry the manual marker.
+ local function Marked()
+  local n,at=0,nil
+  for i,line in ipairs(CardRows()) do if ManualMarker(line) then n=n+1;at=i end end
+  return n,at
+ end
+ local acts=#H.actions
+ Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
+ C.setup(Highlighted()==1,'P17: fixture: the runtime marks card 1, a Needed Echo, as its Take target')
+ local n,at=Marked()
+ local body=Body()
+ print('OBSERVED','P17 manual body='..body)
+ -- The approved compact row: the recommendation stands inside the marked
+ -- offer's own row as the reason alone (the row names the Echo and its
+ -- quality), and the reason's own hover gives the whole sentence with its
+ -- target. The guard that stood here looked for the target's name in the
+ -- text under the rows; that one card is marked and nothing is performed
+ -- stays the guard it was, and how the card is named is the row's EXPECT.
+ C.guard(n==1 and at==1 and #H.actions==acts and not Auto(),
+  'P17: Auto OFF marks the one Needed card; nothing is performed',body)
+ local whole,inRow=body,false
+ do
+  local f=NexusPanel
+  local hover=f._recommendationHover
+  local enter=hover and hover:GetScript('OnEnter')
+  local lines=enter and V.TooltipLines(enter,hover) or {}
+  local leave=hover and hover:GetScript('OnLeave')
+  if leave then leave(hover) end
+  local text=V.Plain(table.concat(lines,'\n'))
+  if text~='' then whole=text end
+  local card=f._offerCards and f._offerCards[1]
+  local _,anchor=f._rollRec:GetPoint(1)
+  inRow=card~=nil and card:IsShown() and anchor==card
+ end
+ C.expect(inRow and body~='' and whole:find(body,1,true)==1 and whole:find('Echo 1 (Uncommon)',1,true)~=nil
+  and #H.actions==acts and not Auto(),
+  'P17: the recommendation stands in the marked card\'s own row and its hover names that card; reading it performs nothing',body..' | '..whole)
+ local before,settings,seen=Counters(),Settings(),rawget(NexusDB,'hasSeenQuickStart')
+ local tip=AutoTooltip()
+ Nexus.Help.Show('rolling');Nexus.Help.Hide()
+ local shown=Nexus.QuickStart.ShowSetup()
+ C.setup(shown,'P17: fixture: the replay opens')
+ local dismiss=WelcomeDismissal('P17: the replay')
+ if dismiss then dismiss:Click() end
+ local sub=MenuItem(OpenMoreMenu(),'Automation settings')
+ C.setup(sub~=nil and type(sub.menuList)=='table','P17: fixture: the ... menu offers Automation settings')
+ C.guard(tip:find('Auto: OFF',1,true)~=nil,'P17: the Auto hover discloses the current scope with Auto OFF',tip)
+ C.guard(Same(Counters(),before) and Settings()==settings and rawget(NexusDB,'hasSeenQuickStart')==seen and not Auto(),
+  'P17: the hover, Help, Setup / Welcome and Automation settings act, request, send and change nothing',Show(Counters()))
+ n,at=Marked()
+ C.guard(n==1 and at==1 and Highlighted()==1,'P17: the manual recommendation still marks the current Needed card')
+ NexusPanel._autoBtn:Click()
+ local f=NexusOverwriteWarning
+ C.setup(f~=nil and f:IsShown(),'P17: fixture: the Auto click opens the Auto warning')
+ if not (f and f:IsShown()) then return end
+ C.guard(not Auto() and Same(Counters(),before),'P17: opening the warning enables and performs nothing',Show(Counters()))
+ f.no:Click()
+ C.guard(not Auto() and not f:IsShown(),'P17: No keeps Auto OFF')
+ Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200003,quality=3}})
+ C.setup(Highlighted()==3,'P17: fixture: the Take target of the next board is card 3')
+ n,at=Marked()
+ C.guard(not Auto() and #H.actions==acts and n==1 and at==3,
+  'P17: after No the next board is still a manual recommendation on its own Needed card; nothing is performed',table.concat(CardRows(),' | '))
+ NexusPanel._autoBtn:Click()
+ C.setup(f:IsShown() and f.yes:IsEnabled() and not Auto(),'P17: fixture: the Auto warning asks again; No saved no suppression')
+ if not f:IsShown() then return end
+ C.guard(#H.actions==acts,'P17: asking again performs nothing')
+ f.yes:Click()
+ local saved=type(NexusDB)=='table' and rawget(NexusDB,'overwriteWarnings') or nil
+ C.guard(Auto() and #H.actions==acts and (type(saved)~='table' or rawget(saved,'auto')==nil),
+  'P17: the explicit Yes turns Auto ON, saves no suppression with the opt-out unticked, and has performed nothing yet')
+ Nexus.RequestRecompute()
+ for _=1,40 do
+  if #H.actions>acts then break end
+  H.Advance(.1)
+ end
+ local new={}
+ for i=acts+1,#H.actions do new[#new+1]=tostring(H.actions[i][1])..':'..tostring(H.actions[i][2]) end
+ print('OBSERVED','P17 actions after Yes='..table.concat(new,','))
+ C.guard(#new==1 and new[1]=='take:200003' and Auto(),
+  'P17: with Auto ON the runtime takes the Needed Echo of the board shown at acceptance, not the earlier target',table.concat(new,','))
 end)
 
 C.finish('(Automation scope and hold reasons in plain words; passive reads; setter-only permissions; settings submenu; inline reason; warning/Help scope and tomes; M2 notes)')
