@@ -5034,7 +5034,7 @@ end
             if warning and warning.CancelAuto then warning.CancelAuto(M) end
             return CommitToggle()
         end
-        if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then
+        if Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)() then
             SetStatus("Ordinary Automation stays OFF while the Orb operation is active or unresolved.")
             return false
         end
@@ -5066,7 +5066,7 @@ end
         return warning.RequestAuto(M, function()
             -- Approval belongs to this still-OFF request. Recheck interruption
             -- and Orb exclusion rather than authorizing a stale UI callback.
-            if sched.autoEnabled or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary())
+            if sched.autoEnabled or (Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)())
                 or (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then
                 arm.promptOverwritePending = false
                 return false

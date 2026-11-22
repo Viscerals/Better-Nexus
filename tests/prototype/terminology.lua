@@ -870,7 +870,8 @@ do
  -- never from a load's own facts: every supplied entry is admitted and none
  -- is rejected.
  local englishKeys=L.Keys()
- check(#englishKeys==4116 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4116 keys, each with English')
+ -- (v47, 2026-11-19: one more reviewed meaning, Orb and Tome checkbox added, obsolete Tome row retired: 4117.)
+ check(#englishKeys==4117 and #englishKeys==count(data),'SETUP the reviewed English catalog has its 4117 keys, each with English')
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')

@@ -102,7 +102,7 @@ Nexus.Help.Show('start')
 b('Next'):Click();check(f.title:GetText():find('locked targets',1,true),'real next handler')
 b('Previous'):Click();check(f.title:GetText():find('Getting started',1,true),'real previous handler')
 Nexus.Help.Show('orbs');check(Document():find('one Orb per replacement',1,true),'Orb instructions explain one-Orb boundary')
-check(Document():find('does not automatically re%-enable'),'no auto restart promise')
+check(Document():find('Starting leaves ordinary Automation as it is',1,true) and not Document():find('re%-enable'),'no auto restart promise: Start changes no ordinary Automation setting')
 b('Close'):Click();check(not f:IsShown(),'close works')
 -- The full-UI design's Help: each page leads with a short task topic (a few
 -- lines and one Open action to the real screen); the page text stays below it

@@ -1166,7 +1166,7 @@ EH:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 local function CommandAuto()
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then
+    if Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)() then
         Say("command.chat.auto_blocked_by_orb")
         return false
     end

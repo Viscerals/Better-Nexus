@@ -2822,7 +2822,8 @@ end
 -- changes one setting through the Store owner instead of writing a settings
 -- table it found itself, and learns whether the change was saved.
 -- Static caller inventory: core/WishlistController.lua UpdateStoreSetting,
--- ui/Theme.lua Choose, and core/SyncModePolicy.lua ApplyChoice (the explicit
+-- ui/Theme.lua Choose, core/MainLifecycle.lua ChooseLanguage and the Tome
+-- permission callback, and core/SyncModePolicy.lua ApplyChoice (the explicit
 -- Sync mode choice, SavedFormat.CHOICE_KEY only). For that one key this entry
 -- validates first and writes only durably: an invalid value is refused, and a
 -- root that SavedFormat.ChoiceStatus does not report writable is refused with

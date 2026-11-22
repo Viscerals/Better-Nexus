@@ -211,11 +211,12 @@ C.scenario('X5 the Help text names the new routes and wording, and keeps its ear
  C.expect(Has(pages.start,'A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done.')
   and Has(pages.start,'Opening, navigating or closing the guide assigns, shares, spends and turns on nothing.'),
   'X5: opening or closing the guide is not a verified step; only a read back result completes one',pages.start)
- C.expect(Has(pages.orbs,'labelled Paused') and Has(pages.orbs,'until it settles or you continue past it'),'X5: the Orbs page names restored PAUSED and the Continue exit')
- C.expect(Has(pages.orbs,'the window says the target is back') and Has(pages.orbs,'the maximum was not recorded'),'X5: it names a returned target and an unrecorded maximum')
- C.expect(Has(pages.orbs,'the header says the current state and the last recorded one'),'X5: it names live and recorded history state')
- for _,s in ipairs({'what is blocked, then what you can do now, then the details','Review target spends nothing',
-  'Nexus never continues by itself','Closing the window does not stop an approved run. Use Pause or Stop.'}) do
+ -- (2026-11-19, user/coordinator-approved Start/Stop wording: no maximum, Pause/Resume, Review target or Continue.)
+ C.expect(Has(pages.orbs,'Continue is no longer offered') and Has(pages.orbs,'kept unchanged as history'),'X5: the Orbs page says Continue is gone and earlier records are history')
+ C.expect(Has(pages.orbs,'A maximum saved by an earlier version is kept but not used') and Has(pages.orbs,"is used from the run's next step"),'X5: it names the unused saved maximum and a changed target')
+ C.expect(Has(pages.orbs,'Run history clears on reload or logout, and the saved record is kept'),'X5: it names what a reload clears and keeps')
+ for _,s in ipairs({'Nexus never retries or refunds it, and never deletes the record',
+  'Nexus never continues an earlier run by itself','Closing the window does not stop a run. Use Stop'}) do
   C.guard(Has(pages.orbs,s),'X5: the Orbs page keeps: '..s)
  end
  for id,text in pairs(pages) do

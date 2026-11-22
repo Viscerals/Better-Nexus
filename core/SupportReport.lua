@@ -1296,6 +1296,60 @@ do
                 .." uncertainSpendExposure="..factCount(runner.uncertain)
                 .." reserved="..factCount(runner.reserved).." historyKnown="..factFlag(runner.historyKnown)
                 .." (session memory only; IDLE is not choice absence)",
+            -- The Start/Stop run's request, compared between its send and the
+            -- run's last read (OrbAuto.RequestView; client state only, never
+            -- proof of what the server did; redrawReturn is uninterpreted).
+            (function()
+                local q=accessorFacts("OrbAuto","RequestView",{"on","state","kind","age","rejoined","redrawReturn",
+                    "sameChoiceTable","choiceShown","sameCards","offerAtSend","offerNow","chargesAtSend","chargesNow",
+                    "redrawFlagAfterSend","redrawFlagNow","pickPendingNow"}) or {}
+                return "Orb Start/Stop request: on="..factFlag(q.on)
+                    .." state="..factCode(q.state,codeSet({"OFF","RUNNING","WAITING","DONE","STOPPED"}))
+                    .." kind="..factCode(q.kind,codeSet({"none","spend","redraw","select","take"}))
+                    .." age="..factAge(q.age).." rejoined="..factFlag(q.rejoined)
+                    .." redrawReturn="..factCode(q.redrawReturn,codeSet({"true","false","nil","other","error"}))
+                    .." sameChoiceTable="..factFlag(q.sameChoiceTable).." choiceShown="..factFlag(q.choiceShown)
+                    .." sameCards="..factFlag(q.sameCards)
+                    .." offerAtSend="..factFlag(q.offerAtSend).." offerNow="..factFlag(q.offerNow)
+                    .." chargesAtSend="..factCount(q.chargesAtSend).." chargesNow="..factCount(q.chargesNow)
+                    .." redrawFlagAfterSend="..factFlag(q.redrawFlagAfterSend).." redrawFlagNow="..factFlag(q.redrawFlagNow)
+                    .." pickPendingNow="..factFlag(q.pickPendingNow)
+                    .." (session memory only; client state, not server proof)"
+            end)(),
+            -- The run's redraw timing (OrbAuto.RedrawTimingView): seconds by
+            -- the client clock from Nexus's send of a redraw (and of its one
+            -- retry) to the pass on which it saw the redraw answered: a new
+            -- choice table (seen) or the choice cleared (cleared). What
+            -- Nexus observed on its own passes, not a server measurement.
+            (function()
+                local t=accessorFacts("OrbAuto","RedrawTimingView",{"first","retries","seen","cleared","picked","pending","recent"}) or {}
+                local function secs(n)
+                    if type(n)=="number" and n>=0 and n<=9999999 then return string.format("%.1fs",n) end
+                    return "unknown"
+                end
+                local items={}
+                pcall(function()
+                    if type(t.recent)~="table" then return end
+                    for i=1,8 do
+                        local e=t.recent[i]
+                        if type(e)~="table" then break end
+                        local item="first:"..secs(e.first)
+                        if e.retry~=nil then item=item..",retry:"..secs(e.retry) end
+                        items[#items+1]=item.."/"..factCode(e.state,codeSet({"seen","cleared","pending","pick"}))
+                    end
+                end)
+                local first,retries=factCount(t.first),factCount(t.retries)
+                local attempts=(first~="unknown" and retries~="unknown") and factCount(t.first+t.retries) or "unknown"
+                return "Orb redraw timing: redraws="..first.." retries="..retries.." attempts="..attempts
+                    .." newChoiceSeen="..factCount(t.seen).." choiceCleared="..factCount(t.cleared)
+                    .." pending="..factCount(t.pending)
+                    .." pickBeforeNewChoice="..factCount(t.picked)
+                    .." recent="..(#items>0 and table.concat(items,"; ") or "none")
+                    .." (session memory only, last 8 redraws, oldest first; client clock from Nexus's send"
+                    .." to the 0.2s pass on which it saw a new choice table (seen) or the choice cleared"
+                    .." with no new table (cleared; cause not shown), pending = time so far;"
+                    .." Nexus's own observation, not a server measurement)"
+            end)(),
         }
     end
 end

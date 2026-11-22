@@ -722,7 +722,7 @@ C.scenario('V4 the hubs open real workspaces; retained routes and hovers say wha
   local lines,ok,err=V.TooltipLines(button:GetScript('OnEnter'),button)
   local tip=V.Plain(table.concat(lines,'\n'))
   local want=({plan='saves, assigns and loads nothing',explore='not a complete or server-wide ranking',
-   orbs='an approved run continues'})[kind]
+   orbs='a run continues. Use Stop'})[kind]
   C.expect(ok and tip:find(want,1,true)~=nil,'V4: the '..kind..' hover says '..want,tostring(err)..' '..tip)
   -- v9 (Root's ruling ST8-2: "Fix the misleading ... hub hover titles
   -- through semantic composition from EXISTING localized menu/control

@@ -39,6 +39,9 @@ local virtualStats = {
 }
 
 local ROW_H = 38
+-- Rows shown after ranking and filtering the whole board (ViewProjections
+-- applies the same limit; this copy serves the no-projection fallback).
+local LEADERBOARD_DISPLAY_LIMIT = 100
 local LIST_W = 590
 local CLASS_COLOR = {
     DEATHKNIGHT={0.77,0.12,0.23}, DRUID={1.00,0.49,0.04}, HUNTER={0.67,0.83,0.45},
@@ -435,6 +438,9 @@ local function Rows()
     local query = searchBox and tostring(searchBox:GetText() or ""):lower() or ""
     local out = {}
     for _, row in ipairs(rows) do
+        -- The same display limit as ViewProjections: the board is already in
+        -- rank order, so the first 100 rows that pass the filters are shown.
+        if #out >= LEADERBOARD_DISPLAY_LIMIT then break end
         local build = row.build or {}
         local class = type(row.resolvedClass) == "string"
             and row.resolvedClass:upper() or nil

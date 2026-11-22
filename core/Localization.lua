@@ -1274,7 +1274,6 @@ local DECLARATIONS = {
     ["readout.menu.read_only"] = {kind = "text"},
     ["readout.menu.save_run"] = {kind = "template", fields = {"setting", "value"}, slots = {"text", "text"}, resultLimit = 435},
     ["readout.menu.take_needed"] = {kind = "template", fields = {"setting", "value"}, slots = {"text", "text"}, resultLimit = 270},
-    ["readout.menu.tomes"] = {kind = "template", fields = {"setting", "value"}, slots = {"text", "text"}, resultLimit = 279},
     ["readout.note.auto_on_scope"] = {kind = "text"},
     ["readout.note.waiting_offer_data"] = {kind = "text"},
     ["readout.status.auto_refused"] = {kind = "text"},
@@ -4458,6 +4457,10 @@ local DECLARATIONS = {
     ["help.body.faq_before_reload_answer"] = {kind = "block"},
     ["help.label.faq_random_roll_leveling_question"] = {kind = "text"},
     ["help.body.faq_random_roll_leveling_answer"] = {kind = "block"},
+    -- v47 (hand-reviewed, not generated): the Start/Stop Orb window balance line,
+    -- in the same order as data/LocalizationEnglish.lua and KEY_CONTEXT.json.
+    ["orb.status.run_until_goal"] = {kind = "text"},
+    ["readout.menu.auto_manage_tomes"] = {kind = "text"},
 }
 -- NEXUS-L10N-REGISTRY END
 

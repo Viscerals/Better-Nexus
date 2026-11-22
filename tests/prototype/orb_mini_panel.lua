@@ -1,5 +1,13 @@
 -- Real OrbRuntime and mini handlers; synthetic WoW/services, no game access.
+-- Start/Stop surfaces (2026-11-19, 9106 field report; user-authorized): in this
+-- build the mini panel offers the Start/Stop runner's Stop only, and no Pause
+-- or Resume (pinned in orb_auto_surfaces.lua and orb_auto_start_stop.lua case
+-- 14). This file keeps covering the earlier runtime's own mini gates, which
+-- the code retains but which no surface reaches while the runner is loaded:
+-- each harness below unloads the runner (NoRunner) so those gates run.
+local function NoRunner() Nexus.OrbAuto=nil end
 local H=dofile('tests/prototype/orbs_support.lua');local M=H.M;local UI=Nexus.OrbPanel
+NoRunner()
 local n=0;local function check(v,m)assert(v,m);n=n+1 end
 local function direct(b)b:GetScript('OnClick')(b)end
 -- v22 (owner brief): the mini fits what it shows. Measured on the real mini
@@ -293,8 +301,10 @@ check(H.Count('orb-spend')==0,'opening and reopening do not spend')
 
 -- Approved real run, submitted offer, Pause/Resume, close and Stop settlement.
 H.OrbPlan({{spellId=410002,quality=2,stacks=3}})
-local full=UI.Show();full.limit:SetText('3');full.start:Click();UI.ShowMini()
-check(H.Count('orb-spend')==1 and M.Status().limit==3,'start remains the full-window approval path')
+-- Start/Stop rework (2026-11-19): the window's Start runs the new automation; this
+-- earlier-runtime run is started through its own API to keep the mini's gates covered.
+local full=UI.Show();assert(M.Start(3));UI.ShowMini()
+check(H.Count('orb-spend')==1 and M.Status().limit==3,'the earlier runtime run is started (API)')
 check(f.pause:IsEnabled() and not f.resume:IsEnabled() and f.stop:IsEnabled(),'running gates')
 check(f.pending:GetText():find('requested',1,true),'pending spend is separately disclosed')
 f.pause:Click();direct(f.pause)
@@ -443,7 +453,7 @@ M.CompactStatus=compact
 -- Independent real-runtime scenarios use fresh synthetic addon sessions.
 local function fresh()
  Nexus=nil;NexusDB=nil;NexusSupportDB=nil;NexusOrbRuntime=nil
- local q=dofile('tests/prototype/orbs_support.lua');UIParent:SetSize(1920,1080)
+ local q=dofile('tests/prototype/orbs_support.lua');NoRunner();UIParent:SetSize(1920,1080)
  q.OrbPlan({{spellId=410002,quality=2,stacks=3}})
  return q,Nexus.OrbPanel,Nexus.OrbPanel.ShowMini()
 end
@@ -473,9 +483,12 @@ assert(loadfile('core/OrbAdapter.lua'))('Nexus',{});assert(loadfile('core/OrbRun
 q.M=Nexus.OrbRuntime;u.ShowMini()
 check(q.M.Status().state=='RECOVERY' and q.M.Status().pending and not q.M.Status().running,'real receipt reload remains passive recovery')
 local pendingFull=mf.pending._nexusFullText or mf.pending:GetText()
-check(not mf.pause:IsEnabled() and not mf.resume:IsEnabled() and mf.stop:IsEnabled()
+-- The reload loaded the Start/Stop runner again (the shipped configuration):
+-- this is the 9106 field case. The restored receipt is history; the mini
+-- offers no Pause, Resume or Stop for it (its Stop sent nothing).
+check(not mf.pause:IsShown() and not mf.resume:IsShown() and not mf.stop:IsEnabled()
  and pendingFull:find('not settled',1,true) and mf.pending:GetText():find('Outcomes: ?',1,true),
- 'mini keeps restored pending explanation, visibly unknown prior outcomes and Resume disabled')
+ 'mini keeps restored pending explanation and visibly unknown prior outcomes; no Pause, Resume or Stop for the receipt')
 mf.pendingHit:GetScript('OnEnter')(mf.pendingHit)
 check(GameTooltip:GetText()==pendingFull and GameTooltip:GetText():find('not settled',1,true),
  'real pending hover exposes the complete restored unsettled explanation')
@@ -511,7 +524,7 @@ for _,field in ipairs({'historyKnown','uncertain'})do
  end)
 end
 recoveryCase('real checking and held phases are visible first',function()
- local R=dofile('tests/prototype/orb_recovery_support.lua');local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(3))
+ local R=dofile('tests/prototype/orb_recovery_support.lua');local H,M,A,O=R.S.Fresh();NoRunner();R.S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(3))
  local server=R.Server(H,{mode='hold'});H.service.RequestChoice=function()SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)end
  for _=1,80 do if M.Status().recoveries==1 then break end;H.Advance(.25)end
  assert(M.Status().recoveries==1 and M.ContinueView().liveStage=='checking','SETUP actual admitted automatic check')
@@ -546,7 +559,7 @@ local function freshFont(height)
  for _,name in ipairs({'NexusFontSmall','NexusFontNormal','NexusFontLarge','NexusFontSecondary','NexusFontTitle'}) do _G[name]=nil end
  CreateFont=nil
  Nexus=nil;NexusDB=nil;NexusSupportDB=nil;NexusOrbRuntime=nil
- local q=dofile('tests/prototype/orbs_support.lua');UIParent:SetSize(1920,1080)
+ local q=dofile('tests/prototype/orbs_support.lua');NoRunner();UIParent:SetSize(1920,1080)
  InstallFont(height,true)
  local LM=Nexus.LayoutMetrics
  if LM and type(LM.EnsureFonts)=='function' then LM.EnsureFonts() end

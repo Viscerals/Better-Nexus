@@ -53,8 +53,8 @@ C.scenario('W1 a restored record kept PAUSED reads in layers under its own label
  C.expect(text==lines[1]..'\n'..lines[2]..'\nDetails: '..s.reason,'W1: the runtime reason follows whole as the details',text)
  C.guard(not Has(text,'Resume would use') and not Has(text,'Resume uses'),'W1: no Resume target is guessed',text)
  C.guard(M.Status().state=='PAUSED' and M.Status().recovery and M.Status().recovery.kind=='PAUSED','W1: it stays PAUSED; it is not turned into RECOVERY')
- C.guard(f.cont:IsShown() and f.cont:GetText()=='Continue...' and not f.resume:IsEnabled() and M.BlocksOrdinary(),
-  'W1: Continue stays the explicit way on; no Resume; ordinary rolling stays blocked')
+ C.guard(not f.cont:IsShown() and not f.resume:IsShown() and M.BlocksOrdinary(),
+  'W1: no Continue opener and no Resume (Start/Stop rework); the record still blocks')
  C.guard(R.Same(R.Saved(),saved) and #H.sent==sent and H.Count('orb-spend')==spend,'W1: the receipt is unchanged; nothing was sent or spent')
  local after=M.RecoveryView()
  C.guard(after.state==recovery.state and after.recovery==recovery.recovery and after.restored==recovery.restored,

@@ -296,6 +296,9 @@ end
 
 -- An earlier Orb action unresolved after a reload: the Orb runtime's own
 -- recovery reason (about 200 characters) is the HUD body, with the button.
+-- The Orb state is unknown after the reload: saved history alone no longer
+-- blocks ordinary rolling while the live Orb service shows no offer (user
+-- decision, 2026-11-19), so the fixture uses a current state that still does.
 -- Real OrbRuntime/OrbAdapter with the synthetic Orb service of
 -- orbs_support.lua, as in orb_guidance_passive_open.lua.
 do
@@ -309,6 +312,7 @@ do
  NexusOrbRuntime:SetScript('OnUpdate',nil);NexusOrbRuntime:SetScript('OnEvent',nil);NexusOrbRuntime:Hide()
  assert(loadfile('core/OrbAdapter.lua'))('Nexus',{})
  assert(loadfile('core/OrbRuntime.lua'))('Nexus',{})
+ H.O.known=false
  H.Notify();H.A.Poll()
  if not (NexusPanel and NexusPanel:IsShown()) then Nexus.Panel.Show() end
  for _=1,4 do Nexus.RequestRecompute();H.Advance(.4) end
@@ -348,11 +352,12 @@ do
    print('ORB_FIT',label,m.name,'box',status:GetWidth()..'x'..status:GetHeight(),'lines',n,'needs',n*m.line)
    check(status:GetWidth()==580,label..' '..m.name..': the status keeps its 580-unit width')
    check(n*m.line<=status:GetHeight(),label..' '..m.name..': every line of the Orb window status fits: '..n..' lines')
-   -- Inside the window, below the usage line and above the rows after it.
+   -- Inside the window, below the Start row and above the rows after it
+   -- (Start/Stop rework 2026-11-19: no approval or usage rows).
    local box={0,0,f:GetWidth(),f:GetHeight()}
-   local st,usage,close=G.Rect(status,f),G.Rect(f.usage,f),G.Rect(f.closeNotice,f)
-   check(G.Inside(st,box) and usage[4]<=st[2] and st[4]<=close[2],
-    label..' '..m.name..': the status '..G.Text(st)..' is inside the window, below the usage and above the close notice')
+   local st,startRow,close=G.Rect(status,f),G.Rect(f.start,f),G.Rect(f.closeNotice,f)
+   check(G.Inside(st,box) and startRow[4]<=st[2] and st[4]<=close[2],
+    label..' '..m.name..': the status '..G.Text(st)..' is inside the window, below the Start row and above the close notice')
    if (f.notice:GetText() or '')~='' then
     local nt=G.Rect(f.notice,f)
     check(st[4]<=nt[2] and nt[4]<=close[2],label..' '..m.name..': the notice follows the status, apart from it')

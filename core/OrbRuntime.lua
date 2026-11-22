@@ -780,7 +780,9 @@ end
 -- see OrbAdapter O.Read). Every action path calls inspect() and reads in full.
 local function readState(...)
     local ok,s,err,stage=pcall(B.Read,...)
+    local display=(...)=="display"
     if not ok then
+        if display then M._displayRead={err="The current Orb state could not be read. No new action was sent.",at=GetTime and GetTime() or 0} end
         -- This is an actual failed observation, unlike an earlier assignment
         -- or target refusal. Never reuse its pre-failure empty-choice fact.
         if run.postRecovery then RC.postUnknown() end
@@ -789,10 +791,14 @@ local function readState(...)
         end
         return nil,"The current Orb state could not be read. No new action was sent.","state"
     end
+    -- The last display read (its state or its refusal), for OrbAuto.CanStart at
+    -- the same moment: the Orb window then makes no second read.
+    if display then M._displayRead={s=s,err=err,at=GetTime and GetTime() or 0} end
     return s,err,stage
 end
 local function inspect(display)
     local assignment=assigned()
+    if display then M._displayAssignment={a=assignment,at=GetTime and GetTime() or 0} end
     if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode.",assignment,"assignment" end
     local targets,err=P.Normalize(config.entries);if not targets then return nil,err,assignment,"targets" end
     local s,e,stage
@@ -1215,7 +1221,7 @@ local function onPickRaw(raw)
     if Nexus.OrbRuntime~=M or type(raw)~="table" then return end
     init()
     local p=run and run.pending
-    if not p then return end
+    if not p or run.historical then return end
     local entry=cleanPick({id=raw.id,q=raw.q,board=raw.board,m=pickRelation(raw,p),acc=raw.acc,op=raw.op,
         slot=raw.slot,sk=raw.sk,rd=raw.rd,inb=raw.inb,ph=PICK_PHASE[raw.ph] and raw.ph or life.phase,
         ep=pickInt(raw.ep,0,65535) or life.epoch,at=wallClock(),c=1})
@@ -3011,6 +3017,13 @@ local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true,LOADOUT_UNKNO
 local CAN_PROGRESS_OBSERVING={OFFER_OPEN=true,WAIT_OFFER=true}
 function M.BlockReason(subject)
     subject=type(subject)=="string" and subject or "This action"
+    -- A Start/Stop run's own request awaits the game's answer: that is the
+    -- wait (the same sentence as the earlier runtime's own run), not an older
+    -- receipt's state, which is history and does not cause it.
+    local auto=Nexus.OrbAuto
+    if auto and auto.Active() and auto.OrdinaryOpen and not auto.OrdinaryOpen() then
+        return subject.." is paused: Orb refinement owns the current action."
+    end
     if not run then return nil end
     local p=run.pending
     if p and run.snap and run.snap.attribution then
@@ -3068,6 +3081,7 @@ function M.Pump(passive)
     -- After a Continue, late game events are recorded on the archive entry (bounded, never acted on).
     if RS.after then pcall(RC.late) end
     if advancing or (not run.running and not run.pending) then return end
+    if run.historical then return end
     passive=passive==true or passiveDepth>0
     if run.pending then
         -- Install the pick hook if the game's PerkService appeared after the load,
@@ -3114,7 +3128,8 @@ function M.Pump(passive)
         run.slotRead={slot=s.context.slot,slotKnown=s.context.slotKnown}
         if p and p.restored then
             -- What the last passive read showed, for the Continue view (the check reads again itself).
-            run.snap={guid=s.context.guid,open=s.offerPending==true or #s.board>0,attribution=RC.attributionExit(p,s)}
+            -- offer: the game's own Orb offer flag alone (an ordinary board is not an Orb offer).
+            run.snap={guid=s.context.guid,open=s.offerPending==true or #s.board>0,offer=s.offerPending==true,attribution=RC.attributionExit(p,s)}
             if receiptGuid(p)~=s.context.guid then pause("The earlier Orb action belongs to another character or an unsupported receipt format.");return end
             if not p.baselineStamp then p.baselineStamp=s.grantStamp end
             local mark=run.pauseSerial
@@ -3645,13 +3660,109 @@ function M.RecoveryView()
         loadoutCheck=check,loadoutCause=cause,loadoutSeenSlot=cause and seen or nil,loadoutSeenAt=cause and seenAt or nil,
         offerRecorded=p.offerKey~=nil,unmet=unmetNow}
 end
-function M.BlocksOrdinary()
+-- A receipt restored after a reload becomes history when the player starts a
+-- new Start/Stop run on it (MarkHistorical; rework of 2026-11-19). It is kept,
+-- with its spend, exposure and evidence, its passive recovery no longer reads,
+-- observes or settles it, and it blocks nothing while the game's own Orb
+-- service reports a known state with no Orb offer (OrbAdapter.ServiceState
+-- IDLE, or no Orb service). An Orb offer or an unknown state blocks as before.
+-- Until such a Start the receipt blocks as it did.
+local function historyClear()
+    local p=run and run.pending
+    if not (p and p.restored==true and run.historical and not run.running) then return false end
+    local okS,_,status=pcall(B.ServiceState)
+    return okS and (status=="IDLE" or status=="ABSENT")
+end
+-- An ordinary Take is about to be sent (GameAdapter.Take): a restored receipt
+-- whose recorded choice, or a pick matched to it, could let the passive
+-- recovery count this Take's gain as that earlier action's outcome is kept as
+-- history first (no false attribution). A receipt without one cannot be
+-- settled by an ownership result (finishResult needs a recorded choice) and is
+-- left as it is. Memory only; nothing is saved or sent.
+function M.HistoryBeforeOrdinaryTake()
+    local p=run and run.pending
+    if p and p.restored==true and not run.running and not run.historical
+        and (hasChoiceEvidence(p) or p.recoveryMatched) then
+        M.MarkHistorical()
+    end
+end
+-- A new Start/Stop run began: a restored receipt is kept as history only, and
+-- its passive recovery no longer reads, observes or settles it in this session.
+function M.MarkHistorical()
+    init()
+    if run and run.pending and run.pending.restored and not run.running then
+        run.historical=true
+        if type(B.Unwatch)=="function" then pcall(B.Unwatch) end
+    end
+end
+-- The earlier runtime's own block (its run or its receipt), without OrbAuto.
+local function receiptBlocks()
     if not config then
         local st=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
         if not st then return false end
         if type(st.orbRefinement)=="table" and st.orbRefinement.pending then init() end
     end
+    if historyClear() then return false end
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
+end
+function M.BlocksOrdinary()
+    if Nexus.OrbAuto and Nexus.OrbAuto.Active() then
+        receiptBlocks() -- the same lazy load as before
+        return true
+    end
+    return receiptBlocks()
+end
+-- Ordinary rolling only (the Auto toggles and the ordinary-board gate). Every
+-- BlocksOrdinary case blocks it too except one: a receipt restored after a
+-- reload, whose spend this client observed with its offer, or whose first Orb
+-- offer seen after its request was recorded (spend unconfirmed), with no recorded choice, while
+-- the last passive read of the same character showed no Orb offer, and no
+-- Continue check under way (a restored receipt is never a running run). No ownership
+-- result can settle such a receipt (finishResult needs a recorded choice), so
+-- an ordinary Take cannot be counted as its outcome. The receipt, its spend
+-- and exposure, the Resume and Start refusals and the loadout, lock and
+-- upload blocks (BlocksOrdinary) are unchanged; nothing is sent or replayed.
+-- A Start/Stop run (OrbAuto) blocks ordinary rolling only while its own Orb
+-- request awaits the game's answer (OrbAuto.OrdinaryOpen false); otherwise
+-- the ordinary flow on a free draw stays as it is without the run (the
+-- ordinary-board gate still refuses an Orb offer or an unknown Orb state).
+function M.BlocksOrdinaryRolling()
+    local auto=Nexus.OrbAuto
+    if auto and auto.Active() then
+        if not (auto.OrdinaryOpen and auto.OrdinaryOpen()) then return true end
+        if not receiptBlocks() then return false end
+    elseif not M.BlocksOrdinary() then return false end
+    local p=run and run.pending
+    if not (p and p.restored==true) then return true end
+    -- Saved history from an earlier session never blocks an actionable
+    -- ordinary pick (user decision, 2026-11-19): while the live Orb service
+    -- reports a known state with no Orb offer (IDLE, or no Orb service) and no
+    -- check of this session is under way, the restored receipt does not block
+    -- ordinary rolling. It is unchanged; its passive recovery continues, and
+    -- an ordinary Take first keeps a receipt that could count that Take's gain
+    -- as its outcome as history (M.HistoryBeforeOrdinaryTake). An open Orb
+    -- offer, an unknown state or a current read that failed (UNREADABLE) still
+    -- blocks here and at the ordinary gate. The loadout, lock and upload blocks
+    -- (BlocksOrdinary) are unchanged.
+    if not run.running and not (run.recovery and run.recovery.kind=="UNREADABLE") then
+        local stage=run.rc and run.rc.stage
+        if stage~="checking" and stage~="ready" then
+            local okS,_,status=pcall(B.ServiceState)
+            if okS and (status=="IDLE" or status=="ABSENT") then return false end
+        end
+    end
+    -- Its spend observed with its offer, or the first Orb offer seen after its
+    -- request recorded as its own before the balance showed the spend (not proof
+    -- that it was this action's reply: a later Orb offer blocks again below and at
+    -- the ordinary-board gate). Neither is changed here. An action with no offer
+    -- recorded may still be owed one, and stays blocked.
+    if (p.spendConfirmed~=true and p.offerKey==nil) or hasChoiceEvidence(p) or p.recoveryMatched then return true end
+    local snap=run.snap
+    if type(snap)~="table" or snap.offer~=false or receiptGuid(p)~=snap.guid then return true end
+    if run.recovery and run.recovery.kind=="UNREADABLE" then return true end
+    local stage=run.rc and run.rc.stage
+    if stage=="checking" or stage=="ready" then return true end
+    return false
 end
 -- The last normal Orb window read (M.Status), for the support report: one
 -- bounded snapshot of fixed codes, whole numbers and booleans, each checked as
@@ -3959,3 +4070,476 @@ do
         return status(...)
     end
 end
+
+-- ===== Start/Stop Orb automation (Nexus.OrbAuto) =====
+-- Its own function scope: the main chunk of this file is near the Lua 5.1
+-- limit of 200 locals.
+;(function()
+-- Nexus: Start/Stop Orb automation (2026-11-19, user-authorized rework).
+--
+-- The player has two controls: Start and Stop. There is no Orb maximum: a run
+-- ends normally when the active loadout's Wishlist is complete, when no Orb is
+-- left, or when no eligible source Echo remains; Stop ends it at once.
+--
+-- While a run is ON, on each pass:
+--   * an open Orb offer (the game's own OrbService.IsOfferPending flag and a
+--     published three-card choice) is answered with a needed Echo of the
+--     active loadout's Wishlist; an offer without one is redrawn with the
+--     game's own Orb redraw (OrbService.RerollOffer, one Orb);
+--   * with nothing on the table, one Orb is spent on a safe surplus source
+--     Echo to open a draw;
+--   * a free (ordinary) draw with a needed Echo is taken once through the
+--     ordinary Take (GameAdapter.Take), with no Orb and without ordinary Auto;
+--   * a free draw without one stays with the ordinary flow (the player, or
+--     ordinary Auto when it is ON): no Orb is spent while one is open, none
+--     because it is unwanted, and the run sends nothing to dismiss it.
+-- The Orb balance is only affordability (at least one Orb), never proof of an
+-- outcome: a reward that raises it, or a client that has not lowered it yet,
+-- changes nothing here. One request is in flight at a time; it is answered when
+-- the game replaces its published choice (a new offer, a new draw, or the
+-- choice cleared). A request the game does not answer is not repeated, except
+-- the one approved retry of an overdue redraw (retryRedraw).
+-- A run is session-only. After a reload a Start is a fresh run on the current
+-- game state; an older Orb receipt is kept as history and does not block it.
+local M={};Nexus.OrbAuto=M
+local P=Nexus.OrbPolicy
+local function B() return Nexus.GameAdapter and Nexus.GameAdapter.Orbs end
+local ANSWER_WAIT=8      -- seconds before one read-only refresh request
+local ANSWER_GIVEUP=20   -- seconds after which the run says it has seen no answer
+local SETTLE_AFTER_LOAD=3
+local run={on=false,state="OFF",reason="Start uses Orbs on safe surplus Echoes until the active loadout's Wishlist is complete. Stop ends it at any time."}
+local frame,lastPass=nil,0
+local loadingUntil=0
+local function now() return (GetTime and GetTime()) or 0 end
+local function sessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
+local function setState(state,reason) run.state=state;run.reason=reason end
+local function choiceRef()
+    local pe=_G.ProjectEbonhold;local perks=type(pe)=="table" and rawget(pe,"Perks") or nil
+    return type(perks)=="table" and rawget(perks,"currentChoice") or nil
+end
+-- The game's own pending-pick flag (Perks.pendingSelectSpellId). The client
+-- sets it when it sends a pick and clears it only when the pick's result
+-- arrives; a refused result leaves the same published choice table (and an
+-- Orb offer) standing (client reference perks_service.lua). Memory only.
+local function pickPending()
+    local pe=_G.ProjectEbonhold;local perks=type(pe)=="table" and rawget(pe,"Perks") or nil
+    return type(perks)=="table" and rawget(perks,"pendingSelectSpellId")~=nil
+end
+-- A request this session already sent whose answer was not seen when its run
+-- ended (Stop, a slot switch, a game refusal of another request). Ending a run
+-- ends every future action; it does not erase this knowledge: a new Start
+-- rejoins this request instead of sending another one before its answer.
+local carried=nil
+-- Redraw timing, for the support report only (user-approved 2026-11-19). For
+-- each redraw the run put in flight: the time from its send (and from its one
+-- retry, if sent) to the pass on which Nexus saw it answered, by the
+-- client clock (GetTime) on the run's own 0.2 s passes. Recorded on the
+-- existing send and answer paths; it sends, reads, schedules and decides
+-- nothing. A redraw answered by a new (non-nil) choice table is "seen"; one
+-- answered by the choice being cleared, with no new table, is "cleared" (the
+-- client state does not show why). A redraw with neither is pending; one
+-- followed by a pick before either is "pick". Session memory only, the last TIMING_KEEP
+-- redraws; never saved or sent. Client observation, not a server measurement.
+local TIMING_KEEP,TIMING_MAX=8,9999999
+local timing={first=0,retries=0,seen=0,cleared=0,picked=0,list={}}
+local function timingCount(key) if timing[key]<TIMING_MAX then timing[key]=timing[key]+1 end end
+-- f: the redraw just put in flight; e: the record of the redraw it retries.
+local function timingSent(f,e)
+    if e then f.timing=e;e.retryAt=f.at;return timingCount("retries") end
+    e={at=f.at};f.timing=e;timingCount("first")
+    local list=timing.list;list[#list+1]=e
+    if #list>TIMING_KEEP then table.remove(list,1) end
+end
+-- f's redraw ended: "seen" (a new choice table), "cleared" (no choice table) or "pick".
+local function timingEnd(f,how)
+    local e=type(f)=="table" and f.timing or nil
+    if not e or e.how then return end
+    e.how=how;e.endAt=now();timingCount(how=="pick" and "picked" or how)
+end
+-- f was answered (responded): by a new choice table, or by the choice being cleared.
+local function timingAnswered(f) timingEnd(f,choiceRef()~=nil and "seen" or "cleared") end
+local function finish(state,reason)
+    local b=B()
+    if run.token and b then b.Release(run.token) end
+    if run.inflight then carried=run.inflight end
+    run.token=nil;run.on=false;run.inflight=nil
+    setState(state,reason)
+end
+-- Read-only: whether the game answered request f, by the same signals as
+-- before: a pick's refused result (its flag cleared, the same choice kept), the
+-- ordinary adapter's settlement of a free-draw Take, or a replaced choice.
+-- Returns answered and, for a pick, "refused" or the ordinary outcome.
+local function responded(f)
+    if (f.kind=="select" or f.kind=="take") and f.pickSeen and not pickPending() and rawequal(choiceRef(),f.ref) then
+        return true,"refused"
+    end
+    if f.kind=="take" then
+        local A=Nexus.GameAdapter
+        local outcome=f.ordinal~=nil and A.SelectOutcome and A.SelectOutcome(f.ordinal) or nil
+        if outcome=="unresolved" or (outcome==nil and rawequal(choiceRef(),f.ref)) then return false end
+        return true,outcome
+    end
+    return not rawequal(choiceRef(),f.ref)
+end
+function M.Active() return run.on==true end
+-- Read-only: a run is ON and none of its requests awaits the game's answer, so
+-- the ordinary path may act on a free draw (GameAdapter.OrdinaryBoardAllowed).
+function M.OrdinaryOpen() return run.on==true and run.inflight==nil end
+function M.Status()
+    return {on=run.on==true,state=run.state,reason=run.reason,
+        inflight=run.inflight and run.inflight.kind or nil,actions=run.actions or 0}
+end
+-- What the client showed for an Orb request of the run: at its send (sent)
+-- and at the run's last read (seen). Memory only; never saved or sent.
+local function clientFacts(s)
+    local pe=_G.ProjectEbonhold;local perks=type(pe)=="table" and rawget(pe,"Perks") or nil
+    return {offer=s and s.offerPending==true or false,charges=s and s.charges or nil,cards=s and s.boardKey or nil,
+        redrawFlag=type(perks)=="table" and rawget(perks,"pendingOrbReroll")~=nil or false}
+end
+-- Read-only diagnostic for a stalled wait (9107 field report): the request in
+-- flight (or carried by Stop) compared between its send and the last read.
+-- Client state only: it proves nothing about the server. Fixed codes, counts
+-- and booleans; no card or player identity.
+function M.RequestView()
+    local f=run.inflight or carried
+    local v={on=run.on==true,state=run.state,kind=f and f.kind or "none"}
+    if not f then return v end
+    local sent,seen=f.sent or {},run.seen or {}
+    v.age=math.max(0,math.floor(now()-(f.at or now())))
+    v.rejoined=f.rejoined==true
+    v.redrawReturn=f.redrawReturn
+    v.sameChoiceTable=rawequal(choiceRef(),f.ref)
+    v.choiceShown=choiceRef()~=nil
+    if sent.cards~=nil and seen.cards~=nil then v.sameCards=sent.cards==seen.cards end
+    v.offerAtSend,v.offerNow=sent.offer,seen.offer
+    v.chargesAtSend,v.chargesNow=sent.charges,seen.charges
+    v.redrawFlagAfterSend,v.redrawFlagNow=sent.redrawFlag,clientFacts(nil).redrawFlag
+    v.pickPendingNow=pickPending()
+    return v
+end
+-- Read-only copy of the redraw timing (see timingSent): counts, and for the
+-- most recent redraws, oldest first, the seconds from the first send (first)
+-- and from the retry (retry) to the end, or so far while pending.
+function M.RedrawTimingView()
+    local t=now()
+    local v={first=timing.first,retries=timing.retries,seen=timing.seen,cleared=timing.cleared,picked=timing.picked,pending=0,recent={}}
+    for i,e in ipairs(timing.list) do
+        local stop=e.endAt or t
+        if not e.how then v.pending=v.pending+1 end
+        v.recent[i]={state=e.how or "pending",first=math.max(0,stop-e.at),
+            retry=e.retryAt and math.max(0,stop-e.retryAt) or nil}
+    end
+    return v
+end
+-- The active loadout's Wishlist targets, or nil and a reason.
+local function targets(reuse)
+    local da=reuse and Nexus.OrbRuntime and Nexus.OrbRuntime._displayAssignment
+    local a
+    if type(da)=="table" and da.at==now() then a=da.a
+    else a=Nexus.GameAdapter and Nexus.GameAdapter.AssignedWishlist and Nexus.GameAdapter.AssignedWishlist() end
+    if type(a)~="table" or a.state~="ready" then
+        return nil,(type(a)=="table" and a.note) or "Assign a resolved Wishlist to the active loadout first."
+    end
+    return P.Normalize(a.entries)
+end
+local function ensureFrame()
+    if frame or type(CreateFrame)~="function" then return end
+    frame=CreateFrame("Frame","NexusOrbAuto")
+    frame:SetScript("OnUpdate",function()
+        local t=now();if t-lastPass<0.2 then return end
+        if not run.on then
+            -- Stopped: no action is sent, but the answer to a request the run
+            -- already sent is still observed on the same pass cadence, so a
+            -- later Start does not rejoin a request that was answered (and
+            -- perhaps resolved) while the run was stopped.
+            if carried then lastPass=t;if responded(carried) then timingAnswered(carried);carried=nil end end
+            return
+        end
+        lastPass=t;M.Pump()
+    end)
+    frame:SetScript("OnEvent",function(_,event)
+        if event=="PLAYER_LEAVING_WORLD" then loadingUntil=math.huge
+        elseif event=="PLAYER_ENTERING_WORLD" then loadingUntil=now()+SETTLE_AFTER_LOAD
+        elseif event=="PLAYER_LOGOUT" then if run.on then finish("STOPPED","Logged out. Orb automation ended.") end end
+    end)
+    frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD");frame:RegisterEvent("PLAYER_LOGOUT")
+end
+-- What a run on this state would do at once: nil when it has work, or the
+-- normal end (no Orbs, a complete Wishlist, no eligible source). An open Orb
+-- offer is work even without Orbs (a needed Echo may be on it).
+local function nothingToDo(list,s)
+    -- A current-state safeguard, not a history rule: Start waits for a clear
+    -- table, and for an Orb action of this session that is still unresolved.
+    -- Passive (ReasonView reads nothing): the earlier runtime's own run.
+    local rt=Nexus.OrbRuntime and Nexus.OrbRuntime.ReasonView and Nexus.OrbRuntime.ReasonView()
+    if type(rt)=="table" and rt.run and (rt.running or (rt.pending and not rt.restored)) then
+        return "An Orb run already owns this action."
+    end
+    -- A request an earlier run of this session sent and the game has not yet
+    -- answered: Start rejoins it (its answer is the next pass's work).
+    if carried and not responded(carried) then return nil end
+    if s.hostPending or s.selectInFlight~=nil then return "Resolve the current Echo action first." end
+    if s.offerPending and #s.board==3 then return nil end
+    -- A free (ordinary) draw is work only when it holds a needed Echo (taken
+    -- through the ordinary Take); otherwise it is left to the ordinary flow.
+    if #s.board>0 then
+        if s.offerPending or not P.Decide(s.board,P.Progress(list,s),s,false,nil) then
+            return "Resolve the current Echo action first."
+        end
+        return nil
+    end
+    if P.Progress(list,s).rolledMissing==0 then return "All rolled targets are already complete. No Orbs are needed." end
+    if s.charges<1 then return "No confirmed Orbs are available." end
+    if #P.Sources(list,s,nil)==0 then return "No safe surplus copies are available. Required and locked copies remain protected." end
+    return nil
+end
+-- The existing saved-data safeguard of Orb mode: local character data that
+-- is not durable (loading, read-only or an unknown saved format) refuses a
+-- new run, with the same sentence (writeRefusal) as before. The run itself
+-- writes nothing; the earlier saved data stays as it is.
+local function savedDataRefusal()
+    local okW,ws=pcall(writeStatus)
+    if not okW or type(ws)~="table" then return "Local saved data is not ready. No Orb action will be sent." end
+    if ws.mode~="durable" then return writeRefusal(ws) end
+    return nil
+end
+-- Read-only: whether Start would start now, and why not. The same checks as
+-- Start, on a display read; Start reads again itself.
+function M.CanStart()
+    if run.on then return false,"Orb automation is running." end
+    if sessionPaused() then return false,"Nexus is paused for this session. Resume Nexus first." end
+    local b=B();if not b then return false,"Orb mode is unavailable." end
+    local saved=savedDataRefusal();if saved then return false,saved end
+    local list,why=targets(true);if not list then return false,why end
+    -- The Orb window's own display read of this moment is reused (no extra read).
+    local dr=Nexus.OrbRuntime and Nexus.OrbRuntime._displayRead
+    local s,err
+    if type(dr)=="table" and dr.at==now() then s,err=dr.s,dr.err else s,err=b.Read("display") end
+    if not s then return false,err end
+    if b.IsOwned() then return false,"Orb mode already owns an operation." end
+    if s.autoAccept then return false,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
+    local done=nothingToDo(list,s);if done then return false,done end
+    return true
+end
+function M.Start()
+    if run.on then return true end
+    if sessionPaused() then return nil,"Nexus is paused for this session. Resume Nexus first." end
+    local b=B();if not b then return nil,"Orb mode is unavailable." end
+    local saved=savedDataRefusal();if saved then return nil,saved end
+    local list,why=targets();if not list then return nil,why end
+    local s,err=b.Read();if not s then return nil,err end
+    if carried and responded(carried) then timingAnswered(carried);carried=nil end
+    local done=nothingToDo(list,s);if done then return nil,done end
+    local token,e=b.AcquireRun();if not token then return nil,e end
+    -- Ordinary Auto and its settings are left as they are: the ordinary flow
+    -- on a free draw is unchanged, and the adapter's single in-flight gate
+    -- keeps one Echo action at a time between the two.
+    -- An older receipt stays as history only: nothing settles it from this run.
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.MarkHistorical then Nexus.OrbRuntime.MarkHistorical() end
+    -- Rejoin: the earlier request stays the one in flight, never sent again.
+    run={on=true,token=token,slot=s.context.slot,state="RUNNING",reason="Orb automation is running.",actions=0,inflight=carried}
+    if carried then carried.rejoined=true end
+    carried=nil
+    ensureFrame()
+    M.Pump()
+    return true
+end
+function M.Stop()
+    if not run.on then return true end
+    finish("STOPPED","Stopped. No further Orb action will be sent.")
+    return true
+end
+local function wait(reason) setState("WAITING",reason) end
+-- One request was sent: is it answered (the published choice was replaced)?
+local function answered(s)
+    local f=run.inflight
+    -- A pick whose result arrived refused (the game cleared its pending-pick
+    -- flag and kept the same published choice) is answered and never sent
+    -- again; without this the run waited on it indefinitely. The ordinary Take
+    -- is settled by the ordinary adapter's own record of its Select.
+    local done,how=responded(f)
+    if done then
+        if how=="refused" then f.refused=true elseif f.kind=="take" then f.outcome=how end
+        return true
+    end
+    if f.kind=="take" then wait("Waiting for the chosen Echo.");return false end
+    local age=now()-f.at
+    if age>=ANSWER_WAIT and not f.refreshed then
+        f.refreshed=true
+        local b=B();if b and b.RequestRefresh then pcall(b.RequestRefresh) end
+    end
+    if age>=ANSWER_GIVEUP then
+        -- What Nexus observed, not what the game did: no new choice was
+        -- published for this request (9107 field report). That fits a request
+        -- the game never answered, an answer the client never published, a
+        -- change the client made in place, or (rejoined) an answer that came
+        -- and went while stopped; the client state cannot tell them apart.
+        wait("Nexus did not see an answer to the earlier Orb request. Nothing is repeated; Stop ends automation.")
+    else
+        wait(f.kind=="spend" and "Waiting for the Orb offer." or f.kind=="redraw" and "Waiting for the redrawn Orb offer."
+            or "Waiting for the chosen Echo.")
+    end
+    return false
+end
+local function send(kind,ok,code,why,fixed)
+    if ok then
+        run.actions=(run.actions or 0)+1
+        local sent=clientFacts(run.sentState);sent.redrawFlag=clientFacts(nil).redrawFlag
+        local b=B()
+        run.inflight={kind=kind,at=now(),ref=run.sentRef,pickSeen=kind=="select" and pickPending() or nil,sent=sent,
+            redrawReturn=kind=="redraw" and b and b.LastRedrawReturn and b.LastRedrawReturn() or nil}
+        setState("RUNNING",kind=="spend" and "One Orb spent; waiting for its offer." or kind=="redraw"
+            and "Orb offer redrawn; waiting for the new offer." or "Needed Echo chosen; waiting for the result.")
+        return
+    end
+    if fixed=="HOST_FALSE" then return finish("STOPPED",why or "The game refused the Orb request.") end
+    if code=="AMBIGUOUS" then
+        -- The host call failed: its outcome is unknown, so it is held as in flight.
+        run.inflight={kind=kind,at=now(),ref=run.sentRef}
+        wait(why or "The last Orb request has an unknown outcome. Nothing is repeated.")
+        return
+    end
+    wait(why or "The game refused the Orb request. Nothing was sent.")
+end
+-- One retry of an overdue redraw (user-approved 2026-11-19, with its disclosed
+-- risk: the first redraw's answer can still arrive late and a second Orb can
+-- be spent). The game's redraw (OrbService.RerollOffer) returns nothing and a
+-- request the server drops answers with nothing but the charge count, so the
+-- client cannot tell a dropped redraw from a slow one. On a pass where the
+-- redraw is overdue (ANSWER_GIVEUP, the existing no-answer point) and no
+-- eligible needed Echo is shown, the same redraw is sent once more through
+-- the ordinary adapter, only if this read still shows the same Orb offer and
+-- choice table, the same cards and the same known Orb count as at its send,
+-- with no pick in flight. An unchanged count is not proof the first redraw
+-- failed. The retry belongs to that redraw (kept across Stop and Start, never
+-- given again); a later, independent redraw has its own. A retry refused
+-- before it is sent keeps it.
+local function retryRedraw(f,s)
+    local sent=f.sent
+    if f.retried or not sent or now()-(f.at or now())<ANSWER_GIVEUP then return end
+    -- (A new choice table never reaches here: it is the redraw's answer.)
+    if s.boardKey~=sent.cards or type(s.charges)~="number" or s.charges~=sent.charges then return end
+    -- No pick in flight: hostPending includes the game's pending-pick flag.
+    if s.hostPending or s.selectInFlight~=nil
+        or (Nexus.GameAdapter.InFlight and Nexus.GameAdapter.InFlight()) then return end
+    local b=B()
+    if not b.RunRebind(run.token,s) then return finish("STOPPED","Orb ownership was lost.") end
+    run.sentRef=choiceRef();run.sentState=s
+    local ok,code,reason,fixed=b.Redraw(run.token,s.boardKey)
+    if code~="REJECTED" then f.retried=true end
+    if not ok and (fixed=="NO_REDRAW" or fixed=="REDRAW_REFUSED") then
+        return finish("DONE",reason.." The Orb offer is left to you.")
+    end
+    send("redraw",ok,code,reason,fixed)
+    if code~="REJECTED" and run.inflight then run.inflight.retried=true end
+    if f.timing and run.inflight and run.inflight~=f then timingSent(run.inflight,f.timing) end
+end
+function M.Pump()
+    if not run.on then return end
+    local b=B();if not b then return end
+    if sessionPaused() then return wait("Nexus is paused for this session. No Orb action is sent.") end
+    if now()<loadingUntil then return wait("Waiting after loading.") end
+    local s,err=b.Read()
+    if not s then return wait(err or "The current Orb state cannot be read.") end
+    run.seen=clientFacts(s)
+    if run.slot~=nil and s.context.slot~=run.slot then
+        return finish("STOPPED","The active loadout changed. Orb automation ended.")
+    end
+    if run.inflight then
+        local f=run.inflight
+        if not answered(s) then
+            -- A redraw with no new choice table seen. The client answers a
+            -- redraw only with a new choice table; a card changed in place (its
+            -- banish handler) is not that answer. So the redraw stays the
+            -- pending request, and the only action is the normal eligible pick:
+            -- when the visible Orb offer holds a needed Echo, it is chosen
+            -- through the same adapter Select and its own checks. With no
+            -- eligible pick nothing else is sent, whatever the card values,
+            -- before the redraw is overdue (no second paid redraw while its
+            -- answer can still be on its way). A pick refused before
+            -- it is sent keeps the redraw as the pending request. Without an
+            -- eligible pick, an overdue redraw may be sent once more
+            -- (retryRedraw).
+            if not (f.kind=="redraw" and s.offerPending and #s.board==3) then return end
+            local list=targets()
+            local decision=list and P.Decide(s.board,P.Progress(list,s),s,false,nil)
+            if not decision then return retryRedraw(f,s) end
+            if not b.RunRebind(run.token,s) then return finish("STOPPED","Orb ownership was lost.") end
+            run.sentRef=choiceRef();run.sentState=s
+            local ok,code,reason,fixed=b.Select(run.token,decision.index,s.boardKey,decision.spellId,nil,function() return b.RunAdmission("choice") end)
+            send("select",ok,code,reason,fixed)
+            if ok and run.inflight then run.inflight.boardKey=s.boardKey end
+            if run.inflight and run.inflight~=f then timingEnd(f,"pick") end
+            return
+        else
+            run.inflight=nil
+            timingAnswered(f)
+            -- A choice the game kept open after Nexus answered it: the game refused it.
+            if f.kind=="select" and s.offerPending and s.boardKey==f.boardKey then
+                return finish("STOPPED","The game did not take the chosen Echo. The offer is left to you.")
+            end
+            if f.kind=="take" then
+                -- A voided pick on the same published choice is not sent again.
+                if f.refused or (f.outcome=="voided" and rawequal(choiceRef(),f.ref)) then
+                    return finish("STOPPED","The game did not take the chosen Echo. The Echo choice is left to you.")
+                end
+                run.tookRef=f.ref
+            end
+        end
+    end
+    if s.hostPending or s.selectInFlight~=nil or (Nexus.GameAdapter.InFlight and Nexus.GameAdapter.InFlight()) then
+        return wait("Waiting for the game's pending action.")
+    end
+    local list,why=targets()
+    if not list then return finish("STOPPED",why) end
+    local progress=P.Progress(list,s)
+    if s.offerPending and #s.board==3 then
+        if not b.RunRebind(run.token,s) then return finish("STOPPED","Orb ownership was lost.") end
+        local decision=P.Decide(s.board,progress,s,false,nil)
+        run.sentRef=choiceRef();run.sentState=s
+        if decision then
+            local ok,code,reason,fixed=b.Select(run.token,decision.index,s.boardKey,decision.spellId,nil,function() return b.RunAdmission("choice") end)
+            send("select",ok,code,reason,fixed)
+            if ok and run.inflight then run.inflight.boardKey=s.boardKey end
+            return
+        end
+        if s.charges<1 then return finish("DONE","No Orbs left to redraw. The Orb offer is left to you.") end
+        local ok,code,reason,fixed=b.Redraw(run.token,s.boardKey)
+        if not ok and (fixed=="NO_REDRAW" or fixed=="REDRAW_REFUSED") then
+            return finish("DONE",reason.." The Orb offer is left to you.")
+        end
+        send("redraw",ok,code,reason,fixed)
+        if run.inflight and run.inflight.kind=="redraw" then timingSent(run.inflight) end
+        return
+    end
+    if s.offerPending or #s.board>0 then
+        -- A free (ordinary) draw with a needed Echo: taken once through the
+        -- ordinary Take and all its admissions, no Orb. Without one, the free
+        -- draw stays with the ordinary flow (the player, or ordinary Auto when
+        -- it is ON); no Orb is spent over it and nothing dismisses it.
+        local choice=choiceRef()
+        if not s.offerPending and choice~=nil and not rawequal(choice,run.tookRef) then
+            local decision=P.Decide(s.board,progress,s,false,nil)
+            local A=Nexus.GameAdapter
+            if decision and A and A.Take then
+                local ok=A.Take(decision.spellId)
+                if ok then
+                    run.actions=(run.actions or 0)+1
+                    run.inflight={kind="take",at=now(),ref=choice,pickSeen=pickPending() or nil,sent=clientFacts(s),
+                        ordinal=A.SelectUnresolved and A.SelectUnresolved() or nil}
+                    return setState("RUNNING","Needed Echo chosen; waiting for the result.")
+                end
+            end
+        end
+        return wait("An Echo choice is open. Nexus leaves it to you and spends no Orb while it is open.")
+    end
+    if progress.rolledMissing==0 then return finish("DONE","All selected targets are complete.") end
+    if s.charges<1 then return finish("DONE","No Orbs remain. New resources will not restart this run automatically.") end
+    local sources=P.Sources(list,s,nil)
+    if #sources==0 then return finish("DONE","No safe surplus source copies remain. Required and locked copies stay protected.") end
+    if not b.RunRebind(run.token,s) then return finish("STOPPED","Orb ownership was lost.") end
+    run.sentRef=choiceRef();run.sentState=s
+    local ok,code,reason,fixed=b.Spend(run.token,sources[1].key,s,nil,function() return b.RunAdmission("spend") end)
+    send("spend",ok,code,reason,fixed)
+end
+end)()

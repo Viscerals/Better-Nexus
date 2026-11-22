@@ -328,10 +328,10 @@ do
   {'theme.tooltip.opacity','text','Changes only how see-through Nexus window backgrounds are; text, buttons and the difficulty card stay solid. 100% is the default look and clears the choice.'},
   {'help.label.faq_echo_not_counted_question','text',"Why doesn't an Echo I can see count for my Wishlist?"},
   {'help.body.faq_echo_not_counted_answer','block','A target is one exact Echo at one exact quality. A lower-quality copy does not count for a higher-quality target; on the panel, an offer at another quality can show Wrong quality. An Echo your Wishlist does not ask for never counts. Only copies you have count, up to the copies the plan asks for; locked copies count only up to its locked targets. Copies above a target are extras. See the Wishlists tab above.'},
-  {'help.label.faq_orb_start_maximum_question','text','Does Auto ON start an Orb run, and what is the maximum?'},
-  {'help.body.faq_orb_start_maximum_answer','block','No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and click Start; starting it turns ordinary Automation off and does not turn it back on. The maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, which does not change during a run. Until you type an amount, it follows your confirmed Orb balance, up to 1000.'},
+  {'help.label.faq_orb_start_maximum_question','text','Does Auto ON start an Orb run, and is there a maximum?'},
+  {'help.body.faq_orb_start_maximum_answer','block','No. Auto never starts an Orb run. A run starts only when you open Orbs and click Start; starting it leaves ordinary Automation as it is. There is no maximum: Nexus uses one Orb per replacement and stops when your rolled targets are complete, when you press Stop, or when no Orb can be used safely.'},
   {'help.label.faq_orb_blocked_question','text',"Why can't I start an Orb run, or why did it stop early?"},
-  {'help.body.faq_orb_blocked_answer','block','Open the Orb window: it shows what is blocked, then what you can do now. An Orb action without a confirmed result blocks new runs until it settles, or until you use Continue... where it is offered. A run ends when your rolled targets are complete or no safe source is left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.'},
+  {'help.body.faq_orb_blocked_answer','block','Open the Orb window: it shows what is blocked, then what you can do now. An Orb action from before a reload without a confirmed result is kept as history; it does not hold a new Start. A run ends when your rolled targets are complete, when no Orb or safe source is left, when you press Stop, or when the active loadout changes. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.'},
   {'help.label.faq_auto_replace_build_question','text','Can Auto replace a Saved Build that has Echoes I value?'},
   {'help.body.faq_auto_replace_build_answer','block','Yes, while Auto is ON. After a finished run, Nexus may save it over your active Saved Build when overall Wishlist progress is higher, or equal with cleanup. It counts Wishlist progress, not Orbs spent, so an Echo you got with Orbs can be lost. At level 80 after a finished run, turning Auto ON or changing the assigned Wishlist can lead to a replacement without a new run. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. Nexus cannot undo a save, and Unassign does not restore a Saved Build. There is no separate automatic-save switch: keep Auto OFF to leave it unchanged.'},
   {'help.label.faq_hidden_panel_reload_question','text','Does a hidden panel stay hidden after a reload?'},
@@ -350,7 +350,10 @@ do
  for _,row in ipairs(NEW20) do MISSING[#MISSING+1]=row[1] end
  local LANGS={'frFR','deDE','esES','plPL','ptBR','ruRU'}
  local missing={};for _,key in ipairs(MISSING) do missing[key]=true end
- check(#LEGACY18==18 and #NEW20==20 and #MISSING==38,'SETUP the 18 measured legacy keys and the 20 accepted new keys')
+ -- v47 (2026-11-19): one more reviewed meaning with no pack entry yet (English shown).
+ MISSING[#MISSING+1]='orb.status.run_until_goal';missing['orb.status.run_until_goal']=true
+ MISSING[#MISSING+1]='readout.menu.auto_manage_tomes';missing['readout.menu.auto_manage_tomes']=true
+ check(#LEGACY18==18 and #NEW20==20 and #MISSING==40,'SETUP the 18 measured legacy keys, the 20 accepted new keys and the Orb and Tome keys')
  for _,key in ipairs(LEGACY18) do check(type(realData[key])=='string','SETUP '..key..' is a current English key') end
  for _,row in ipairs(NEW20) do
   check(realData[row[1]]==row[3] and L.Kind(row[1])==row[2],
@@ -365,7 +368,7 @@ do
   end
   for key in pairs(pack.entries) do if realData[key]==nil then extra=extra+1 end end
   table.sort(other)
-  check(lacks==38 and #other==0 and extra==0,'EXPECT the real '..id..' pack lacks exactly the 18 legacy and 20 new English keys and no other, with no extra key ('
+  check(lacks==40 and #other==0 and extra==0,'EXPECT the real '..id..' pack lacks exactly the 18 legacy, 20 new and the Orb and Tome English keys and no other, with no extra key ('
    ..lacks..' lacking, other: '..table.concat(other,', ')..'; '..extra..' extra)')
  end
  local function LoadReal()

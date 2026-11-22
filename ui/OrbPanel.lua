@@ -345,6 +345,7 @@ local ENGLISH={
     ["orb.status.review_state_changed"]="The review changed after it was shown; nothing was reviewed or cancelled. Check the target shown now. Nothing was spent.",
     ["orb.status.review_target_changed"]="The target changed after it was shown; nothing was reviewed. Check the target shown now, then review it again. Nothing was spent.",
     ["orb.status.rolled_missing"]="{count} rolled target copies still missing",
+    ["orb.status.run_until_goal"]="Start rolls until your Wishlist goal is met, you press Stop, or no Orb can be used safely. A request with no answer seen is waited on, not repeated.",
     ["orb.status.run_all_complete"]="All selected targets are complete.",
     ["orb.status.run_approved"]="Approved. Preparing one Orb replacement.",
     ["orb.status.run_auto_accept"]="Turn off the game's automatic Echo acceptance before continuing.",
@@ -417,13 +418,13 @@ local ENGLISH={
     ["orb.tooltip.history_result"]="Result: {result}",
     ["orb.tooltip.history_why_fallback"]="Why this Echo was selected",
     ["orb.tooltip.max_follow_balance"]="Follow your confirmed Orb balance, up to 1000, until you enter another amount or start the run. This does not spend Orbs.",
-    ["orb.tooltip.mini_close"]="Hides this panel only. An approved run keeps running: use Pause or Stop. Mini panel in the Orb window shows it again.",
+    ["orb.tooltip.mini_close"]="Hides this panel only. A run keeps running: use Stop. Mini panel in the Orb window shows it again.",
     ["orb.tooltip.mini_drag"]="Drag to move this panel. It stays where you put it until you reload; nothing is saved.",
     ["orb.tooltip.mini_missing"]="Copies, not Echo families: the rolled target copies this run still needed at its latest check. Locked targets are not counted, because Orbs cannot change locked Echoes. Unavailable is not 0, and 0 does not mean the whole build is complete.",
     ["orb.tooltip.mini_open"]="Opens the full Orb window. Opening it starts, resumes and spends nothing.",
-    ["orb.tooltip.mini_panel_open"]="Shows a small movable panel with this run's status and Pause, Resume and Stop. Opening it starts, resumes and spends nothing.",
+    ["orb.tooltip.mini_panel_open"]="Shows a small movable panel with this run's status and Stop. Opening it starts and spends nothing.",
     ["orb.tooltip.mini_pause"]="Pause holds the run before its next Orb. An Orb already requested cannot be undone. Offered only while the run is running.",
-    ["orb.tooltip.mini_pending"]="An Orb requested whose spend is not confirmed yet, or an Orb action whose result has not settled. It counts against the approved maximum until it settles.",
+    ["orb.tooltip.mini_pending"]="An Orb requested whose spend is not confirmed yet, or an Orb action whose result has not settled.",
     ["orb.tooltip.mini_resume"]="Resume continues this paused run with the same approved maximum; its usage is not reset. It is not offered while an earlier action must settle first: one restored after a reload, one whose offer was already chosen, or one for a changed assignment. After a target change, review the new target in Open Orbs and resume there. Orb mode checks again before it continues.",
     ["orb.tooltip.mini_stop"]="Stop ends this run: no further Orb is spent. An action already submitted may still finish; resolve its offer in the game.",
     ["orb.tooltip.mini_usage"]="Orbs this run has used, against its current approved maximum. Unavailable means it could not be read; it is not 0.",
@@ -1469,7 +1470,10 @@ local function refresh()
     frame.permanent:SetText(permanent and permanent>0 and TF("orb.status.locked_copies_remain",{count=N(permanent)})or "")
     local d=s.limitDraft or {}
     local mode=""
-    if not busy then
+    if Nexus.OrbAuto then
+        -- Start/Stop: there is no maximum; the line says what Start does.
+        if not Nexus.OrbAuto.Active() then mode="\n"..T("orb.status.run_until_goal") end
+    elseif not busy then
         if d.tracking then
             mode=d.value~=nil and ("\n"..TF("orb.status.max_follows_balance",{count=N(d.cap or 1000)}))
                 or ("\n"..T("orb.status.max_follows_unconfirmed"))
@@ -1611,8 +1615,52 @@ function UI.Refresh()
         error(err,0)
     end
     if err==true then refreshFailing=false end
+    -- Start's readiness reuses the display read the refresh just made, so the
+    -- panel makes no second read and its diagnostics describe the latest one.
+    local autoCan,autoWhy=false,nil
+    if Nexus.OrbAuto and page=="run" and err==true then
+        local okC,c,w=pcall(Nexus.OrbAuto.CanStart)
+        if okC then autoCan,autoWhy=c,w end
+    end
+    -- Start only after a complete run render (not while loading); Stop while ON.
+    UI.ApplyAutoControls(autoCan and err==true,autoWhy,err~=true)
     -- Advanced, a page change or a new UI scale or screen size.
     fitWindow()
+end
+-- Start/Stop Orb automation (OrbAuto, 2026-11-19): the run controls are Start
+-- and Stop only. There is no Orb maximum to enter, and no Pause, Resume,
+-- Continue or target review; the earlier controls stay hidden. The status line
+-- shows the automation's own reason while it runs or after it ended.
+function UI.ApplyAutoControls(can,why,partial)
+    local auto=Nexus.OrbAuto
+    if not frame or not auto or page~="run" then return end
+    local st=auto.Status()
+    -- Advanced held source exclusions for the earlier runtime only; OrbAuto has none.
+    if frame.advanced then frame.advanced:Hide() end
+    for _,k in ipairs({"limitLabel","limit","max","pause","resume","cont","review","approval","usage","advancedToggle"}) do
+        if frame[k] and frame[k].Hide then frame[k]:Hide() end
+    end
+    -- Hidden and not clickable: the earlier runtime's Pause and Resume.
+    enable(frame.pause,false);enable(frame.resume,false)
+    frame.start:SetText(T("orb.button.start"));frame.stop:SetText(T("orb.button.stop"))
+    frame.start:Show();frame.stop:Show()
+    -- One runner: Stop is offered exactly while it is ON. The earlier
+    -- runtime's Stop of an older receipt (a recovery action that sent nothing
+    -- and only re-marked that receipt) is not offered, nor its close notice
+    -- ("Use Pause or Stop"), which names controls that no longer exist.
+    if frame.closeNotice then frame.closeNotice:Hide() end
+    -- (A run of the earlier runtime that is actually running, which no
+    -- surface can start any more, keeps its real Stop.)
+    -- Passive (ReasonView reads nothing): no extra game read per refresh.
+    local rv=Nexus.OrbRuntime and Nexus.OrbRuntime.ReasonView and Nexus.OrbRuntime.ReasonView()
+    local legacyRunning=type(rv)=="table" and rv.running==true
+    enable(frame.start,not st.on and can);enable(frame.stop,st.on or legacyRunning)
+    if not partial and (st.on or st.state~="OFF") then setFull(frame.status,st.reason or "") end
+    if frame.startWhy and not partial then
+        local line=(not st.on and not can and why) and tostring(truthful(why) or why) or ""
+        setFull(frame.startWhy,line~="" and (T("orb.label.start_reason").." "..(line:match("^[^\n]*") or "")) or "",
+            line~="" and (T("orb.label.start_reason").." "..line) or nil)
+    end
 end
 local function ensure()
     if frame then return end
@@ -1677,6 +1725,7 @@ local function ensure()
     end)
     frame.pause:Hide();frame.resume:Hide()
     frame.start=button(frame,334,-188,126,T("orb.button.start"),function()
+        if Nexus.OrbAuto then notify(Nexus.OrbAuto.Start());return end
         local s=Nexus.OrbRuntime.Status()
         if s.state=="FINISHED" and not confirmNewRun then
             -- The explicit preparation of a new run: its draft follows the
@@ -1725,7 +1774,10 @@ local function ensure()
         -- Any other text is the player's own amount (the existing path).
         notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft,frame.historyReview))
     end)
-    frame.stop=button(frame,470,-188,120,T("orb.button.stop"),function()notify(Nexus.OrbRuntime.Stop())end)
+    frame.stop=button(frame,470,-188,120,T("orb.button.stop"),function()
+        if Nexus.OrbAuto and Nexus.OrbAuto.Active() then notify(Nexus.OrbAuto.Stop());return end
+        notify(Nexus.OrbRuntime.Stop())
+    end)
     -- Why Start would not start now, on the line right under the Start row
     -- (one line; the whole reason on hover). The click still checks again.
     frame.startWhy=text(frame,20,-213,580,12)
@@ -1836,14 +1888,17 @@ local function ensure()
         place(frame.startWhy,20,y)
         local why=measured(frame.startWhy,580,12,12)
         if why>0 then y=y+12+2 end
-        place(frame.approval,20,y);frame.approval:SetHeight(34);y=y+34+2
-        place(frame.usage,20,y);y=y+measured(frame.usage,580,12,22)+4
+        -- Start/Stop rework (OrbAuto): no approval or usage-against-maximum rows.
+        if not Nexus.OrbAuto then
+            place(frame.approval,20,y);frame.approval:SetHeight(34);y=y+34+2
+            place(frame.usage,20,y);y=y+measured(frame.usage,580,12,22)+4
+        end
         place(frame.status,20,y);y=y+measured(frame.status,580,12,74)+1
         local noticeH=measured(frame.notice,440,12,24)
         if frame.cont:IsShown() or frame.review:IsShown() then noticeH=math.max(noticeH,24) end
         place(frame.notice,20,y);place(frame.cont,470,y);place(frame.review,470,y)
         if noticeH>0 then y=y+noticeH+5 end
-        place(frame.closeNotice,20,y);y=y+20+1
+        if not Nexus.OrbAuto then place(frame.closeNotice,20,y);y=y+20+1 end
         for _,b in ipairs({{frame.help,20},{frame.advancedToggle,115},{frame.miniPanel,220},
             {frame.reference,340},{frame.closeButton,515}}) do place(b[1],b[2],y) end
         y=y+24
@@ -2489,7 +2544,10 @@ function UI.AttachMainPanel(parent)
         if s and not s.running and s.canResume and not changedTarget(s.resumeTarget) then Nexus.OrbRuntime.Resume()end
         f.refresh()
     end)
-    f.stop=button(f,137,-65,48,"",function()Nexus.OrbRuntime.Stop();f.refresh()end)
+    f.stop=button(f,137,-65,48,"",function()
+        if Nexus.OrbAuto and Nexus.OrbAuto.Active() then Nexus.OrbAuto.Stop() else Nexus.OrbRuntime.Stop() end
+        f.refresh()
+    end)
     f.details=button(f,191,-65,69,"",function()UI.Show()end)
     -- Hide for a settled, ended run only (issue #167). Presentation only: it
     -- hides this strip, not Nexus, and spends, chooses, saves, releases or
@@ -2528,6 +2586,24 @@ function UI.AttachMainPanel(parent)
     -- Pipes are doubled so a name shows as written.
     local function piped(v) return (v:gsub("|","||")) end
     f.refresh=function()
+        -- A Start/Stop run (OrbAuto): the strip shows it with its reason and
+        -- offers Stop and Details only (no Pause, Resume or counts).
+        local auto=Nexus.OrbAuto
+        if auto and auto.Active() then
+            f.dismissed,f.shownRun=nil,nil;f:Show()
+            if not f.labelled then
+                f.labelled=true
+                f.pause:SetText(T("orb.button.pause"));f.resume:SetText(T("orb.button.resume"))
+                f.stop:SetText(T("orb.button.stop"));f.details:SetText(T("orb.button.details"))
+                f.dismiss:SetText(T("orb.button.hide_until_next_run"))
+            end
+            local reason=auto.Status().reason or ""
+            local words=truthful(reason) or reason
+            setFull(f.summary,words,words)
+            f.pause:Hide();f.resume:Hide();f.dismiss:Hide();f.primary:Hide()
+            f.stop:Show();enable(f.stop,true);f.details:Show()
+            return
+        end
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f.dismissed,f.shownRun=nil,nil;f:Hide();return end
         local settled=settledRun(s)
@@ -2647,6 +2723,18 @@ function UI.AttachMainPanel(parent)
                 item[1]:ClearAllPoints();item[1]:SetPoint("TOPLEFT",item[2],-65-extra)
             end
         end
+        if Nexus.OrbAuto then
+            -- No Start/Stop run is ON: this is the earlier runtime's record,
+            -- shown as history. Its Pause, Resume and Stop (recovery actions
+            -- superseded by Start/Stop) are not offered; Details and the
+            -- dismissal of a settled run stay.
+            -- A run of that runtime that is actually running keeps its real Stop.
+            f.primary:Hide();f.pause:Hide();f.resume:Hide()
+            enable(f.primary,false);enable(f.pause,false);enable(f.resume,false)
+            if s.running then f.stop:Show();enable(f.stop,true) else f.stop:Hide();enable(f.stop,false) end
+            if settled then f.dismiss:Show() else f.dismiss:Hide() end
+            return
+        end
         local resumable=not s.running and s.canResume and not changedTarget(s.resumeTarget)
         f.primary:SetText(T(s.running and "orb.button.pause" or "orb.button.resume"));enable(f.primary,s.running or resumable)
         enable(f.pause,s.running);enable(f.resume,resumable)
@@ -2727,6 +2815,13 @@ local function miniView()
     if type(Nexus.StartupStatus)=="function" then okReady,ready=pcall(Nexus.StartupStatus) end
     if not okReady then return {kind="error",error=ready} end
     if type(ready)~="table" or not ready.coreReady then return {kind="loading"} end
+    -- A Start/Stop run (OrbAuto): its own kind, Stop only, its own reason.
+    local auto=Nexus.OrbAuto
+    if type(auto)=="table" and type(auto.Active)=="function" and auto.Active() then
+        local st=auto.Status()
+        return {kind="auto",reason=type(st.reason)=="string" and st.reason or nil,
+            inflight=type(st.inflight)=="string" and st.inflight or nil}
+    end
     local runtime=Nexus.OrbRuntime
     if type(runtime)~="table" or type(runtime.CompactStatus)~="function" then return {kind="missing"} end
     local ok,s=pcall(runtime.CompactStatus)
@@ -2760,6 +2855,10 @@ end
 -- which is reviewed and resumed in the Orb window; Stop as the main panel
 -- offers it. Anything that is not a well-formed run offers nothing.
 local function miniGates(v)
+    if v.kind=="auto" then return false,false,true end
+    -- With Start/Stop, the earlier runtime's record is history: its Pause,
+    -- Resume and Stop are not offered.
+    if v.kind=="run" and Nexus.OrbAuto then return false,false,v.running==true end
     if v.kind~="run" then return false,false,false end
     return v.running,v.state=="PAUSED" and v.canResume and not v.running and not changedTarget(v.target),
         v.running or v.pending or v.state=="PAUSED" or v.state=="LIMIT"
@@ -2767,6 +2866,13 @@ end
 local function miniStateText(v)
     if v.kind=="none" then return T("orb.status.mini_no_run") end
     if v.kind=="loading" then return T("orb.status.mini_loading") end
+    if v.kind=="auto" then
+        -- What the run waits on, in existing phase words: an Orb offer after a
+        -- spend or a redraw, the result after a choice, otherwise the next step.
+        local phase=(v.inflight=="spend" or v.inflight=="redraw") and phases.WAIT_OFFER
+            or v.inflight=="select" and phases.WAIT_RESULT or phases.READY
+        return TF("orb.status.mini_running",{state=T(phase)})
+    end
     if v.kind~="run" then return T("orb.status.mini_unavailable") end
     local label=phases[v.state] and T(phases[v.state]) or TF("orb.status.mini_unknown_state",{state=v.state})
     if recoveryPhases[v.recoveryPhase] then return phaseText(v) end
@@ -2783,6 +2889,7 @@ end
 local function miniReason(v)
     if v.kind=="none" then return miniText(T("orb.status.mini_open_to_start")) end
     if v.kind=="loading" then return miniText(T("orb.status.mini_reading_saved")) end
+    if v.kind=="auto" then return miniText(truthful(v.reason)) end
     if v.kind~="run" then
         -- The read error itself is diagnostic text and stays as raised.
         local _,detail=miniText(T(MINI_UNREAD[v.kind])..(v.error~=nil and (" "..tostring(v.error)) or ""))
@@ -2797,6 +2904,7 @@ end
 -- ..."), its own whole label per case (no rewrite of a shown text).
 local function miniUsage(v,compact)
     if v.kind=="none" then return T("orb.status.mini_usage_none") end
+    if v.kind=="auto" then return "" end -- no maximum to count against
     local spent,limit=v.spent and miniNumber(v.spent),v.limit and miniNumber(v.limit)
     -- A restored receipt without its approved maximum: the fallback gates the
     -- run but is not shown as approved.
@@ -2807,6 +2915,10 @@ local function miniUsage(v,compact)
     return T("orb.status.mini_usage_unavailable")
 end
 local function miniPending(v)
+    if v.kind=="auto" then
+        -- A request in flight is an outstanding result, never "none".
+        return v.inflight and T("orb.status.mini_result_not_settled") or T("orb.status.mini_pending_none")
+    end
     if v.kind=="none" then return T("orb.status.mini_pending_none") end
     if v.reserved==nil or v.pending==nil then return T("orb.status.mini_pending_unavailable") end
     if v.uncertain==nil or v.unconfirmedResults==nil or v.historyKnown~=true
@@ -2889,6 +3001,10 @@ function UI.PanelRunLine()
     local okView,v=pcall(miniView)
     if not okView or type(v)~="table" then v={kind="error"} end
     if v.kind=="none" or v.kind=="loading" or v.kind=="missing" then return nil end
+    if v.kind=="auto" then
+        local line=TF("orb.status.line_run",{status=miniStateText(v)})
+        return line,line,line
+    end
     if v.kind~="run" then
         local unread=TF("orb.status.line_run",{status=T(MINI_UNREAD_KEY)})
         return unread,unread,unread
@@ -2958,6 +3074,8 @@ local function miniRender()
     local pause,resume,stop=miniGates(v)
     enable(mini.pause,pause and not miniBusy);enable(mini.resume,resume and not miniBusy)
     enable(mini.stop,stop and not miniBusy)
+    -- Start/Stop: no Pause or Resume control exists for the runner.
+    if Nexus.OrbAuto then mini.pause:Hide();mini.resume:Hide() end
     if mini._nexusStack then mini._nexusStack() end
     clampMini()
     if v.kind=="error" then return tostring(v.error) end
@@ -3038,7 +3156,9 @@ local function miniAct(kind)
         local pause,resume,stop=miniGates(v)
         local allowed=(kind=="pause" and pause) or (kind=="resume" and resume) or (kind=="stop" and stop)
         if not allowed then miniSay(miniRefusal(kind,v));return end
-        local done,why=Nexus.OrbRuntime[MINI_ACTIONS[kind]]()
+        local done,why
+        if kind=="stop" and Nexus.OrbAuto and Nexus.OrbAuto.Active() then done,why=Nexus.OrbAuto.Stop()
+        else done,why=Nexus.OrbRuntime[MINI_ACTIONS[kind]]() end
         -- An accepted Resume is worded from a fresh read and belongs to the
         -- state that read shows.
         local after=kind=="resume" and done and miniView() or nil

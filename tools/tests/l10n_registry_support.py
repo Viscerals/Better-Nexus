@@ -102,7 +102,9 @@ CHARGE_DECLARATION = {"kind": "format", "fields": CHARGE_FIELDS, "slot": "count"
 # v39 (B/C RED): the 20 accepted new meanings (SLICE_BC_NEW_ROWS below) are
 # appended after the 4096, so the catalog declares 4116; the bounded limit
 # stays 5120 (not patched for the features).
-CURRENT_FULL_UI_KEYS = 4116
+# v47 (2026-11-19, user/coordinator-approved Start/Stop wording): one more
+# hand-reviewed Orb meaning, then the Tome checkbox; the obsolete Tome info row is retired (4117 active).
+CURRENT_FULL_UI_KEYS = 4117
 RUNTIME_CAP = 5120
 # v39 (B/C): the 20 accepted new meanings, an independent oracle restated from
 # the v33 PLAN newKeys20 (opacity: the v23 Theme reference; FAQ: FAQ_DRAFT r3).
@@ -128,23 +130,20 @@ SLICE_BC_NEW_ROWS = (
      "the plan asks for; locked copies count only up to its locked targets. Copies above a target "
      "are extras. See the Wishlists tab above.", (), None),
     ("help.label.faq_orb_start_maximum_question", "text",
-     "Does Auto ON start an Orb run, and what is the maximum?", (), None),
+     "Does Auto ON start an Orb run, and is there a maximum?", (), None),
     ("help.body.faq_orb_start_maximum_answer", "block",
-     "No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and "
-     "click Start; starting it turns ordinary Automation off and does not turn it back on. The "
-     "maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled "
-     "targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, "
-     "which does not change during a run. Until you type an amount, it follows your confirmed Orb "
-     "balance, up to 1000.", (), None),
+     "No. Auto never starts an Orb run. A run starts only when you open Orbs and click Start; "
+     "starting it leaves ordinary Automation as it is. There is no maximum: Nexus uses one Orb per "
+     "replacement and stops when your rolled targets are complete, when you press Stop, or when no "
+     "Orb can be used safely.", (), None),
     ("help.label.faq_orb_blocked_question", "text",
      "Why can't I start an Orb run, or why did it stop early?", (), None),
     ("help.body.faq_orb_blocked_answer", "block",
-     "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action "
-     "without a confirmed result blocks new runs until it settles, or until you use Continue... "
-     "where it is offered. A run ends when your rolled targets are complete or no safe source is "
-     "left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes "
-     "locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See "
-     "the Orbs tab above.", (), None),
+     "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action from "
+     "before a reload without a confirmed result is kept as history; it does not hold a new Start. A "
+     "run ends when your rolled targets are complete, when no Orb or safe source is left, when you "
+     "press Stop, or when the active loadout changes. Orb mode never changes locked Echo slots. A "
+     "reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.", (), None),
     ("help.label.faq_auto_replace_build_question", "text",
      "Can Auto replace a Saved Build that has Echoes I value?", (), None),
     ("help.body.faq_auto_replace_build_answer", "block",

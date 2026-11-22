@@ -1,33 +1,37 @@
-local H=dofile('tests/prototype/orbs_support.lua');local M=H.M
+-- Start/Stop rework (2026-11-19). The earlier maximum EditBox is gone from
+-- the player's controls: during a run nothing can be typed or approved, Start
+-- is locked while the run is ON, Stop is offered, and a hidden box submits
+-- nothing even when its Enter handler is called directly.
+-- (Replaces the strict legacy maximum EditBox lock pin.)
+local H=dofile('tests/prototype/orbs_support.lua');local A,O=H.A,H.O
+local M=Nexus.OrbAuto
 dofile('tests/prototype/legacy_editbox_support.lua')(H)
-H.OrbPlan({{spellId=410002,quality=2,stacks=3}});assert(M.Start(3))
-local ok,f=pcall(Nexus.OrbPanel.Show)
-assert(ok,'legacy busy Orb render failed: '..tostring(f))
-H.AssertOrbLocked(f,'running pending operation')
-local changes=0;local set=M.SetLimit
-M.SetLimit=function(...)changes=changes+1;return set(...)end
-local function unchanged(reason)
- local before=M.Status();local actions=#H.actions;local limitCalls=changes;f.limit:SetText('999')
- f.limit:GetScript('OnEnterPressed')(f.limit);Nexus.OrbPanel.Refresh()
- local after=M.Status()
- assert(changes==limitCalls,reason..': locked Enter called SetLimit')
- assert(after.limit==before.limit and after.spent==before.spent and after.reserved==before.reserved,reason..': allowance/exposure changed')
- assert(#H.actions==actions and f.limit:GetText()==tostring(after.limit),reason..': Enter submitted an action or retained fake maximum')
- H.AssertOrbLocked(f,reason)
+H.OrbPlan({{spellId=410002,quality=2,stacks=3}})
+local f=Nexus.OrbPanel.Show()
+assert(not f.limit:IsShown() and not f.max:IsShown(),'idle: no maximum box or Max button')
+assert(M.Start(),'Start');H.Advance(.5);Nexus.OrbPanel.Refresh()
+assert(H.Count('orb-spend')==1,'one Orb opens a draw')
+local function locked(reason)
+ assert(not f.limit:IsShown() and not f.max:IsShown(),reason..': a maximum control is shown')
+ assert(not f.start:IsEnabled() and f.stop:IsEnabled(),reason..': Start must be locked and Stop offered')
+ local actions=#H.actions
+ f.limit:SetText('999');f.limit:GetScript('OnEnterPressed')(f.limit);Nexus.OrbPanel.Refresh()
+ assert(#H.actions==actions and M.Active(),reason..': a direct Enter on the hidden box changed the run or sent something')
 end
-unchanged('running')
-f.start:Click();assert(M.Status().state=='PAUSED');unchanged('paused pending')
-H.Offer();assert(H.Count('take')==0);Nexus.OrbPanel.Refresh();unchanged('paused ready offer')
-f.start:Click();assert(H.Count('take')==1);unchanged('submitted selection')
-f.stop:Click();assert(M.Status().pending and not M.Status().running);unchanged('stopped unresolved')
-H.Result(410002,2);Nexus.OrbPanel.Refresh()
-assert(not M.Status().pending and f.limit.mouseEnabled and f.limit.keyboardEnabled,'settled Stop restores idle editing')
-assert(H.Count('orb-spend')==1,'Stop/refresh must not submit another spend')
-f.limit:SetText('1');f.start:Click();H.Offer();H.Result(410002,2);Nexus.OrbPanel.Refresh()
--- A settled maximum finishes the run: the next run's maximum is editable at
--- once, and Stop is not needed to release the completed budget.
-assert(M.Status().state=='FINISHED' and not M.Status().pending,'actual settled completion reached')
-assert(f.limit.mouseEnabled and f.limit.keyboardEnabled,'a finished run unlocks the next maximum')
-assert(not f.stop:IsEnabled(),'Stop is disabled once the run is finished')
-assert(H.Count('orb-spend')==2 and H.Count('take')==2,'only the two explicit synthetic Starts submitted')
-print('PASS strict legacy EditBox running/paused/ready/selection/stopped/settled/limit locks and allowance')
+locked('waiting for the offer')
+O.offer=true;H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}});H.Advance(.5);Nexus.OrbPanel.Refresh()
+assert(H.Count('take')==1);locked('choice submitted')
+f.stop:Click();assert(not M.Active(),'Stop ends the run')
+Nexus.OrbPanel.Refresh()
+-- (2026-11-19 decision) Stop does not erase the sent choice: Start is offered
+-- and rejoins it; the rejoined run sends nothing before its answer.
+assert(f.start:IsEnabled(),'while the choice is still in flight, Start is offered to rejoin it')
+local sent=#H.actions
+f.start:Click();H.Advance(1);Nexus.OrbPanel.Refresh()
+assert(M.Active() and #H.actions==sent,'the rejoined run sends nothing before the choice is answered')
+f.stop:Click();assert(not M.Active(),'Stop ends the rejoined run')
+H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false;H.Notify();A.Poll()
+Nexus.OrbPanel.Refresh()
+assert(f.start:IsEnabled() and not f.stop:IsEnabled(),'after Stop, Start is offered again and Stop is not')
+assert(H.Count('orb-spend')==1 and H.Count('take')==1,'only the run itself sent anything')
+print('PASS no maximum EditBox: run locks Start, offers Stop, hidden box submits nothing')

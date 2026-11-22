@@ -123,6 +123,7 @@ NAMES += ['leaderboard_recovery_rows','leaderboard_recovery_upstream']
 NAMES += ['retention_ranked_marker_pass']
 NAMES += ['rival_picker_detection']
 NAMES += ['retention_busy_retry_bound']
+NAMES += ['retention_timestamp_only']
 NAMES += ['share_source_drift_order']
 NAMES += ['compaction_rebind_release']
 NAMES += ['dps_compaction_preservation']
@@ -399,6 +400,8 @@ NAMES += ['native_details_measurement']
 NAMES += ['server_status_difficulty_authority']
 # Issue #21 Stage A: a Community or Leaderboard scroll that keeps the exact bound virtual window (same rows, revisions, selection, layout and checked-out frames) does not release and rebind it; wheel steps, clamping, the overflow cue and every data, dirty, filter, selection, layout, resize and failure rebind are kept (EXPECT fails at 9bfb2bb9 by design; native flicker and frame timing NOT_RUN).
 NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
+# Leaderboard top-100 display: every Leaderboard path (synchronous and resumable ViewProjections, the real window and its no-projection fallback) shows exactly the first 100 rows of the old full output after all filters and ranking over the entire eligible board, including real-pair combined eligibility, class rows from beyond the overall top 100 and a tie across position 100; preparation stops at the cut; the full DPS board, its cursor, tooltip ranks and stored records are unchanged (EXPECT fails at d14fa7eb by design; native NOT_RUN).
+NAMES += ['leaderboard_top100_display']
 # Issue #167: the attached main-panel Orb strip of a settled finished run has its own session-only Hide; the same run stays hidden through ticker refresh and panel re-render, a different run (same numbers), active, pending, paused or recovery state stays shown, a stale click is refused, and nothing is spent, saved or changed (EXPECT fails at c7e4d7cd by design; native NOT_RUN).
 NAMES += ['orb_strip_dismiss']
 # Issue #168 (panelA): plain-left drag of the main panel from its background, grip and every passive label, count, card and icon through one owner (one StartMoving / StopMovingOrSizing, panelX / panelY saved once in UIParent units, only after a real move with valid reads); clicks, right drags and a second start do nothing; editor counts, difficulty and buttons are excluded; root / origin hide ends a move, the render transaction does not; hover areas fit their text (EXPECT fails at c7e4d7cd by design; native pointer capture NOT_RUN).
@@ -479,6 +482,14 @@ NAMES += ['automation_souvenir_reveal']
 NAMES += ['updated_provider_settle_runtime']
 # The game's own auto-accept timer (0.18 s, armed at the parse, never re-checks its option) against the later-frame settle rule in adversarial frame order (driver before timer; 60 fps, 20 fps, one long frame, late first read, option off): no Nexus action before the native pick; measures the no-timer admit delay (synthetic; native NOT_RUN).
 NAMES += ['updated_provider_native_timer_order']
+# A receipt restored after a reload whose Orb offer was seen (spend observed, or offer recorded with the spend
+# unconfirmed), with no recorded choice and no Orb offer open no longer
+# locks ordinary Auto (the 9101 lockout); a current offer, unknown Orb state, recorded choice, this session's receipt and a pause still block.
+NAMES += ['orb_restored_ordinary_release']
+# Start/Stop Orb automation (user-authorized rework 2026-11-19): no Orb maximum; needed Echo from an Orb offer whatever the
+# balance; native Orb redraw for an offer without one; one Orb opens a draw on a clear table; ordinary choices left to the player.
+NAMES += ['orb_auto_start_stop']
+NAMES += ['orb_auto_surfaces']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

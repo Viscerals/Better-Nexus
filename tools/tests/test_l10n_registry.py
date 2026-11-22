@@ -173,9 +173,13 @@ class RegistryParserTests(unittest.TestCase):
         context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
         rows = [row for row in context["keys"] if type(row) is dict]
         keys = [key for key, _, _, _, _ in SLICE_BC_NEW_ROWS]
-        self.assertEqual(list(declarations)[-20:], keys, "the 20 are the last declarations, in order")
-        self.assertEqual(list(english)[-20:], keys, "the 20 are the last English entries, in order")
-        self.assertEqual([row.get("key") for row in rows[-20:]], keys, "the 20 are the last context rows, in order")
+        # The Orb Start/Stop line and Tome checkbox follow the 20 B/C keys.
+        tail = ["orb.status.run_until_goal", "readout.menu.auto_manage_tomes"]
+        self.assertEqual(list(declarations)[-22:-2], keys, "the 20 are the last declarations before these two keys, in order")
+        self.assertEqual(list(english)[-22:-2], keys, "the 20 are the last English entries before these two keys, in order")
+        self.assertEqual([row.get("key") for row in rows[-22:-2]], keys, "the 20 are the last context rows before these two keys, in order")
+        self.assertEqual((list(declarations)[-2:], list(english)[-2:], [row.get("key") for row in rows[-2:]]),
+                         (tail, tail, tail), "the Orb and Tome meanings are last in declarations, English and context")
         for key, kind, text, slots, limit in SLICE_BC_NEW_ROWS:
             with self.subTest(key=key):
                 if kind == "template":
@@ -844,11 +848,13 @@ class DiagnosticTests(unittest.TestCase):
             self.assertEqual((row["sha256"], row["byteLength"]),
                              (hashlib.sha256(value).hexdigest(), len(value)))
 
-    def test_d2_real_retired_list_is_empty_and_checked(self):
+    def test_d2_real_retired_tome_key_is_checked(self):
         context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
-        self.assertEqual(context["retiredKeys"]["keys"], [])
+        self.assertEqual(context["retiredKeys"]["keys"], ["readout.menu.tomes"])
         receipt = self.diagnose(*self.inputs)
-        self.assertEqual(receipt["retiredKeys"], [])
+        self.assertEqual(receipt["retiredKeys"], ["readout.menu.tomes"])
+        self.assertTrue(receipt["valid"])
+        self.assertEqual(receipt["problemCounts"]["obsolete"], 0)
         self.assertEqual(self.catalog.DIAGNOSTIC_CODES, EXPECTED_DIAGNOSTIC_CODES)
         for codes in (self.catalog.CODES, self.catalog.VALIDATION_CODES,
                       self.catalog.EVIDENCE_CODES, self.catalog.REGISTRY_CODES,

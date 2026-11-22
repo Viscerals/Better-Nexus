@@ -552,7 +552,7 @@ do
  check(P.DetailNameLines({'a','b','c','d'})[3]=='+2 more','ENGLISH: +N more exact')
  P.Render(Model{shed={'a','b','c','d'}})
  local lines=P.HubTooltipLines('orbs')
- check(lines[1]=='Orbs / Lost Memories' and lines[4]=='Closing the Orb window or its mini panel only hides it; an approved run continues. Use Pause or Stop.','ENGLISH: Orbs hub hover exact')
+ check(lines[1]=='Orbs / Lost Memories' and lines[4]=='Closing the Orb window or its mini panel only hides it; a run continues. Use Stop.','ENGLISH: Orbs hub hover exact')
  local chat=S.CaptureChat(function() P.HideByPlayer() end)
  check(chat[1]=='|cffffd200Nexus:|r |cffffffffThe Nexus panel is hidden.|r Show it again: type |cffffffff/nexus panel|r or click the Nexus minimap button. Hiding does not turn Nexus off or change Auto.','ENGLISH: hide chat exact: '..tostring(chat[1]))
  P.Show()

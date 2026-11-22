@@ -300,19 +300,21 @@ C.scenario('S3b the difficulty card: Hardcore red, a known Normal neutral, an un
 end)
 
 C.scenario('S4 your record and the best known record for the same Echoes are separate rows',function()
- local perf={dummy={global={dps=5130,player='Synthetic'}},lk={}}
+ local perf={dummy={global={dps=9077790,player='Synthetic'}},lk={}}
  P.Render(Model({bestDps={dummy={dps=4812}},performance=perf}))
  local p=NexusPanel._play
  if not C.setup(type(p)=='table','S4: fixture: the summary exists') then return end
  local text=ShownText()
- C.expect(text:find('Yours · Training Dummy',1,true)~=nil and Plain(p.yoursValue)=='4,812 DPS',
+ C.expect(text:find('Yours · Training Dummy',1,true)~=nil and Plain(p.yoursValue)=='4k DPS',
   'S4: your record has its own row',Plain(p.yoursValue))
- C.expect(Plain(p.bestLabel)=='Best known · same build' and Plain(p.bestValue)=='5,130 DPS',
+ C.expect(Plain(p.bestLabel)=='Best known · same build' and Plain(p.bestValue)=='9.08M DPS',
   'S4: the best known record for the same Echoes has its own row',Plain(p.bestValue))
  -- Approved panel cleanup: the DPS section is one line of entries, so what
  -- best known means is on the best known entry's hover, not a row of its own.
  local scope=table.concat(V.TooltipLines(p.bestHit:GetScript('OnEnter'),p.bestHit),' | ')
  C.expect(scope:find('server-wide ranking',1,true)~=nil,'S4: the best known hover says what best known is',scope)
+ C.expect(scope:find('9,077,790',1,true)~=nil and not scope:find('9.08M',1,true),
+  'S4: the best known hover keeps the exact DPS',scope)
  C.expect(not text:lower():find('rank #',1,true),'S4: no rank is claimed')
  -- No record at all while shared data loads. Approved panel cleanup ("Hide
  -- absent DPS/training sections completely"): the former "... shared data
@@ -390,7 +392,7 @@ C.scenario('S4b no DPS record: no row, word or reserved space; a measured 0 is a
  if not C.setup(l.play==true and l.gap==6 and ProgressBottom()~=nil and l.boxes.footer~=nil and l.boxes.orbLine==nil
   and P._playDetails~=true,'S4b: fixture: the Play layout at font scale 1, Details closed, no Orb line',tostring(l.gap)) then return end
  local text=ShownText()
- C.guard(text:find('4,812 DPS',1,true)~=nil and text:find('5,130 DPS',1,true)~=nil,
+ C.guard(text:find('4k DPS',1,true)~=nil and text:find('5k DPS',1,true)~=nil,
   'S4b: your record and the best known record show while both exist',text)
  local withBoth=NexusPanel:GetHeight()
  -- No record at all, in both shapes a model carries it: no record fields,
@@ -424,7 +426,7 @@ C.scenario('S4b no DPS record: no row, word or reserved space; a measured 0 is a
   'S4b: the measured 0 has its row and that row\'s height',table.concat(below,',')..' '..NexusPanel:GetHeight()..' / '..tostring(withNone))
  C.setup(P.Render(both)==true,'S4b: fixture: both records again')
  text=ShownText()
- C.guard(NexusPanel:GetHeight()==withBoth and text:find('4,812 DPS',1,true)~=nil and text:find('5,130 DPS',1,true)~=nil,
+ C.guard(NexusPanel:GetHeight()==withBoth and text:find('4k DPS',1,true)~=nil and text:find('5k DPS',1,true)~=nil,
   'S4b: records arriving again give the rows and their height back',NexusPanel:GetHeight()..' / '..withBoth..' '..text)
  C.guard(Effects()==before,'S4b: showing and hiding the DPS rows makes no game action, send, saved-data or Auto change',Effects())
 end)
@@ -446,7 +448,7 @@ C.scenario('S4c a partial DPS record shows only the row that exists; its hover n
  local p=NexusPanel._play
  if not C.setup(type(p)=='table','S4c: fixture: the summary exists') then return end
  local text=ShownText()
- C.guard(text:find('Yours · Training Dummy',1,true)~=nil and text:find('4,812 DPS',1,true)~=nil,'S4c: your record keeps its row',text)
+ C.guard(text:find('Yours · Training Dummy',1,true)~=nil and text:find('4k DPS',1,true)~=nil,'S4c: your record keeps its row',text)
  C.expect(not text:find('Best known',1,true) and not text:find('received yet',1,true) and not text:find('server-wide',1,true),
   'S4c: no best known row, placeholder or note without a best known record',text)
  C.expect(NexusPanel._responsiveLayout.boxes.bestKnown==nil and not p.bestHit:IsShown(),
@@ -466,7 +468,7 @@ C.scenario('S4c a partial DPS record shows only the row that exists; its hover n
  C.setup(P.Render(Model({performance={dummy={global={dps=5130,player='Synthetic'}},lk={}}}))==true,
   'S4c: fixture: only a best known record exists')
  text=ShownText()
- C.guard(text:find('Best known · same build',1,true)~=nil and text:find('5,130 DPS',1,true)~=nil,
+ C.guard(text:find('Best known · same build',1,true)~=nil and text:find('5k DPS',1,true)~=nil,
   'S4c: the best known record keeps its row',text)
  C.expect(not text:find('Yours',1,true) and not text:find('record yet',1,true),
   'S4c: no row or placeholder of yours without a record of yours',text)
@@ -1028,7 +1030,7 @@ C.scenario('S13 the DPS entries share one line while they fit and wrap as whole 
   for _,r in ipairs(G.Shown(NexusPanel)) do
    if r.kind=='FontString' and r:GetParent()==NexusPanel then
     local plain=Plain(r)
-    if plain:find('Yours',1,true) or plain:find('Best known',1,true) or plain:find('4,812',1,true) or plain:find('5,130',1,true) then
+    if plain:find('Yours',1,true) or plain:find('Best known',1,true) or r==NexusPanel._play.yoursValue or r==NexusPanel._play.bestValue then
      out[#out+1]=r
     end
    end
@@ -2527,9 +2529,14 @@ C.scenario('S31 the Orb controls strip attached under the panel draws no run cou
       tag..': the strip\'s words are whole: not cut, in a box as tall as its lines',
       G.Text(rect)..' needs '..tostring(bar.summary:GetStringHeight())..': '..label)
      -- The controls: shown, in one row under the words, inside the strip, with their gates.
+     -- Start/Stop surfaces (2026-11-19, 9106 field report): the earlier
+     -- runtime's run is history here. Its Pause and Resume (and a Stop of a
+     -- run that is not running) are not offered; a run of it that is actually
+     -- running keeps its real Stop; Details stays.
+     local stopShown=case[2].running==true
      local strip=G.Rect(bar,NexusPanel)
      local row,inside,below=nil,true,true
-     for _,b in ipairs({bar.pause,bar.resume,bar.stop,bar.details}) do
+     for _,b in ipairs(stopShown and {bar.stop,bar.details} or {bar.details}) do
       local r=b:IsVisible() and G.Rect(b,NexusPanel) or nil
       if not r then inside=false else
        row=row or r[2]
@@ -2537,13 +2544,14 @@ C.scenario('S31 the Orb controls strip attached under the panel draws no run cou
        if r[2]<rect[4]-0.01 then below=false end
       end
      end
-     C.guard(inside and below,tag..': Pause, Resume, Stop and Details are shown in one row inside the strip, under its words',
+     C.guard(inside and below,tag..': the shown controls (Stop of a running run, Details) are in one row inside the strip, under its words',
       G.Text(strip)..' words '..G.Text(rect))
-     C.guard((bar.pause:IsEnabled() and true or false)==case[6][1] and (bar.resume:IsEnabled() and true or false)==case[6][2]
-      and (bar.stop:IsEnabled() and true or false)==case[6][3] and (bar.details:IsEnabled() and true or false)==true
-      and V.Plain(bar.pause:GetText() or '')=='Pause' and V.Plain(bar.resume:GetText() or '')=='Resume'
-      and V.Plain(bar.stop:GetText() or '')=='Stop' and V.Plain(bar.details:GetText() or '')=='Details',
-      tag..': the controls keep their names and gates',tostring(bar.pause:IsEnabled())..'/'..tostring(bar.resume:IsEnabled())..'/'..tostring(bar.stop:IsEnabled()))
+     C.guard(not bar.pause:IsShown() and not bar.resume:IsShown() and not bar.primary:IsShown()
+      and bar.stop:IsShown()==stopShown and (not stopShown or bar.stop:IsEnabled())
+      and (bar.details:IsEnabled() and true or false)==true
+      and (not stopShown or V.Plain(bar.stop:GetText() or '')=='Stop') and V.Plain(bar.details:GetText() or '')=='Details',
+      tag..': no Pause or Resume; Stop only for a running run; Details kept',
+      tostring(bar.pause:IsShown())..'/'..tostring(bar.resume:IsShown())..'/'..tostring(bar.stop:IsShown())..'/'..tostring(bar.stop:IsEnabled()))
      -- The numbers are not lost. They are on the strip's hover (the strip
      -- drew them itself before the correction, so this hover is new)...
      local whole=tostring(bar.summary._nexusFullText or '')

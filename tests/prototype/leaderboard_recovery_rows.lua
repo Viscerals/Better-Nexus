@@ -497,7 +497,10 @@ if SIZE.expireAfterDays then
  C,R=Nexus.BuildCatalog,Nexus.DataRetention
  Settle(H)
  local meta=NexusDB.authorityBundle.dataRetention or {}
- check((tonumber(meta.nextMaintenanceAt) or 0)>CLOCK.base+CLOCK.offset,'day 29: a retention run ran in this session: '..tostring(meta.nextMaintenanceAt))
+ -- A run that expires nothing and records nothing new saves no metadata; its
+ -- next-run time is held for the session (DataRetention.NextMaintenanceAt).
+ local nextRun=R.NextMaintenanceAt()
+ check((tonumber(nextRun) or 0)>CLOCK.base+CLOCK.offset,'day 29: a retention run ran in this session: '..tostring(nextRun))
  check(C.Status().barrierCount==retentionCount and R.MarkerFirstSeenCount(NexusDB)==ageing,
   'day 29: no retention marker expires: '..C.Status().barrierCount..'/'..retentionCount)
  check(F.Serialize(meta.markerFirstSeen or {})==firstSeenBefore,'day 29: the first observations are not reset by a reload or a run')

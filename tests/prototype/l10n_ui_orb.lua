@@ -203,11 +203,12 @@ check(Hover(f.max)[1]=='Follow your confirmed Orb balance, up to 1000, until you
 check(f.approval:GetText()=='Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion.','consent English (two lines)')
 check(f.plan:GetText()=='Assigned Wishlist: '..WISHLIST,'assigned Wishlist with a non-ASCII name verbatim')
 check(f.balance:GetText():match('^[^\n]*')=='Confirmed Orb balance: 10','balance English: '..f.balance:GetText())
-f.limit:SetText('');f.limit:ClearFocus();f.start:Click()
-check(f.notice:GetText()=='The maximum follows the confirmed Orb balance, which is not available. Nothing was started.' and H.Count('orb-spend')==0,'refusal English, nothing spent: '..tostring(f.notice:GetText())..' spends='..H.Count('orb-spend'))
-f.limit:SetText('3');f.limit:ClearFocus();f.start:Click()
+-- Start/Stop rework (2026-11-19): the window's Start runs the new automation
+-- and asks for no maximum, so the earlier maximum refusal is gone. The earlier
+-- runtime's run, whose surfaces below keep their English, is started by its API.
+assert(Nexus.OrbRuntime.Start(3))
 UI.Refresh()
-check(H.Count('orb-spend')==1,'Start spends through the real path')
+check(H.Count('orb-spend')==1,'the earlier runtime spends through its real path')
 check(f.usage:GetText()=='Orbs used: 0 / 3 approved; pending: 1 Orb requested, not confirmed yet','usage English: '..f.usage:GetText())
 local shown,full=UI.PanelRunLine()
 check(shown:find('^Orb run: Running %- Waiting for the Orb offer; Used 0 of 3 approved; ') ~=nil,'panel line English: '..shown)
@@ -232,8 +233,11 @@ check(strip.summary:GetText():find('awaiting Orb result\n',1,true)==1 and not st
  'strip English, words only: '..strip.summary:GetText())
 check(tostring(strip.summary._nexusFullText):find('Orbs used: 0 / 3 approved\n1 Orb pending, not confirmed yet\n',1,true)==1,
  'strip hover English: '..tostring(strip.summary._nexusFullText))
-mini.pause:Click()
-check(mini.notice:GetText()=='Paused.','mini outcome English')
+-- Start/Stop surfaces (2026-11-19, 9106 field report): the mini offers no Pause
+-- (its "Paused." outcome is superseded); the earlier run is paused through its
+-- runtime so the strip's paused wording below is still checked.
+check(not mini.pause:IsShown() and not mini.resume:IsShown(),'mini offers no Pause or Resume')
+M.Pause();Nexus.OrbPanel.Refresh()
 strip.refresh()
 check(strip.summary:GetText():find("^awaiting Orb result; 'Za.-' %(same%)\nPaused$")~=nil,
  'strip: a paused run with a pending Orb says the wait once, in words, beside its whole target: '..strip.summary:GetText())
@@ -354,14 +358,18 @@ f.advancedToggle:Click()
 Passive('Advanced render',function() Scan('advanced',Collect(f)) end)
 check(f.sourcePage:GetText()==S.OPEN..'Eligible sources 1 / 1'..S.CLOSE,'source pager template: '..f.sourcePage:GetText())
 f.advancedToggle:Click()
-f.limit:SetText('');f.limit:ClearFocus();f.start:Click()
-check(S.IsPseudo(f.notice:GetText()) and H.Count('orb-spend')==0,'Start refusal passes the seam and spends nothing')
+-- Start/Stop rework (2026-11-19): no maximum to refuse; an unknown Orb balance
+-- (an adapter phrase of the book) refuses Start through the seam.
+H.O.known=false;f.start:GetScript('OnClick')(f.start)
+check(S.IsPseudo(f.notice:GetText()) and H.Count('orb-spend')==0,'Start refusal passes the seam and spends nothing: '..tostring(f.notice:GetText()))
+H.O.known=true;UI.Refresh()
 Scan('refused',Collect(f))
 f.resume:GetScript('OnClick')(f.resume)
 check(S.IsPseudo(f.notice:GetText()),'Resume refusal passes the seam: '..f.notice:GetText())
 -- Running.
-f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
-check(H.Count('orb-spend')==1 and M.Status().running,'the run starts through the real Start')
+-- Start/Stop rework: the earlier runtime's run (its surfaces are scanned below) is started by its API.
+assert(M.Start(3));UI.Refresh()
+check(H.Count('orb-spend')==1 and M.Status().running,'the earlier runtime run starts')
 Passive('running render, hovers and page switches',function()
  Scan('running',Collect(f))
  local log=UI.ShowLog();Scan('history running',Collect(log))
@@ -392,9 +400,11 @@ do
  check(whole:find('Unknown spend: '..S.OPEN..'unavailable'..S.CLOSE,1,true)~=nil,'unavailable stays a distinct word, never 0: '..whole)
  M.CompactStatus=real
 end
--- Paused (mini Pause), its strip and mini, and the paused page.
-NexusOrbMini.pause:Click()
-check(not M.Status().running and S.IsPseudo(NexusOrbMini.notice:GetText()),'mini Pause outcome passes the seam')
+-- Paused (through the runtime: the Start/Stop mini offers no Pause), its strip
+-- and mini, and the paused page.
+check(not NexusOrbMini.pause:IsShown(),'the mini offers no Pause')
+M.Pause()
+check(not M.Status().running,'the earlier run is paused')
 -- The runtime keeps its raw English reason; only the display says it.
 check(M.Status().reason=='Paused. A submitted spend may still finish; the native offer remains available.','runtime reason stays raw English')
 UI.Refresh()
@@ -488,7 +498,8 @@ print('scanned texts: '..scanned)
 ------------------------------------------------------------------------------
 Boot('long')
 Plan(3)
-f=UI.Show();f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
+-- Start/Stop rework: the earlier runtime's run (its dense views are checked here) is started by its API.
+f=UI.Show();assert(Nexus.OrbRuntime.Start(3));UI.Refresh()
 for _,t in ipairs(Collect(f)) do check(t.text~='' ,'long: text shown') end
 check(S.IsPseudo(f.usage:GetText()) and S.IsPseudo(f.status:GetText():match('^[^\n]*')),'long: usage and status shown')
 local logLong=UI.ShowLog();check(S.IsPseudo(logLong.page:GetText()),'long: history shown')
@@ -507,7 +518,7 @@ f=UI.Show()
 check(f.title:GetText()=='Orbs / Lost Memories' and f.max:GetText()=='Max','missing entries: exact English')
 check(Hover(f.max)[1]=='Follow your confirmed Orb balance, up to 1000, until you enter another amount or start the run. This does not spend Orbs.','missing tooltip entry: exact English')
 check(S.IsPseudo(f.start:GetText()),'present entries still translated')
-f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
+assert(Nexus.OrbRuntime.Start(3));UI.Refresh() -- the earlier runtime's run, by its API (Start/Stop rework)
 check(f.usage:GetText():find('^Orbs used: 0 / 3 approved; '..S.OPEN..'pending:')==nil
  and f.usage:GetText():find('^Orbs used: 0 / 3 approved; pending: 1 Orb requested, not confirmed yet')~=nil,
  'missing template entries: exact English composition: '..f.usage:GetText())
@@ -535,7 +546,9 @@ end
 local OUTER_EN='Local character data is not ready: %s No Orb action will be sent.'
 local MARKER_EN='The saved data format marker is not a valid format number (%s). This build writes format %s. The data is kept unchanged and read-only.'
 local function StartWhy(f)
- f.limit:SetText('3');f.limit:ClearFocus();f.start:Click();UI.Refresh()
+ -- Start/Stop rework: the Start line shows the new Start's reason; the saved-data
+ -- refusal is the same sentence as the earlier runtime's (raw kept below).
+ UI.Refresh()
  return f.startWhy:GetText(),M.Status().startReason
 end
 local function StubWrite(status)

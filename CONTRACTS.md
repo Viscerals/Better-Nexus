@@ -15,6 +15,216 @@ This file has two parts.
 
 ## Current rolling and Orb contract (authoritative)
 
+- **Start/Stop Orb automation (`Nexus.OrbAuto`, user-authorized rework of
+  2026-11-19; it lives in core/OrbRuntime.lua).** These rules replace the
+  earlier Orb run controls wherever the two differ below.
+  - **Controls.** The player's controls are Start and Stop only. There is no
+    Orb maximum, as an option or as a zero-limit stand-in. A maximum saved by an
+    earlier version is kept in saved data but is neither shown nor applied.
+  - **Each pass while ON, for the active loadout's Wishlist:**
+    - An Orb offer (the game's `OrbService.IsOfferPending` and a published
+      three-card choice) is answered with a needed Echo (`OrbPolicy.Decide`,
+      targets only).
+    - An offer without a needed Echo is redrawn with the game's own Orb redraw
+      (`OrbService.CanRerollOffer` / `RerollOffer`, one Orb).
+    - With nothing on the table, one Orb is spent on the first safe surplus
+      source (`OrbPolicy.Sources`) to open a draw.
+    - A free (ordinary) draw with a needed Echo is taken once through the
+      ordinary Take (`GameAdapter.Take` and all its admissions), with no Orb.
+      Ordinary Auto does not need to be ON and no setting changes. The pick is
+      settled by the ordinary adapter's own Select record; a pick it voids on
+      the same published choice ends the run, and the same published choice is
+      never taken twice.
+    - A free draw without a needed Echo stays with the ordinary flow: the
+      player, or ordinary Auto when it is ON, exactly as without a run. No Orb
+      is spent over it, and the run sends nothing to dismiss or redraw it.
+      After its normal resolution the run continues.
+  - **Ordinary Auto alongside a run.** Start leaves ordinary Auto and its
+    settings as they are. The run blocks ordinary rolling only while one of its
+    own requests awaits the game's answer (`OrbAuto.OrdinaryOpen`); the
+    ordinary-board gate still refuses an Orb offer or an unknown Orb state, and
+    the adapter's single in-flight gate keeps one Echo action at a time between
+    the two.
+  - **Balance.** The Orb balance is only affordability (at least one Orb), never
+    proof of an outcome. A balance that rises or has not dropped changes
+    nothing.
+  - **One request in flight.** It counts as answered when the game replaces its
+    published choice. A request the game does not answer is not repeated: after
+    8 s one read-only refresh is requested, after 20 s the run says it is
+    waiting, and Stop ends it. That wait says only what Nexus observed ("Nexus
+    did not see an answer to the earlier Orb request"), never that the game
+    did not answer: an unchanged published choice fits a request the game
+    never answered, an answer the client never published, a change made in
+    place, or a redraw the client refused; the client state cannot tell them
+    apart (9107 field report).
+  - **A refused pick ends the run.** The client clears its pending-pick flag
+    (`Perks.pendingSelectSpellId`) when a pick's result arrives. A refused
+    result keeps the same published choice table, and an Orb offer still
+    stands (client reference `perks_service.lua`). A pick of the run (an Orb
+    choice or a free-draw Take) whose flag the client cleared, with that same
+    choice still published, is answered as refused. The run ends with "The
+    game did not take the chosen Echo", the pick is never sent again, and a
+    new Start is the player's own decision. Before this rule the run waited on
+    the pick indefinitely while the cards stayed visible.
+  - **How a run ends.**
+    - Normally: a complete Wishlist, no Orbs, no eligible source, or no redraw
+      available.
+    - With its reason: Stop, a game refusal, a loadout (slot) switch, or logout.
+  - **Start refuses, with an existing sentence, when:**
+    - local character data is not durable;
+    - an Orb action of this session is unresolved;
+    - a game action is pending, or a non-Orb choice without a needed Echo is
+      open;
+    - there is nothing to do (unless an Orb offer is open).
+  - **Session-only.** The run writes no receipt. After a reload, Start is a
+    fresh run on the current game state.
+  - **Stop and an immediate Start.** Stop ends every further action of the
+    run at once. A request the run already sent and whose answer was not seen
+    is not forgotten: a new Start rejoins it as the request in flight, so no
+    second Orb, choice or pick is sent before its answer, which is then handled
+    as usual. While the run is stopped its existing update frame keeps
+    observing that request's answer (no action is sent), so a request answered
+    while stopped, even one whose choice was then resolved, is not waited on:
+    that Start is a fresh run. An answer published and resolved within one
+    observation (0.2 s) leaves no trace in the client state; the rejoined run
+    then waits, sends nothing again, and says "Nexus did not see an answer".
+    That fact is unobservable here.
+  - **Old receipts.** A restored older receipt is never what holds a new Start
+    or an actionable ordinary pick (user decision on the 9106 field report).
+    - While the live Orb service shows no offer (IDLE, or no Orb service), no
+      check of this session is under way and the current state was readable,
+      it does not block ordinary rolling. An open Orb offer, an unknown Orb
+      state or an unreadable current state still blocks it.
+    - This supersedes the narrower ordinary-rolling release of c57e08a6 and
+      ce49e85b (test.9103/9104) for restored receipts; that predicate now
+      applies only while the live Orb service is not IDLE or ABSENT, where the
+      ordinary-board gate refuses anyway.
+    - It is kept unchanged. Before an ordinary Take is sent, a receipt whose
+      recorded choice or matched pick could count that Take's gain as its own
+      outcome is kept as history (`OrbRuntime.HistoryBeforeOrdinaryTake`), so
+      nothing is attributed to it.
+    - Its loadout, lock and upload block (`BlocksOrdinary`) is unchanged until
+      a Start, which keeps it as history: kept unchanged, its passive recovery
+      stops, and it blocks nothing while the Orb service shows no offer.
+  - **The run's own wait.** While a run's own request awaits the game's
+    answer, ordinary actions wait with the run's sentence ("... is paused: Orb
+    refinement owns the current action."), not an older receipt's text.
+  - **Window.** The Orb window shows no maximum, Max, usage-against-maximum,
+    approval, Pause, Resume, Continue, target review or Advanced exclusions.
+  - **Surfaces (9106 field report: "Stop appears to do nothing").** The Orb
+    window, the main-panel strip and the mini panel operate the one runner:
+    Stop is offered exactly while it is ON (or while a run of the earlier
+    runtime is actually running, which no surface can start any more) and
+    ends it. The earlier runtime's Pause and Resume, its Stop of a paused or
+    restored record (a recovery action that sent nothing and only re-marked
+    that record) and the close notice "Use Pause or Stop" are not offered.
+    The record's history words, Details, the dismissal of a settled run, the
+    passive mini panel and the next run's visibility are unchanged.
+  - **Updated provider: the minimal native state (`OrbAdapter.RunAdmission`).**
+    - A spend needs no published choice.
+    - A choice or redraw needs:
+      - the game's Orb offer flag;
+      - no specialization field;
+      - exactly three cards and no fourth;
+      - no memory card (`isGuaranteed`), which is left to the player.
+    - The older provider keeps `ClientAdmission`.
+  - **Residuals.**
+    - The engine's own waiting and status sentences are not in the Orb phrase
+      book, so they show in English in every language. Localization is held.
+    - An unstarted restored receipt still shows its earlier recovery text, which
+      names the removed Continue control.
+    - The internals of `RerollOffer` are not in the admitted client reference.
+    - A memory card that the client's four-entry trim drops before it publishes
+      the choice is not visible to any reader. It is not established whether an
+      Orb draw can carry one. This is the same accepted residual as on the
+      ordinary path, now applied to Orb choices and redraws.
+    - A Start while a restored receipt's own Orb offer is still open answers or
+      redraws that offer, because an open Orb offer is work. The frozen receipt
+      does not record that outcome: nothing is attributed to it, and its
+      outcome evidence is not added.
+    - `O.Redraw` does not interpret `RerollOffer`'s return value: the admitted
+      client reference has no `OrbService` source and its own "Use Orbs"
+      button ignores the return too, so the contract of `true`, `false` and
+      `nil` is not established. A redraw that publishes no new choice waits as
+      unanswered (it gets only the single retry below); a new choice table is
+      handled whatever the return was.
+    - Redraw-wait diagnostic (9107 field report). `OrbAuto.RequestView`, and
+      the support report's "Orb Start/Stop request" line, record for the
+      request in flight (or carried by Stop):
+      - what the client showed at its send and at the run's last read: same
+        choice table, same cards, Orb offer flag, Orb charges, and the client's
+        own `Perks.pendingOrbReroll` flag;
+      - `RerollOffer`'s raw return code.
+      It is memory only, read-only and uninterpreted: client state, not proof
+      of what the server did. It sends nothing and changes no behavior.
+    - Redraw outcomes (user-approved behavior, 2026-11-19). A genuinely new
+      acknowledged offer (a choice message, which always publishes a new
+      table) is used, once, whether its cards are new or repeated; a request
+      with no choice message waits. A single retry was approved only when the
+      game reliably confirms a redraw did not go through, and the admitted
+      provider has no such signal:
+      - `Perks.pendingOrbReroll` is set by `PerkService.MarkOrbReroll`, whose
+        caller (the Orb service) is not in the reference;
+      - it is cleared only by the choice message, together with a new table;
+      - no refusal message, handler or flag exists for it ("a dropped orb
+        request only leaves the next reveal auto-shown").
+      A set or cleared flag, an unchanged board, an idle state and a `false` or
+      `nil` return are therefore not treated as a refusal. The missing native
+      fact is a refusal signal for `RerollOffer`.
+    - One retry of an overdue redraw (user-approved, 2026-11-19, superseding
+      the refusal-signal condition above, with its disclosed risk: the first
+      redraw's answer can still arrive late, and a second Orb can be spent).
+      The game's `OrbService.RerollOffer` returns nothing, lowers the shown
+      Orb count at once and asks for the charge count; a request the server
+      drops answers with that count alone, so a dropped redraw and a slow one
+      look the same to the client. On a pass where the redraw is overdue (the
+      existing no-answer point, `ANSWER_GIVEUP`) and no eligible needed Echo is
+      shown, the same redraw is sent once more through the ordinary adapter
+      `Redraw`, only when this read still shows the same Orb offer, the same
+      cards and the same known Orb count as at its send, with no pick or other
+      Echo action in flight. An unchanged count is not proof the first redraw
+      failed. A new choice table is always consumed first, as the answer.
+      - The retry belongs to that redraw: it is kept across Stop and Start
+        (nothing is sent while stopped) and is never given again; a later,
+        independent redraw has its own. A retry refused before it is sent
+        keeps it.
+    - Redraw timing (user-approved diagnostic, 2026-11-19).
+      `OrbAuto.RedrawTimingView` and the support report's one "Orb redraw
+      timing" line record, for each redraw the run put in flight, the
+      client-clock seconds (`GetTime`) from Nexus's send, and from its one
+      retry, to the run pass on which Nexus saw the redraw answered:
+      - `seen`: a new, non-nil choice table;
+      - `cleared`: the choice cleared with no new table. The client state does
+        not show why, and it is never counted as a new choice seen.
+      A redraw with neither is `pending` (time so far). A redraw followed by a
+      pick sent before either is `pick`. The view and the line also give the
+      counts of first sends, retries, attempts, new choices seen, cleared
+      choices and pending redraws. The run's own handling of the answer is
+      unchanged.
+      - It is recorded only on the existing send and answer paths, including
+        an answer seen while stopped or by Start.
+      - It is session memory only (the last 8 redraws), never saved or sent.
+      - It sends, reads, schedules and decides nothing.
+      - It is Nexus's own observation at its pass cadence, not a server
+        measurement.
+      - No other request kind is retried, and no timer, limit, text or prompt
+        is added.
+    - Visible offer during a pending redraw (user direction, 2026-11-19;
+      corrected after the High review of 221d38fa). The client answers a
+      redraw only with a new choice table (`perks_service.lua` 119-123, 192).
+      Its banish handler (438-443) changes a card in place without answering
+      it. So while a redraw has no new choice table seen, it stays the pending
+      request, and the only action is the normal eligible pick:
+      - when the visible Orb offer holds a needed Echo, it is chosen through
+        the same adapter Select and its own checks (the Orb offer flag, three
+        cards, a selectable card, an unchanged board key, client admission, no
+        pick pending), with no spend;
+      - with no eligible pick nothing is sent, whatever the card values, until
+        the redraw is overdue; then only its one retry above;
+      - a pick refused before it is sent keeps the redraw as the pending
+        request.
+      A redraw that leaves no needed Echo shown still waits.
+
 - **No inferred guarantee.** There are no guaranteed future Echo rolls. A saved
   or verified build is evidence of identity, contents and ownership only. It
   predicts no future offer. `isGuaranteed` on a board card is an observed flag of
@@ -386,6 +596,28 @@ This file has two parts.
   spend, selection or automatic Resume, and consumes no fresh live allowance.
   Completion from actual ownership and exhaustion of two live checks do not
   remove this finite explicit exit. Archive/save refusal keeps receipt and gate.
+- **Restored receipt without an open Orb offer.** One restored class does not
+  block ordinary rolling (`OrbRuntime.BlocksOrdinaryRolling`, read by the chat
+  and panel Auto toggles, the HUD guidance and the final ordinary-board gate).
+  The receipt was restored after a reload; this client observed its spend with
+  its offer, or recorded the first Orb offer seen after its request while the
+  spend is still unconfirmed (not proof that it was this action's reply; a later
+  Orb offer blocks again);
+  it has no recorded choice; the last passive read of the same character showed no
+  Orb offer; no offer was matched to it in this session; and no Continue check
+  is under way. No ownership result can settle such a receipt, so an ordinary
+  Take is never counted as its outcome, and the adapter's own Take is not kept
+  as the receipt's raw pick evidence (a manual pick still is). An Orb offer
+  that appears, an unreadable state, or the live game service reporting an
+  offer or an unknown state blocks again. The receipt, its spend and exposure,
+  the Resume and Start refusals, Continue and the loadout, lock and upload
+  blocks (`BlocksOrdinary`) are unchanged. Nothing is sent or replayed. An
+  unconfirmed spend stays unconfirmed and reserved, and Continue still refuses
+  it (`spend_unconfirmed`); a receipt whose offer was never seen stays blocked.
+  Consequence: once ordinary rolling has changed ownership, a late arrival of
+  the original offer no longer equals the receipt's ownership, so it is not
+  matched to the receipt (`OFFER_UNMATCHED`) and that action cannot be
+  confirmed afterwards; Continue remains its exit.
 - **Recovery authority.** Retained completed states survive lifecycle holds and
   cannot reopen limit approval. Eligible held receipts have the explicit checked
   Continue exit; an ineligible entry preserves the automatic owner. Equivalent

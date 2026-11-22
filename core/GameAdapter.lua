@@ -4944,6 +4944,12 @@ end
 function A.InFlight()
     return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
 end
+-- Read-only: true only while this adapter itself is inside a game service
+-- call (its own Select, Banish, Freeze, Reroll or Lock), so a post-hook can
+-- tell that call from the player's input.
+function A.SelfCalling()
+    return selfCalling == true
+end
 
 -- Read-only, for a caller that must not treat a loading screen as a result:
 -- every request that still waits for the server, by the same rules as
@@ -5525,7 +5531,17 @@ function A.OrdinaryBoardAllowed()
     -- own UI is not touched, so the player's manual choice stays available.
     local admitted, why = ledger.ChoiceAdmission(PerksTbl(), ledger.MemoryCardContract(), nil, "gate")
     if not admitted then return false, why end
-    if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
+    -- A Start/Stop run (OrbAuto) owns the Orb token for its whole run, but
+    -- the ordinary flow on a free draw is not its Orb action: the ordinary
+    -- path (its own Take, ordinary Auto, the player's actions) is admitted
+    -- while the run has no Orb request awaiting the game's answer. Orb mode's
+    -- ownership blocks as before.
+    local orbOwned = A.Orbs and A.Orbs.IsOwned()
+    if orbOwned and A.Orbs.RunOwned and A.Orbs.RunOwned()
+        and Nexus.OrbAuto and Nexus.OrbAuto.OrdinaryOpen and Nexus.OrbAuto.OrdinaryOpen() then
+        orbOwned = false
+    end
+    if orbOwned or (Nexus.OrbRuntime and (Nexus.OrbRuntime.BlocksOrdinaryRolling or Nexus.OrbRuntime.BlocksOrdinary)()) then
         return false, A.OrbBlockReason("Ordinary rolling")
             or "Orb refinement owns the current action; ordinary rolling is paused"
     end
@@ -5844,6 +5860,11 @@ function A.Take(spellId, expect)
         if choiceMark == nil or ledger.LevelingChoiceKey(mirror) ~= choiceMark then
             return false, "leveling_offer_changed"
         end
+    end
+    -- No false attribution: a restored Orb receipt that could count this
+    -- Take's gain as its own outcome is kept as history first (memory only).
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.HistoryBeforeOrdinaryTake then
+        pcall(Nexus.OrbRuntime.HistoryBeforeOrdinaryTake)
     end
     -- Updated client (independent Spec P1): the visible memory card and the
     -- memory authority once more, after every callback above (granted reads,

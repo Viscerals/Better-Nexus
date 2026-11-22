@@ -1079,7 +1079,8 @@ class ConsumerBindingTests(_ConsumerBindingMixin, unittest.TestCase):
         defined = lf[:lf.index(header)].count(b"\n") + 2
         calls = [number for number, text in enumerate(lf.split(b"\n"), 1)
                  if b'Permission("readout.' in text]
-        self.assertEqual(len(calls), 13)                    # SETUP: the current literal calls
+        # The Tome checkbox now uses Text, not the formatted status wrapper.
+        self.assertEqual(len(calls), 12)                    # SETUP: the current literal calls
         receipt = self.catalog.consumer_binding_report(*binding_args(self.files))
         wrapper = {"name": "Permission", "line": defined, "path": READOUT}
         found = sorted((site["line"], site["site"], site["method"], row["binding"], proved,

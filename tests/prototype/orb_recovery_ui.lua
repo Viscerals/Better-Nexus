@@ -34,23 +34,17 @@ local function Until(H,fn,seconds)
  return fn()
 end
 
-section('1 the button and the window',function()
+-- Start/Stop rework (2026-11-19): no recovery UI or buttons on the run page.
+-- (Replaces the Continue opener pin; the window's own behavior below is kept.)
+section('1 no opener on the run page',function()
  local H,M,A,O,server=World()
  SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
  H.Advance(.5)
- check(f.cont and f.cont:IsShown() and f.cont:IsEnabled(),'the Continue button is shown for the class')
- -- At most the former 445 (stale exact pin updated by the finish pass, item
- -- D: measured rows), with every row inside it.
+ check(not f.cont:IsShown(),'no Continue opener for the class')
  check(f:GetHeight()<=445 and f._bandsBottom~=nil and f._bandsBottom<=f:GetHeight(),'the Orb window keeps its size')
  local sent=#H.sent;local reqs=server.requests
- f.cont:Click()
- local w=assert(NexusOrbContinue,'its own window');check(w:IsShown(),'the window opens')
  H.Advance(.5)
- -- The intro names the client-observed spend (no server reply confirms a spend).
- check(w.body:GetText():find('spend observed by this client',1,true) and w.body:GetText():find('No spend and no choice',1,true),'it explains what Continue is: '..w.body:GetText())
- check(w.check:IsEnabled() and not w.go:IsEnabled(),'only Check is available at first')
- check(server.requests==reqs and #H.sent==sent and H.Count('orb-spend')==0 and H.Count('take')==0,'opening it sent and spent nothing')
- -- no receipt: no button
+ check(server.requests==reqs and #H.sent==sent and H.Count('orb-spend')==0 and H.Count('take')==0,'opening the window sent and spent nothing')
  local H2,M2,A2,O2=S.Fresh()
  SlashCmdList.NEXUS('orbs');local f2=assert(NexusOrbPanel)
  H2.Advance(.5)
@@ -128,15 +122,15 @@ section('6 a click confirms what the window showed',function()
  check(M.ContinueView().stage=='ready' and M.ContinueView().token==newest,'and the newer check is untouched')
 end)
 
-section('5 the help names Continue',function()
- -- the Orb help topic is a long string in ui/Help.lua; it must describe Continue and no longer claim there is no exit
+section('5 the help says Continue is gone and nothing continues by itself',function()
+ -- (2026-11-19, user/coordinator-approved Start/Stop wording: no maximum, Pause/Resume, Review target or Continue.)
+ -- the Orb help topic is a long string in ui/Help.lua; it says Continue is no longer offered and earlier runs never continue by themselves
  local f=assert(io.open('ui/Help.lua','rb'));local text=f:read('*a');f:close()
  local orbs=text:match('id="orbs".-id="troubleshooting"') or ''
- check(orbs:find('Continue:',1,true) and orbs:find('Nexus never continues by itself',1,true),'the Orb help describes Continue and says it is never automatic')
+ check(orbs:find('Continue is no longer offered',1,true) and orbs:find('Nexus never continues an earlier run by itself',1,true) and not orbs:find('Continue:',1,true),'the Orb help says Continue is gone and nothing continues by itself')
  check(not orbs:find('No exit from that block exists yet',1,true),'and no longer says no exit exists')
  check(orbs:find('not prove',1,true) and orbs:find('older answer',1,true),'it states what stays uncertain')
- check(orbs:find('at most two recovery checks',1,true) and orbs:find('then refused still uses one',1,true),
-  'Help counts admitted checks, including refusals, rather than only archived outcomes')
+ check(not orbs:find('recovery checks',1,true),'Help describes no recovery checks: a Start/Stop run has none')
 end)
 
 -- Semantic replacement of the old Archive-stub test: source projection and

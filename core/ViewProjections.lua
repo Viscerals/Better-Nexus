@@ -35,6 +35,11 @@ local workStats = {
 local MAX_SOURCE_PER_PUMP = 25
 local MAX_COMPARISONS_PER_PUMP = 500
 local MAX_SORT_MOVES_PER_PUMP = 500
+-- The Leaderboard shows the first 100 rows of the ranked, filtered board.
+-- Ranking and every filter still see the entire eligible board; only the
+-- displayed projection is cut. The DPS owner's full board (GetDpsBoard, its
+-- cursor, tooltip and nameplate ranks) is not limited here.
+local LEADERBOARD_DISPLAY_LIMIT = 100
 
 local function DeepCopy(value, seen)
     if type(value) ~= "table" then return value end
@@ -523,6 +528,9 @@ local function LeaderboardProjection(filters)
         and CombinedRows() or Board(filters.category)
     local out = {}
     for _, row in ipairs(source) do
+        -- The source is already in rank order, so the first matching rows
+        -- are the displayed ones; rows after the cut are never prepared.
+        if #out >= LEADERBOARD_DISPLAY_LIMIT then break end
         local copied = PrepareLeaderboardRow(row, filters)
         if copied.ordinaryComplete == true
             and LeaderboardRowMatches(copied, filters) then
@@ -1192,6 +1200,37 @@ PrepareLeaderboardRow = function(row, context)
     return copied
 end
 
+-- Rank order of an unprepared source entry. A category entry is a board row
+-- whose dps, ts, player and identity preparation copies unchanged. A real
+-- pair becomes CombinedRow(pair.dummy, pair.lk), which takes its rank fields
+-- from exactly these values.
+local function PairRankDps(pair)
+    return math.max(tonumber(pair.dummy.dps) or 0, tonumber(pair.lk.dps) or 0)
+end
+
+local function RawLeaderboardBefore(left, right, combined, countComparison)
+    if not combined then
+        return LeaderboardBefore(left, right, false, countComparison)
+    end
+    if countComparison then countComparison() end
+    local leftDps, rightDps = PairRankDps(left), PairRankDps(right)
+    if leftDps ~= rightDps then return leftDps > rightDps end
+    local leftPlayer, rightPlayer = tostring(left.lk.player):lower(),
+        tostring(right.lk.player):lower()
+    if leftPlayer ~= rightPlayer then return leftPlayer < rightPlayer end
+    return tostring(left.lk.publicIdentityKey or "")
+        < tostring(right.lk.publicIdentityKey or "")
+end
+
+local function BeginLeaderboardOrder(job, source)
+    if #source <= 1 then
+        job.state, job.source, job.sourceIndex = "rank", source, 1
+        return
+    end
+    job.state, job.sortWidth, job.sortLeft = "order", 1, 1
+    job.sortSource, job.sortTarget, job.merge = source, {}, nil
+end
+
 local function PumpLeaderboardJob(job, unit)
     local dps = Nexus.DpsCapture
     local sourceRows, comparisons, sortMoves = 0, 0, 0
@@ -1216,8 +1255,8 @@ local function PumpLeaderboardJob(job, unit)
                     job.pairCursor = CandidateEvidence.BeginRealDpsPairs(
                         job.boards.dummy or {}, job.boards.lk or {})
                 else
-                    job.state, job.sourceIndex = "rank", 1
-                    job.source = job.boards[job.filters.category] or {}
+                    BeginLeaderboardOrder(job,
+                        job.boards[job.filters.category] or {})
                 end
                 break
             end
@@ -1228,13 +1267,73 @@ local function PumpLeaderboardJob(job, unit)
         comparisons = comparisons + (pairWork or 0)
         workStats.comparisons = workStats.comparisons + (pairWork or 0)
         if done then
-            job.state, job.sourceIndex = "rank", 1
-            job.source = CandidateEvidence.RealDpsPairsResult(job.pairCursor)
+            BeginLeaderboardOrder(job,
+                CandidateEvidence.RealDpsPairsResult(job.pairCursor) or {})
+        end
+    elseif job.state == "order" then
+        -- Bounded bottom-up merge of the unprepared source into rank order.
+        -- It is stable, so ordering every source row and then filtering
+        -- yields the same rows in the same order as filtering first and then
+        -- ordering the survivors.
+        local combined = job.filters.category == "combined"
+        while sortMoves < MAX_SORT_MOVES_PER_PUMP do
+            if not job.merge then
+                local total = #job.sortSource
+                if job.sortLeft > total then
+                    job.sortSource, job.sortTarget =
+                        job.sortTarget, job.sortSource
+                    job.sortWidth = job.sortWidth * 2
+                    job.sortLeft = 1
+                    if job.sortWidth >= total then
+                        job.state, job.source, job.sourceIndex =
+                            "rank", job.sortSource, 1
+                        job.sortSource, job.sortTarget = nil, nil
+                        break
+                    end
+                else
+                    local left = job.sortLeft
+                    local middle = math.min(left + job.sortWidth - 1, total)
+                    local right = math.min(left + 2 * job.sortWidth - 1, total)
+                    job.merge = {
+                        left=left,leftEnd=middle,right=middle+1,
+                        rightEnd=right,out=left,
+                    }
+                end
+            end
+            local merge = job.merge
+            if merge then
+                local takeLeft
+                if merge.left > merge.leftEnd then
+                    takeLeft = false
+                elseif merge.right > merge.rightEnd then
+                    takeLeft = true
+                else
+                    takeLeft = not RawLeaderboardBefore(
+                        job.sortSource[merge.right],
+                        job.sortSource[merge.left], combined,
+                        CountComparison)
+                end
+                local sourceIndex = takeLeft and merge.left or merge.right
+                job.sortTarget[merge.out] = job.sortSource[sourceIndex]
+                if takeLeft then merge.left = merge.left + 1
+                else merge.right = merge.right + 1 end
+                merge.out = merge.out + 1
+                sortMoves = sortMoves + 1
+                workStats.sortMoves = workStats.sortMoves + 1
+                if merge.left > merge.leftEnd
+                    and merge.right > merge.rightEnd then
+                    job.sortLeft = merge.rightEnd + 1
+                    job.merge = nil
+                end
+            end
         end
     elseif job.state == "rank" then
+        -- The source is in rank order: the first rows that pass the filters
+        -- are the displayed ones, so preparation stops at the display limit.
         local combined = job.filters.category == "combined"
         while sourceRows < MAX_SOURCE_PER_PUMP
-            and job.sourceIndex <= #job.source do
+            and job.sourceIndex <= #job.source
+            and #job.rows < LEADERBOARD_DISPLAY_LIMIT do
             local raw = job.source[job.sourceIndex]
             job.sourceIndex = job.sourceIndex + 1
             sourceRows = sourceRows + 1
@@ -1255,72 +1354,13 @@ local function PumpLeaderboardJob(job, unit)
                 end
             end
         end
-        if job.sourceIndex > #job.source then
-            if #job.rows <= 1 then
-                unit.sourceRows, unit.comparisons, unit.sortMoves =
-                    sourceRows, comparisons, sortMoves
-                return Publish("leaderboard", job,
-                    {filtered=#job.rows,category=job.filters.category,
-                        rowByKey=job.rowByKey})
-            end
-            job.state, job.sortWidth, job.sortLeft = "sort", 1, 1
-            job.sortSource, job.sortTarget, job.merge = job.rows, {}, nil
-        end
-    elseif job.state == "sort" then
-        local combined = job.filters.category == "combined"
-        while sortMoves < MAX_SORT_MOVES_PER_PUMP do
-            if not job.merge then
-                local total = #job.sortSource
-                if job.sortLeft > total then
-                    job.sortSource, job.sortTarget =
-                        job.sortTarget, job.sortSource
-                    job.rows = job.sortSource
-                    job.sortWidth = job.sortWidth * 2
-                    job.sortLeft = 1
-                    if job.sortWidth >= total then
-                        unit.sourceRows, unit.comparisons, unit.sortMoves =
-                            sourceRows, comparisons, sortMoves
-                        return Publish("leaderboard", job,
-                            {filtered=#job.rows,
-                                category=job.filters.category,
-                                rowByKey=job.rowByKey})
-                    end
-                else
-                    local left = job.sortLeft
-                    local middle = math.min(left + job.sortWidth - 1, total)
-                    local right = math.min(left + 2 * job.sortWidth - 1, total)
-                    job.merge = {
-                        left=left,leftEnd=middle,right=middle+1,
-                        rightEnd=right,out=left,
-                    }
-                end
-            end
-            local merge = job.merge
-            if merge then
-                local takeLeft
-                if merge.left > merge.leftEnd then
-                    takeLeft = false
-                elseif merge.right > merge.rightEnd then
-                    takeLeft = true
-                else
-                    takeLeft = LeaderboardBefore(
-                        job.sortSource[merge.left],
-                        job.sortSource[merge.right], combined,
-                        CountComparison)
-                end
-                local sourceIndex = takeLeft and merge.left or merge.right
-                job.sortTarget[merge.out] = job.sortSource[sourceIndex]
-                if takeLeft then merge.left = merge.left + 1
-                else merge.right = merge.right + 1 end
-                merge.out = merge.out + 1
-                sortMoves = sortMoves + 1
-                workStats.sortMoves = workStats.sortMoves + 1
-                if merge.left > merge.leftEnd
-                    and merge.right > merge.rightEnd then
-                    job.sortLeft = merge.rightEnd + 1
-                    job.merge = nil
-                end
-            end
+        if job.sourceIndex > #job.source
+            or #job.rows >= LEADERBOARD_DISPLAY_LIMIT then
+            unit.sourceRows, unit.comparisons, unit.sortMoves =
+                sourceRows, comparisons, sortMoves
+            return Publish("leaderboard", job,
+                {filtered=#job.rows,category=job.filters.category,
+                    rowByKey=job.rowByKey})
         end
     end
     unit.sourceRows, unit.comparisons, unit.sortMoves =

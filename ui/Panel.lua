@@ -7096,12 +7096,12 @@ local function PlayWhole(value)
     return math.floor(value + 0.5)
 end
 
--- "4,812": a whole DPS with thousands separators; nil when not a record.
--- A record measured as 0 is a record ("0"): only a missing record, or one
--- without a usable number, is none.
-local function PlayDps(record)
+-- Nil when not a record; measured zero stays "0". Keep full grouped values
+-- for record details; the inline Play HUD can request the compact DPS form.
+local function PlayDps(record, compact)
     local dps = type(record) == "table" and PlayWhole(record.dps) or nil
     if not dps then return nil end
+    if compact then return FmtDps(dps) end
     local text = tostring(dps)
     while true do
         local grouped, n = text:gsub("^(%d+)(%d%d%d)", "%1,%2")
@@ -7421,11 +7421,11 @@ function M.PlayRecordFacts(model)
         return nil
     end
     local best = type(model.bestDps) == "table" and model.bestDps or {}
-    local mineD, mineL = PlayDps(best.dummy), PlayDps(best.lk)
+    local mineD, mineL = PlayDps(best.dummy, true), PlayDps(best.lk, true)
     local pr = type(model.progress) == "table" and model.progress or {}
     local perf = type(pr.performance) == "table" and pr.performance or {}
-    local knownD = PlayDps(type(perf.dummy) == "table" and perf.dummy.global or nil)
-    local knownL = PlayDps(type(perf.lk) == "table" and perf.lk.global or nil)
+    local knownD = PlayDps(type(perf.dummy) == "table" and perf.dummy.global or nil, true)
+    local knownL = PlayDps(type(perf.lk) == "table" and perf.lk.global or nil, true)
     return {yours = Value(mineD, mineL), dummyOnly = mineD ~= nil and mineL == nil,
         best = Value(knownD, knownL)}
 end
@@ -10309,9 +10309,9 @@ end
 -- The "Automation settings" submenu of the Options menu (UX-10): every permission
 -- Auto gates on, with its current value (Readout.AutomationSettingsRows), read
 -- from Store.Settings and the runtime's counters when the menu opens. Opening,
--- hovering or closing it changes nothing. Only the Reroll and Freeze rows act,
--- through their existing setter (/nexus reroll|freeze on|off: MainCommands to
--- Main's rollingOption); Lock Wishlist Echoes opens the Wishlist Editor, whose
+-- hovering or closing it changes nothing. Reroll, Freeze and Random Roll use
+-- their existing slash setters. Auto-manage Tome Echoes changes only its
+-- permission through the lifecycle callback. Lock Wishlist Echoes opens the Wishlist Editor, whose
 -- own control is its setter; the last row opens the Reference page on Auto.
 -- `action` wraps a click
 -- (the menu's MenuAction: it closes the menu first).
@@ -10337,12 +10337,22 @@ function M.AutomationMenuItems(action)
         if row.kind == "title" then
             item.isTitle, item.notCheckable = true, true
         elseif row.kind == "toggle" then
-            local command = row.command
             item.checked = row.checked == true
-            item.func = action(function()
-                local slash = SlashCmdList and SlashCmdList.NEXUS
-                if type(slash) == "function" then slash(command) end
-            end)
+            if row.key == "autoDisable" then
+                local set = callbacks and callbacks.SetAutoManageTomes
+                if type(set) == "function" then
+                    local enabled = not item.checked
+                    item.func = action(function() set(enabled) end)
+                else
+                    item.disabled = true
+                end
+            else
+                local command = row.command
+                item.func = action(function()
+                    local slash = SlashCmdList and SlashCmdList.NEXUS
+                    if type(slash) == "function" then slash(command) end
+                end)
+            end
         elseif row.kind == "editor" then
             item.notCheckable = true
             item.func = action(function()
@@ -10579,8 +10589,9 @@ function M.NoteAutoClick(before, ok, state)
     end
     local orb = Nexus.OrbRuntime
     local blocked = false
-    if orb and type(orb.BlocksOrdinary) == "function" then
-        local okOrb, value = pcall(orb.BlocksOrdinary)
+    local blocks = orb and (orb.BlocksOrdinaryRolling or orb.BlocksOrdinary)
+    if type(blocks) == "function" then
+        local okOrb, value = pcall(blocks)
         blocked = okOrb and value == true
     end
     local model = type(M._lastModel) == "table" and M._lastModel or nil

@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4116,
+    "declaredKeys": 4117,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -40,8 +40,10 @@
     "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"
   },
   "retiredKeys": {
-    "keys": [],
-    "rule": "semantic keys deliberately removed from the declarations: each a valid key, listed once in ascending order, never an active declaration. No current key is retired. The opt-in diagnostics report a pack entry for a listed key as obsolete and any other unknown pack key as an orphan; the strict gate still refuses both as orphan-entry, and neither counts toward the active keys",
+    "keys": [
+      "readout.menu.tomes"
+    ],
+    "rule": "semantic keys deliberately removed from the declarations: each a valid key, listed once in ascending order, never an active declaration. The opt-in diagnostics report a pack entry for a listed key as obsolete and any other unknown pack key as an orphan; the strict gate still refuses both as orphan-entry, and neither counts toward the active keys",
     "checkedBy": "tools/l10n_catalog.py registry_catalog_diagnostics",
     "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"
   },
@@ -7572,7 +7574,7 @@
     {
       "key": "help.body.about_engine",
       "kind": "block",
-      "english": "Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.",
+      "english": "Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role and confirmation safeguards.",
       "placeholders": [],
       "group": "help",
       "meaning": "Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7671,7 +7673,7 @@
     {
       "key": "help.body.faq_pause_hide_answer_2",
       "kind": "block",
-      "english": "An action already sent may still finish: pausing cancels nothing that was sent, Nexus stays loaded, and it does not stop all of its work on your computer. A reload does not decide a result that is still unknown. After Resume Nexus, Auto can continue if it was already on; Orb runs stay paused until you continue them in the Orb window.",
+      "english": "An action already sent may still finish: pausing cancels nothing that was sent, Nexus stays loaded, and it does not stop all of its work on your computer. A reload does not decide a result that is still unknown. After Resume Nexus, Auto can continue if it was already on; an Orb run that is still ON continues, and Stop ends it.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of the answer, split only to fit the catalog block size; code joins the parts with a space. The answer under its FAQ question (help.label.faq_pause_hide_question), shown in white. Do not add blank lines (a blank line would start a new question). Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7693,7 +7695,7 @@
     {
       "key": "help.body.orbs_after_run",
       "kind": "block",
-      "english": "After a finished run: click Start new run, review the maximum, then click Confirm new run. If the maximum changes, review it and press Start new run again.",
+      "english": "After a run ends, click Start to begin a new one.",
       "placeholders": [],
       "group": "help",
       "meaning": "Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7704,7 +7706,7 @@
     {
       "key": "help.body.orbs_before_start",
       "kind": "block",
-      "english": "Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.",
+      "english": "Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs... and Help spend nothing.",
       "placeholders": [],
       "group": "help",
       "meaning": "Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7715,7 +7717,7 @@
     {
       "key": "help.body.orbs_blocked_1",
       "kind": "block",
-      "english": "When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions.",
+      "english": "When it is blocked: Stop prevents new submissions, not one already sent; its result may still arrive. Changing the active loadout ends the run.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 1 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7726,7 +7728,7 @@
     {
       "key": "help.body.orbs_blocked_2",
       "kind": "block",
-      "english": "While paused, the Orb window, the main panel and the mini panel name the Wishlist that Resume would use when that target is ready; no target is named for a Wishlist that is not ready, while an earlier submitted action must settle first, or when the run can no longer resume. After a change, an operation already submitted settles first. Then click Review target in the Orb window and Resume there:",
+      "english": "A run has no Pause or Resume: Stop ends it, and Start begins a new one on the current Wishlist.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7737,7 +7739,7 @@
     {
       "key": "help.body.orbs_blocked_3",
       "kind": "block",
-      "english": "Resume adopts the new target and keeps the same maximum. Review target spends nothing. It acts only on the target shown when you click it; if the target changed just before, nothing is reviewed and the window shows the new one. If the assignment changed and came back to the run's own Wishlist, the window says the target is back, and Review target is still needed.",
+      "english": "A Wishlist or assignment changed during a run is used from the run's next step; no review is needed, and nothing is spent for the change itself.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 3 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7748,7 +7750,7 @@
     {
       "key": "help.body.orbs_blocked_4",
       "kind": "block",
-      "english": "During a loading screen, until the world is ready again and briefly after you enter, Nexus submits no new Orb spend or choice to the game and Resume stays off; a kept approval never permits spending or choosing during that window.",
+      "english": "During a loading screen, until the world is ready again and briefly after you enter, Nexus submits no new Orb spend or choice to the game.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 4 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7759,7 +7761,7 @@
     {
       "key": "help.body.orbs_blocked_5",
       "kind": "block",
-      "english": "After a classified loading screen, a running run keeps only its existing approval and waits for the game (Waiting for the game after loading) before any new action; if the run is paused instead, Resume needs its current checks. Pause and Stop still apply. If the approval or the original character, run or service context is missing, a paused run may no longer own its action: then Resume is not offered; Stop, then approve a new run.",
+      "english": "After a loading screen, a run that is still ON waits briefly before its next action. Stop still applies.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 5 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7770,7 +7772,7 @@
     {
       "key": "help.body.orbs_blocked_6",
       "kind": "block",
-      "english": "Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.",
+      "english": "A run has no Advanced exclusions or Recheck. Locked and required copies stay protected.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 6 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7781,7 +7783,7 @@
     {
       "key": "help.body.orbs_closing",
       "kind": "block",
-      "english": "Closing the window does not stop an approved run. Use Pause or Stop. During a run, Pause and Resume are separate buttons in fixed places, so pressing Pause twice never resumes. The main Nexus panel keeps compact progress with the same Pause, Resume and Stop.",
+      "english": "Closing the window does not stop a run. Use Stop in the Orb window, on the main Nexus panel or in the mini panel.",
       "placeholders": [],
       "group": "help",
       "meaning": "Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7792,7 +7794,7 @@
     {
       "key": "help.body.orbs_continue_exit_1",
       "kind": "block",
-      "english": "Continue: a restored observed spend with no recorded choice and no open offer can use this explicit exit. Stop first if an attribution-ambiguous run is still running. A stopped attribution-ambiguous choice can also use it when fresh ownership shows its distinct chosen gain; unrelated changes and the ambiguity flag alone are insufficient.",
+      "english": "Continue is no longer offered. A record left from an earlier version is kept unchanged as history and does not hold a new Start.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 1 of 4 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7803,7 +7805,7 @@
     {
       "key": "help.body.orbs_continue_exit_2",
       "kind": "block",
-      "english": "This remains available after actual completion, exhausted live checks and reload, when its current checks pass. Nexus asks twice, read-only, for the Orb count and Echoes, checks quiet unchanged state, then waits for your confirmation. It archives the original receipt UNCONFIRMED with no confidence, ends the old run and releases ordinary rolling only after saving.",
+      "english": "Nexus never deletes that record and sends nothing for it.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 4 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7814,7 +7816,7 @@
     {
       "key": "help.body.orbs_continue_exit_3",
       "kind": "block",
-      "english": "Observed spend stays counted once; unknown charge exposure stays unknown without a refund. No spend, choice or automatic Resume is sent. The finite archive holds at most eight entries and can fill. Every new spend reserves room for its possible exit before Auto is disabled or authority acquired. A full restored pending record stays preserved and blocked; Continue cannot make room by deleting history.",
+      "english": "Its observed spend stays counted once; unknown charge exposure stays unknown without a refund.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 3 of 4 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7825,7 +7827,7 @@
     {
       "key": "help.body.orbs_continue_exit_4",
       "kind": "block",
-      "english": "A new Orb run needs new approval of its maximum and any disclosed history baseline. Two uncorrelated answers do not prove that the server is finished or that no older answer is still on its way. Nexus never continues by itself. Older readers may retain a versioned record with an unsupported-owner message; that message does not establish another character acted. Return to this build to review eligibility; this does not restart spending.",
+      "english": "Two uncorrelated answers do not prove that the server is finished or that no older answer is still on its way. Nexus never continues an earlier run by itself.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 4 of 4 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7847,7 +7849,7 @@
     {
       "key": "help.body.orbs_reloading_1",
       "kind": "block",
-      "english": "Reloading: a reload never clears the record, refunds or repeats an Orb, or settles the action by itself. For Orbs, Nexus suggests a reload only in these cases, and its message says which: the game still holds an earlier Orb choice (the Orb window names the Echo to choose after the reload); a submitted action that cannot be confirmed, which Continue may then handle; a game packet Nexus could not accept; or local saved data that could not be read.",
+      "english": "Reloading: a reload never clears the record, refunds or repeats an Orb, or settles the action by itself. For Orbs, Nexus suggests a reload only in these cases, and its message says which: the game still holds an earlier Orb choice (the Orb window names the Echo to choose after the reload); a game packet Nexus could not accept; or local saved data that could not be read.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 1 of 2 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7858,7 +7860,7 @@
     {
       "key": "help.body.orbs_reloading_2",
       "kind": "block",
-      "english": "Otherwise do not reload; follow the Orb window. To report a problem, type /nexus report before any reload. Run history clears on reload or logout; after a reload the Continue window says the earlier steps are not listed, and the saved record is kept. The history of the current run shows its usage as it is now; when the run has changed since its last recorded step (Pause records none), the header says the current state and the last recorded one.",
+      "english": "Otherwise do not reload; follow the Orb window. To report a problem, type /nexus report before any reload. Run history clears on reload or logout, and the saved record is kept.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 2 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7869,7 +7871,7 @@
     {
       "key": "help.body.orbs_requirements",
       "kind": "block",
-      "english": "The game's auto-accept and other addons' pickers must be off. If the game has no Orb service, only Orb mode is unavailable and ordinary rolling still works. If the Orb service exists but Nexus cannot read its state, ordinary rolling waits too. Login, reconnect, new resources or reload never restart spending. If another addon changes how Orb requests are sent after Nexus starts watching them, recovery checks may be unavailable during that interface session: Nexus then pauses and keeps the pending record and its spending exposure. Continue is offered only when its checks pass.",
+      "english": "The game's auto-accept and other addons' pickers must be off. If the game has no Orb service, only Orb mode is unavailable and ordinary rolling still works. If the Orb service exists but Nexus cannot read its state, ordinary rolling waits too. Login, reconnect, new resources or reload never restart spending.",
       "placeholders": [],
       "group": "help",
       "meaning": "The last two sentences are a conditional limitation, not a report that it happened: keep it conditional (if, may). The interface session lasts until the next reload or logout and is not the Orb run; where run is translated as session, word it so it cannot be read as the run, and do not add that a reload restores the checks, settles the action, clears the record, refunds or repeats an Orb. Nexus pauses and the pending record and spending exposure are kept as they are, not cleared or settled. Continue is the Orb window button label and is offered only when its checks pass, never always. The whole text must stay within the 1024-byte block limit. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7891,7 +7893,7 @@
     {
       "key": "help.body.orbs_run_steps_2",
       "kind": "block",
-      "english": "2. Set the maximum. Until you type an amount, it follows your confirmed Orb balance, up to 1000. Typing an amount stops that; Max returns to following the balance. A typed amount must be a whole number from 1 to 10,000. A maximum saved by an earlier version is kept.",
+      "english": "2. There is no maximum to set. A maximum saved by an earlier version is kept but not used.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7902,7 +7904,7 @@
     {
       "key": "help.body.orbs_run_steps_3",
       "kind": "block",
-      "english": "3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run.",
+      "english": "3. Click Start. Nexus uses one Orb at a time on eligible surplus copies and also takes a needed Echo from a free draw. Starting leaves ordinary Automation as it is. Locked and required copies stay protected.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 3 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7913,7 +7915,7 @@
     {
       "key": "help.body.orbs_run_steps_4",
       "kind": "block",
-      "english": "If unconfirmed history exists, the same Start area shows its count and late-result risk; Start accepts current Echoes as this run's baseline without settling old actions. Reload requires a new deliberate review.",
+      "english": "An Orb record left from before a reload is kept as history; it does not hold a new Start.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 4 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7924,7 +7926,7 @@
     {
       "key": "help.body.orbs_run_steps_5",
       "kind": "block",
-      "english": "4. Watch the run. It continues after each confirmed result; actual owned Echoes decide completion. Start permits at most two recovery checks within the same maximum; a check that is admitted and then refused still uses one. Unknown spend exposure stays counted. A classified loading screen holds actions, restarts the pending timer on entry and allows a three-second settling opportunity. Stop and Pause stay authoritative.",
+      "english": "4. Watch the run. It continues after each answer the game publishes; actual owned Echoes decide completion. A request whose answer Nexus has not seen is waited on and never repeated. During a loading screen the run sends nothing. Stop always applies.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 5 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7935,7 +7937,7 @@
     {
       "key": "help.body.orbs_run_steps_6",
       "kind": "block",
-      "english": "No safe source still ends the run. Orbs used counts spent Orbs against the approved maximum; pending means an Orb was requested and its spend is not confirmed yet. If a record saved by an earlier version has no approved maximum, the Orb windows say the maximum was not recorded instead of naming one.",
+      "english": "The run also ends when no Orb is left, when no safe source copy is left, or when the game does not take a chosen Echo. Pending means an Orb was requested and its answer has not been seen yet.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 6 of 6 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7946,7 +7948,7 @@
     {
       "key": "help.body.orbs_unresolved_1",
       "kind": "block",
-      "english": "Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. The Orb window shows what is blocked, then what you can do now, then the details. A result restored after a reload that keeps the run paused reads the same way, labelled Paused. Where Continue... is offered, the window says the result blocks until it settles or you continue past it.",
+      "english": "Unresolved result: an Orb action from before a reload without a confirmed result is kept as history with its spending exposure. It does not hold a new Start; ordinary picks wait only while an Orb offer is open or the Orb state is unknown.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 1 of 2 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -7957,7 +7959,7 @@
     {
       "key": "help.body.orbs_unresolved_2",
       "kind": "block",
-      "english": "Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.",
+      "english": "Relogging, reloading, changing builds or pressing controls again do not clear it. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 2 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -8144,7 +8146,7 @@
     {
       "key": "help.body.rolling_permissions_2",
       "kind": "block",
-      "english": "Nexus never activates or loads a Saved Build (the saved autoActivate value is not used by any action), and Auto never starts an Orb run. To see each current value, click Options on the Nexus panel, then Automation settings; Reroll and Freeze can be changed there or with the commands below. The Auto warning lists the same permissions.",
+      "english": "Nexus never activates or loads a Saved Build (the saved autoActivate value is not used by any action), and Auto never starts an Orb run. To see each current value, click Options on the Nexus panel, then Automation settings; Reroll and Freeze can be changed there or with the commands below. Turning off Auto-manage Tome Echoes there leaves current Tome settings as they are. The Auto warning lists the same permissions.",
       "placeholders": [],
       "group": "help",
       "meaning": "This is part 2 of 2 of one paragraph, split only to fit the catalog block size; code joins the parts in order with a space or a line break exactly as in English. Keep each part a complete sentence group; do not move text between parts. Part of the Nexus Reference manual (read-only help text). Keep every /nexus command, option word (on, off, adaptive, released ...), quoted on-screen label and the names Nexus, EchoWeaver and Project Ebonhold exactly as written; translate the surrounding sentences. Button and window names in the text (Plan, Explore, Build Library, Options, Auto ON/OFF, Sync Now ...) should match how those labels are translated in their own windows. Game terms (Echo, Wishlist, Saved Build, Orb, Take, Banish, Reroll, Freeze, Lost Memories) follow the game client's wording. Consequence, consent, spending, sending and saving statements must stay complete and exact in meaning. Keep the existing line breaks; lines starting with a space and a number are a numbered list.",
@@ -8718,7 +8720,7 @@
     {
       "key": "help.body.topic_orbs_1",
       "kind": "block",
-      "english": "Orb mode refines rolled Echoes toward the assigned Wishlist, one Orb per replacement, within the maximum you approve with Start.",
+      "english": "Start refines rolled Echoes toward the assigned Wishlist, one Orb per replacement, until the goal is met, you press Stop, or no Orb can be used safely.",
       "placeholders": [],
       "group": "help",
       "meaning": "Short topic summary (line 1 of 2) shown above the full reference text. Keep consequences (assigns/spends/sends nothing) complete. Shown as one paragraph: do not add line breaks (block kind only for length room).",
@@ -8729,7 +8731,7 @@
     {
       "key": "help.body.topic_orbs_2",
       "kind": "text",
-      "english": "Opening the window, Help and Max spend nothing. Closing the window does not stop a run: use Pause or Stop.",
+      "english": "Opening the window or Help spends nothing. Closing the window does not stop a run: use Stop.",
       "placeholders": [],
       "group": "help",
       "meaning": "Short topic summary (line 2 of 2) shown above the full reference text. Keep consequences (assigns/spends/sends nothing) complete.",
@@ -11906,29 +11908,6 @@
       "resultLimitBytes": 270,
       "group": "readout",
       "meaning": "Info row: the Take permission; it has no in-game switch. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
-      "consumer": "Readout.AutomationSettingsRows",
-      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
-      "cohort": "fullui:hud"
-    },
-    {
-      "key": "readout.menu.tomes",
-      "kind": "template",
-      "english": "Turn tomes off and on ({setting}): {value}; no in-game switch",
-      "placeholders": [
-        {
-          "name": "setting",
-          "type": "text",
-          "meaning": "saved setting name such as autoPick, never translated"
-        },
-        {
-          "name": "value",
-          "type": "text",
-          "meaning": "shown current value: on, off or not set (readout.value.setting_*)"
-        }
-      ],
-      "resultLimitBytes": 279,
-      "group": "readout",
-      "meaning": "Info row: the tome permission. {setting} is the saved setting name (an identifier, inserted unchanged); {value} is the shown current value (readout.value.setting_*).",
       "consumer": "Readout.AutomationSettingsRows",
       "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu, and the Settings window Automation page (menu); family coverage PENDING review",
       "cohort": "fullui:hud"
@@ -25664,7 +25643,7 @@
     {
       "key": "orb.tooltip.mini_close",
       "kind": "text",
-      "english": "Hides this panel only. An approved run keeps running: use Pause or Stop. Mini panel in the Orb window shows it again.",
+      "english": "Hides this panel only. A run keeps running: use Stop. Mini panel in the Orb window shows it again.",
       "placeholders": [],
       "group": "orb",
       "meaning": "Hover of Close. Button names: Pause, Stop, Mini panel.",
@@ -25708,7 +25687,7 @@
     {
       "key": "orb.tooltip.mini_panel_open",
       "kind": "text",
-      "english": "Shows a small movable panel with this run's status and Pause, Resume and Stop. Opening it starts, resumes and spends nothing.",
+      "english": "Shows a small movable panel with this run's status and Stop. Opening it starts and spends nothing.",
       "placeholders": [],
       "group": "orb",
       "meaning": "Hover of Mini panel. Pause, Resume and Stop are the button names.",
@@ -25730,7 +25709,7 @@
     {
       "key": "orb.tooltip.mini_pending",
       "kind": "text",
-      "english": "An Orb requested whose spend is not confirmed yet, or an Orb action whose result has not settled. It counts against the approved maximum until it settles.",
+      "english": "An Orb requested whose spend is not confirmed yet, or an Orb action whose result has not settled.",
       "placeholders": [],
       "group": "orb",
       "meaning": "Hover of the pending line.",
@@ -30185,7 +30164,7 @@
     {
       "key": "panel.tooltip.orbs_closing_continues",
       "kind": "text",
-      "english": "Closing the Orb window or its mini panel only hides it; an approved run continues. Use Pause or Stop.",
+      "english": "Closing the Orb window or its mini panel only hides it; a run continues. Use Stop.",
       "placeholders": [],
       "group": "panel",
       "meaning": "Closing is not stopping: an approved Orb run keeps going. \"Pause\"/\"Stop\" are the Orb window's buttons; keep their names.",
@@ -52675,7 +52654,7 @@
     {
       "key": "help.label.faq_orb_start_maximum_question",
       "kind": "text",
-      "english": "Does Auto ON start an Orb run, and what is the maximum?",
+      "english": "Does Auto ON start an Orb run, and is there a maximum?",
       "placeholders": [],
       "group": "help",
       "meaning": "FAQ question (heading gold): whether Auto starts an Orb run, and what the Orb maximum means.",
@@ -52686,7 +52665,7 @@
     {
       "key": "help.body.faq_orb_start_maximum_answer",
       "kind": "block",
-      "english": "No. Auto never starts an Orb run. A run starts only when you open Orbs, check the maximum and click Start; starting it turns ordinary Automation off and does not turn it back on. The maximum is a limit, not a goal. Nexus uses one Orb per replacement and stops when your rolled targets are complete, so it can use fewer. Orbs used counts spent Orbs against the maximum, which does not change during a run. Until you type an amount, it follows your confirmed Orb balance, up to 1000.",
+      "english": "No. Auto never starts an Orb run. A run starts only when you open Orbs and click Start; starting it leaves ordinary Automation as it is. There is no maximum: Nexus uses one Orb per replacement and stops when your rolled targets are complete, when you press Stop, or when no Orb can be used safely.",
       "placeholders": [],
       "group": "help",
       "meaning": "FAQ answer: Auto never starts an Orb run; only Start in the Orb window does; the maximum is a fixed limit per run, defaulting to the confirmed balance up to 1000. 'Start', 'Orbs used' quote the Orb window. Accepted FAQ r3 group 2.",
@@ -52708,7 +52687,7 @@
     {
       "key": "help.body.faq_orb_blocked_answer",
       "kind": "block",
-      "english": "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action without a confirmed result blocks new runs until it settles, or until you use Continue... where it is offered. A run ends when your rolled targets are complete or no safe source is left. Changing the active loadout, assignment or targets pauses it. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.",
+      "english": "Open the Orb window: it shows what is blocked, then what you can do now. An Orb action from before a reload without a confirmed result is kept as history; it does not hold a new Start. A run ends when your rolled targets are complete, when no Orb or safe source is left, when you press Stop, or when the active loadout changes. Orb mode never changes locked Echo slots. A reload does not settle an unknown result. Do not clear saved data. See the Orbs tab above.",
       "placeholders": [],
       "group": "help",
       "meaning": "FAQ answer: the Orb window says what blocks a run and what to do; an unconfirmed result blocks new runs; when a run ends or pauses; never clear saved data. 'Continue...' quotes the Orb window button. Accepted FAQ r3 group 3.",
@@ -52825,6 +52804,28 @@
       "consumer": "ui/Help.lua PAGE_BLOCKS.faq (H.FormatQuestions)",
       "familySurface": "help: Reference > Questions (FAQ) page (answer); family coverage PENDING review",
       "cohort": "fullui:v33_faq"
+    },
+    {
+      "key": "orb.status.run_until_goal",
+      "kind": "text",
+      "english": "Start rolls until your Wishlist goal is met, you press Stop, or no Orb can be used safely. A request with no answer seen is waited on, not repeated.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Second line of the Orb window balance box while no Start/Stop run is ON: what Start does (there is no Orb maximum). Do not promise that a run continues past a request whose answer was not seen.",
+      "consumer": "ui/OrbPanel.lua UI.Refresh (Orb window, Run controls page, balance box)",
+      "familySurface": "orb: Orb window (title \"Orbs / Lost Memories\"), Run controls page (status); family coverage PENDING review",
+      "cohort": "fullui:v47_orb_startstop"
+    },
+    {
+      "key": "readout.menu.auto_manage_tomes",
+      "kind": "text",
+      "english": "Auto-manage Tome Echoes",
+      "placeholders": [],
+      "group": "readout",
+      "meaning": "Checkbox permission for Nexus to automatically disable off-Wishlist Tome Echoes and re-enable needed ones. Turning it off leaves existing Tome states alone; it does not turn master Auto off.",
+      "consumer": "Readout.AutomationSettingsRows",
+      "familySurface": "hud: Nexus HUD panel: Options > Automation settings submenu (checkbox); family coverage PENDING review",
+      "cohort": "fullui:tome_option"
     }
   ],
   "currentAdoption": {
@@ -52947,6 +52948,7 @@
         "readout.menu.activate_never",
         "readout.menu.allow_freeze",
         "readout.menu.allow_reroll",
+        "readout.menu.auto_manage_tomes",
         "readout.menu.auto_reference",
         "readout.menu.auto_selected_off",
         "readout.menu.auto_selected_on",
@@ -52957,7 +52959,6 @@
         "readout.menu.read_only",
         "readout.menu.save_run",
         "readout.menu.take_needed",
-        "readout.menu.tomes",
         "readout.note.auto_on_scope",
         "readout.note.waiting_offer_data",
         "readout.status.auto_refused",
@@ -55121,13 +55122,13 @@
       "format",
       "template"
     ],
-    "totalKeys": 4116,
+    "totalKeys": 4117,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
       "chat": 160,
       "records": 276,
-      "hud": 166,
+      "hud": 165,
       "usertext": 261,
       "journal": 202,
       "integration": 8,
@@ -55151,7 +55152,9 @@
       "v8_source16_journal_names": 2,
       "v33_legacy_context_rows": 18,
       "v33_opacity": 4,
-      "v33_faq": 16
+      "v33_faq": 16,
+      "v47_orb_startstop": 1,
+      "tome_option": 1
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments, except cohort fullui:v33_legacy_context_rows: the 18 meanings that were already declared and in English without a context row, whose rows are author-composed from their current producers (ui/Panel.lua, ui/Readout.lua, ui/WishlistRenderer.lua and core/Main.lua CommandReference) and add no meaning; and except cohorts fullui:v33_opacity (4 Appearance background-opacity rows, ui/Theme.lua) and fullui:v33_faq (the 8 accepted FAQ question/answer groups, ui/Help.lua), whose 20 new meanings are hand-reviewed, appended last in the declarations, the English base and here in the same order, and have no pack entry yet (each optional pack lacks them; they show English). The original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py validates the full catalog against the runtime contract: text, block, format and template kinds, typed placeholders and the lines policy, within the bounded runtime cap of 5120 entries (5121 fails closed; the cap was 4096 before)."
   }

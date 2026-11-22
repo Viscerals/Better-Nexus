@@ -6,7 +6,7 @@ Nexus = Nexus or {}
 local A = assert(Nexus.GameAdapter, "OrbAdapter requires GameAdapter")
 local O = {}
 A.Orbs = O
-local owner, ownerContext
+local owner, ownerContext, runOwner, redrawReturn
 local observations = { serial=0, grantedRef=nil, grantedSig=nil }
 local selectionSerial,selection=0,nil
 local watched={}
@@ -538,7 +538,14 @@ local function watchChoices(svc)
         -- that a reload superseded (the harness keeps the old wrapper) is inert.
         if A.Orbs~=O then return end
         local raw
-        if captureSink and not selfSelecting then
+        -- Nor is the ordinary adapter's own Take (GameAdapter.SelfCalling): it is
+        -- not a manual pick, and it must not fill the receipt's evidence slots.
+        local okSelf,ordinarySelf=pcall(function()
+            local adapter=Nexus.GameAdapter
+            return adapter and type(adapter.SelfCalling)=="function" and adapter.SelfCalling()==true
+        end)
+        ordinarySelf=okSelf and ordinarySelf==true
+        if captureSink and not selfSelecting and not ordinarySelf then
             local okR,r=pcall(rawPick,svc,id)
             if okR and type(r)=="table" then raw=r
             else raw={id=integer(id,1) and id or nil} end -- the read failed: the Echo id is still kept
@@ -638,7 +645,7 @@ local function checkedValidation(token,source,reason)
     end
     return s,err,code
 end
-function O.Spend(token,key,expected,guard)
+function O.Spend(token,key,expected,guard,admit)
     local mark=pauseMark()
     local s,err,code=checkedValidation(token,"OrbAdapter.SpendValidation","The Orb state check failed. No Orb was sent.")
     if not s then return nil,"REJECTED",err,code end
@@ -674,7 +681,7 @@ function O.Spend(token,key,expected,guard)
     -- still stops it here, before the host.
     -- The client admission is read here, after the last read and guard, so a
     -- provider or draw that changed inside one of them still spends nothing.
-    local admitted,clientWhy=O.ClientAdmission()
+    local admitted,clientWhy=(admit or O.ClientAdmission)()
     if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
@@ -684,13 +691,13 @@ function O.Spend(token,key,expected,guard)
     if value==false then return nil,"REJECTED","The game refused the Orb spend.","HOST_FALSE" end
     return true,"SUBMITTED"
 end
-function O.Select(token,index,expectedBoard,id,guard)
+function O.Select(token,index,expectedBoard,id,guard,admit)
     local mark=pauseMark()
     local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
     if not s then return nil,"REJECTED",err,code end
     -- Before any card is considered: the truthful reason on a client or draw
     -- where no Orb choice is admitted. Read again at the host boundary below.
-    local admitted,clientWhy=O.ClientAdmission()
+    local admitted,clientWhy=(admit or O.ClientAdmission)()
     if not admitted then return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
@@ -717,15 +724,105 @@ function O.Select(token,index,expectedBoard,id,guard)
     -- outcome, followed by the caller's select_rejected.
     -- The guard and the boundary sink ran other code as well: the client
     -- admission is read once more, immediately before the host.
-    admitted,clientWhy=O.ClientAdmission()
+    admitted,clientWhy=(admit or O.ClientAdmission)()
     if not admitted then selfSelecting=false;return nil,"REJECTED",clientWhy,"CLIENT_CONTRACT" end
     if crossed(mark) then selfSelecting=false;return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     selfSelecting=false
     boundary((not ok or (v~=true and v~=false)) and "pick_unknown" or v==false and "pick_false" or "pick_true",nil)
     if not ok or (v~=true and v~=false) then return nil,"AMBIGUOUS","The selection outcome is unknown. No selection will be repeated." end
-    if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually." end
+    if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually.","HOST_FALSE" end
     return true,"SUBMITTED",s.grantStamp
+end
+-- Start/Stop Orb automation (OrbAuto, 2026-11-19) ---------------------------
+-- The run owner holds the same single ownership token as Orb mode. It is
+-- acquired with any current choice on the table (an open Orb offer is
+-- actionable; every action still validates the fresh state itself) and is
+-- rebound to a fresh read before each action, because the ownership
+-- generation in the context moves with every ownership push.
+function O.AcquireRun()
+    if sessionPaused() then return nil,PAUSED end
+    if owner then return nil,"Orb mode already owns an operation." end
+    local fresh,err=O.Read();if not fresh then return nil,err end
+    if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
+    if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
+    owner={};ownerContext=fresh.context;selection=nil;runOwner=owner
+    watchChoices(ownerContext.svc)
+    return owner,fresh
+end
+-- Read-only diagnostic: the code of the last RerollOffer return ("true",
+-- "false", "nil", "other" or "error"), or nil before any redraw. Uninterpreted.
+function O.LastRedrawReturn() return redrawReturn end
+-- Read-only: the current owner is an OrbAuto run (AcquireRun), not Orb mode.
+function O.RunOwned() return owner~=nil and owner==runOwner end
+function O.RunRebind(token,s)
+    if not owner or token~=owner or type(s)~="table" then return false end
+    ownerContext=s.context;return true
+end
+-- The minimal actionable native state for OrbAuto. On the older provider the
+-- earlier admission (O.ClientAdmission) applies unchanged. On the updated
+-- provider (its loadout readers GetServerActiveDesign / WantsMoreOfEcho):
+--   "spend": no Echo choice is published (an empty or absent currentChoice).
+--     A specialization field left from an answered draw does not refuse it.
+--   "choice" (Select or redraw on an Orb offer): the game's own Orb flag
+--     (OrbService.IsOfferPending, read by the caller's state read) binds the
+--     shown choice to the Orb, as the game's own auto-accept exemption and
+--     its Orb redraw button do; no specialization field; exactly three
+--     published cards and no fourth; no memory card (flag isGuaranteed).
+--     A memory card or a specialization draw is left to the player.
+-- Memory only (rawget), as O.ClientAdmission. Returns true, or false and text.
+local CHOICE_MEMORY="The Orb offer shows a memory card. Nexus leaves that choice to you; no choice was sent."
+local CHOICE_SHAPE="The Orb offer is not a complete three-card choice. No choice was sent."
+local SPEND_OPEN="An Echo choice is open. No Orb was spent."
+function O.RunAdmission(kind)
+    local pe=_G.ProjectEbonhold
+    if type(pe)~="table" then return false,CLIENT_UNREADABLE end
+    local svc,perks=rawget(pe,"PerkService"),rawget(pe,"Perks")
+    if type(svc)~="table" or type(perks)~="table" then return false,CLIENT_UNREADABLE end
+    local updated=rawget(svc,"GetServerActiveDesign")~=nil or rawget(svc,"WantsMoreOfEcho")~=nil
+    if not updated then return O.ClientAdmission() end
+    local ch=rawget(perks,"currentChoice")
+    if kind=="spend" then
+        if ch==nil then return true end
+        if type(ch)~="table" then return false,CLIENT_UNREADABLE end
+        if rawget(ch,1)~=nil then return false,SPEND_OPEN end
+        return true
+    end
+    if rawget(perks,"currentSpecDraw")~=nil then return false,CLIENT_SPEC end
+    if type(ch)~="table" or rawget(ch,4)~=nil then return false,CHOICE_SHAPE end
+    for i=1,3 do
+        local c=rawget(ch,i)
+        if type(c)~="table" then return false,CHOICE_SHAPE end
+        if rawget(c,"isGuaranteed") then return false,CHOICE_MEMORY end
+    end
+    return true
+end
+-- The game's own Orb redraw of an open Orb offer (OrbService.CanRerollOffer /
+-- RerollOffer, the game's "Use Orbs" button; the server charges one Orb).
+-- One call per open offer; the caller keeps one request in flight.
+function O.Redraw(token,expectedBoard)
+    local mark=pauseMark()
+    local s,err,code=checkedValidation(token,"OrbAdapter.RedrawValidation","The Orb state check failed. No redraw was sent.")
+    if not s then return nil,"REJECTED",err,code end
+    if not s.offerPending or #s.board~=3 or s.boardKey~=expectedBoard or s.hostPending
+        or s.selectInFlight~=nil then return nil,"REJECTED","The Orb offer changed or another action is pending." end
+    local orb=ownerContext.orb
+    if type(orb)~="table" or type(orb.RerollOffer)~="function" or type(orb.CanRerollOffer)~="function" then
+        return nil,"REJECTED","This game client offers no Orb redraw.","NO_REDRAW"
+    end
+    local okC,can=pcall(orb.CanRerollOffer)
+    if not okC or can~=true then return nil,"REJECTED","The game does not allow an Orb redraw now.","REDRAW_REFUSED" end
+    local admitted,why=O.RunAdmission("choice")
+    if not admitted then return nil,"REJECTED",why,"CLIENT_CONTRACT" end
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
+    -- Its raw return is kept as a diagnostic code only: the admitted client
+    -- reference has no OrbService source, and its own "Use Orbs" button ignores
+    -- this return too, so true, false or nil is not interpreted here.
+    local ok,ret=pcall(orb.RerollOffer)
+    redrawReturn=not ok and "error" or ret==true and "true" or ret==false and "false" or ret==nil and "nil" or "other"
+    boundary("redraw_call",s)
+    if not ok then return nil,"AMBIGUOUS","The redraw call failed; its outcome is unknown. No repeat will be sent." end
+    return true,"SUBMITTED"
 end
 do
     local read=O.Read

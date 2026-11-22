@@ -2140,21 +2140,24 @@ C.scenario('N11 the attached Orb strip draws its words at the panel\'s secondary
     C.expect(text:find("'"..NAME.."' (new)",1,true)~=nil,tag..': the target\'s name is whole, with its kind',text)
     C.expect(math.abs((strip[4]-strip[2])-(100+extra))<=0.01,tag..': the strip is its 100 units plus what the words need beyond 52',
      tostring(strip[4]-strip[2])..' / '..tostring(100+extra))
+    -- Start/Stop surfaces (2026-11-19, 9106 field report): this paused run of
+    -- the earlier runtime is history here; its Pause, Resume and Stop are not
+    -- offered. Details moves with the row as before.
     local placed=true
-    for _,b in ipairs({bar.pause,bar.resume,bar.stop,bar.details}) do
+    for _,b in ipairs({bar.details}) do
      local r=b:IsVisible() and Rect(b) or nil
      if not (r and math.abs(r[2]-(strip[2]+65+extra))<=0.01 and r[2]>=rect[4]-0.01 and G.Inside(r,strip,0.01)) then placed=false end
     end
-    C.expect(placed,tag..': Pause, Resume, Stop and Details sit in one row under the whole words, inside the strip',
+    C.expect(placed,tag..': Details sits in the control row under the whole words, inside the strip',
      'row wanted at '..tostring(strip[2]+65+extra)..', words end '..tostring(rect[4]))
     if extra==0 then
      C.guard(math.abs((strip[4]-strip[2])-100)<=0.01 and math.abs(box-52)<=0.01,tag..': words that fit leave the strip at 100 units and the label at 52')
     else
      grew=grew+1
     end
-    C.guard(bar.pause:GetScript('OnClick')~=nil and bar.resume:GetScript('OnClick')~=nil and bar.stop:GetScript('OnClick')~=nil
-     and bar.details:GetScript('OnClick')~=nil and not bar.pause:IsEnabled() and not bar.resume:IsEnabled() and bar.stop:IsEnabled(),
-     tag..': the controls keep their handlers and gates (a changed target resumes only after review)')
+    C.guard(bar.details:GetScript('OnClick')~=nil and bar.details:IsEnabled()
+     and not bar.pause:IsShown() and not bar.resume:IsShown() and not bar.stop:IsShown() and not bar.primary:IsShown(),
+     tag..': no Pause, Resume or Stop is offered for the paused earlier run; Details keeps its handler')
    end
   end
   C.expect(grew>=1,'N11: at 125% the words need more than 52 units and the strip grew for them',grew)

@@ -946,6 +946,16 @@ function Lifecycle.New(options)
             end,
             RefreshDisplay=function() return RefreshHud() end,
             RequestFirstDisplay=function() return RequestFirstHud() end,
+            SetAutoManageTomes=function(enabled)
+                local owner = Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+                if not (owner and owner.owner == Store and type(owner.UpdateSettingsV1) == "function") then
+                    return false
+                end
+                local result = owner.UpdateSettingsV1("autoDisable", enabled)
+                if not result then return false end
+                RequestRecompute()
+                return true
+            end,
             -- Issue #123: the language chooser's two explicit callbacks.
             LanguageStatus=function() return LanguageStatus() end,
             ChooseLanguage=function(id) return ChooseLanguage(id) end,

@@ -63,19 +63,39 @@ for i=1,3 do H.now=H.now+4;M.Recheck();M.Pump() end
 s=M.Status()
 check(s.pending and s.spent+s.reserved==1 and Nexus.Store.State().orbRefinement.pending~=nil,'classification unchanged: still unresolved, exposure and receipt kept')
 n=#H.actions
+-- EXPECT semantic replacement (2026-11-19, user decision on the 9106 field
+-- report): saved history from an earlier session never blocks an actionable
+-- ordinary pick while the live Orb service shows no offer. The ordinary-roll
+-- mutators (Take, Reroll, Banish, Freeze) are therefore admitted here; every
+-- other mutator keeps its truthful refusal below. The ordinary-roll mutators
+-- act or refuse exactly as without the receipt (here no choice is open; a
+-- Reroll needs none). The attribution guard of a Take with an open choice is
+-- in orb_restored_ordinary_release.
+local rolling={take=true,reroll=true,banish=true,freeze=true}
+local savedBefore=H.Clone(Nexus.Store.State().orbRefinement.pending)
+check(M.BlocksOrdinaryRolling()==false and A.OrdinaryBoardAllowed()==true,'ordinary rolling is not blocked by the restored receipt')
 for name,why in pairs(reasons())do
- check(type(why)=='string' and why:find('cannot be confirmed',1,true)~=nil and why:find('Continue in /nexus orbs',1,true)~=nil
-  and why:find('does not clear it by itself',1,true)~=nil and not why:find('only a proposal',1,true),name..': block reason names the exit: '..tostring(why))
- check(not why:find('owns the current action',1,true) and not why:find('Stop and settle',1,true),name..': no false instruction')
+ if rolling[name] then
+  check(why==nil or (type(why)=='string' and not why:find('cannot be confirmed',1,true) and not why:find('Orb',1,true)),name..': not blocked by the receipt: '..tostring(why))
+ else
+  check(type(why)=='string' and why:find('cannot be confirmed',1,true)~=nil and why:find('Continue in /nexus orbs',1,true)~=nil
+   and why:find('does not clear it by itself',1,true)~=nil and not why:find('only a proposal',1,true),name..': block reason names the exit: '..tostring(why))
+  check(not why:find('owns the current action',1,true) and not why:find('Stop and settle',1,true),name..': no false instruction')
+ end
 end
-check(#H.actions==n and M.BlocksOrdinary() and not M.Resume() and not M.Prepare(),'the block itself is unchanged')
+check(H.Count('orb-spend')==1,'no Orb was spent')
+local savedAfter=Nexus.Store.State().orbRefinement.pending
+local same=savedAfter~=nil
+for k,v in pairs(savedBefore) do if type(v)~='table' and savedAfter[k]~=v then same=false end end
+check(same and M.Status().pending,'the receipt is kept unchanged: nothing is attributed to it')
+check(M.BlocksOrdinary() and not M.Resume() and not M.Prepare(),'the loadout, lock and upload block and the Resume and Start refusals are unchanged')
 for name,call in pairs({Prepare=function()return M.Prepare()end,UseAssignedWishlist=function()return M.UseAssignedWishlist()end,SuggestSources=function()return M.SuggestSources()end})do
  local ok,refusal=call()
  check(not ok and type(refusal)=='string' and refusal:find('Continue in /nexus orbs',1,true)~=nil
   and not refusal:find('settle it',1,true) and not refusal:find('Stop and settle',1,true),name..': refusal names the only exit: '..tostring(refusal))
 end
-local allowed,why=A.OrdinaryBoardAllowed()
-check(allowed==false and Nexus.UserText.Message(why)==why,'the visible ordinary reason is the same truthful sentence')
+local allowed,why=A.Activate(1)
+check(allowed~=true and Nexus.UserText.Message(why)==why,'the visible blocked reason is the same truthful sentence')
 -- Missing retained spend history is outside Continue, not proof the client
 -- never observed it or the server spent nothing. Opening the explanation sends
 -- nothing and every mutator remains blocked for this class too.
@@ -89,8 +109,12 @@ check(su.reason:find('no retained observation',1,true) and su.reason:find('does 
 local base=HU.Clone(R.Saved());local actions=#HU.actions;local sends=#HU.sent;local reqs=OU.requests
 Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh();NexusOrbPanel.cont:Click()
 check(not NexusOrbContinue.check:IsEnabled() and not NexusOrbContinue.go:IsEnabled(),'explanation does not enable a check or consent')
-for name,call in pairs({take=function()return AU.Take(410002)end,reroll=function()return AU.Reroll()end,
- banish=function()return AU.Banish(1)end,freeze=function()return AU.Freeze(1)end,lock=function()return AU.LockPerk(410001)end,
+-- EXPECT semantic replacement (2026-11-19, user-authorized 9101 lockout fix ce49e85b): this class has its
+-- offer recorded and no recorded choice, so ordinary rolling (Take, Reroll, Banish, Freeze through the
+-- ordinary-board gate) is no longer blocked by it. Every other mutator below keeps its refusal unchanged.
+check(MU.BlocksOrdinaryRolling()==false and AU.OrdinaryBoardAllowed()==true and MU.BlocksOrdinary(),
+ 'ordinary-board gate permits; the loadout, lock and upload block is kept')
+for name,call in pairs({lock=function()return AU.LockPerk(410001)end,
  unlock=function()return AU.UnlockPerk(410001)end,save=function()return AU.Save(1,'x')end,activate=function()return AU.Activate(1)end,
  upload=function()return AU.UploadWishlist(0,'x',{{spellId=410002,quality=2,stacks=1}})end})do
  local ok,refusal=call();check(not ok and type(refusal)=='string',name..': missing history still blocks mutation')

@@ -41,7 +41,7 @@ local function open(orb)
  foreground(orb,help);unchanged(before,'Reference opening');return help
 end
 H.OrbPlan({{spellId=410002,quality=2,stacks=3}});O.charges=0
-local orb=Nexus.OrbPanel.Show();button(orb,'Advanced'):Click();assert(orb.advanced:IsShown())
+local orb=Nexus.OrbPanel.Show();assert(not orb.advanced:IsShown() and not orb.advancedToggle:IsShown(),'Start/Stop rework: no Advanced')
 local help=open(orb);local before=snapshot()
 button(help,'Next'):Click();button(help,'Previous'):Click();button(help,'Start page'):Click()
 foreground(orb,help);unchanged(before,'Help navigation')

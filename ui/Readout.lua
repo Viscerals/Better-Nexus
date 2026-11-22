@@ -729,8 +729,8 @@ end
 
 -- The rows of the Automation settings menu, from facts the caller read
 -- without acting (as AutomationScopeLines). Each row: `text`; `kind` "title",
--- "info" (shown, not changeable here), "toggle" (an existing setter:
--- `command` is the /nexus argument to run, `checked` the current value),
+-- "info" (shown, not changeable here), "toggle" (`checked` is the current
+-- value; `command` is present for toggles backed by an existing /nexus setter),
 -- "editor" (the option lives in the Wishlist editor) or "help". Pure. `text`
 -- is display copy; `kind`, `key` and `command` are the row's identity.
 function M.AutomationSettingsRows(facts)
@@ -779,9 +779,8 @@ function M.AutomationSettingsRows(facts)
         "Take needed Echoes (autoPick): " .. v .. "; no in-game switch"))
     v = OnOff(s, "autoBanish")
     Add("info", Permission("readout.menu.banish", "autoBanish", v, "Banish (autoBanish): " .. v .. "; no in-game switch"))
-    v = OnOff(s, "autoDisable")
-    Add("info", Permission("readout.menu.tomes", "autoDisable", v,
-        "Turn tomes off and on (autoDisable): " .. v .. "; no in-game switch"))
+    Add("toggle", T("readout.menu.auto_manage_tomes", "Auto-manage Tome Echoes"),
+        {key = "autoDisable", checked = not not Value("autoDisable")})
     v = OnOff(s, "autoSave")
     Add("info", Permission("readout.menu.save_run", "autoSave", v,
         "Save a better finished run over the active Saved Build (autoSave): " .. v

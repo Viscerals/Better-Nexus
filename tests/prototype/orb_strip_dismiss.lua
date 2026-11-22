@@ -120,8 +120,8 @@ C.scenario('D2 a new run with the same numbers is shown again',function()
  bar.dismiss:Click()
  C.setup(not bar:IsShown(),'D2: the first run is hidden')
  StartRun(1);H.Advance(.3)
- C.expect(bar:IsShown() and not bar.dismiss:IsShown() and bar.pause:IsShown(),
-  'D2: an approved new run is shown with its actions and no Hide')
+ C.expect(bar:IsShown() and not bar.dismiss:IsShown() and bar.stop:IsShown() and bar.stop:IsEnabled() and not bar.pause:IsShown(),
+  'D2: an approved new run is shown with its Stop and no Hide')
  Settle(1);H.Advance(.3)
  C.setup(M.Status().state=='FINISHED','D2: the new run finished with the same numbers')
  C.expect(bar:IsShown() and bar.summary:GetText()==first,'D2: the new finished run is shown, though its text is identical',bar.summary:GetText())
@@ -172,11 +172,15 @@ C.scenario('D4 work that needs attention is never hidden',function()
  C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D4: no Hide while an Orb is pending')
  Direct(bar.dismiss);bar.refresh()
  C.expect(bar:IsShown(),'D4: a pending Orb is never hidden')
- bar.pause:Click();H.Advance(.3)
+-- Start/Stop surfaces (2026-11-19, 9106 field report): the earlier runtime's run
+-- is history on the strip: no Pause or Resume; Stop only while it is actually
+-- running. Pausing it here is done through its runtime API, as no surface offers it.
+ M.Pause();H.Advance(.3)
  C.setup(M.Status().state=='PAUSED','D4: the run is paused')
  Direct(bar.dismiss);bar.refresh()
  C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D4: a paused run is never hidden')
- bar.stop:Click();H.Advance(.3)
+ C.expect(not bar.stop:IsShown() and not bar.stop:IsEnabled(),'D4: no surface Stop is offered for the paused run')
+ M.Stop();H.Advance(.3)
  C.setup(M.Status().state=='STOPPED' and M.Status().pending,'D4: Stop leaves the submitted Orb unresolved')
  Direct(bar.dismiss);bar.refresh()
  C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D4: a stopped run with an unresolved Orb is never hidden')
@@ -275,7 +279,7 @@ C.scenario('D6 a finished run with unknown outcomes stays shown; its matched set
   and tostring(bar.summary._nexusFullText):find('unknown spend exposure: 2',1,true)~=nil,
   'D6: the strip discloses the exposure in words and its hover the count',bar and bar.summary:GetText())
  C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D6: a run with unknown outcomes is shown without Hide')
- C.guard(bar.pause:IsShown() and bar.stop:IsShown() and not bar.stop:IsEnabled(),'D6: the row keeps its disabled actions')
+ C.guard(not bar.pause:IsShown() and not bar.resume:IsShown() and not bar.stop:IsShown() and not bar.stop:IsEnabled(),'D6: no Pause, Resume or Stop is offered for that held run')
  local before=Effects()
  local archive=F.Serialize(RS.SavedRow('orbRecoveryArchive'))
  Direct(bar.dismiss);bar.refresh();H.Advance(1)

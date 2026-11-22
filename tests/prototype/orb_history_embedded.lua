@@ -1,7 +1,8 @@
 -- The Orb history is a page of the Orb window (NexusOrbRunLog under
 -- NexusOrbPanel), not a second window. Moving between "Run controls" and
 -- "Run history" only shows and hides frames: it spends, starts, confirms and
--- cancels nothing, and an armed new-run review survives it. Closing the
+-- cancels nothing (Start/Stop rework 2026-11-19: Start is one fixed control
+-- with no armed new-run review). Closing the
 -- window (Close or Escape) still cancels that review, as before. The history
 -- bands do not overlap, the window stays on the visible UI at common screen
 -- sizes and UI scales, and a long recorded value is cut on a character
@@ -50,8 +51,7 @@ SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel);Nexus.OrbPanel.Refresh(
 local runTab,historyTab=button('Run controls',f),button('Run history',f)
 check(Nexus.OrbPanel.Page()=='run','the window opens on its run page')
 check(runTab._nexusSelectedBar and runTab._nexusSelectedBar:IsShown(),'the open page is marked by a bar, not by colour alone')
-f.start:Click()
-check(f.start:GetText()=='Confirm new run','the first press arms a review and starts nothing')
+check(f.start:GetText()=='Start','Start keeps its fixed words')
 local armed=frozen()
 
 -- 2. Page changes are only page changes.
@@ -65,20 +65,19 @@ check(log.page:GetText()=='Operations 1-2 of 2','the history shows the finished 
 check(frozen()==armed,'opening the history changes nothing in the run')
 runTab:Click();Nexus.OrbPanel.Refresh()
 check(Nexus.OrbPanel.Page()=='run' and not log:IsShown() and f.start:IsShown(),'Run controls returns to the run page')
-check(f.start:GetText()=='Confirm new run','page changes neither confirm nor cancel the armed review')
+check(f.start:GetText()=='Start' and frozen()==armed,'page changes start or confirm nothing')
 Nexus.OrbPanel.ShowLog();Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh()
-check(f.start:GetText()=='Confirm new run' and frozen()==armed,'ShowLog and Show are page changes too')
+check(f.start:GetText()=='Start' and frozen()==armed,'ShowLog and Show are page changes too')
 
 -- 3. Close on the history page closes the window; reopening is disarmed.
 Nexus.OrbPanel.ShowLog()
 button('Close',log):Click()
 check(not f:IsShown() and not log:IsShown(),'Close on the history page closes the whole window')
 Nexus.OrbPanel.Show()
-check(f.start:GetText()=='Start new run','closing the window cancels the armed review, as before')
+check(f.start:GetText()=='Start','reopening shows the same fixed Start')
 check(frozen()==armed,'and starts, confirms or spends nothing')
 
 -- 4. Escape (UISpecialFrames) does the same.
-f.start:Click();check(f.start:GetText()=='Confirm new run','armed again')
 Nexus.OrbPanel.ShowLog()
 local listed=false
 for _,name in ipairs(UISpecialFrames)do
@@ -89,7 +88,7 @@ check(listed and not f:IsShown() and not log:IsShown(),'Escape closes the window
 Nexus.OrbPanel.ShowLog()
 check(f:IsShown() and log:IsShown(),'the history reopens directly')
 Nexus.OrbPanel.Show()
-check(f.start:GetText()=='Start new run' and frozen()==armed,'Escape cancelled the review and changed nothing else')
+check(f.start:GetText()=='Start' and frozen()==armed,'Escape changed nothing')
 
 -- 5. Bands of the history page, at their current offsets, do not overlap.
 local real=M.RunLog
@@ -300,21 +299,15 @@ for _,case in ipairs({
  UIParent:SetSize(case[2],case[3])
  Nexus.OrbPanel.Show();f:ClearAllPoints();f:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',math.min(700,case[2]-640),500)
  Nexus.OrbPanel.Refresh();visible(case[1]..', run page',case[4])
- advancedButton:Click();visible(case[1]..', Advanced',case[4])
- -- Stale exact-660 pin updated (finish pass item D, OrbPanel flowBands): the
- -- measured window is at most the former Advanced height and holds the whole
- -- Advanced box below the buttons.
- local _,_,_,_,ay=f.advanced:GetPoint()
- check(f.advanced:IsShown() and f:GetHeight()<=Nexus.OrbPanel.RUN_SIZE.advanced
-  and -(tonumber(ay) or 0)+f.advanced:GetHeight()<=f:GetHeight(),'Advanced keeps its full height, so every control is reachable')
- advancedButton:Click()
+ -- Start/Stop rework (2026-11-19): no Advanced exclusions on the run page.
+ check(not f.advanced:IsShown() and not f.advancedToggle:IsShown(),'no Advanced box or toggle')
  Nexus.OrbPanel.ShowLog();visible(case[1]..', history page',case[4])
  f:Hide()
 end
 -- The UI scale changes while the window is open: the next refresh refits it.
-UIParent:SetSize(1366,768);Nexus.OrbPanel.Show();advancedButton:Click()
+UIParent:SetSize(1366,768);Nexus.OrbPanel.Show()
 UIParent:SetSize(1092.27,614.4);f:GetScript('OnUpdate')(f,1)
 visible('UI scale changed while open',0.85)
-advancedButton:Click();f:Hide()
+f:Hide()
 check(frozen()==armed,'fitting, paging and reading changed nothing in the run')
 print('PASS orb_history_embedded: one window with a history page; page changes act on nothing; bands apart; character-safe values complete in tooltips; window on screen checks='..checks)

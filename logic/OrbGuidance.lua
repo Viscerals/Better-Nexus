@@ -171,7 +171,13 @@ function G.Observe(progress, intent, plan, known)
     local A = Nexus.GameAdapter
     local obs = {plan = plan and true or false, intent = intent}
     if A then
-        if type(A.OrbBlockReason) == "function" then
+        -- The reason names a block only while the Orb runtime blocks ordinary
+        -- rolling (a restored receipt that no longer does keeps its Orb view).
+        local orb = Nexus.OrbRuntime
+        local rolling = orb and type(orb.BlocksOrdinaryRolling) == "function" and orb.BlocksOrdinaryRolling
+        local okRolling, blocked = true, true
+        if rolling then okRolling, blocked = pcall(rolling) end
+        if type(A.OrbBlockReason) == "function" and not (okRolling and blocked == false) then
             local ok, why = pcall(A.OrbBlockReason, "Ordinary rolling")
             if ok and type(why) == "string" and why ~= "" then obs.orbBlock = why end
         end

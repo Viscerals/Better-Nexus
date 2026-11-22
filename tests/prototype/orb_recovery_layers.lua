@@ -98,7 +98,7 @@ C.scenario('L1 eligible restored record: layered status; Continue stays explicit
  SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel);H.Advance(.5)
  local lines=Layered(f,M,'L1',HEADLINE_CONTINUE)
  C.expect(lines[2]=='What you can do: Continue... below checks the game, then asks you to confirm.','L1: the action names the eligible Continue',lines[2])
- C.guard(f.cont:IsShown() and f.cont:GetText()=='Continue...','L1: the Continue button is the one named')
+ C.guard(not f.cont:IsShown(),'L1: no Continue opener (Start/Stop rework: no recovery buttons)')
  C.guard(M.BlocksOrdinary(),'L1: ordinary rolling is blocked, as the headline says')
  f.cont:Click();local w=assert(NexusOrbContinue);H.Advance(.5)
  C.setup(M.RunLog('current').runId==nil,'L1: fixture: this session has no run history')
@@ -138,8 +138,8 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
   'L1b: the paused restored record names its actual explicit Continue action',lines[2])
  C.guard(cv.explanation==true and not s.running and not s.canResume and not c.canResume,
   'L1b: restored explanation is independent of the blocked Resume target')
- C.guard(f.cont:IsShown() and f.cont:GetText()=='Continue...' and not f.resume:IsEnabled() and M.BlocksOrdinary(),
-  'L1b: Continue stays the explicit way on; no Resume; ordinary rolling stays blocked')
+ C.guard(not f.cont:IsShown() and not f.resume:IsShown() and M.BlocksOrdinary(),
+  'L1b: no Continue opener and no Resume (Start/Stop rework); the record still blocks')
  local mini=Nexus.OrbPanel.ShowMini()
  C.guard(mini.state:GetText()=='Paused - a pending result must settle first' and not mini.resume:IsEnabled(),'L1b: the mini panel offers no Resume',mini.state:GetText())
  -- Root-adjudicated current-contract fixture adaptation (L1b only; not a
@@ -217,8 +217,8 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  f.statusHit:GetScript('OnLeave')(f.statusHit)
  f:Hide();C.setup(not f:IsVisible(),'L1b: the full window is closed before Open Orbs')
  mini.open:Click()
- C.guard(f:IsVisible() and f.cont:IsVisible() and f.cont:GetText()=='Continue...',
-  'L1b: actual Open Orbs opens the full window and explicit Continue')
+ C.guard(f:IsVisible() and not f.cont:IsVisible(),
+  'L1b: actual Open Orbs opens the full window (no Continue opener)')
  Layered(f,M,'L1b Open Orbs',PAUSED_HEADLINE_CONTINUE)
  f:Hide();Nexus.Panel.Show();H.Advance(.3)
  local bar=NexusPanel and NexusPanel._orbControls
@@ -230,8 +230,8 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  C.guard(bar.details:IsVisible() and bar.details:GetText()=='Details' and not bar.resume:IsEnabled()
   and bar:GetHeight()==100 and bar.summary:GetHeight()==52,'L1b: existing Details, blocked Resume and strip geometry remain')
  bar.details:Click()
- C.guard(f:IsVisible() and f.cont:IsVisible() and f.cont:GetText()=='Continue...',
-  'L1b: actual Details opens the full window and explicit Continue')
+ C.guard(f:IsVisible() and not f.cont:IsVisible(),
+  'L1b: actual Details opens the full window (no Continue opener)')
  Layered(f,M,'L1b Details',PAUSED_HEADLINE_CONTINUE)
  mini.resume:GetScript('OnClick')(mini.resume)
  C.guard(mini.notice:GetText()=='Not resumed: a pending result must settle.','L1b: a mini Resume that reaches the handler is refused',mini.notice:GetText())
@@ -251,7 +251,7 @@ C.scenario('L2 unobservable record: layered status keeps every earlier fact',fun
  local f=NexusOrbPanel
  local lines=Layered(f,M,'L2',HEADLINE)
  C.expect(lines[2]=='What you can do: follow the details; Why blocked... below explains this record.','L2: the action names the explanation shown',lines[2])
- C.guard(f.cont:IsShown() and f.cont:GetText()=='Why blocked...','L2: the explanation button is the one named')
+ C.guard(not f.cont:IsShown(),'L2: no explanation opener (Start/Stop rework: no recovery buttons)')
  local text=f.status:GetText()
  C.guard(text:find('does not prove that the server spent nothing',1,true)~=nil and text:find('Nothing is retried, refunded or deleted',1,true)~=nil,
   'L2: no invented conclusion; never retried, refunded or deleted',text)
@@ -398,16 +398,15 @@ C.scenario('L6 Help: fixed controls, target review, usage words and state-specif
  end
  C.setup(orbs and trouble,'L6: the Orb and troubleshooting pages exist')
  local function has(t,s) return t:find(s,1,true)~=nil end
- for _,s in ipairs({'Pause and Resume are separate buttons in fixed places','name the Wishlist that Resume would use',
-  'click Review target in the Orb window and Resume there','Review target spends nothing',
-  'Orbs used counts spent Orbs against the approved maximum','pending means an Orb was requested and its spend is not confirmed yet',
-  'what is blocked, then what you can do now, then the details','a reload never clears the record','Otherwise do not reload',
+ -- (2026-11-19, user/coordinator-approved Start/Stop wording: no maximum, Pause/Resume, Review target or Continue.)
+ for _,s in ipairs({'A run has no Pause or Resume',"is used from the run's next step",
+  'There is no maximum to set','Pending means an Orb was requested and its answer has not been seen yet',
+  'a reload never clears the record','Otherwise do not reload',
   'before any reload','Run history clears on reload or logout'}) do
   C.expect(has(orbs,s),'L6: the Orb page says: '..s)
  end
- for _,s in ipairs({'do not clear it','Nexus never retries or refunds it, and never deletes the record','Nexus never continues by itself',
-  'Resume adopts the new target and keeps the same maximum','The approved maximum does not change during the run',
-  'Closing the window does not stop an approved run. Use Pause or Stop.'}) do
+ for _,s in ipairs({'do not clear it','Nexus never retries or refunds it, and never deletes the record','Nexus never continues an earlier run by itself',
+  'A maximum saved by an earlier version is kept but not used','Closing the window does not stop a run. Use Stop'}) do
   C.guard(has(orbs,s),'L6: the Orb page keeps: '..s)
  end
  C.guard(not orbs:lower():find('try again',1,true) and not orbs:lower():find('choose again if',1,true),'L6: no retry advice')

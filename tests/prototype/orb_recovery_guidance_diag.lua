@@ -15,25 +15,22 @@ check(v.text:find('does not prove that the server spent nothing',1,true),'no inv
 check(v.text:find('no retained observation',1,true) and not v.text:find('never observed',1,true),'missing saved history is not proof the client never observed it')
 check(v.text:find('Start, Resume and reload cannot reconstruct',1,true),'repeat actions cannot reconstruct history')
 Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh()
-check(NexusOrbPanel.cont:IsShown() and NexusOrbPanel.cont:GetText()=='Why blocked...','ineligible record has explanation affordance')
-NexusOrbPanel.cont:Click();local f=assert(NexusOrbContinue)
-check(f:IsShown() and f.title:GetText()=='Unresolved Orb action','explanation opens without starting a check')
-check(not f.check:IsEnabled() and not f.go:IsEnabled() and f.token==nil,'no Check/consent token for the class')
-check(#H.sent==sends and O.requests==requests and R.Same(R.Saved(),saved),'opening explanation sends and saves nothing')
+-- Start/Stop rework (2026-11-19): no recovery UI or buttons on the run page.
+check(not NexusOrbPanel.cont:IsShown(),'no Continue opener for the record')
+check(#H.sent==sends and O.requests==requests and R.Same(R.Saved(),saved),'opening the window sends and saves nothing')
 local ok,why=M.ContinueBegin()
 check(not ok and why=='spend_unconfirmed','API still refuses the original gate')
 check(M.Status().pending and M.Status().reserved==1 and M.BlocksOrdinary(),'uncertain exposure and block retained')
-f:Hide()
 local H2,M2,A2,O2=R.Class({latch=false});R.Server(H2);S.Pass(H2,M2,A2,1)
-check(M2.ContinueView().eligible,'client-observed spend retains the original eligibility')
-Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh();NexusOrbPanel.cont:Click()
-check(NexusOrbContinue.check:IsEnabled() and not NexusOrbContinue.go:IsEnabled(),'eligible class still needs its read-only check')
+check(M2.ContinueView().eligible,'client-observed spend retains the original eligibility (runtime view)')
+Nexus.OrbPanel.Show();Nexus.OrbPanel.Refresh()
+check(not NexusOrbPanel.cont:IsShown(),'an eligible record has no Continue opener either')
 -- Offered/named choice class must not acquire an archive consent either.
 local H3,M3,A3,O3=R.Class({latch=false})
 H3.Board({{spellId=500037,quality=1},{spellId=500001,quality=1},{spellId=500038,quality=1}});O3.offer=true
 S.Pass(H3,M3,A3,1);Nexus.OrbPanel.Show();NexusOrbPanel.Refresh()
 check(M3.ContinueView().reason=='offer_open','open offer still refuses')
-NexusOrbPanel.cont:Click();check(not NexusOrbContinue.check:IsEnabled() and not NexusOrbContinue.go:IsEnabled(),'explanation cannot confirm an open offer')
+check(not NexusOrbPanel.cont:IsShown(),'no Continue opener with an open offer')
 -- Instrumentation availability is optional and disabled dispatch preserves results.
 local raw=Nexus.Performance;local labels={}
 Nexus.Performance={MeasureDiagnostic=function(label,fn,...)labels[label]=(labels[label]or 0)+1;return fn(...)end}

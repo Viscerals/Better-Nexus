@@ -368,29 +368,21 @@ section('prepared history requires represented acknowledgment',function()
  check(plan.historyCount==1 and type(plan.historyRisk)=='string' and plan.historyAcknowledgment~=nil,'EXPECT Prepare exposes bounded history risk and explicit acknowledgment fact')
  check(not M.Confirm(plan.token) and H.Count('orb-spend')==1 and not R.Saved(),'EXPECT Confirm cannot silently supply missing acknowledgment')
 end)
+-- Start/Stop rework (2026-11-19): a retained archive does not block a new
+-- clear run and needs no acknowledgment. The real Start of the Orb window
+-- starts a fresh run; the archive stays exact and nothing is attributed to it.
+-- (Replaces the represented history acknowledgment of the earlier Start.)
 for _,chosen in ipairs({false,true})do
- section('actual Start callback acknowledges '..tostring(chosen),function()
+ section('actual Start with retained history '..tostring(chosen),function()
   local H,M,A,O=S01Archive(chosen);local old=H.Clone(R.SavedRow('orbRecoveryArchive'))
-  assert(M.SetLimit(3));Nexus.OrbPanel.Show();local panel=NexusOrbPanel
-  check(panel.approval:GetText():find('1 unconfirmed',1,true) and panel.approval:GetText():find('baseline',1,true),'EXPECT same Start area visibly discloses history risk/baseline')
-  local lines=0;for line in (panel.approval:GetText()..'\n'):gmatch('(.-)\n')do lines=lines+1;check(#line*7<=panel.approval:GetWidth(),'GUARD history disclosure fits its real width conservatively')end
-  check(lines==2 and lines*17<=panel.approval:GetHeight(),'GUARD complete history acknowledgment fits the actual approval area')
-   check(panel.approval:GetText():find('Start approves this maximum',1,true)
-    and panel.approval:GetText():find('within max',1,true),
-    'EXPECT retained-history Start explicitly approves the maximum and binds recovery checks to it')
-   local tooltip=GameTooltip;local captured;local spends=H.Count('orb-spend')
-   GameTooltip={SetOwner=function()end,AddLine=function(_,text)captured=text end,Show=function()end,Hide=function()end}
-   assert(panel.approvalHit,'SETUP actual approval has the existing full-text hover helper')
-   panel.approvalHit:GetScript('OnEnter')(panel.approvalHit);GameTooltip=tooltip
-   check(captured==panel.approval._nexusFullText and captured:find('current Echoes baseline',1,true)
-    and captured:find('Up to 2 recovery checks within this maximum',1,true) and H.Count('orb-spend')==spends,
-    'GUARD approval hover retains complete baseline/risk/maximum wording and submits nothing')
-  panel.start:GetScript('OnClick')(panel.start);panel.start:GetScript('OnClick')(panel.start)
-  check(H.Count('orb-spend')==2 and R.Saved().attributionFormat==1 and R.Saved().guid==nil and R.Saved().attributionOwner~=nil,'EXPECT real Start callback carries represented fact and creates older-reader-failclosed envelope')
-  H.Offer();assert(M.Stop());H.Result(410002,2);H.Advance(.5)
-  check(not R.Saved() and H.Count('orb-spend')==2 and M.Status().spent==1,'EXPECT acknowledged prior source/pair permits only observed exact new replacement, also after Stop')
-  check(M.Status().reason:find('no server action correlation',1,true),'GUARD stopped observed replacement exposes its attribution limit in public status')
+  Nexus.OrbPanel.Show();local panel=NexusOrbPanel
+  check(not panel.approval:IsShown() and panel.start:IsEnabled(),'EXPECT no acknowledgment text; Start is offered')
+  local spends=H.Count('orb-spend')
+  panel.start:GetScript('OnClick')(panel.start);H.Advance(.5)
+  check(Nexus.OrbAuto.Active() and H.Count('orb-spend')==spends+1,'EXPECT the real Start begins a fresh run with one Orb')
+  H.Offer();H.Advance(.5);H.Result(410002,2);H.Advance(.5)
   check(R.Same(R.SavedRow('orbRecoveryArchive'),old) and old[1].resolution.confidence=='NONE','GUARD old UNKNOWN/NONE receipt remains exact and unattributed')
+  Nexus.OrbAuto.Stop()
  end)
 end
 section('stale rendered history cannot enroll a new receipt',function()

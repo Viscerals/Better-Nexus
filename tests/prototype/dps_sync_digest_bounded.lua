@@ -276,10 +276,8 @@ end
 -- sooner. Bounded. Nothing is cancelled, forced or skipped, and no clock is
 -- changed. The "DSD settle" line reports the frames, schedule and headroom.
 local function SavedStore() return rawget(rawget(NexusDB,'authorityBundle'),'dpsCapture') end
-local function RetentionDue()
- local meta=rawget(rawget(NexusDB,'authorityBundle'),'dataRetention')
- return type(meta)=='table' and tonumber(rawget(meta,'nextMaintenanceAt')) or nil
-end
+-- The next run's time, saved or (a run that wrote nothing) held for this session.
+local function RetentionDue() return Nexus.DataRetention.NextMaintenanceAt() end
 local function Settle(tag)
  local quiet=0
  for i=1,24000 do
@@ -301,7 +299,7 @@ local function SettleCatalog(tag,seconds)
  check(Nexus.DataRetention.Limits().enabled~=true,tag..': setup: retention runs in its unlimited mode')
  local settled=Settle(tag)
  local due=RetentionDue()
- check(due~=nil,tag..': setup: the retention schedule is saved')
+ check(due~=nil,tag..': setup: the retention schedule is known')
  local dueIn,waited,resettled=due-time(),0,0
  if due-time()<seconds then
   for _=1,6200 do if time()>=due then break end;waited=waited+1;H.Advance(.05,.05) end

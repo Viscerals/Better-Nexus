@@ -275,8 +275,8 @@ REFERENCE_SUCCESSORS = {
                                   "of the full visible-UI catalog",
 }
 # Full visible-UI scope: unlike the English successor, the composed packs and
-# the release metadata carry a strong current identity. Packs: the eight
-# Saved Build label translations first committed in 351a83b5; release
+# the release metadata carry a strong current identity. The current packs
+# derive from 193d9a1c by removing the obsolete Tome row from each pack; release
 # metadata: 539 entry-review declarations in three cohorts (the 529 original
 # records, the six neutral-template records and the four frFR Echo quality
 # records), first committed in 046c71cc. Canonical Git
@@ -285,14 +285,14 @@ REFERENCE_SUCCESSORS = {
 # also record their physical checkout bytes; RELEASE_LANGUAGES.json is
 # text=auto and its physical bytes depend on the platform. A later intended
 # change of either file needs its own reviewed identity here. The values are
-# literal operator facts computed from those immutable Git pins, never from
-# the bytes under test.
+# literal facts computed from immutable Git inputs and the explicit
+# one-row-per-pack retirement, never from the working bytes under test.
 CURRENT_SUCCESSOR_INPUTS = {
     "data/LocalizationPacks.lua": {
-        "canonical": ("c4a1542a3cd5b7a695d2338ed7bbc7d02fdd5209bcadb51ccb7e307acc2d12a5", 3316775),
-        "blob": "44ff89b7b179586fd0193af50e0f51ea5196d20a",
-        "firstCommit": "193d9a1c993300f71ea72222bd8a937d51fbd301",
-        "physical": ("a4c6f22322f06228b51b1361e233526ddbbabe4bc71de3eddb173b832f3db790", 3341312)},
+        "canonical": ("86f44ca605fb503a89eed8bc81eb644e3608dc3427d4c3042e178df786fcbb56", 3316030),
+        "blob": "4a0567f1445a04f4c603f9f38ad049b8399d7279",
+        "derivedFrom": "193d9a1c993300f71ea72222bd8a937d51fbd301 (remove only readout.menu.tomes)",
+        "physical": ("de5d8500542c1427f0d70eeb3a400552f38689e289f2fb8fc9ea9c9d62739ff6", 3340561)},
     "docs/localization/RELEASE_LANGUAGES.json": {
         "canonical": ("5a36b22476f9f99342e43c612c8e2c1a1958e3c38544f6010469ee096a8c0462", 267917),
         "blob": "f127ce0a02992f55aeba845b1a4ca414087cff65",
@@ -327,12 +327,12 @@ HISTORICAL_SUCCESSOR_INPUTS = {
 # map independently derived from six prior-map controls plus the 12 reviewed
 # caption literals accepted in 193d9a1c (derivation 0841e837; other values exact).
 CURRENT_PACK_VALUE_MAPS = {
-    "frFR": "e856aca5fae4dec6066c81499c4105502d440c1f7abed815c0e096d001ae3996",
-    "deDE": "e8c4a5170010e4b11f625b41c3e4fef2a3235839274d0c28e24dd751030a617c",
-    "esES": "92fe120f03d2e9f3241f43e428accdf93fecf401797d0f6dc1d51f07d1c638ad",
-    "plPL": "0ce81c78f9da63b8b2579b9f2e0ca6990f925ba3b5e1de0a327bc952a9fb3bd3",
-    "ptBR": "b61b494342b52b53156c7a3abf17f5d1eca9abcd453f1fd095261c93c38269d8",
-    "ruRU": "9cf9473df2185e847184a02ff1adb095e238441404d59377aa31e514eb075f49",
+    "frFR": "5e39699bccf28c647049d5c4c534d060bd324d0d909d9166cf6190f16e06ac6d",
+    "deDE": "87a7ca42ab98b1fe27ef00ef9ecd4daf640c01bfae392fba96e132471491c363",
+    "esES": "a86c2ff45947c9c29c95e2397b5376e03609a7dce00b07e5aee89d5b02916e53",
+    "plPL": "b5ad7ceb82c826b74bfbea48754b87e398274b76e88dc70f951eed6ed3c7f365",
+    "ptBR": "5973ed5d14afd373b637aa39ca1c76c3298fd7221428f89cdbd891f3ab562b38",
+    "ruRU": "94f226a3770b0b00edd51c396434079e86530d7ce9f5b7be861e641500e75687",
 }
 # The actual entry-review declarations: three distinct evidence cohorts, in
 # this order, all technical metadata, not fluent human, native, rights or
@@ -424,7 +424,9 @@ CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "P
 # declaration and context order, so the reviewed catalog holds 4116; the
 # bounded runtime limit stays 5120. The v40 B/C sources hold those 20, so
 # full_english_oracle() and the sources agree at 4116.
-CURRENT_FULL_UI_KEYS = 4116
+# v47 (2026-11-19, user/coordinator-approved Start/Stop wording): one more
+# hand-reviewed Orb meaning, then the Tome checkbox; the obsolete Tome info row is retired (4117 active).
+CURRENT_FULL_UI_KEYS = 4117
 
 
 def current_english_oracle():
@@ -470,8 +472,8 @@ def full_english_oracle():
 # other missing key, deliver or review a translation, or close the coverage,
 # language or native gates, which stay OPEN. A pack that loses a cohort key,
 # gains any key or lacks any other English key fails, and the cohort's order
-# and exact value-map pins (CURRENT_PACK_VALUE_MAPS) are unchanged.
-CURRENT_PACK_COHORT_KEYS = 4078
+# and exact value-map pins (CURRENT_PACK_VALUE_MAPS) differ only by the retired Tome info row.
+CURRENT_PACK_COHORT_KEYS = 4077
 SLICE_A_PACK_MISSING_KEYS = (
     "command.chat.reference_random_roll", "command.chat.reference_random_roll_limits",
     "command.chat.reference_random_roll_rule", "editor.button.rarity_mode",
@@ -500,17 +502,21 @@ SLICE_BC_NEW_KEYS = (
     "help.label.faq_before_reload_question", "help.body.faq_before_reload_answer",
     "help.label.faq_random_roll_leveling_question", "help.body.faq_random_roll_leveling_answer",
 )
-PACK_MISSING_KEYS = tuple(sorted(SLICE_A_PACK_MISSING_KEYS + SLICE_BC_NEW_KEYS))
+# v47 (2026-11-19, user/coordinator-approved Start/Stop wording): one new
+# hand-reviewed meaning appended after the B/C cohort; no pack holds it yet
+# (it shows English), so each pack lacks 40 including the Tome checkbox.
+V47_AND_TOME_NEW_KEYS = ("orb.status.run_until_goal", "readout.menu.auto_manage_tomes")
+PACK_MISSING_KEYS = tuple(sorted(SLICE_A_PACK_MISSING_KEYS + SLICE_BC_NEW_KEYS + V47_AND_TOME_NEW_KEYS))
 
 
 def current_pack_cohort(oracle):
     """The protected pack cohort: every current English key of the oracle
-    except the 38 expected missing ones (18 legacy, 20 new), in English
+    except the 40 expected missing ones (18 legacy, 20 B/C, 1 v47, 1 Tome checkbox), in English
     (context) order."""
     missing = set(PACK_MISSING_KEYS)
-    if (len(SLICE_A_PACK_MISSING_KEYS) != 18 or len(SLICE_BC_NEW_KEYS) != 20 or len(missing) != 38
-            or not missing <= set(oracle)):
-        raise AssertionError("the expected missing keys are 38 distinct current English keys")
+    if (len(SLICE_A_PACK_MISSING_KEYS) != 18 or len(SLICE_BC_NEW_KEYS) != 20 or len(V47_AND_TOME_NEW_KEYS) != 2
+            or len(missing) != 40 or not missing <= set(oracle)):
+        raise AssertionError("the expected missing keys are 40 distinct current English keys")
     cohort = [key for key in oracle if key not in missing]
     if len(cohort) != CURRENT_PACK_COHORT_KEYS:
         raise AssertionError("the protected pack cohort holds %d keys" % len(cohort))
@@ -524,9 +530,10 @@ def current_pack_cohort(oracle):
 # the 380 generated panel keys below. The accepted v33 PLAN adds the 4 opacity
 # meanings of ui/Theme.lua (a path of this family) next to their theme.*
 # siblings, in the sorted position of the 166 (HUD_OPACITY_PLACEMENT), so the
-# family adopts 573. No earlier key moves or leaves; the Help family stays [],
-# so the 16 FAQ meanings belong to no family. Adoption is not coverage: the 4
-# have no pack entry, and every family status stays PENDING.
+# family adopted 573. The Tome checkbox replaced the obsolete Tome info row
+# without moving other keys, so there are still 573. The Help family stays [],
+# so the 16 FAQ meanings belong to no family. Adoption is not coverage: the
+# new meanings have no pack entry, and every family status stays PENDING.
 HUD_FULL_UI_ADOPTED_KEYS = [
     "callboard.heading.rewards_by_difficulty", "callboard.label.difficulty_hc1",
     "callboard.label.difficulty_hc2", "callboard.label.difficulty_hc3",
@@ -551,7 +558,7 @@ HUD_FULL_UI_ADOPTED_KEYS = [
     "readout.menu.auto_selected_off", "readout.menu.auto_selected_on",
     "readout.menu.auto_settings_title", "readout.menu.banish", "readout.menu.lock_echoes",
     "readout.menu.orb_never", "readout.menu.read_only", "readout.menu.save_run",
-    "readout.menu.take_needed", "readout.menu.tomes", "readout.note.auto_on_scope",
+    "readout.menu.take_needed", "readout.note.auto_on_scope",
     "readout.note.waiting_offer_data", "readout.status.auto_refused",
     "readout.status.auto_refused_orb", "readout.status.auto_refused_status",
     "readout.status.auto_refused_warning", "readout.status.charges_estimated",
@@ -775,17 +782,18 @@ HUD_OPACITY_PLACEMENT = (
     ("theme.menu.unknown_colour", ("theme.menu.unknown_opacity",)),
     ("theme.tooltip.appearance_help", ("theme.tooltip.opacity",)),
 )
-HUD_ADOPTED_BEFORE_OPACITY = 569
+HUD_ADOPTED_BEFORE_OPACITY = 568
 HUD_ADOPTED_KEYS_NOW = 573
+HUD_TOME_KEY = "readout.menu.auto_manage_tomes"
+HUD_TOME_SIBLING = "readout.menu.allow_reroll"
 
 
 def hud_adoption_before_opacity():
-    """The 569 keys the HUD family adopted before v43, in order, from the
-    independent literals: the dated 23, the 166 generated HUD keys, the 380
-    generated panel keys."""
+    """The 568 earlier HUD keys still retained before adding the new controls:
+    the dated 23, the 165 generated HUD keys and the 380 generated panel keys."""
     earlier = CURRENT_HUD_ADOPTED_KEYS + HUD_FULL_UI_ADOPTED_KEYS + HUD_PANEL_ADOPTED_KEYS
     if ((len(CURRENT_HUD_ADOPTED_KEYS), len(HUD_FULL_UI_ADOPTED_KEYS), len(HUD_PANEL_ADOPTED_KEYS))
-            != (23, 166, 380) or len(earlier) != HUD_ADOPTED_BEFORE_OPACITY
+            != (23, 165, 380) or len(earlier) != HUD_ADOPTED_BEFORE_OPACITY
             or len(set(earlier)) != len(earlier)):
         raise AssertionError("the earlier HUD adoption oracle holds %d keys, %d distinct"
                              % (len(earlier), len(set(earlier))))
@@ -793,10 +801,11 @@ def hud_adoption_before_opacity():
 
 
 def current_hud_adoption_oracle():
-    """The HUD family's adopted keys now: exactly the earlier 569, unmoved,
-    plus the 4 opacity keys, each right after its sibling."""
+    """The HUD family's adopted keys now: exactly the surviving earlier 568, unmoved,
+    plus the 4 opacity keys and the Tome checkbox, after their siblings."""
     earlier = hud_adoption_before_opacity()
     follows = dict(HUD_OPACITY_PLACEMENT)
+    follows[HUD_TOME_SIBLING] = (HUD_TOME_KEY,)
     opacity = [key for _, keys in HUD_OPACITY_PLACEMENT for key in keys]
     if (opacity != list(SLICE_BC_NEW_KEYS[:4]) or set(opacity) & set(earlier)
             or not set(follows) <= set(HUD_FULL_UI_ADOPTED_KEYS)):
@@ -1459,11 +1468,11 @@ class KeyContextContract(unittest.TestCase):
         adopted = {key for family in families for key in family["adoptedKeys"]}
         self.assertLessEqual(adopted, set(self.keys))
 
-    def test_hud_adopts_exactly_its_earlier_keys_and_the_four_opacity_keys(self):
-        # v43 (review S2, v33 PLAN): the HUD family is exactly the earlier 569
-        # keys, unmoved, plus the 4 opacity meanings next to their theme.*
-        # siblings. Both sides are independent: the literals above against the
-        # document read with the json module; no tool is involved.
+    def test_hud_adopts_earlier_keys_plus_opacity_and_tome_controls(self):
+        # The HUD family keeps the earlier 568 surviving keys in order,
+        # adds the 4 opacity meanings beside their theme.* siblings, and
+        # adds the Tome checkbox next to the other automation controls. The
+        # literal oracle and the JSON document are independent.
         families = {family["name"]: family["adoptedKeys"] for family in self.doc["windowFamilies"]}
         self.assertEqual(len(families), len(self.doc["windowFamilies"]))
         hud = families["Main panel (HUD)"]
@@ -1472,15 +1481,17 @@ class KeyContextContract(unittest.TestCase):
                                    "theme.menu.unknown_opacity", "theme.tooltip.opacity"])
         self.assertEqual(hud, current_hud_adoption_oracle())
         self.assertEqual((len(hud), len(set(hud))), (HUD_ADOPTED_KEYS_NOW, HUD_ADOPTED_KEYS_NOW))
-        # Every earlier key is kept, in its earlier order; only the 4 are new.
-        self.assertEqual([key for key in hud if key not in opacity], hud_adoption_before_opacity())
-        self.assertEqual(sorted(set(hud) - set(hud_adoption_before_opacity())), sorted(opacity))
+        # Every earlier key is kept, in its earlier order.
+        added = opacity + [HUD_TOME_KEY]
+        self.assertEqual([key for key in hud if key not in added], hud_adoption_before_opacity())
+        self.assertEqual(sorted(set(hud) - set(hud_adoption_before_opacity())), sorted(added))
+        self.assertEqual(hud[hud.index(HUD_TOME_SIBLING) + 1], HUD_TOME_KEY)
         self.assertEqual(hud[:len(CURRENT_HUD_ADOPTED_KEYS)], CURRENT_HUD_ADOPTED_KEYS)
-        # Sorted position: the generated HUD segment (the 166, now 170) stays
+        # Sorted position: the generated HUD segment (165 earlier, now 170) stays
         # sorted, and each new key directly follows its named sibling.
         start = len(CURRENT_HUD_ADOPTED_KEYS)
-        segment = hud[start:start + len(HUD_FULL_UI_ADOPTED_KEYS) + len(opacity)]
-        self.assertEqual(segment, sorted(HUD_FULL_UI_ADOPTED_KEYS + opacity))
+        segment = hud[start:start + len(HUD_FULL_UI_ADOPTED_KEYS) + len(added)]
+        self.assertEqual(segment, sorted(HUD_FULL_UI_ADOPTED_KEYS + added))
         self.assertEqual(hud[start + len(segment):], HUD_PANEL_ADOPTED_KEYS)
         for sibling, placed in HUD_OPACITY_PLACEMENT:
             index = hud.index(sibling)
@@ -4132,7 +4143,7 @@ class CatalogCurrentSource(unittest.TestCase):
                          ("Main panel (HUD)", current_hud_adoption_oracle(), HUD_ADOPTED_KEYS_NOW))
         self.assertEqual((hud["adoptedKeys"], hud["adoptedKeyCount"]),
                          (declared[hud["name"]], len(declared[hud["name"]])))
-        opacity = sorted(SLICE_BC_NEW_KEYS[:4])
+        missing_hud = sorted([*SLICE_BC_NEW_KEYS[:4], HUD_TOME_KEY])
         for family in families:
             with self.subTest(family["name"]):
                 self.assertEqual((family["semanticStatus"], family["coverageStatus"],
@@ -4146,14 +4157,14 @@ class CatalogCurrentSource(unittest.TestCase):
                 # legitimately identical, a held identical key stays a
                 # placeholder, an adopted key no pack holds (PACK_MISSING_KEYS)
                 # is missing, and every other adopted key stays draft.
-                # v43 (review S2): the 4 opacity keys are adopted by the HUD
-                # and held by no pack, so they are that family's missing keys
+                # The four opacity keys and Tome checkbox are adopted by the
+                # HUD and held by no pack, so they are that family's missing keys
                 # for every pack; no other family adopts a missing key. They
                 # are never counted as draft, reviewed or translated.
                 self.assertEqual([row["productId"] for row in family["products"]], PACK_IDS)
                 adopted_set = set(family["adoptedKeys"])
                 missing = sorted(adopted_set & set(PACK_MISSING_KEYS))
-                self.assertEqual(missing, opacity if family is hud else [])
+                self.assertEqual(missing, missing_hud if family is hud else [])
                 for row in family["products"]:
                     reviewed = sorted(adopted_set & reviewed_by_pack[row["productId"]])
                     placeholder = sorted(adopted_set

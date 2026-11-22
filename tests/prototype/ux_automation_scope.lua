@@ -567,7 +567,7 @@ C.scenario('P12 UX-10 the Automation settings submenu shows every permission; on
  print('OBSERVED','P12 submenu='..text:gsub('\n',' / '))
  C.expect(text:find('Auto: OFF',1,true)~=nil and text:find('Allow Reroll (autoReroll): on',1,true)~=nil
   and text:find('Allow Freeze (autoFreeze): on',1,true)~=nil and text:find('Take needed Echoes (autoPick): on',1,true)~=nil
-  and text:find('Banish (autoBanish): on',1,true)~=nil and text:find('(autoDisable): on',1,true)~=nil
+  and text:find('Banish (autoBanish): on',1,true)~=nil and text:find('Auto-manage Tome Echoes',1,true)~=nil
   and text:find('(autoSave): on',1,true)~=nil and text:find('Lock Wishlist Echoes (autoLockEchoes): off',1,true)~=nil
   and text:find('Activate a Saved Build: never',1,true)~=nil and text:find('autoActivate value is not used',1,true)~=nil
   and text:find('Orb runs: never by Auto',1,true)~=nil,
@@ -595,6 +595,21 @@ C.scenario('P12 UX-10 the Automation settings submenu shows every permission; on
   'P12: reopened, the row shows Reroll off',again and again.text)
  if again then again.func() end
  C.guard(SettingsMap().autoReroll=='true','P12: the same row turns it back on')
+ local tome=MenuItem((MenuItem(OpenMoreMenu(),'Automation settings') or {}).menuList,'Auto-manage Tome Echoes')
+ if C.setup(tome and tome.checked==true and type(tome.func)=='function','P12: Tome control is checkable and initially on') then
+  local beforeTome=SettingsMap()
+  tome.func()
+  local afterTome=SettingsMap()
+  local onlyTome=afterTome.autoDisable=='false'
+  for k,v in pairs(beforeTome) do if k~='autoDisable' and afterTome[k]~=v then onlyTome=false end end
+  for k,v in pairs(afterTome) do if k~='autoDisable' and beforeTome[k]~=v then onlyTome=false end end
+  C.expect(onlyTome,'P12: turning Tome automation off changes only its saved permission')
+  local off=MenuItem((MenuItem(OpenMoreMenu(),'Automation settings') or {}).menuList,'Auto-manage Tome Echoes')
+  C.expect(off and off.checked==false,'P12: reopened, the Tome control stays unchecked')
+  if off and type(off.func)=='function' then off.func() end
+  C.guard(SettingsMap().autoDisable=='true' and Same(Counters(),before) and not Auto(),
+   'P12: re-enabling Tome automation leaves master Auto and action counters unchanged')
+ end
  -- The locked-Echo option is set in the editor: its row opens it, changing nothing.
  local sub2=MenuItem(OpenMoreMenu(),'Automation settings')
  local lock=sub2 and MenuItem(sub2.menuList,'Lock Wishlist Echoes')

@@ -151,20 +151,23 @@ do
   check(f.status:GetWidth()==580 and f.status:GetHeight()==statusH,
    m.name..': the status is its measured height up to 74: '..f.status:GetHeight()..' == '..statusH)
   Whole(f.statusHit,f.status,statusOver,m.name..': the status')
-  check(f.approval:GetHeight()==34,m.name..': the approval keeps its full 34 units')
-  -- Approval, usage, status, notice, close notice and the button row in
-  -- order, apart, with no gap above 16 units, all inside the window.
+  -- Start/Stop rework (2026-11-19): no approval or usage rows, and no close
+  -- notice ("Use Pause or Stop" names controls that no longer exist; Start/Stop
+  -- surfaces, field report on 9106). The Start row, status, notice and the
+  -- button row in order, apart, with no gap above 16 units, all inside the window.
+  check(not f.approval:IsShown() and not f.usage:IsShown(),m.name..': no approval or usage row')
+  check(not f.closeNotice:IsShown(),m.name..': no obsolete close notice')
   local box={0,0,f:GetWidth(),f:GetHeight()}
-  local approval,usage,status,notice=G.Rect(f.approval,f),G.Rect(f.usage,f),G.Rect(f.status,f),G.Rect(f.notice,f)
-  local close,help=G.Rect(f.closeNotice,f),G.Rect(f.help,f)
-  local order={approval,usage,status,notice,close,help}
+  local startRow,status,notice=G.Rect(f.start,f),G.Rect(f.status,f),G.Rect(f.notice,f)
+  local help=G.Rect(f.help,f)
+  local order={startRow,status,notice,help}
   local bad
   for i=2,#order do
    local gap=order[i][2]-order[i-1][4]
    if not (gap>=0 and gap<=16) then bad=bad or ('row '..i..' '..G.Text(order[i])..' is '..gap..' below '..G.Text(order[i-1])) end
   end
   for _,r in ipairs(order) do if not G.Inside(r,box) then bad=bad or (G.Text(r)..' is outside the window '..G.Text(box)) end end
-  check(not bad,m.name..': approval, usage, status, notice, close notice and buttons are stacked inside the window'..(bad and (': '..bad) or ''))
+  check(not bad,m.name..': Start row, status, notice and buttons are stacked inside the window'..(bad and (': '..bad) or ''))
   for _,b in ipairs({f.cont,f.review}) do
    if b:IsShown() then
     local r=G.Rect(b,f)

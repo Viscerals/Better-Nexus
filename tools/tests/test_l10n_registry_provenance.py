@@ -100,10 +100,9 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual((self.release["packProvenance"]["contract"],
                           self.release["packProvenance"]["contractVersion"]),
                          ("nexus.l10n.pack_provenance", 1))
-        # Entry and review facts are unchanged: every current English key
-        # (the full visible-UI catalog, 4116), six packs of 4078 draft
-        # entries each (24468 in all; each pack still lacks 38 of the 4116
-        # keys), no translated entry reviewed and no gate upgrade. The
+        # Retiring the unused Tome row leaves 4117 English keys and 4077
+        # draft entries per pack (24462 total, 40 missing per pack).
+        # No translated entry was reviewed and no gate was upgraded. The
         # current metadata holds 539 structural entry declarations, every one
         # "legitimately_identical" with status "declared": frFR 110, deDE
         # 108, esES 90, plPL 89, ptBR 92, ruRU 50. They are source facts of
@@ -112,8 +111,8 @@ class ProvenanceTests(unittest.TestCase):
         # acceptance facts below stay as they were.
         report = self.catalog.registry_catalog_report(*self.inputs)
         self.assertEqual(report["denominator"]["englishKeys"], CURRENT_FULL_UI_KEYS)
-        self.assertEqual([row["entriesPresent"] for row in report["products"]], [4078] * 6)
-        self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 24468)
+        self.assertEqual([row["entriesPresent"] for row in report["products"]], [4077] * 6)
+        self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 24462)
         declared = {"frFR": 110, "deDE": 108, "esES": 90, "plPL": 89, "ptBR": 92, "ruRU": 50}
         self.assertEqual(sorted(row["productId"] for row in report["products"]), sorted(declared))
         for row in report["products"]:

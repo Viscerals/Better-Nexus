@@ -420,8 +420,15 @@ do
  local misses={}
  local function expect(v,m) if not v then misses[#misses+1]=m end end
  local f=assert(NexusHelpWindow,'r3 SETUP: the Help window');local content=assert(f.content,'r3 SETUP: the Help document frame')
+ -- v47 (2026-11-19): the corrected Orbs page (no maximum, Pause or Continue
+ -- text) is shorter than this storage model; the longest page, Auto, rolling
+ -- and saving, keeps the case meaningful (a page longer than one part). Its
+ -- live "Auto right now" lines are not this case's subject: within this case
+ -- only they are left out (restored below), so the document is the page.
+ local panelAuto=Nexus.Panel and Nexus.Panel.AutoDetailLines
+ if Nexus.Panel then Nexus.Panel.AutoDetailLines=function() return {} end end
  local orbs
- for _,p in ipairs(Help.Pages) do if p.id=='orbs' then orbs=p end end
+ for _,p in ipairs(Help.Pages) do if p.id=='rolling' then orbs=p end end
  assert(orbs,'r3 SETUP: the Orbs reference page')
  local function Visible(s)
   s=tostring(s or ''):gsub('||','\1'):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
@@ -486,7 +493,7 @@ do
   return fr
  end
  -- The real call site, twice (another page first forces a fresh SetText).
- Help.Show('rolling');Help.Show('orbs')
+ Help.Show('orbs');Help.Show('rolling')
  local parts,stored={},0
  Walk(content,function(o)
   if o.kind=='FontString' then
@@ -511,6 +518,7 @@ do
  for fs,r in pairs(armed) do rawset(fs,'SetText',r.prior) end
  for fr,r in pairs(creators) do rawset(fr,'CreateFontString',r.prior) end
  CreateFrame=priorCreate
+ if Nexus.Panel then Nexus.Panel.AutoDetailLines=panelAuto end
  Help.Hide()
  if #misses>0 then
   error('v28 r3 Orbs document storage: '..#misses..' expectation(s) missed:\n'..table.concat(misses,'\n'),0)

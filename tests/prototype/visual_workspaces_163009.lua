@@ -377,18 +377,9 @@ C.scenario('W5b Orbs: the rows under Start take the room their text needs; no bl
  C.guard(f.approval:GetHeight()>=34 and f.approval:GetText()==approvalText and approvalText:find('Start approves this maximum',1,true)~=nil,
   'W5b: the approval text keeps its 34 units and its words',f.approval:GetHeight())
  C.expect(f._bandsBottom~=nil and f._bandsBottom<=f:GetHeight() and f:GetHeight()<=445,'W5b: every row ends inside the window, at most the former 445',f:GetHeight())
- -- Advanced adds its whole box below the buttons; closing it gives the
- -- height back exactly.
- local closed=f:GetHeight()
- local adv
- for _,c in ipairs(f.children or {}) do if c.kind=='Button' and V.Plain(c:GetText() or '')=='Advanced' then adv=c end end
- if C.setup(adv~=nil,'W5b: fixture: the Advanced button') then
-  adv:Click()
-  local ar=G.Rect(f.advanced,f)
-  C.expect(f.advanced:IsShown() and ar[2]>=hr[4] and ar[4]<=f:GetHeight() and ar[2]-hr[4]<=16,'W5b: Advanced lies whole below the buttons',G.Text(ar))
-  adv:Click()
-  C.expect(not f.advanced:IsShown() and f:GetHeight()==closed,'W5b: closing Advanced gives back exactly its height',f:GetHeight())
- end
+ -- Start/Stop rework (2026-11-19): no Advanced exclusions; the closed window
+ -- is the whole window. (Replaces the Advanced box geometry expectation.)
+ C.expect(not f.advanced:IsShown() and not f.advancedToggle:IsShown(),'W5b: no Advanced box or toggle on the run page')
  Nexus.OrbPanel.Hide()
  C.guard(Quiet()==q and Nexus.OrbRuntime.Status().running~=true,'W5b: the band flow started, spent, sent and toggled nothing',Quiet())
 end)

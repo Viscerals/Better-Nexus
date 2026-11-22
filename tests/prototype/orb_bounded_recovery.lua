@@ -1175,7 +1175,10 @@ r2case('E full usage and compact strip hover',function()
  check(f.usageHit~=nil and strip.summaryHit~=nil,'EXPECT full text helpers exist on actual usage and compact strip')
  local before=H.Count('orb-spend');local tooltip=GameTooltip;local captured
  GameTooltip={SetOwner=function()end,AddLine=function(_,value)captured=value end,Show=function()end,Hide=function()end}
- for _,pair in ipairs({{f.usage,f.usageHit},{strip.summary,strip.summaryHit}}) do
+ -- Start/Stop rework (2026-11-19): the window has no usage-against-maximum row;
+ -- the compact strip keeps its hover.
+ check(not f.usage:IsShown(),'EXPECT no usage-against-maximum row in the window')
+ for _,pair in ipairs({{strip.summary,strip.summaryHit}}) do
   local fs,hit=pair[1],pair[2]
   check(hit~=nil and hit._nexusText==fs,'EXPECT full text helper covers actual usage and compact strip')
   fs.GetStringHeight=function()return 120 end -- independent overflow model only

@@ -1,50 +1,28 @@
--- At the moment an approved run reaches its maximum, the Orb panel's primary
--- control changes under the player: it was Pause while the run was going and
--- Resume while the run was paused, and at FINISHED it offers a new run with
--- the configured maximum already filled in. One press there starts real
--- spending. The first press must only arm that control, and only a deliberate
--- second press may start the run. Real runtime, real panel handlers, fake
--- game services, synthetic data.
-local H=dofile('tests/prototype/orbs_support.lua');local M,A,O=H.M,H.A,H.O
+-- Start/Stop rework (2026-11-19). The earlier risk was a primary control that
+-- changed meaning under the player (Pause, Resume, then "Start new run" with a
+-- maximum filled in), so one press after a finished run spent again. Start is
+-- now one fixed control: it never changes its words, it is unavailable while
+-- the run is ON, and after a run ends it is offered only when there is work.
+-- (Replaces the two-press new-run confirmation pin.)
+local H=dofile('tests/prototype/orbs_support.lua');local A,O=H.A,H.O
+local M=Nexus.OrbAuto
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-H.OrbPlan({{spellId=410002,quality=2,stacks=14}})
-H.granted={['Disposable A']={},['Disposable B']={}}
-for _=1,6 do
- table.insert(H.granted['Disposable A'],{spellId=410001,quality=1})
- table.insert(H.granted['Disposable B'],{spellId=410003,quality=0})
-end
-O.charges=20
-H.Notify();A.Poll()
-H.Approve(3,false,false)
-for step=1,3 do
- for _=1,20 do if M.Status().state=='WAIT_OFFER' then break end M.Pump() end
- check(M.Status().state=='WAIT_OFFER','step '..step..': the run requested its own Orb')
- H.Offer({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410008,quality=1}})
- H.Result(410002,2)
-end
-check(M.Status().state=='FINISHED','the settled run finished at its limit: '..tostring(M.Status().state))
-
-SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
+H.OrbPlan({{spellId=410002,quality=2,stacks=1}})
+SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel);Nexus.OrbPanel.Refresh()
+check(f.start:GetText()=='Start' and f.start:IsEnabled(),'Start is offered with its fixed words')
+f.start:Click();H.Advance(.5);Nexus.OrbPanel.Refresh()
+check(M.Active() and H.Count('orb-spend')==1,'one press starts the run and spends one Orb')
+check(f.start:GetText()=='Start' and not f.start:IsEnabled(),'while ON, Start keeps its words and is unavailable')
+f.start:Click();H.Advance(.5)
+check(H.Count('orb-spend')==1,'a press on the unavailable Start spends nothing')
+O.offer=true;H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}});H.Advance(.5)
+local out=H.Clone(H.granted)
+for _,es in pairs(out) do for i=#es,1,-1 do if es[i].spellId==O.source then table.remove(es,i);break end end end
+out['Desired A']={{spellId=410002,quality=2}}
+H.granted=out;H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false;H.Notify();A.Poll();H.Advance(.5)
 Nexus.OrbPanel.Refresh()
-check(f.start:GetText()=='Start new run','the primary control offers a new run')
-local spends=H.Count('orb-spend')
-f.start:Click()
-local s=M.Status()
-check(s.state=='FINISHED' and not s.running,'the first press starts nothing: '..tostring(s.state))
-check(H.Count('orb-spend')==spends,'the first press spends nothing: '..H.Count('orb-spend')..' of '..spends)
-check(f.start:GetText()=='Confirm new run','the control now says which press starts the run')
-check(f.status:GetText():find('Confirm new run',1,true)~=nil,
- 'the panel states what the second press approves: '..f.status:GetText())
-
--- A closed window is not an armed one.
-f:Hide();f:Show();Nexus.OrbPanel.Refresh()
-check(f.start:GetText()=='Start new run','closing the window disarms the control')
-check(not M.Status().running,'and nothing was started by closing it')
-
-f.start:Click()
-check(f.start:GetText()=='Confirm new run','it arms again on the next press')
-check(not M.Status().running,'still nothing is running after the arming press')
-f.start:Click()
-check(M.Status().running==true,'the second, deliberate press starts the new run')
-check(M.Status().spent==0,'the new run starts its own counters: '..tostring(M.Status().spent))
-print('PASS orb_finished_new_run_confirm: a finished run needs a deliberate second press before it spends again checks='..checks)
+check(not M.Active() and M.Status().state=='DONE','the run finished: the Wishlist is complete')
+check(f.start:GetText()=='Start' and not f.start:IsEnabled(),'a finished run with nothing to do offers no Start')
+local spends=H.Count('orb-spend');f.start:Click();H.Advance(.5)
+check(H.Count('orb-spend')==spends and not M.Active(),'a press after the finished run spends nothing')
+print('PASS orb_finished_new_run_confirm: one fixed Start, unavailable while ON and after a finished run with nothing to do checks='..checks)

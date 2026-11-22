@@ -54,19 +54,19 @@ check(has(trouble,'only when no action is active or pending: log out to characte
 check(has(guide,'only when no action is active or pending: log out to character selection'),'guide: turning Nexus off guarded')
 check(has(trouble,'UNVERIFIED hint') and has(guide,'UNVERIFIED hint'),'peer update reports are unverified hints')
 
--- 2. Max and the budget: Max follows the balance and starts nothing; the
--- approved maximum is fixed; the manual limit is its own rule.
-check(has(orbs,'Max returns to following the balance') and has(orbs,'Help and Max spend nothing'),'Max follows the balance and spends nothing')
-check(has(orbs,'up to 1000') and has(orbs,'Typing an amount stops that'),'the draft follows the balance up to 1000 until typed')
-check(has(orbs,'The approved maximum does not change during the run'),'approved maximum fixed')
-check(has(orbs,'whole number from 1 to 10,000'),'manual-limit validation stated separately')
-check(has(orbs,'A maximum saved by an earlier version is kept'),'legacy saved values kept')
-check(has(orbs,'Start new run') and has(orbs,'Confirm new run'),'explicit new-run review')
+-- 2. Start/Stop (2026-11-19, user/coordinator-approved wording): there is no
+-- maximum, Max or budget to describe; Start begins a run, Stop ends it.
+check(has(orbs,'There is no maximum to set') and has(orbs,'and Help spend nothing') and not has(orbs,'Max returns'),'no maximum to set; opening and Help spend nothing')
+check(not has(orbs,'up to 1000') and not has(orbs,'Typing an amount'),'no balance-following maximum is described')
+check(not has(orbs,'approved maximum'),'no approved maximum is described')
+check(not has(orbs,'whole number from 1 to 10,000'),'no maximum to type is described')
+check(has(orbs,'A maximum saved by an earlier version is kept but not used'),'legacy saved values kept, and not used')
+check(has(orbs,'After a run ends, click Start to begin a new one') and not has(orbs,'Confirm new run'),'a new run is a new Start')
 for _,text in ipairs({orbs,guide}) do
  check(not text:find('Max starts',1,true) and not text:find('Max approves',1,true) and not text:find('Max changes',1,true),'Max never described as starting or approving')
 end
-check(has(orbs,'Closing the window does not stop an approved run. Use Pause or Stop.'),'closing is not stopping')
-check(has(orbs,'Recheck only asks for balance and ownership data; it is not a replay or a fix'),'Recheck is read-only')
+check(has(orbs,'Closing the window does not stop a run. Use Stop'),'closing is not stopping')
+check(has(orbs,'A run has no Advanced exclusions or Recheck'),'no Recheck or Advanced control is described')
 check(has(orbs,'do not clear it') or has(orbs,'does not clear it') or has(orbs,'do not clear'),'unresolved receipt is not cleared by relog or controls')
 before(orbs,'if that action\'s offer is still open','choose in that window','narrow manual case: prerequisite before the action')
 

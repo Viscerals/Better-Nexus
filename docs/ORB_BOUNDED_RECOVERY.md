@@ -159,6 +159,25 @@ rolling. It sends no spend/selection or automatic Resume. Observed spend is not
 charged twice; unobserved charge exposure moves from reservation to unknown
 exposure without a refund. A refused save retains the receipt, exposure and gate.
 
+Continue is not needed for ordinary rolling in one restored class: a receipt
+restored after a reload whose spend this client observed with its offer, or
+whose first Orb offer seen after its request was recorded while the spend is
+still unconfirmed (not proof that it was this action's reply; a later Orb offer
+blocks again), with no recorded choice, while the last passive read showed no Orb offer, no offer was matched
+to it in this session and no Continue check is under way. Ordinary Auto may
+then be turned on from chat or the panel and the ordinary-board gate permits.
+No ownership result can settle that receipt, so an ordinary Take cannot be
+counted as its outcome, and the adapter's own Take is not kept as raw pick
+evidence. An unconfirmed spend stays unconfirmed and reserved, Continue still
+refuses it, and a receipt whose offer was never seen stays blocked. The receipt
+and its exposure stay; Resume, Start and the loadout,
+lock and upload blocks still refuse; an Orb offer that appears, an unreadable
+state or an Orb service that reports an offer or an unknown state blocks again.
+The release gives up one path: after ordinary rolling has changed ownership, a
+late arrival of the original offer no longer equals the receipt's ownership,
+so it is not matched (`OFFER_UNMATCHED`) and the old action cannot be confirmed
+from it. That is conservative (nothing is attributed); Continue remains the exit.
+
 Only observed actual ownership can complete the selected build. If it completes
 while the last operation cannot be attributed, the run stops with its unresolved
 receipt and exposure retained until that explicit checked exit; completion does

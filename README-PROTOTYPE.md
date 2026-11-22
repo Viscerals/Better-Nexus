@@ -256,21 +256,22 @@ not count for a higher-quality target.
 ## Orbs / Lost Memories
 
 Orbs refine rolled Echoes toward the assigned Wishlist, one Orb per replacement.
-They cannot create or replace locked slots; a run stops when rolled targets are
-complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
+They cannot create or replace locked slots. Opening the window, **Open Orbs...**
+and Help spend nothing.
 
 1. Open `/nexus orbs`, **Orbs** on the panel footer, **Orbs / Lost Memories**
    in the **Options** menu under **More help and windows**, or **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
    the confirmed Orb balance. Loading is never a zero balance.
-2. Set the maximum. Until you type an amount it follows your confirmed balance,
-   up to 1000. Typing stops that; **Max** returns to following the balance. A
-   typed amount is a whole number from 1 to 10,000. A maximum saved by an
-   earlier version is kept.
-3. Click **Start**. Start approves the maximum shown and automatic use of eligible
-   surplus copies, including safe recycling. It turns ordinary Auto OFF; it does
-   not turn it back ON. The approved maximum does not change during the run.
-4. The run continues after each confirmed result and stops at completion, the
-   maximum, low balance, no safe source or uncertainty.
+2. There is no maximum to set. A maximum saved by an earlier version is kept but
+   not used.
+3. Click **Start**. Nexus uses one Orb at a time on eligible surplus copies and
+   also takes a needed Echo from a free draw. Starting leaves ordinary Auto as it
+   is. Locked and required copies stay protected.
+4. The run continues after each answer the game publishes. It ends when the
+   Wishlist goal is met, when no Orb or safe source copy is left, when the game
+   does not take a chosen Echo, when the active loadout changes, or when you
+   press **Stop**. A request whose answer Nexus has not seen is waited on and
+   never repeated.
 
 Login, reconnect, new resources or reload never restart spending. If the game
 has no Orb service, only Orb mode is unavailable and ordinary rolling still
@@ -278,33 +279,24 @@ works. If the Orb service exists but Nexus cannot read its state, ordinary
 rolling waits too. The Orb window's **Help** button
 opens this Orb section in `/nexus reference`.
 
-Closing the window does not stop an approved run. Use Pause or Stop.
+Closing the window does not stop a run. Use Stop in the Orb window, on the main Nexus panel or in the mini panel.
 
-After a finished run, click **Start new run**, review the maximum, then click
-**Confirm new run**. If the maximum changes, press Start new run again.
+After a run ends, click **Start** to begin a new one.
 
 When it is blocked:
 
-- Pause/Stop prevents new submissions; it cannot undo an accepted spend, and a
-  pending result may still settle.
-- Changing the active loadout, assignment or targets pauses new actions; Resume
-  adopts the new target and keeps the same maximum.
-- **Recheck** (Advanced) only asks for balance and ownership data. It is not a
-  replay or a fix; it can request confirming data, but pressing it does not
-  clear a record.
-- An unresolved Orb result keeps its spending exposure and blocks new Orb runs
-  and ordinary rolling. Relogging, reloading, changing builds, returning to the
-  old loadout or pressing controls again does not clear it. Nexus never retries,
+- Stop prevents new submissions; it cannot undo one already sent, and its
+  result may still arrive.
+- An Orb record left from before a reload is kept as history with its spending
+  exposure. It does not hold a new Start; ordinary picks wait only while an Orb
+  offer is open or the Orb state is unknown. Relogging, reloading, changing
+  builds or pressing controls again does not clear it. Nexus never retries,
   refunds or deletes it. Do not clear saved data.
 - The one manual case: after a reload, if that action's offer is still open in
   the game's offer window and matches the saved record, choose in that window.
   Nexus confirms it only from the exact matching result, and only for the Echo
   it proposed (the Orb window names it). An action that ended unobserved cannot
-  be confirmed. For an action with a spend this client observed (one Orb fewer
-  with its offer; no server reply confirms a spend) and no recorded outcome whose
-  offer is gone, the player may choose Continue in the Orb window after a read-only
-  check (`docs/ORB_RECOVERY_CONTINUE.md`); besides the exact matching result,
-  nothing else clears the block.
+  be confirmed.
 
 ## Shared builds, DPS and Sync
 

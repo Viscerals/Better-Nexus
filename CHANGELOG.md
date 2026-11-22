@@ -1,3 +1,21 @@
+# Nexus 1.20.0-beta.1 (next public test)
+
+Changes since test.9101.
+
+### Echoes and Orb rolling
+
+- The Orb panel now uses **Start** and **Stop**. There is no roll limit to enter. Start rolls toward your active Wishlist until the goal is met, you stop it, or no usable Orb remains.
+- Orb rolling can pick a needed Echo already on screen while waiting for a redraw. If a redraw still has no observed result after 20 seconds, Nexus can retry that request once when the choices and Orb count are still unchanged.
+- Support reports now distinguish a redraw that produced new choices from one that cleared the choices.
+- Added **Auto-manage Tome Echoes** under **Options → Automation settings**. Turning it off leaves the current Tome Echo settings alone without turning off Auto. The separate Wishlist option for locking Echo slots is unchanged.
+- Flexible Plan no longer reports a save or clear as successful when the change couldn't be verified.
+
+### DPS, leaderboard, and startup
+
+- The HUD's **Yours** and **Best Known** rows abbreviate large DPS numbers, for example **9.08M DPS** instead of **9,077,790 DPS**. Recorded values and rankings are unchanged; the **Best Known** tooltip still shows the exact number.
+- The Leaderboard displays up to 100 results **after** applying your filters and ranking the eligible results. Searches can still find entries outside the overall top 100.
+- On login or reload, default maintenance no longer republishes the whole catalog when only its maintenance timestamp would change.
+
 # Nexus 1.19.5
 
 - Fixed the Wishlist button for active Saved Builds without an association; it now opens a persistent Create New Wishlist editor instead of hiding the Nexus menu.
