@@ -4461,6 +4461,21 @@ local DECLARATIONS = {
     -- in the same order as data/LocalizationEnglish.lua and KEY_CONTEXT.json.
     ["orb.status.run_until_goal"] = {kind = "text"},
     ["readout.menu.auto_manage_tomes"] = {kind = "text"},
+    -- Language selection in the setup guide.
+    ["guide.label.step_language"] = {kind = "text"},
+    ["guide.body.why_language"] = {kind = "text"},
+    ["guide.body.outcome_expect_language"] = {kind = "text"},
+    ["guide.title.language_title"] = {kind = "text"},
+    ["guide.body.language_intro"] = {kind = "text"},
+    ["guide.body.language_reload"] = {kind = "text"},
+    ["guide.body.language_current"] = {kind = "text"},
+    ["guide.body.language_next"] = {kind = "text"},
+    ["guide.body.language_selected"] = {kind = "text"},
+    ["guide.body.language_available"] = {kind = "text"},
+    ["guide.body.language_apply"] = {kind = "text"},
+    ["guide.body.language_combat"] = {kind = "text"},
+    ["editor.button.new_wishlist_short"] = {kind = "text"},
+
 }
 -- NEXUS-L10N-REGISTRY END
 
