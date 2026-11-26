@@ -125,7 +125,7 @@ end
 function SyncModeDialog.Ensure()
     local d = SyncModeDialog.frame
     if d then return d end
-    d = CreateFrame("Frame", "NexusSyncModeDialog", UIParent)
+    d = Nexus.FontSupport.CreateFrame("Frame", "NexusSyncModeDialog", UIParent)
     SyncModeDialog.frame = d
     d:SetSize(460, 430)
     d:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
@@ -154,7 +154,7 @@ function SyncModeDialog.Ensure()
     d.options = {}
     for index, mode in ipairs(SyncModeDialog.MODES) do
         local top = -86 - (index - 1) * 74
-        local option = CreateFrame("CheckButton", nil, d, "UIRadioButtonTemplate")
+        local option = Nexus.FontSupport.CreateFrame("CheckButton", nil, d, "UIRadioButtonTemplate")
         option:SetSize(20, 20)
         option:SetPoint("TOPLEFT", 24, top)
         option.mode = mode
@@ -175,17 +175,17 @@ function SyncModeDialog.Ensure()
     Text("note", "GameFontDisableSmall", -312, 34):SetText(
         T("sync.note.apply_saves_only"))
     Text("result", "GameFontHighlightSmall", -350, 34)
-    d.apply = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.apply = Nexus.FontSupport.CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     d.apply:SetSize(84, 22)
     d.apply:SetPoint("BOTTOMRIGHT", -112, 16)
     d.apply:SetText(T("sync.button.apply"))
     d.apply:SetScript("OnClick", function() SyncModeDialog.Apply() end)
-    d.cancel = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.cancel = Nexus.FontSupport.CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     d.cancel:SetSize(84, 22)
     d.cancel:SetPoint("BOTTOMRIGHT", -20, 16)
     d.cancel:SetText(T("sync.button.cancel"))
     d.cancel:SetScript("OnClick", function() d:Hide() end)
-    d.close = CreateFrame("Button", nil, d, "UIPanelCloseButton")
+    d.close = Nexus.FontSupport.CreateFrame("Button", nil, d, "UIPanelCloseButton")
     d.close:SetSize(32, 32)
     d.close:SetPoint("TOPRIGHT", -4, -4)
     d.close:SetScript("OnClick", function() d:Hide() end)
@@ -381,7 +381,7 @@ end
 
 local function InstallPopupDragHandle(parent)
     parent:SetMovable(true)
-    local handle = CreateFrame("Frame", nil, parent)
+    local handle = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     handle:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -6)
     handle:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -38, -6)
     handle:SetHeight(28)
@@ -1458,7 +1458,7 @@ local CLASS_PICK_ORDER = {
 }
 
 local function MakeDropdownMenu(parent, width)
-    local menu = CreateFrame("Frame", nil, parent)
+    local menu = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     menu:SetFrameStrata("TOOLTIP")
     menu:SetWidth(width)
     menu:SetBackdrop({
@@ -1474,7 +1474,7 @@ end
 
 -- owner: the menu to close when the row is in a scrolled list inside it.
 local function AddMenuButton(menu, text, onClick, index, owner)
-    local b = CreateFrame("Button", nil, menu)
+    local b = Nexus.FontSupport.CreateFrame("Button", nil, menu)
     b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,-6-(index-1)*22)
     b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
     local fs = b:CreateFontString(nil,"OVERLAY",Nexus.LayoutMetrics
@@ -1621,9 +1621,9 @@ local function RefreshPostWishlistMenu()
     -- The rows live in a list that scrolls with the mouse wheel inside the
     -- menu, so more sources than fit its 300 px never spill below it.
     if not menu._list then
-        menu._scroll = CreateFrame("ScrollFrame", nil, menu)
+        menu._scroll = Nexus.FontSupport.CreateFrame("ScrollFrame", nil, menu)
         menu._scroll:SetPoint("TOPLEFT", 0, 0); menu._scroll:SetPoint("BOTTOMRIGHT", 0, 6)
-        menu._list = CreateFrame("Frame", nil, menu._scroll)
+        menu._list = Nexus.FontSupport.CreateFrame("Frame", nil, menu._scroll)
         menu._list:SetWidth(menu:GetWidth()); menu._scroll:SetScrollChild(menu._list)
         menu._scroll:EnableMouseWheel(true)
         menu._scroll:SetScript("OnMouseWheel", function(self, delta)
@@ -1670,7 +1670,7 @@ end
 
 local function EnsurePostPopup()
     if postPopup then return postPopup end
-    local p = CreateFrame("Frame","NexusPostPopup",UIParent)
+    local p = Nexus.FontSupport.CreateFrame("Frame","NexusPostPopup",UIParent)
     p:SetSize(760, 560)
     p:SetFrameStrata("FULLSCREEN_DIALOG")
     p:EnableMouse(true)
@@ -1680,36 +1680,36 @@ local function EnsurePostPopup()
 
     local titleBar = p:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
     titleBar:SetPoint("TOP",0,-14); titleBar:SetText(T("library.title.share_form"))
-    local close = CreateFrame("Button",nil,p,"UIPanelCloseButton")
+    local close = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function()
         HidePostMenus(); ClearPostDescriptionFocus(); p:Hide()
     end)
 
     local tl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); tl:SetPoint("TOPLEFT",16,-38); tl:SetText(T("library.label.share_build_title"))
-    postTitleBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate"); postTitleBox:SetSize(330,20); postTitleBox:SetPoint("TOPLEFT",16,-54); postTitleBox:SetAutoFocus(false)
+    postTitleBox = Nexus.FontSupport.CreateFrame("EditBox",nil,p,"InputBoxTemplate"); postTitleBox:SetSize(330,20); postTitleBox:SetPoint("TOPLEFT",16,-54); postTitleBox:SetAutoFocus(false)
     ConfigureSafeEditableText(postTitleBox, 80, false)
     p._postTitleBox = postTitleBox
 
     local dl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); dl:SetPoint("TOPLEFT",16,-88); dl:SetText(T("library.label.share_description"))
-    local descBg = CreateFrame("Frame",nil,p); descBg:SetPoint("TOPLEFT",14,-104); descBg:SetSize(334,180)
+    local descBg = Nexus.FontSupport.CreateFrame("Frame",nil,p); descBg:SetPoint("TOPLEFT",14,-104); descBg:SetSize(334,180)
     pcall(function() descBg:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=12,insets={left=3,right=3,top=3,bottom=3}}); descBg:SetBackdropColor(0,0,0,0.5) end)
-    local descScroll = CreateFrame("ScrollFrame","NexusPostDescriptionScroll",descBg,
+    local descScroll = Nexus.FontSupport.CreateFrame("ScrollFrame","NexusPostDescriptionScroll",descBg,
         "UIPanelScrollFrameTemplate")
     descScroll:SetPoint("TOPLEFT",6,-6)
     descScroll:SetPoint("BOTTOMRIGHT",-24,6)
-    postDescBox = CreateFrame("EditBox",nil,descScroll)
+    postDescBox = Nexus.FontSupport.CreateFrame("EditBox",nil,descScroll)
     ConfigureDescriptionEdit(postDescBox, descScroll, 286, 168)
     ConfigureSafeEditableText(postDescBox, 2000, true)
     p._postDescScroll = descScroll
     p._postDescBox = postDescBox
 
     local chooseLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); chooseLabel:SetPoint("TOPLEFT",16,-302); chooseLabel:SetText(T("library.label.share_choose_source"))
-    postWishlistBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postWishlistBtn:SetSize(334,26); postWishlistBtn:SetPoint("TOPLEFT",16,-320); postWishlistBtn:SetText(TF("library.button.source_named", {name=T("library.value.source_select")}))
+    postWishlistBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postWishlistBtn:SetSize(334,26); postWishlistBtn:SetPoint("TOPLEFT",16,-320); postWishlistBtn:SetText(TF("library.button.source_named", {name=T("library.value.source_select")}))
     p._postWishlistBtn = postWishlistBtn
     postWishlistMenu = MakeDropdownMenu(p,334); postWishlistMenu:SetPoint("TOPLEFT",16,-348)
     postWishlistBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostWishlistMenu(); postWishlistMenu:Show() end)
 
-    postClassBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postClassBtn:SetSize(334,26); postClassBtn:SetPoint("TOPLEFT",16,-360); postClassBtn:SetText(TF("library.button.class_named", {class=T("library.value.class_select")}))
+    postClassBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postClassBtn:SetSize(334,26); postClassBtn:SetPoint("TOPLEFT",16,-360); postClassBtn:SetText(TF("library.button.class_named", {class=T("library.value.class_select")}))
     p._postClassBtn = postClassBtn
     postClassMenu = MakeDropdownMenu(p,334); postClassMenu:SetPoint("TOPLEFT",16,-388)
     postClassBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostClassMenu(); postClassMenu:Show() end)
@@ -1718,18 +1718,18 @@ local function EnsurePostPopup()
     local previewWishlist = p:CreateFontString(nil,"OVERLAY","GameFontHighlight"); previewWishlist:SetPoint("TOPLEFT",380,-54); previewWishlist:SetSize(350,16); previewWishlist:SetJustifyH("LEFT"); p._previewWishlist=previewWishlist
     local previewClass = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); previewClass:SetPoint("TOPLEFT",380,-74); previewClass:SetSize(350,14); previewClass:SetJustifyH("LEFT"); p._previewClass=previewClass
     local previewSummary = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); previewSummary:SetPoint("TOPLEFT",380,-92); previewSummary:SetSize(350,14); previewSummary:SetJustifyH("LEFT"); p._previewSummary=previewSummary
-    local previewClip=CreateFrame("Frame",nil,p); previewClip:SetPoint("TOPLEFT",374,-112); previewClip:SetSize(370,390); pcall(function() previewClip:SetClipsChildren(true) end); p._previewClip=previewClip
-    local previewScroll=CreateFrame("ScrollFrame",nil,previewClip); previewScroll:SetAllPoints(previewClip); previewScroll:EnableMouseWheel(true); p._previewScroll=previewScroll
-    local previewChild=CreateFrame("Frame",nil,previewScroll); previewChild:SetWidth(360); previewChild:SetHeight(1); previewScroll:SetScrollChild(previewChild); p._previewChild=previewChild
+    local previewClip=Nexus.FontSupport.CreateFrame("Frame",nil,p); previewClip:SetPoint("TOPLEFT",374,-112); previewClip:SetSize(370,390); pcall(function() previewClip:SetClipsChildren(true) end); p._previewClip=previewClip
+    local previewScroll=Nexus.FontSupport.CreateFrame("ScrollFrame",nil,previewClip); previewScroll:SetAllPoints(previewClip); previewScroll:EnableMouseWheel(true); p._previewScroll=previewScroll
+    local previewChild=Nexus.FontSupport.CreateFrame("Frame",nil,previewScroll); previewChild:SetWidth(360); previewChild:SetHeight(1); previewScroll:SetScrollChild(previewChild); p._previewChild=previewChild
     p._previewRows={}
     for i=1,100 do
-        local row=CreateFrame("Frame",nil,previewChild); row:SetSize(355,22)
+        local row=Nexus.FontSupport.CreateFrame("Frame",nil,previewChild); row:SetSize(355,22)
         local icon=row:CreateTexture(nil,"ARTWORK"); icon:SetSize(20,20); icon:SetPoint("LEFT",0,0); row.icon=icon
         local text=row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); text:SetPoint("LEFT",26,0); text:SetSize(325,20); text:SetJustifyH("LEFT"); row.text=text; row:Hide(); p._previewRows[i]=row
     end
     local noWishlistNote=p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); noWishlistNote:SetPoint("TOPLEFT",380,-112); noWishlistNote:SetSize(350,80); noWishlistNote:SetJustifyH("LEFT"); noWishlistNote:SetJustifyV("TOP"); p._noWishlistNote=noWishlistNote
 
-    local postGoBtn=CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postGoBtn:SetSize(150,28); postGoBtn:SetPoint("BOTTOM",0,16); postGoBtn:SetText(T("library.button.share_form_submit")); p._postGoBtn=postGoBtn
+    local postGoBtn=Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postGoBtn:SetSize(150,28); postGoBtn:SetPoint("BOTTOM",0,16); postGoBtn:SetText(T("library.button.share_form_submit")); p._postGoBtn=postGoBtn
     postGoBtn:SetScript("OnClick",function()
         local wishlist, class = ControllerInstance().PostDraft()
         if not wishlist or not class then print("|cffff6060Nexus:|r "..T("library.chat.share_needs_source_class")); return end
@@ -1880,7 +1880,7 @@ local editEchoBtn, editLockText
 
 local function EnsureEditPopup()
     if editPopup then return editPopup end
-    local p = CreateFrame("Frame","NexusEditPopup",UIParent)
+    local p = Nexus.FontSupport.CreateFrame("Frame","NexusEditPopup",UIParent)
     p:SetSize(360,282); p:SetFrameStrata("FULLSCREEN_DIALOG")
     p:EnableMouse(true); p:Hide()
     p._dragHandle = InstallPopupDragHandle(p)
@@ -1888,7 +1888,7 @@ local function EnsureEditPopup()
     local title = p:CreateFontString(nil,"OVERLAY","GameFontNormal")
     title:SetPoint("TOP",0,-12); title:SetText(T("library.title.edit_form"))
 
-    local close = CreateFrame("Button",nil,p,"UIPanelCloseButton")
+    local close = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelCloseButton")
     close:SetPoint("TOPRIGHT",-2,-2); close:SetScript("OnClick",function()
         ClearEditDescriptionFocus()
         p:Hide()
@@ -1897,14 +1897,14 @@ local function EnsureEditPopup()
 
     local tl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     tl:SetPoint("TOPLEFT",16,-36); tl:SetText(T("library.label.edit_title"))
-    editTitleBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate")
+    editTitleBox = Nexus.FontSupport.CreateFrame("EditBox",nil,p,"InputBoxTemplate")
     editTitleBox:SetSize(310,20); editTitleBox:SetPoint("TOPLEFT",20,-52); editTitleBox:SetAutoFocus(false)
     ConfigureSafeEditableText(editTitleBox, 80, false)
     p._editTitleBox = editTitleBox
 
     local dl = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     dl:SetPoint("TOPLEFT",16,-80); dl:SetText(T("library.label.edit_description"))
-    local descBg = CreateFrame("Frame",nil,p)
+    local descBg = Nexus.FontSupport.CreateFrame("Frame",nil,p)
     descBg:SetPoint("TOPLEFT",18,-96); descBg:SetSize(324,86)
     pcall(function()
         descBg:SetBackdrop({ bgFile="Interface\\Tooltips\\UI-Tooltip-Background",
@@ -1912,11 +1912,11 @@ local function EnsureEditPopup()
             tile=true,tileSize=16,edgeSize=12, insets={left=3,right=3,top=3,bottom=3} })
         descBg:SetBackdropColor(0,0,0,0.5)
     end)
-    local descScroll = CreateFrame("ScrollFrame","NexusEditDescriptionScroll",descBg,
+    local descScroll = Nexus.FontSupport.CreateFrame("ScrollFrame","NexusEditDescriptionScroll",descBg,
         "UIPanelScrollFrameTemplate")
     descScroll:SetPoint("TOPLEFT",6,-6)
     descScroll:SetPoint("BOTTOMRIGHT",-24,6)
-    editDescBox = CreateFrame("EditBox",nil,descScroll)
+    editDescBox = Nexus.FontSupport.CreateFrame("EditBox",nil,descScroll)
     ConfigureDescriptionEdit(editDescBox, descScroll, 278, 74)
     ConfigureSafeEditableText(editDescBox, 2000, true)
     p._editDescScroll = descScroll
@@ -1930,7 +1930,7 @@ local function EnsureEditPopup()
     editLockText:SetJustifyV("TOP")
     p._editLockText = editLockText
 
-    editEchoBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    editEchoBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     -- The two actions stay 10 px apart (they used to overlap by 4 px).
     editEchoBtn:SetSize(202,22)
     editEchoBtn:SetPoint("BOTTOMLEFT",18,16)
@@ -1949,7 +1949,7 @@ local function EnsureEditPopup()
         end
     end)
 
-    local saveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    local saveBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText(T("library.button.edit_save_details"))
     p._saveBtn = saveBtn
     saveBtn:SetScript("OnClick",function()
@@ -2013,7 +2013,7 @@ end
 
 local function EnsureDetailPanel(parent)
     if detailPanel then return detailPanel end
-    local p = CreateFrame("Frame", nil, parent)
+    local p = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     p:SetSize(500, 570)
     p:SetPoint("TOPLEFT", parent, "TOPLEFT", 520, -60)
     p:SetFrameLevel(parent:GetFrameLevel() + 2)
@@ -2039,7 +2039,7 @@ local function EnsureDetailPanel(parent)
     p.title:SetSize(390,20)
     p.title:SetJustifyH("LEFT")
 
-    p.closeBtn = CreateFrame("Button", nil, p, "UIPanelCloseButton")
+    p.closeBtn = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelCloseButton")
     p.closeBtn:SetPoint("TOPRIGHT", -2, -2)
     p.closeBtn:SetScript("OnClick", function()
         ControllerInstance().ClearSelection()
@@ -2053,7 +2053,7 @@ local function EnsureDetailPanel(parent)
 
     -- The title and byline keep one line each; a shortened one is read in
     -- full from this tooltip.
-    p.headerHit = CreateFrame("Frame", nil, p)
+    p.headerHit = Nexus.FontSupport.CreateFrame("Frame", nil, p)
     p.headerHit:SetPoint("TOPLEFT", p.title, "TOPLEFT")
     p.headerHit:SetPoint("BOTTOMRIGHT", p.author, "BOTTOMRIGHT")
     p.headerHit:EnableMouse(true)
@@ -2072,10 +2072,10 @@ local function EnsureDetailPanel(parent)
     -- Everything between the header and the action row scrolls in a
     -- measured body (LayoutDetailPanel), so a short responsive panel keeps
     -- the records and the Details! note inside it.
-    local bodyScroll = CreateFrame("ScrollFrame", "NexusCommunityDetailScroll", p,
+    local bodyScroll = Nexus.FontSupport.CreateFrame("ScrollFrame", "NexusCommunityDetailScroll", p,
         "UIPanelScrollFrameTemplate")
     bodyScroll.scrollBarHideable = 1
-    local body = CreateFrame("Frame", nil, bodyScroll)
+    local body = Nexus.FontSupport.CreateFrame("Frame", nil, bodyScroll)
     body:SetSize(440, 1)
     bodyScroll:SetScrollChild(body)
     p.bodyScroll, p.body = bodyScroll, body
@@ -2092,7 +2092,7 @@ local function EnsureDetailPanel(parent)
     linkLabel:SetText("|cff888888"..T("library.label.discord_link").."|r")
     p.linkLabel = linkLabel
 
-    local linkBox = CreateFrame("EditBox",nil,body,"InputBoxTemplate")
+    local linkBox = Nexus.FontSupport.CreateFrame("EditBox",nil,body,"InputBoxTemplate")
     linkBox:SetSize(382,18)
     linkBox:SetAutoFocus(false)
     ConfigureSafeEditableText(linkBox, 2048, true)
@@ -2112,7 +2112,7 @@ local function EnsureDetailPanel(parent)
     p.linkBox = linkBox
 
     -- Owner-only Save button for the link
-    local linkSaveBtn = CreateFrame("Button",nil,body,"UIPanelButtonTemplate")
+    local linkSaveBtn = Nexus.FontSupport.CreateFrame("Button",nil,body,"UIPanelButtonTemplate")
     linkSaveBtn:SetSize(72,18)
     linkSaveBtn:SetPoint("LEFT",linkBox,"RIGHT",8,0)
     linkSaveBtn:SetText(T("library.button.save_link"))
@@ -2267,7 +2267,7 @@ local function EnsureDetailPanel(parent)
     -- player's build or your own. It only ever makes a draft: a mirror of
     -- your OWN server Saved Build hides it and offers Share as a separate,
     -- confirmed action instead (p.shareBtn below).
-    p.lockBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.lockBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.lockBtn:SetSize(130,22)
     p.lockBtn:SetPoint("BOTTOMLEFT",8,8)
     p.lockBtn:SetText(T("library.button.copy_into_editor"))
@@ -2317,7 +2317,7 @@ local function EnsureDetailPanel(parent)
     end)
     p.lockBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    p.editBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.editBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.editBtn:SetSize(96,22)
     p.editBtn:SetPoint("LEFT",p.lockBtn,"RIGHT",6,0)
     p.editBtn:SetText(T("library.button.edit_build"))
@@ -2326,7 +2326,7 @@ local function EnsureDetailPanel(parent)
         if selected then M.ToggleEditPopup(selected) end
     end)
 
-    p.retryShareBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.retryShareBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.retryShareBtn:SetSize(130,22)
     p.retryShareBtn:SetPoint("BOTTOMLEFT",8,8)
     p.retryShareBtn:SetText(T("library.button.retry_share"))
@@ -2379,7 +2379,7 @@ local function EnsureDetailPanel(parent)
     end)
     p.retryShareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    p.deleteBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.deleteBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.deleteBtn:SetSize(104,22)
     p.deleteBtn:SetPoint("BOTTOMRIGHT",-8,8)
     p.deleteBtn:SetText(T("library.button.delete"))
@@ -2551,7 +2551,7 @@ local function EnsureDetailPanel(parent)
         end
     end)
 
-    p.shareBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.shareBtn = Nexus.FontSupport.CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.shareBtn:SetSize(130,22)
     p.shareBtn:SetPoint("BOTTOMRIGHT",-8,8)
     p.shareBtn:SetText(T("library.button.share_saved_build"))
@@ -2642,7 +2642,7 @@ local function ShowDetailStatus(kind)
     if not p then return end
     local status = p._nexusStatus
     if not status then
-        status = CreateFrame("Frame", nil, p:GetParent())
+        status = Nexus.FontSupport.CreateFrame("Frame", nil, p:GetParent())
         status:SetAllPoints(p)
         status:SetFrameLevel(p:GetFrameLevel())
         pcall(function()
@@ -3016,7 +3016,7 @@ local function GetCard(parent)
         return c
     end
 
-    local card = CreateFrame("Button", nil, parent)
+    local card = Nexus.FontSupport.CreateFrame("Button", nil, parent)
     virtualStats.created = virtualStats.created + 1
     card:SetHeight(CARD_HEIGHT)
     card:EnableMouse(true)
@@ -3087,7 +3087,7 @@ local function GetCard(parent)
     card.mineBadge:SetJustifyH("RIGHT")
     card.mineBadge:Hide()
 
-    card.addBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
+    card.addBtn = Nexus.FontSupport.CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
     card.addBtn:SetSize(52, 22)
     card.addBtn:SetPoint("BOTTOMRIGHT", -8, 7)
     card.addBtn:SetText(T("library.button.view_build"))
@@ -3177,7 +3177,7 @@ local function GetHeader(parent)
         local h = table.remove(headerPool)
         h:SetParent(parent); h:Show(); return h
     end
-    local h = CreateFrame("Frame", nil, parent)
+    local h = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     h:SetHeight(22)
     h.label = h:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
     h.label:SetPoint("BOTTOMLEFT",2,-2)
@@ -3208,7 +3208,7 @@ local function EnsureFrame()
     if frame then return frame end
 
     -- Main browser window: list and detail panel live together in one surface.
-    frame = CreateFrame("Frame","NexusCommunityBuildsFrame",UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame","NexusCommunityBuildsFrame",UIParent)
     frame:SetClampedToScreen(true)
     if type(UISpecialFrames) == "table" then
         table.insert(UISpecialFrames, "NexusCommunityBuildsFrame")
@@ -3446,15 +3446,15 @@ local function EnsureFrame()
     -- mouse wheel over the body and the bar at its right edge move it
     -- (SetContentScroll). The bar is shown only while there is something to
     -- scroll.
-    local contentScroll = CreateFrame("ScrollFrame",nil,frame)
+    local contentScroll = Nexus.FontSupport.CreateFrame("ScrollFrame",nil,frame)
     contentScroll:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0)
     contentScroll:SetSize(1040,640)
     contentScroll:EnableMouseWheel(true)
-    local content = CreateFrame("Frame",nil,contentScroll)
+    local content = Nexus.FontSupport.CreateFrame("Frame",nil,contentScroll)
     content:SetSize(1040,640)
     contentScroll:SetScrollChild(content)
     frame._contentScroll, frame._content, frame._contentOffset = contentScroll, content, 0
-    local contentBar = CreateFrame("Slider",nil,frame)
+    local contentBar = Nexus.FontSupport.CreateFrame("Slider",nil,frame)
     contentBar:SetOrientation("VERTICAL")
     contentBar:SetWidth(16)
     contentBar:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-4,-40)
@@ -3494,14 +3494,14 @@ local function EnsureFrame()
     frame._titleText = titleText
     titleText:SetText(T("library.title.window"))
 
-    local closeBtn = CreateFrame("Button",nil,frame,"UIPanelCloseButton")
+    local closeBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT",-6,-6)
     -- It stays at the window's corner, above the scrolled content.
     closeBtn:SetFrameLevel(frame:GetFrameLevel() + 20)
 
     -- A single click-away layer and one-open-menu rule make every selector
     -- behave like the same control instead of three unrelated popup frames.
-    dropdownShield = CreateFrame("Button","NexusBuildDropdownShield",UIParent)
+    dropdownShield = Nexus.FontSupport.CreateFrame("Button","NexusBuildDropdownShield",UIParent)
     dropdownShield:SetAllPoints(UIParent)
     dropdownShield:SetFrameStrata("DIALOG")
     dropdownShield:SetFrameLevel(frame:GetFrameLevel() - 1)
@@ -3544,7 +3544,7 @@ local function EnsureFrame()
 
     local function AddDropdownRow(panel, entry, index, width, selectedFn, onSelect, color)
         local item = entry
-        local row = CreateFrame("Button",nil,panel)
+        local row = Nexus.FontSupport.CreateFrame("Button",nil,panel)
         row:SetSize(width - 10,24)
         row:SetPoint("TOPLEFT",5,-(5+(index-1)*24))
         row:EnableMouse(true)
@@ -3628,18 +3628,18 @@ local function EnsureFrame()
     end
 
     -- Primary navigation is centered and visually separate from filtering.
-    local navBar = CreateFrame("Frame",nil,frame)
+    local navBar = Nexus.FontSupport.CreateFrame("Frame",nil,frame)
     navBar:SetSize(332,24)
     navBar:SetPoint("TOPLEFT",18,-12)
     frame._navBar = navBar
 
-    local buildsTab = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    local buildsTab = Nexus.FontSupport.CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     buildsTab:SetSize(110,22)
     buildsTab:SetPoint("LEFT",0,0)
     buildsTab:SetText("|cffffd200Build Library|r")
     buildsTab:Disable()
 
-    leaderboardBtn = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    leaderboardBtn = Nexus.FontSupport.CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     leaderboardBtn:SetSize(112,22)
     leaderboardBtn:SetPoint("LEFT",buildsTab,"RIGHT",4,0)
     leaderboardBtn:SetText("Leaderboard")
@@ -3649,7 +3649,7 @@ local function EnsureFrame()
         if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
     end)
 
-    wishlistBtn = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    wishlistBtn = Nexus.FontSupport.CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     wishlistBtn:SetSize(98,22)
     wishlistBtn:SetPoint("LEFT",leaderboardBtn,"RIGHT",4,0)
     wishlistBtn:SetText("Wishlists")
@@ -3663,7 +3663,7 @@ local function EnsureFrame()
     -- Reference beside it is the manual's Sharing page. Like the other
     -- navigation buttons each replaces this window, whose layer is above
     -- theirs; each opens a page only and shares, sends or changes nothing.
-    frame._helpNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    frame._helpNav = Nexus.FontSupport.CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     frame._helpNav:SetSize(56,22)
     frame._helpNav:SetPoint("LEFT",wishlistBtn,"RIGHT",4,0)
     frame._helpNav:SetText(T("library.button.help"))
@@ -3672,7 +3672,7 @@ local function EnsureFrame()
             Nexus.Help.OpenHelp("sharing",function() CloseDropdowns(); frame:Hide() end)
         end
     end)
-    frame._referenceNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    frame._referenceNav = Nexus.FontSupport.CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     frame._referenceNav:SetSize(84,22)
     frame._referenceNav:SetPoint("LEFT",frame._helpNav,"RIGHT",4,0)
     frame._referenceNav:SetText(T("library.button.reference"))
@@ -3698,7 +3698,7 @@ local function EnsureFrame()
     frame._actionLabel = actionLabel
     actionLabel:SetText(T("library.heading.actions"))
 
-    searchBox = CreateFrame("EditBox","NexusBuildsSearch",frame,"InputBoxTemplate")
+    searchBox = Nexus.FontSupport.CreateFrame("EditBox","NexusBuildsSearch",frame,"InputBoxTemplate")
     frame._searchBox = searchBox
     searchBox:SetSize(165,22)
     searchBox:SetPoint("TOPLEFT",20,-78)
@@ -3723,7 +3723,7 @@ local function EnsureFrame()
     end)
     if (FilterSettings().search or "") ~= "" then searchLabel:Hide() end
 
-    clearSearchBtn = CreateFrame("Button",nil,searchBox,"UIPanelButtonTemplate")
+    clearSearchBtn = Nexus.FontSupport.CreateFrame("Button",nil,searchBox,"UIPanelButtonTemplate")
     frame._clearSearchBtn = clearSearchBtn
     clearSearchBtn:SetSize(82,18)
     clearSearchBtn:SetPoint("RIGHT",searchBox,"RIGHT",-2,0)
@@ -3744,7 +3744,7 @@ local function EnsureFrame()
     end)
 
     -- Library scope is a direct two-button selector instead of a hidden dropdown.
-    scopeBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    scopeBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame._scopeBtn = scopeBtn
     scopeBtn:SetSize(84,22)
     scopeBtn:SetPoint("LEFT",searchBox,"RIGHT",8,0)
@@ -3763,7 +3763,7 @@ local function EnsureFrame()
     end)
     scopeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
-    myBuildsBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    myBuildsBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame._myBuildsBtn = myBuildsBtn
     myBuildsBtn:SetSize(84,22)
     myBuildsBtn:SetPoint("LEFT",scopeBtn,"RIGHT",4,0)
@@ -3785,7 +3785,7 @@ local function EnsureFrame()
     end)
     myBuildsBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
-    classDropBtn = CreateFrame("Button",nil,frame)
+    classDropBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame)
     classDropBtn:SetSize(128,22)
     classDropBtn:SetPoint("LEFT",myBuildsBtn,"RIGHT",6,0)
     frame._classDropBtn = classDropBtn
@@ -3807,7 +3807,7 @@ local function EnsureFrame()
     classDropBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
     -- Preserve the established named frame for compatibility. The class
     -- choice is now a direct two-state control, so the shell stays hidden.
-    dropPanel = CreateFrame("Frame","NexusClassDropPanel",UIParent)
+    dropPanel = Nexus.FontSupport.CreateFrame("Frame","NexusClassDropPanel",UIParent)
     dropPanel:SetSize(138,10)
     StyleDropdownPanel(dropPanel)
     dropPanel:Hide()
@@ -3816,11 +3816,11 @@ local function EnsureFrame()
     -- requires both records; unchecked imposes no DPS-record requirement.
     -- The browsing scope stays on the All Shared / Mine buttons. The
     -- check always shows the saved filter (M.Refresh), never a guess.
-    local qualifiedBox = CreateFrame("Button",nil,frame)
+    local qualifiedBox = Nexus.FontSupport.CreateFrame("Button",nil,frame)
     qualifiedBox:SetSize(196,22)
     qualifiedBox:SetPoint("LEFT",classDropBtn,"RIGHT",6,0)
     frame._qualifiedBox = qualifiedBox
-    qualifiedBtn = CreateFrame("CheckButton",nil,qualifiedBox,"UICheckButtonTemplate")
+    qualifiedBtn = Nexus.FontSupport.CreateFrame("CheckButton",nil,qualifiedBox,"UICheckButtonTemplate")
     qualifiedBtn:SetSize(22,22)
     qualifiedBtn:SetPoint("LEFT",qualifiedBox,"LEFT",0,0)
     frame._qualifiedBtn = qualifiedBtn
@@ -3853,12 +3853,12 @@ local function EnsureFrame()
     -- key: the saved sort mode (a code); label: its shown name.
     local sorts={{key="dps",label=T("library.label.sort_dps")},{key="recent",label=T("library.label.sort_recent")},
         {key="title",label=T("library.label.sort_title")}}
-    sortToggle = CreateFrame("Button",nil,frame)
+    sortToggle = Nexus.FontSupport.CreateFrame("Button",nil,frame)
     sortToggle:SetSize(126,22)
     sortToggle:SetPoint("LEFT",frame._qualifiedBox,"RIGHT",6,0)
     frame._sortToggle = sortToggle
     StyleSelectorButton(sortToggle)
-    sortPanel = CreateFrame("Frame","NexusBuildSortPanel",UIParent)
+    sortPanel = Nexus.FontSupport.CreateFrame("Frame","NexusBuildSortPanel",UIParent)
     sortPanel:SetSize(134,#sorts*24+10)
     StyleDropdownPanel(sortPanel)
     for i,entry in ipairs(sorts) do
@@ -3877,7 +3877,7 @@ local function EnsureFrame()
     end)
     sortToggle:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
-    syncBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    syncBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     syncBtn:SetSize(88,22)
     syncBtn:SetPoint("TOPRIGHT",-132,-78)
     frame._syncBtn = syncBtn
@@ -3905,7 +3905,7 @@ local function EnsureFrame()
     syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
     -- The one Sync mode choice, beside Sync Now. Opening it is a draft only.
-    frame._modeBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    frame._modeBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame._modeBtn:SetSize(96,22)
     frame._modeBtn:SetPoint("TOPRIGHT",-128,-104)
     frame._modeBtn:SetText(T("library.button.sync_mode"))
@@ -3921,7 +3921,7 @@ local function EnsureFrame()
     end)
     frame._modeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
-    local postBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    local postBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     postBtn:SetSize(110,22)
     postBtn:SetPoint("TOPRIGHT",-15,-78)
     frame._postBtn = postBtn
@@ -3941,7 +3941,7 @@ local function EnsureFrame()
     resultText:SetJustifyH("LEFT")
     frame._resultText = resultText
 
-    prevPageBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    prevPageBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     prevPageBtn:SetSize(48,20)
     prevPageBtn:SetPoint("TOPLEFT",202,-104)
     prevPageBtn:SetText(T("library.button.page_prev"))
@@ -3960,7 +3960,7 @@ local function EnsureFrame()
     pageText:SetJustifyH("CENTER")
     frame._pageText = pageText
 
-    nextPageBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    nextPageBtn = Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     nextPageBtn:SetSize(48,20)
     nextPageBtn:SetPoint("TOPLEFT",320,-104)
     nextPageBtn:SetText(T("library.button.page_next"))
@@ -3988,18 +3988,18 @@ local function EnsureFrame()
     -- Clip region (SetClipsChildren is retail-only on 3.3.5 -- same class
     -- of API as SetColorTexture; wrap defensively so everything below still
     -- gets created even if this call throws)
-    local listClip = CreateFrame("Frame",nil,frame)
+    local listClip = Nexus.FontSupport.CreateFrame("Frame",nil,frame)
     listClip:SetPoint("TOPLEFT",20,-130)
     listClip:SetPoint("BOTTOMLEFT",20,20)
     listClip:SetWidth(480)
     frame._listClip = listClip
     pcall(function() listClip:SetClipsChildren(true) end)
 
-    scrollFrame = CreateFrame("ScrollFrame",nil,listClip)
+    scrollFrame = Nexus.FontSupport.CreateFrame("ScrollFrame",nil,listClip)
     scrollFrame:SetAllPoints(listClip)
     scrollFrame:EnableMouseWheel(true)
 
-    scrollChild = CreateFrame("Frame",nil,scrollFrame)
+    scrollChild = Nexus.FontSupport.CreateFrame("Frame",nil,scrollFrame)
     scrollChild:SetWidth(460)
     scrollChild:SetHeight(1)     -- set dynamically in Refresh
     scrollFrame:SetScrollChild(scrollChild)

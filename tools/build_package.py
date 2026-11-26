@@ -18,7 +18,9 @@ storage-only support component:
   * everything under core/, data/, logic/, third_party/, ui/;
   * of those, only .lua, .toc and .md files, plus exactly one image: the minimap
     texture ui/Textures/NexusMinimap.tga (TEXTURE_ASSETS), required, at that exact
-    path and in one exact bounded TGA form; no other image, suffix or root;
+    path and in one exact bounded TGA form;
+  * the exact Cyrillic fallback font and its permission notice (FONT_ASSETS),
+    held to their declared paths, sizes and SHA-256; no other font or suffix;
   * everything under companion/NexusSupport/, packaged as its own addon folder
     so WoW creates a separate SavedVariables file for support reports;
   * nothing else: no tests, tools, docs, .github, SavedVariables, logs or archives.
@@ -47,6 +49,10 @@ RUNTIME_DIRS = ['core', 'data', 'logic', 'third_party', 'ui']
 COMPANION_DIR = 'companion/NexusSupport'
 COMPANION_ADDON = 'NexusSupport'
 ALLOWED_SUFFIXES = {'.lua', '.toc', '.md'}
+FONT_ASSETS = {
+    'Fonts/DejaVuSans.ttf': (756072, '3fdf69cabf06049ea70a00b5919340e2ce1e6d02b0cc3c4b44fb6801bd1e0d22'),
+    'Fonts/LICENSE_DEJAVU.txt': (4814, 'a6ed0d41ebee3ca53d22f4d55be20d64291a4f5fa8e303468839993343a830eb'),
+}
 # The one runtime file that is not Lua, TOC or Markdown: the minimap button
 # texture that ui/Panel.lua names. It is admitted at this exact, case-exact
 # path only (archive member Nexus/ui/Textures/NexusMinimap.tga); every other
@@ -72,7 +78,7 @@ def git(*args: str) -> bytes:
 
 def committed_files() -> dict[str, bytes]:
     names = [n for n in git('ls-tree', '-r', '-z', '--name-only', 'HEAD').decode().split('\0') if n]
-    wanted = [n for n in names if n in TOP_LEVEL or n.split('/', 1)[0] in RUNTIME_DIRS
+    wanted = [n for n in names if n in TOP_LEVEL or n in FONT_ASSETS or n.split('/', 1)[0] in RUNTIME_DIRS
               or n.startswith(COMPANION_DIR + '/')]
     return {n: git('cat-file', 'blob', 'HEAD:' + n) for n in sorted(wanted)}
 
@@ -190,14 +196,29 @@ def toc_texture_entries(toc: str) -> list[str]:
     return [e for e in listed if e in TEXTURE_ASSETS or pathlib.PurePosixPath(e).suffix.lower() in IMAGE_SUFFIXES]
 
 
+def font_problems(data: bytes | None, name: str) -> list[str]:
+    if data is None:
+        return [f'missing font asset: {name}']
+    size, digest = FONT_ASSETS[name]
+    if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+        return [f'font asset differs from the approved bytes: {name}']
+    return []
+
+
 def check(files: dict[str, bytes]) -> list[str]:
     problems = [f'missing top-level file: {n}' for n in TOP_LEVEL if n not in files]
     for name in files:
-        if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES and name not in TEXTURE_ASSETS:
+        if (pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES
+                and name not in TEXTURE_ASSETS and name not in FONT_ASSETS):
             problems.append(f'unexpected file type in package: {name}')
     # The referenced minimap texture is required, in its exact form.
     for name in TEXTURE_ASSETS:
         problems.extend(texture_problems(files.get(name), name))
+    for name in FONT_ASSETS:
+        problems.extend(font_problems(files.get(name), name))
+    for entry in files.get('Nexus.toc', b'').decode('utf-8', 'replace').splitlines():
+        if entry.strip().replace('\\', '/') in FONT_ASSETS:
+            problems.append(f'Nexus.toc must not load a font asset as code: {entry.strip()}')
 
     # The companion is its own addon: its TOC must load exactly its own files,
     # it must declare its own SavedVariables, and it must not depend on Nexus.

@@ -928,7 +928,7 @@ end
 -- One row frame for either pool. A striped row (the tome rows) also gets a
 -- background whose faint shade alternates with its neighbours.
 local function NewRow(statusWidth, striped)
-    local row = CreateFrame("Frame", nil, child)
+    local row = Nexus.FontSupport.CreateFrame("Frame", nil, child)
     row:SetHeight(ROW_H)
     row:EnableMouse(true)
     if striped then
@@ -1006,7 +1006,7 @@ end
 -- The short intro keeps the full purpose and notes in its tooltip.
 local function IntroHover()
     if introHover then return introHover end
-    introHover = CreateFrame("Frame", nil, child)
+    introHover = Nexus.FontSupport.CreateFrame("Frame", nil, child)
     introHover:EnableMouse(true)
     introHover:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1025,7 +1025,7 @@ end
 -- unreadable off-Wishlist list does and does not show.
 local function CountsHover()
     if countsHover then return countsHover end
-    countsHover = CreateFrame("Frame", nil, child)
+    countsHover = Nexus.FontSupport.CreateFrame("Frame", nil, child)
     countsHover:EnableMouse(true)
     countsHover:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -1044,7 +1044,7 @@ local function PageButton(kind)
         or kind == "reference" and M._pageReferenceButton
         or kind == "builds" and buildsButton or nil
     if b then return b end
-    b = CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
+    b = Nexus.FontSupport.CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
     if kind == "help" then
         -- Help is the guided setup coach (Help.OpenHelp; native QA
         -- test.163008), above the Journal. Passive: it assigns, saves, sends,
@@ -1421,7 +1421,7 @@ end
 
 local function MenuOpen(items, anchor)
     if type(EasyMenu) ~= "function" then return end
-    M._menuFrame = M._menuFrame or CreateFrame("Frame", "NexusJournalAssociationMenu", UIParent, "UIDropDownMenuTemplate")
+    M._menuFrame = M._menuFrame or Nexus.FontSupport.CreateFrame("Frame", "NexusJournalAssociationMenu", UIParent, "UIDropDownMenuTemplate")
     -- Theme.OpenMenu: the same EasyMenu call, with the shared list opaque
     -- while it shows this Nexus menu.
     local theme = Nexus.Theme
@@ -1729,7 +1729,7 @@ end
 local function EnsureAssociationPanel(journal)
     if not journal then return nil end
     if not associationPanel then
-        associationPanel = CreateFrame("Frame", "NexusLoadoutAssociationPanel", journal)
+        associationPanel = Nexus.FontSupport.CreateFrame("Frame", "NexusLoadoutAssociationPanel", journal)
         associationPanel:SetSize(360, 56)
         associationPanel:SetFrameStrata("DIALOG")
         associationPanel:SetFrameLevel((journal:GetFrameLevel() or 0) + 24)
@@ -1748,7 +1748,7 @@ local function EnsureAssociationPanel(journal)
 
         -- The label's holder (PlaceStripLabel): at scale 1 the label is at
         -- its original (10, -9) with its original 145 px width.
-        associationPanel.labelHolder = CreateFrame("Frame", nil, associationPanel)
+        associationPanel.labelHolder = Nexus.FontSupport.CreateFrame("Frame", nil, associationPanel)
         PlaceStripLabel(associationPanel, 1, STRIP_LABEL_W, STRIP_LABEL_MAX_H)
         associationPanel.label = associationPanel.labelHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         associationPanel.label:SetPoint("TOPLEFT", 0, 0)
@@ -1756,7 +1756,7 @@ local function EnsureAssociationPanel(journal)
         associationPanel.label:SetJustifyH("LEFT")
         associationPanel.label:SetTextColor(0.72, 0.72, 0.72)
 
-        associationPanel.selector = CreateFrame("Button", "NexusActiveWishlistSelector", associationPanel)
+        associationPanel.selector = Nexus.FontSupport.CreateFrame("Button", "NexusActiveWishlistSelector", associationPanel)
         associationPanel.selector:SetSize(169, 21)
         associationPanel.selector:SetPoint("TOPRIGHT", -31, -5)
         associationPanel.selector:RegisterForClicks("LeftButtonUp")
@@ -1781,7 +1781,7 @@ local function EnsureAssociationPanel(journal)
         associationPanel.selector.arrow:SetSize(16, 16)
         associationPanel.selector.arrow:SetPoint("RIGHT", -5, 0)
 
-        associationPanel.design = CreateFrame("Button", "NexusAssociatedWishlistDesignButton", associationPanel)
+        associationPanel.design = Nexus.FontSupport.CreateFrame("Button", "NexusAssociatedWishlistDesignButton", associationPanel)
         associationPanel.design:SetSize(20, 20)
         associationPanel.design:SetPoint("TOPRIGHT", -7, -6)
         associationPanel.design:RegisterForClicks("LeftButtonUp")
@@ -1794,7 +1794,7 @@ local function EnsureAssociationPanel(journal)
         associationPanel.design.glyph:SetText("...")
         associationPanel.design.glyph:SetTextColor(1, 0.82, 0.2)
         associationPanel.design:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        associationPanel.newWishlist = CreateFrame("Button", nil, associationPanel, "UIPanelButtonTemplate")
+        associationPanel.newWishlist = Nexus.FontSupport.CreateFrame("Button", nil, associationPanel, "UIPanelButtonTemplate")
         associationPanel.newWishlist:SetSize(150, 19)
         associationPanel.newWishlist:SetPoint("BOTTOMRIGHT", -7, 5)
         associationPanel.newWishlist:SetText(T("journal.button.new_wishlist"))
@@ -1881,7 +1881,7 @@ end
 local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel, targetIdentity)
     loadoutLabel = loadoutLabel or tostring(loadoutName or "")
     if not wishlistPicker then
-        wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
+        wishlistPicker = Nexus.FontSupport.CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
         -- Native high-level rendering put this opaque parent above Unassign.
         -- TOOLTIP supplies the overlay order; keep its child levels low.
@@ -1898,7 +1898,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
         wishlistPicker.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
         wishlistPicker.bg:SetAllPoints()
         wishlistPicker.bg:SetVertexColor(0.02, 0.025, 0.035, 0.99)
-        wishlistPicker.border = CreateFrame("Frame", nil, wishlistPicker)
+        wishlistPicker.border = Nexus.FontSupport.CreateFrame("Frame", nil, wishlistPicker)
         wishlistPicker.border:SetAllPoints()
         wishlistPicker.border:SetFrameLevel(wishlistPicker:GetFrameLevel() + 1)
         wishlistPicker.title = wishlistPicker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1949,11 +1949,11 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             local cKey = c.key
             local row = wishlistPickerRows[i]
             if not row or not row.nameButton then
-                row = CreateFrame("Frame", nil, wishlistPicker)
+                row = Nexus.FontSupport.CreateFrame("Frame", nil, wishlistPicker)
                 row:SetFrameLevel(wishlistPicker:GetFrameLevel() + 2)
                 row:EnableMouse(true)
                 row:SetSize(width-12, rowH)
-                row.nameButton = CreateFrame("Button", nil, row)
+                row.nameButton = Nexus.FontSupport.CreateFrame("Button", nil, row)
                 row.nameButton:SetFrameLevel(row:GetFrameLevel() + 1)
                 row.nameButton:RegisterForClicks("LeftButtonUp")
                 row.nameButton:EnableMouse(true)
@@ -1963,7 +1963,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 -- One line per row; a shortened name is complete in the row tooltip.
                 if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.nameButton.text, nil, rowH-2) end
                 row.nameButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-                row.gear = CreateFrame("Button", nil, row)
+                row.gear = Nexus.FontSupport.CreateFrame("Button", nil, row)
                 row.gear:SetFrameLevel(row:GetFrameLevel() + 2)
                 row.gear:RegisterForClicks("LeftButtonUp")
                 row.gear:EnableMouse(true)
@@ -2139,7 +2139,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
     if linked then
         local row = wishlistPicker.clearRow
         if not row then
-            row = CreateFrame("Button", nil, wishlistPicker)
+            row = Nexus.FontSupport.CreateFrame("Button", nil, wishlistPicker)
             row:SetHeight(20)
             row.text = row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
             -- Help quotes "Unassign Wishlist"; help_action_first finds it as
@@ -2297,7 +2297,7 @@ end
 
 local function EnsureAssociationScanner()
     if scanFrame then return end
-    scanFrame = CreateFrame("Frame", "NexusLoadoutAssociationScanner", UIParent)
+    scanFrame = Nexus.FontSupport.CreateFrame("Frame", "NexusLoadoutAssociationScanner", UIParent)
     local elapsed = 0
     scanFrame:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
@@ -2424,7 +2424,7 @@ local function Install()
     theirTabCount = n
 
     -- A second Install after a partial failure reuses every frame and hook.
-    ourTab = ourTab or CreateFrame("Button", "NexusJournalTab",
+    ourTab = ourTab or Nexus.FontSupport.CreateFrame("Button", "NexusJournalTab",
         journal, "CharacterFrameTabButtonTemplate")
     ourTab:SetText(T("journal.tab.nexus_progress"))
     Attach.target, Attach.mode = nil, "none"
@@ -2505,7 +2505,7 @@ local function Install()
     -- their switcher rightly ignores our tab -- so we occlude rather
     -- than fight their state. EnableMouse blocks click-through.
     if not panel then
-        panel = CreateFrame("Frame", "NexusJournalPanel", journal)
+        panel = Nexus.FontSupport.CreateFrame("Frame", "NexusJournalPanel", journal)
         panel:SetPoint("TOPLEFT", journal, "TOPLEFT", 10, -32)
         panel:SetPoint("BOTTOMRIGHT", journal, "BOTTOMRIGHT", -8, 8)
         panel:EnableMouse(true)
@@ -2516,11 +2516,11 @@ local function Install()
     panel:SetFrameLevel(journal:GetFrameLevel() + 10)
 
     if not scroll then
-        scroll = CreateFrame("ScrollFrame", "NexusJournalScroll",
+        scroll = Nexus.FontSupport.CreateFrame("ScrollFrame", "NexusJournalScroll",
             panel, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -6)
         scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 4)
-        child = CreateFrame("Frame", nil, scroll)
+        child = Nexus.FontSupport.CreateFrame("Frame", nil, scroll)
         child:SetSize(292, 100)
         scroll:SetScrollChild(child)
     end

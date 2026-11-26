@@ -70,6 +70,7 @@ local function SyncNote(f)
         or mode and type(display) == "function" and display(mode) or nil
     f.sync:SetText(text and TF("setup.body.sync_reference", function() return {sync = tostring(text)} end,
         text .. " Reference: Sharing lists what is sent.") or "")
+    if M.LayoutWelcome then M.LayoutWelcome(f) end
     return f
 end
 
@@ -182,7 +183,7 @@ end
 local retryFrame
 local function StartRecordRetry()
     if M.Settled() or retryFrame then return end
-    retryFrame = CreateFrame("Frame")
+    retryFrame = Nexus.FontSupport.CreateFrame("Frame")
     local elapsed = 0
     retryFrame:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
@@ -283,6 +284,70 @@ local function FitClose(f)
     f:SetWidth(math.max(WELCOME_W, HINT_RIGHT + CLOSE_GAP + width + CLOSE_EDGE))
 end
 
+-- The welcome/replay window shares one measured layout in every language.
+-- Keep the English window width; longer action labels wrap inside buttons.
+function M.LayoutWelcome(f)
+    local metrics = Nexus.LayoutMetrics
+    if not (f and f.actionRows and f.guide and f.close and metrics
+        and metrics.FitButtonWidth and metrics.WrapHeight) then return end
+    local gap, edge = 22, 24
+    local closeW = metrics.FitButtonWidth(f.close, CLOSE_W)
+    local width = WELCOME_W
+    local full = width - 2 * edge
+    local column = (full - gap) / 2
+    f:SetWidth(width)
+    f:SetClampedToScreen(true)
+    local y = 16
+    local function TextBlock(label, minimum, after)
+        label:ClearAllPoints()
+        label:SetPoint("TOPLEFT", f, "TOPLEFT", edge, -y)
+        label:SetJustifyV("TOP")
+        local height = metrics.WrapHeight(label, full, minimum)
+        y = y + height + after
+    end
+    local function ButtonHeight(button, w, minimum)
+        button:SetWidth(w)
+        local label = button:GetFontString()
+        label:ClearAllPoints()
+        label:SetPoint("CENTER", button, "CENTER", 0, 0)
+        label:SetJustifyH("CENTER")
+        label:SetJustifyV("MIDDLE")
+        if label.SetWordWrap then label:SetWordWrap(true) end
+        if label.SetNonSpaceWrap then label:SetNonSpaceWrap(true) end
+        return math.max(minimum, metrics.WrapHeight(label, w - 24, 1) + 12)
+    end
+    f.title:SetJustifyH("CENTER")
+    f.subtitle:SetJustifyH("CENTER")
+    TextBlock(f.title, 18, 4)
+    TextBlock(f.subtitle, 12, 8)
+    TextBlock(f.body, 112, 8)
+    for _, row in ipairs(f.actionRows) do
+        local buttonH = 26
+        for _, button in ipairs(row) do
+            buttonH = math.max(buttonH, ButtonHeight(button, column, 26))
+        end
+        for index, button in ipairs(row) do
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", f, "TOPLEFT", edge + (index - 1) * (column + gap), -y)
+            button:SetSize(column, buttonH)
+        end
+        y = y + buttonH + 10
+    end
+    f.guide:ClearAllPoints()
+    f.guide:SetPoint("TOPLEFT", f, "TOPLEFT", edge, -y)
+    local guideH = ButtonHeight(f.guide, full, 26)
+    f.guide:SetSize(full, guideH)
+    y = y + guideH + 8
+    TextBlock(f.sync, 72, 12)
+    local hintW = math.max(80, full - closeW - 12)
+    local hintH = metrics.WrapHeight(f.hint, hintW, 54)
+    f.hint:ClearAllPoints()
+    f.hint:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", edge, 22)
+    f.close:SetHeight(ButtonHeight(f.close, closeW, CLOSE_H))
+    f:SetHeight(math.max(476, y + math.max(hintH, f.close:GetHeight()) + 22))
+    if metrics.FitToScreen then metrics.FitToScreen(f) end
+end
+
 -- Normal (first-time or deliberate) presentation: the exact first-time texts.
 local function NormalTexts(f)
     f._informational = nil
@@ -295,7 +360,7 @@ end
 local function EnsureFrame()
     if frame then return frame end
 
-    frame = CreateFrame("Frame", "NexusQuickStart", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusQuickStart", UIParent)
     -- Height fits the body and hint at a 16 px replacement font such as the
     -- ElvUI font measured natively (6 body lines, 3 hint lines); the default
     -- font needs 5 and 2. tests/prototype/quickstart_layout_fit.lua models both.
@@ -347,7 +412,7 @@ local function EnsureFrame()
         T("setup.body.welcome_starting_fresh", "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft.")
     )
 
-    local current = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local current = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     current:SetSize(174, 26)
     current:SetPoint("TOPLEFT", 24, -176)
     current:SetText(T("setup.button.set_up_current_build", "Set up current build"))
@@ -360,7 +425,7 @@ local function EnsureFrame()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then Nexus.JournalTab.OpenBuilds(true) end
     end)
 
-    local import = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local import = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     import:SetSize(174, 26)
     import:SetPoint("TOPRIGHT", -24, -176)
     import:SetText(T("setup.button.import_create_wishlist", "Import / Create Wishlist"))
@@ -371,7 +436,7 @@ local function EnsureFrame()
         if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
     end)
 
-    local builds = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local builds = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     builds:SetSize(174, 26)
     builds:SetPoint("TOPLEFT", current, "BOTTOMLEFT", 0, -10)
     builds:SetText(T("setup.button.browse_community_builds", "Browse Community builds"))
@@ -381,7 +446,7 @@ local function EnsureFrame()
         if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
     end)
 
-    local leaderboard = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local leaderboard = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     leaderboard:SetSize(174, 26)
     leaderboard:SetPoint("TOPRIGHT", import, "BOTTOMRIGHT", 0, -10)
     leaderboard:SetText(T("setup.button.open_leaderboard", "Open Leaderboard"))
@@ -393,13 +458,14 @@ local function EnsureFrame()
 
     -- The optional long manual under its own name, Reference (the design's
     -- separately named view); Help itself is the coach row below.
-    local reference = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local reference = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     reference:SetSize(174,26);reference:SetPoint("TOPLEFT",24,-250);reference:SetText(T("setup.button.reference", "Reference"))
     reference:SetScript("OnClick",function() Finish();OpenReference() end)
     frame.reference = reference
-    local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local orbs = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText(T("setup.button.orbs_lost_memories", "Orbs / Lost Memories"))
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
+    frame.actionRows = {{current, import}, {builds, leaderboard}, {reference, orbs}}
     -- Help: the step-by-step coach (ui/GuidedSetup.lua), the prominent full
     -- row, through the guarded route above (OpenHelpCoach). Like the other
     -- entry buttons it only navigates: it records no setup fact, grants no
@@ -408,7 +474,7 @@ local function EnsureFrame()
     -- close). A refused coach has said why in chat; this window, and any
     -- other open window with its draft, then stay for a retry, and nothing
     -- else opens. The Sync line moves down.
-    local guide = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local guide = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     guide:SetSize(372, 26)
     guide:SetPoint("TOPLEFT", 24, -284)
     guide:SetText(T("setup.button.help_guided_setup", "Help: Guided setup"))
@@ -431,7 +497,7 @@ local function EnsureFrame()
     hint:SetJustifyH("LEFT")
     hint:SetText(NormalHint())
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local close = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(74, 24)
     close:SetPoint("BOTTOMRIGHT", -24, 20)
     close:SetText(T("setup.button.close", "Close"))
@@ -465,11 +531,11 @@ local function EnsureFrame()
     -- ancestor (the UI hidden, a cinematic) makes it not visible, so neither
     -- records nor closes anything; no stale entry is left to take a later
     -- Escape. (Review36 M7R-01; offline model only, native NOT_RUN.)
-    local escape = CreateFrame("Frame", "NexusQuickStartEscape", frame)
+    local escape = Nexus.FontSupport.CreateFrame("Frame", "NexusQuickStartEscape", frame)
     escape:SetScript("OnHide", function()
         if frame and frame:IsVisible() then Finish() end
     end)
-    frame:HookScript("OnShow", function() escape:Show() end)
+    frame:HookScript("OnShow", function() escape:Show(); M.LayoutWelcome(frame) end)
     frame:HookScript("OnHide", function() escape:Hide() end)
     escape:Hide()
     UISpecialFrames = UISpecialFrames or {}
@@ -618,7 +684,7 @@ M.RefreshChecklist = RefreshChecklist
 
 local function EnsureChecklist()
     if checklist then return checklist end
-    local f = CreateFrame("Frame", "NexusSetupChecklist", UIParent)
+    local f = Nexus.FontSupport.CreateFrame("Frame", "NexusSetupChecklist", UIParent)
     checklist = f
     f:SetSize(CHECK_W, CHECK_H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
@@ -662,7 +728,7 @@ local function EnsureChecklist()
         end
     end
     local function button(x, w, label, fn)
-        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        local b = Nexus.FontSupport.CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
         b:SetSize(w, 24)
         b:SetPoint("BOTTOMLEFT", x, 20)
         b:SetText(label)
@@ -701,7 +767,7 @@ local function EnsureChecklist()
     f.close = button(362, 74, T("setup.button.close", "Close"), function() f:Hide() end)
     -- Reference, the optional long manual, on its own row above Help and
     -- Close. It opens above this window (Help's own layer); this window stays.
-    f.reference = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.reference = Nexus.FontSupport.CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     f.reference:SetSize(CHECK_REFERENCE_W, 24)
     f.reference:SetPoint("BOTTOMRIGHT", -24, CHECK_REFERENCE_Y)
     f.reference:SetText(T("setup.button.reference", "Reference"))

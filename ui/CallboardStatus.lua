@@ -1369,7 +1369,7 @@ end
 function M.Init()
     if scanner then return end
     EnsureEbonholdHooks()
-    scanner = CreateFrame("Frame", "NexusCallboardStatusScanner", UIParent)
+    scanner = Nexus.FontSupport.CreateFrame("Frame", "NexusCallboardStatusScanner", UIParent)
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
     scanner:RegisterEvent("QUEST_LOG_UPDATE")
     scanner:RegisterEvent("UNIT_QUEST_LOG_CHANGED")

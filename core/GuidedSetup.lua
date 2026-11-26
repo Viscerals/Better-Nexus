@@ -25,14 +25,14 @@ Nexus = Nexus or {}
 local G = {}
 Nexus.GuidedSetup = G
 
-G.STEPS = {'welcome', 'wishlist', 'target', 'assign', 'manual', 'auto', 'summary'}
+G.STEPS = {'welcome', 'wishlist', 'target', 'assign', 'manual', 'auto', 'language', 'summary'}
 G.INDEX = {}
 for i, id in ipairs(G.STEPS) do G.INDEX[id] = i end
 -- A look-around (the explore path) sets nothing up, so it shows only the
 -- lesson, Auto and the summary after Welcome.
-G.EXPLORE = {'welcome', 'manual', 'auto', 'summary'}
+G.EXPLORE = {'welcome', 'manual', 'auto', 'language', 'summary'}
 -- Steps the player may skip. Welcome needs a choice; the summary ends.
-G.SKIPPABLE = {wishlist = true, target = true, assign = true, manual = true, auto = true}
+G.SKIPPABLE = {wishlist = true, target = true, assign = true, manual = true, auto = true, language = true}
 G.SIM_ANSWER = 1
 local SAVED = {assigned = true, firstRun = true, unassigned = true, kept = true}
 local LIMIT = 8
@@ -734,6 +734,7 @@ function G.CanNext()
     -- Auto continues once the player chose to keep it as it is (KeepAuto)
     -- in this very context; Recheck drops a choice made in another.
     if id == 'auto' then G.Recheck(); return s.autoKept ~= nil end
+    if id == 'language' then return true end
     return false
 end
 -- Moves along the current path; changes no choice and no result.

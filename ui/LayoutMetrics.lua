@@ -54,7 +54,7 @@ local FONT_SIZES = {small=10,normal=12,large=14,secondary=11,title=15}
 -- has to exist or be shown; only the owned objects are ever set, never a
 -- game font or a UI scale.
 local FONT_REFERENCE = "GameFontHighlightSmall"
-local fontReference
+local fontReference, fontPath
 
 local function Clamp(value, low, high)
     value = tonumber(value) or low
@@ -122,11 +122,12 @@ end
 -- runtime revision every layout cache is keyed by.
 function M.EnsureFonts()
     local reference = ReferenceScale()
-    if fontsReady and reference == fontReference then return FONT_NAMES end
-    fontsReady, fontReference = true, reference
-    if type(CreateFont) ~= "function" then return FONT_NAMES end
     local path = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT
         or "Fonts\\FRIZQT__.TTF"
+    if Nexus.FontSupport then path = Nexus.FontSupport.Path(path) end
+    if fontsReady and reference == fontReference and path == fontPath then return FONT_NAMES end
+    fontsReady, fontReference, fontPath = true, reference, path
+    if type(CreateFont) ~= "function" then return FONT_NAMES end
     for kind, name in pairs(FONT_NAMES) do
         local font = _G[name]
         if not font then
@@ -376,7 +377,7 @@ end
 -- shortened a value itself stores the complete text in _nexusFullText, which
 -- the tooltip then shows even when the shortened text fits.
 function M.FullTextTooltip(fontString, parent, anchor)
-    local hit = CreateFrame("Frame", nil, parent)
+    local hit = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     hit:SetAllPoints(fontString)
     hit:EnableMouse(true)
     hit._nexusText = fontString
@@ -424,13 +425,32 @@ function M.FitToScreen(frame, margin, ceiling)
     return scale
 end
 
--- Button width for its current label: the client's text width when it
--- reports one, otherwise the conservative character model, plus end caps.
-function M.FitButtonWidth(button, minimum, maximum)
+-- Measure on an unconstrained copy of the label, so an existing narrow
+-- button cannot report the width of its already shortened text.
+function M.ButtonLabelWidth(button)
     local text = tostring(button:GetText() or "")
         :gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     local width
-    if type(button.GetTextWidth) == "function" then
+    local label = button.GetFontString and button:GetFontString()
+    if label and label.GetFont and UIParent and type(CreateFrame) == "function" then
+        local path, size, flags = label:GetFont()
+        if path and size then
+            if not M._buttonMeasure then
+                local create = Nexus.FontSupport and Nexus.FontSupport.CreateFrame or CreateFrame
+                M._buttonMeasure = create("Frame", nil, UIParent)
+                M._buttonMeasure:Hide()
+                M._buttonMeasure.text = M._buttonMeasure:CreateFontString(nil, "OVERLAY")
+            end
+            local probe = M._buttonMeasure.text
+            probe:SetFont(path, size, flags or "")
+            probe:SetWidth(0); probe:SetHeight(0)
+            if probe.SetWordWrap then probe:SetWordWrap(false) end
+            probe:SetText(text)
+            width = tonumber(probe:GetStringWidth())
+            if not width or width ~= width or width <= 0 or width == math.huge then width = nil end
+        end
+    end
+    if not width and type(button.GetTextWidth) == "function" then
         local ok, value = pcall(button.GetTextWidth, button)
         value = ok and tonumber(value) or nil
         if value and value > 0 and value < math.huge then width = value end
@@ -439,7 +459,12 @@ function M.FitButtonWidth(button, minimum, maximum)
         local char = M.ConservativeText(RuntimeFontScale())
         width = #(text:gsub("[\128-\191]", "")) * char
     end
-    width = math.max(tonumber(minimum) or 1, math.ceil(width + 24))
+    return width
+end
+
+-- Leave room for the native button's end caps on both sides.
+function M.FitButtonWidth(button, minimum, maximum)
+    local width = math.max(tonumber(minimum) or 1, math.ceil(M.ButtonLabelWidth(button) + 24))
     if maximum then width = math.min(maximum, width) end
     button:SetWidth(width)
     return width
@@ -508,6 +533,7 @@ local function PanelKey(spec)
         math.ceil(tonumber(spec.headerTitleH) or 0),
         math.ceil(Measured(spec.lineSmallH)),math.ceil(Measured(spec.planDetailsW)),
         math.ceil(Measured(spec.setupTitleH)),math.ceil(Measured(spec.setupHintH)),
+        math.ceil(Measured(spec.setupButtonW)),
         math.ceil(Measured(spec.completeTitleH)),math.ceil(Measured(spec.completeTextH)),
         math.ceil(Measured(spec.listHeadingH)),
         math.ceil(Measured(spec.headerControlsH)),math.ceil(Measured(spec.planDetailsH)),
@@ -1115,15 +1141,9 @@ function M.Panel(spec)
         end)
     end
     if spec.noBuild then
-        -- The setup view's title and hint are as tall as their wrapped text
-        -- measures at the width each has here (spec.setupTitleH,
-        -- spec.setupHintH: Panel.MeasuredLayout; the title's is this row's,
-        -- the hint's is given below), never under the modelled rows they had
-        -- (one large line; two small lines), and the buttons and what
-        -- follows move down by what the text needs.
-        local top, height = Block(0, math.max(large, math.ceil(Measured(spec.setupTitleH))))
-        Add(layout,"setupTitle",inset,top,full,height)
-        Gap(5)
+        -- The hint already explains the next action; omit the duplicate
+        -- large heading and its reserved space in both languages.
+        local top, height
         -- The hint is a block of its own in the panel's middle, not a line
         -- from edge to edge. Its room is the panel less 24 design pixels at
         -- each side (layout.setupHintRoom). Inside that room it is as wide
@@ -1141,7 +1161,7 @@ function M.Panel(spec)
         top, height = Block(0, math.max(small * 2, math.ceil(Measured(spec.setupHintH))))
         Add(layout,"setupHint",(width-hintW)/2,top,hintW,height)
         Gap(5)
-        local buttonWidth = math.min(146, full)
+        local buttonWidth = math.min(full, math.max(146, math.ceil(Measured(spec.setupButtonW))))
         top, height = Block(0, math.max(24, normal + 8))
         Add(layout,"setupAssign",(width-buttonWidth)/2,top,buttonWidth,height)
         Gap(5)
@@ -1573,9 +1593,10 @@ end
 -- keep their template height; a title longer than its room stays one line.
 M.WORKSPACE_WIDTH = 1040
 local WORKSPACE_TABS = {"plan","builds","records"}
-function M.WorkspaceHeader(width)
+function M.WorkspaceHeader(width, helpWidth)
     width = math.max(640, math.floor(tonumber(width) or M.WORKSPACE_WIDTH))
     local top, left, height, gap, tabW, helpW, referenceW = 12, 18, 22, 4, 96, 56, 84
+    helpW = math.max(helpW, math.ceil(tonumber(helpWidth) or 0))
     local boxes, x = {}, left
     for _, key in ipairs(WORKSPACE_TABS) do
         boxes[key] = Box(x, top, tabW, height)

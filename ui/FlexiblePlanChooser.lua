@@ -361,7 +361,7 @@ function Factory.New(options)
         end, function() frame:Hide() end, Say)
     end
     local function Button(parent, name, text, width, callback)
-        local button=CreateFrame("Button",name,parent,"UIPanelButtonTemplate")
+        local button=Nexus.FontSupport.CreateFrame("Button",name,parent,"UIPanelButtonTemplate")
         button:SetSize(width,22);button:SetText(text);button:SetScript("OnClick",callback)
         return button
     end
@@ -372,7 +372,7 @@ function Factory.New(options)
     end
     local function EnsureFrame()
         if frame then return end
-        frame=CreateFrame("Frame","NexusFlexiblePlanChooser",UIParent)
+        frame=Nexus.FontSupport.CreateFrame("Frame","NexusFlexiblePlanChooser",UIParent)
         frame:SetSize(1020,650);frame:SetPoint("CENTER");frame:SetFrameStrata("HIGH");frame:SetFrameLevel(60)
         frame:SetClampedToScreen(true);frame:EnableMouse(true)
         if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusFlexiblePlanChooser") end
@@ -381,19 +381,19 @@ function Factory.New(options)
         -- #151 persistence status, distinct from the pool status at -570.
         persistLabel=Label(frame,"",970,20,22,-66)
         Label(frame,T("plan.heading.catalog"),430,20,22,-94);Label(frame,T("plan.heading.pool"),480,20,505,-94)
-        search=CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
+        search=Nexus.FontSupport.CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
         search:SetSize(430,22);search:SetPoint("TOPLEFT",22,-120);search:SetAutoFocus(false);search:SetMaxLetters(96)
         search:SetScript("OnTextChanged",function() catalogOffset=0;Refresh() end)
         search:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
-        catalogArea=CreateFrame("Frame","NexusFlexiblePlanCatalog",frame)
+        catalogArea=Nexus.FontSupport.CreateFrame("Frame","NexusFlexiblePlanCatalog",frame)
         catalogArea:SetPoint("TOPLEFT",22,-152);catalogArea:SetSize(460,ROWS*HEIGHT)
-        poolArea=CreateFrame("Frame","NexusFlexiblePlanPool",frame)
+        poolArea=Nexus.FontSupport.CreateFrame("Frame","NexusFlexiblePlanPool",frame)
         poolArea:SetPoint("TOPLEFT",505,-152);poolArea:SetSize(495,ROWS*HEIGHT)
         catalogArea:EnableMouseWheel(true);poolArea:EnableMouseWheel(true)
         catalogArea:SetScript("OnMouseWheel",function(_,delta) catalogOffset=catalogOffset-delta*HEIGHT;Refresh() end)
         poolArea:SetScript("OnMouseWheel",function(_,delta) poolOffset=poolOffset-delta*HEIGHT;Refresh() end)
         for i=1,ROWS do
-            local row=CreateFrame("Frame",nil,catalogArea)
+            local row=Nexus.FontSupport.CreateFrame("Frame",nil,catalogArea)
             row:SetSize(460,HEIGHT);row:SetPoint("TOPLEFT",0,-(i-1)*HEIGHT)
             row.label=Label(row,"",375,HEIGHT,0,0)
             -- One line at the row height (docs/UI_TEXT_LAYOUT.md), as in the pool
@@ -408,14 +408,14 @@ function Factory.New(options)
             row.action=Button(row,nil,T("plan.button.add"),62,function() return Add(catalogRow.spellId) end)
             row.action:SetPoint("TOPRIGHT",0,-3)
             catalogRows[i]=row
-            row=CreateFrame("Frame",nil,poolArea)
+            row=Nexus.FontSupport.CreateFrame("Frame",nil,poolArea)
             row:SetSize(495,HEIGHT);row:SetPoint("TOPLEFT",0,-(i-1)*HEIGHT)
             row.label=Label(row,"",280,HEIGHT,0,0)
             -- One line at the row height (docs/UI_TEXT_LAYOUT.md); while it is shortened
             -- the row's tooltip shows it whole, so the row takes mouse input.
             row:EnableMouse(true)
             if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.label,row,HEIGHT) end
-            row.count=CreateFrame("EditBox",nil,row,"InputBoxTemplate")
+            row.count=Nexus.FontSupport.CreateFrame("EditBox",nil,row,"InputBoxTemplate")
             row.count:SetSize(32,22);row.count:SetPoint("TOPLEFT",290,-3);row.count:SetAutoFocus(false);row.count:SetMaxLetters(3)
             row.count:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
             row.count:SetScript("OnTextChanged",function(self)

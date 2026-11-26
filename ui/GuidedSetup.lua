@@ -98,7 +98,7 @@ local GAP, MIN_H, BLOCK_MAX = 8, 360, 220
 local MAX_H = 640
 local WHITE = 'Interface\\Buttons\\WHITE8X8'
 local HELP = {welcome = 'start', wishlist = 'wishlists', target = 'wishlists', assign = 'wishlists',
-    manual = 'rolling', auto = 'rolling', summary = 'start'}
+    manual = 'rolling', auto = 'rolling', language = 'start', summary = 'start'}
 -- Fixed status colours (never from the palette); each kind also has a glyph
 -- and a word in the copy.
 local COLOR = {['not'] = {0.62, 0.6, 0.58}, waiting = {0.95, 0.8, 0.38}, checking = {0.58, 0.76, 1},
@@ -118,6 +118,37 @@ local view = {help = false, checklist = false, autoMore = false, lesson = nil, r
 local function ResetImport() view.import = {open = false, text = '', result = nil, checked = nil} end
 
 local function Core() return Nexus.GuidedSetup end
+
+U.LANGUAGES = {
+    {id = 'enUS', name = 'English', ready = true},
+    {id = 'ruRU', name = 'Русский', ready = true},
+    {id = 'esES', name = 'Español', tip = 'Traducción sin terminar.'},
+    {id = 'deDE', name = 'Deutsch', tip = 'Übersetzung noch nicht fertig.'},
+    {id = 'frFR', name = 'Français', tip = 'Traduction non terminée.'},
+}
+
+function U.LanguageStatus()
+    local panel = Nexus.Panel
+    if panel and type(panel.LanguageStatus) == 'function' then return panel.LanguageStatus() end
+    return {active = Nexus.Localization.ActiveLanguage(), refusal = 'startup'}
+end
+
+function U.LanguageName(id)
+    for _, language in ipairs(U.LANGUAGES) do
+        if language.id == id then return language.name end
+    end
+    return tostring(id or 'English')
+end
+
+function U.SelectLanguage(id)
+    -- The unfinished translations are display-only placeholders here.
+    if id ~= 'enUS' and id ~= 'ruRU' then return false end
+    local panel = Nexus.Panel
+    if not (panel and type(panel.ChooseLanguage) == 'function') then return false end
+    local result = panel.ChooseLanguage(id)
+    if type(panel.LanguageResultText) == 'function' then note = panel.LanguageResultText(result, id) end
+    return result
+end
 ------------------------------------------------------------------------
 -- Full visible-UI localization (guide family, guide.* keys). The coach's
 -- words stay core/UserText.lua Guide (and EXTRA below); this window shows them
@@ -513,7 +544,7 @@ local function Wire(b)
 end
 
 local function NewButton()
-    local b = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    local b = Nexus.FontSupport.CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
     b:SetSize(100, 22)
     Wire(b)
     local theme = Nexus.Theme
@@ -537,7 +568,7 @@ local FOOT = {
 -- the Theme and draws only an underline, brighter on hover. Both bind their
 -- own label as the button's FontString, which the Theme colours.
 local function FooterAction(look)
-    local b = CreateFrame('Button', nil, frame)
+    local b = Nexus.FontSupport.CreateFrame('Button', nil, frame)
     b:SetSize(100, 22)
     Wire(b)
     local theme = Nexus.Theme
@@ -638,7 +669,7 @@ local function NewRow()
     local b = NewButton()
     b.desc = b:CreateFontString(nil, 'OVERLAY', FONTS.body)
     b.desc:SetJustifyH('LEFT'); b.desc:SetJustifyV('TOP')
-    b.radio = CreateFrame('CheckButton', nil, b, 'UIRadioButtonTemplate')
+    b.radio = Nexus.FontSupport.CreateFrame('CheckButton', nil, b, 'UIRadioButtonTemplate')
     b.radio:SetSize(16, 16)
     b.radio:EnableMouse(false)
     local theme = Nexus.Theme
@@ -671,6 +702,18 @@ end
 local function Row(spec, x, y, w)
     local b = Take('row', NewRow)
     Arm(b, spec)
+    -- A disabled choice still needs its explanation on hover in 3.3.5.
+    if spec.hintOnly and not b._hintOnly then
+        b._hintOnly = Nexus.FontSupport.CreateFrame('Frame', nil, b)
+        b._hintOnly:SetAllPoints(b)
+        b._hintOnly:EnableMouse(true)
+        b._hintOnly:SetFrameLevel(b:GetFrameLevel() + 1)
+        b._hintOnly:SetScript('OnEnter', function() Tooltip(b) end)
+        b._hintOnly:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    end
+    if b._hintOnly then
+        if spec.hintOnly then b._hintOnly:Show() else b._hintOnly:Hide() end
+    end
     local inset = spec.radio ~= nil and 28 or 10
     local tw = math.max(40, w - inset - 8)
     local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
@@ -843,6 +886,10 @@ local function StepStatus(g, s, ctx, id)
         if ctx.auto == 'unknown' then return 'stale', wd.modeUnknown end
         if s.skipped.auto then return 'skipped' end
         return w
+    elseif id == 'language' then
+        local status = U.LanguageStatus()
+        if status.refusal then return 'unavailable' end
+        return 'observed', U.LanguageName(status.saved or status.active)
     end
     return w, g.StepId() == 'summary' and wd.review or wd.summary
 end
@@ -1304,6 +1351,37 @@ function VIEW.auto(g, s, ctx, c, y)
     return y
 end
 
+function VIEW.language(g, s, ctx, c, y)
+    local copy = c.language or {}
+    local status = U.LanguageStatus()
+    y = Head(copy.title, y)
+    y = y - Text(copy.intro, PAD, y, CW, 'body', TEXT) - GAP
+    y = y - Text((copy.current or '') .. ' ' .. U.LanguageName(status.active),
+        PAD, y, CW, 'body', MUTED) - GAP
+    for _, language in ipairs(U.LANGUAGES) do
+        local id = language.id
+        local selected = (status.saved or status.active) == id
+        y = y - Row({label = language.name, radio = selected, selected = selected,
+            desc = language.tip or (selected and copy.selected or copy.available),
+            tip = language.tip, enabled = language.ready == true and status.refusal == nil,
+            hintOnly = language.ready ~= true,
+            act = language.ready and function() U.SelectLanguage(id) end or nil}, PAD, y, CW) - 4
+    end
+    if status.pending then
+        y = y - Text((copy.next or '') .. ' ' .. U.LanguageName(status.saved),
+            PAD, y, CW, 'body', GOLD) - GAP
+    end
+    y = y - Text(copy.reload, PAD, y, CW, 'body', MUTED) - GAP
+    local combat = type(InCombatLockdown) == 'function' and InCombatLockdown()
+    y = y - Actions({{label = copy.apply, primary = true,
+        enabled = status.pending == true and not combat,
+        act = function()
+            if not (type(InCombatLockdown) == 'function' and InCombatLockdown()) then ReloadUI() end
+        end}}, PAD, y, CW) - GAP
+    if combat then y = y - Text(copy.combat, PAD, y, CW, 'body', MUTED) - GAP end
+    return y
+end
+
 function VIEW.summary(g, s, ctx, c, y)
     local fin, b = c.finish or {}, c.buttons or {}
     local sm = ctx.summary
@@ -1347,11 +1425,14 @@ function VIEW.summary(g, s, ctx, c, y)
         elseif id == 'auto' then
             if ctx.auto == 'unknown' then return fin.autoUnknown end
             return Fmt(fin.autoMode, ctx.auto == 'on' and 'ON' or 'OFF')
+        elseif id == 'language' then
+            local status = U.LanguageStatus()
+            return U.LanguageName(status.saved or status.active)
         end
     end
     local rowsTop = y
-    for _, id in ipairs({'wishlist', 'target', 'assign', 'manual', 'auto'}) do
-        local inPath = not explore or id == 'manual' or id == 'auto'
+    for _, id in ipairs({'wishlist', 'target', 'assign', 'manual', 'auto', 'language'}) do
+        local inPath = not explore or id == 'manual' or id == 'auto' or id == 'language'
         local kind, word = StepStatus(g, s, ctx, id)
         if not inPath then kind, word = 'not', nil end
         if kind == 'waiting' and g.StepId() ~= id and id ~= 'assign' then kind = 'not' end
@@ -1460,7 +1541,7 @@ end
 
 local function Ensure()
     if frame then return frame end
-    frame = CreateFrame('Frame', 'NexusGuidedSetup', UIParent)
+    frame = Nexus.FontSupport.CreateFrame('Frame', 'NexusGuidedSetup', UIParent)
     frame:SetSize(W, MIN_H)
     frame:SetPoint('TOP', UIParent, 'TOP', 0, -TopOffset())
     frame:SetFrameStrata('DIALOG')
@@ -1534,7 +1615,7 @@ local function Ensure()
     -- checks; Escape gives the keyboard back. Typing only keeps the text in
     -- this session's view; a changed text drops the earlier check, which
     -- belongs to the exact text it read.
-    local box = CreateFrame('EditBox', nil, frame)
+    local box = Nexus.FontSupport.CreateFrame('EditBox', nil, frame)
     box:SetAutoFocus(false)
     box:SetFontObject(ChatFontNormal)
     box:SetTextInsets(6, 6, 0, 0)
@@ -1571,7 +1652,7 @@ local function Ensure()
     -- the coach is, and its own hide closes the coach only while the coach is
     -- still visible; an explicit hide of the coach hides it first, so that
     -- closes nothing. Offline model only; native NOT_RUN.
-    local escape = CreateFrame('Frame', 'NexusGuidedSetupEscape', frame)
+    local escape = Nexus.FontSupport.CreateFrame('Frame', 'NexusGuidedSetupEscape', frame)
     escape:SetScript('OnHide', function(self)
         if not (frame and frame:IsVisible()) then return end
         if view.help then
@@ -1773,7 +1854,7 @@ local function Clip(t, x, w, from, to, s)
 end
 
 local function ScrollControl(label, tip, dir)
-    local b = CreateFrame('Button', nil, frame)
+    local b = Nexus.FontSupport.CreateFrame('Button', nil, frame)
     b:SetSize(SCROLL.bar, SCROLL.bar)
     local theme = Nexus.Theme
     if theme and theme.Exempt then theme.Exempt(b) else b._nexusThemeExempt = true end
@@ -2422,7 +2503,7 @@ function U.OpenHelp(page)
         -- one pass, and the coach shown inside that pass would be closed by
         -- the same key press.
         if not helpReturn then
-            helpReturn = CreateFrame('Frame')
+            helpReturn = Nexus.FontSupport.CreateFrame('Frame')
             helpReturn:SetScript('OnUpdate', function(self) self:Hide(); U.HelpEnded() end)
         end
         helpReturn:Show()

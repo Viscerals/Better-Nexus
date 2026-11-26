@@ -159,7 +159,7 @@ local function ScheduleRepaint()
     if repaintPending then return end
     repaintPending = true
     if not repaintRunner then
-        repaintRunner = CreateFrame("Frame")
+        repaintRunner = Nexus.FontSupport.CreateFrame("Frame")
         repaintRunner:Hide()
     end
     local elapsed = 0
@@ -216,7 +216,7 @@ local function StartExport()
     exportJob = job
     exportGeneration = exportGeneration + 1
     local myGeneration = exportGeneration
-    if not exportRunner then exportRunner = CreateFrame("Frame") end
+    if not exportRunner then exportRunner = Nexus.FontSupport.CreateFrame("Frame") end
     exportRunner:Show()
     local updateElapsed = 0
     exportRunner:SetScript("OnUpdate", function(self, elapsed)
@@ -243,7 +243,7 @@ local function StartExport()
                 self:Hide()
                 local finalText = value
                 if not exportFinisher then
-                    exportFinisher = CreateFrame("Frame")
+                    exportFinisher = Nexus.FontSupport.CreateFrame("Frame")
                     exportFinisher:Hide()
                 end
                 local waited = false
@@ -273,7 +273,7 @@ end
 
 local function EnsureFrame()
     if frame then return frame end
-    frame = CreateFrame("Frame", "NexusLogViewer", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusLogViewer", UIParent)
     frame:SetClampedToScreen(true)
     if type(UISpecialFrames) == "table" then
         table.insert(UISpecialFrames, "NexusLogViewer")
@@ -315,13 +315,13 @@ local function EnsureFrame()
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -10)
     title:SetText(T("log.title.data_log"))
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    local close = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
 
     tabButtons = {}
     local prev
     for i, tab in ipairs(TABS) do
-        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        local b = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         local label = T(tab.textKey)
         b:SetSize(math.max(56, #label * 6 + 18), 22)
         if i == 6 then
@@ -343,7 +343,7 @@ local function EnsureFrame()
         prev = b
     end
 
-    local selectAll = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local selectAll = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     selectAll:SetSize(116, 22)
     selectAll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -82)
     -- Help quotes "Select this page" and "Prepare full diagnostic report" by
@@ -356,7 +356,7 @@ local function EnsureFrame()
         end
     end)
 
-    local refresh = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local refresh = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     refresh:SetSize(70, 22)
     refresh:SetPoint("RIGHT", selectAll, "LEFT", -4, 0)
     refresh:SetText(T("log.button.refresh"))
@@ -364,12 +364,12 @@ local function EnsureFrame()
         if activeTab == "ai_export" then StartExport() else ScheduleRepaint() end
     end)
 
-    pagePrevious=CreateFrame("Button", "NexusLogPreviousPage", frame, "UIPanelButtonTemplate")
+    pagePrevious=Nexus.FontSupport.CreateFrame("Button", "NexusLogPreviousPage", frame, "UIPanelButtonTemplate")
     pagePrevious:SetSize(48,22)
     pagePrevious:SetPoint("RIGHT",refresh,"LEFT",-4,0)
     pagePrevious:SetText(T("log.button.previous_page"))
     pagePrevious:SetScript("OnClick",function() M.SetPage(copyPage-1) end)
-    pageNext=CreateFrame("Button", "NexusLogNextPage", frame, "UIPanelButtonTemplate")
+    pageNext=Nexus.FontSupport.CreateFrame("Button", "NexusLogNextPage", frame, "UIPanelButtonTemplate")
     pageNext:SetSize(48,22)
     pageNext:SetPoint("RIGHT",pagePrevious,"LEFT",-4,0)
     pageNext:SetText(T("log.button.next_page"))
@@ -379,7 +379,7 @@ local function EnsureFrame()
     peerLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 42)
     peerLabel:SetText(T("log.label.peer_event_filter"))
 
-    peerEdit = CreateFrame("EditBox", "NexusPeerTestTarget", frame,
+    peerEdit = Nexus.FontSupport.CreateFrame("EditBox", "NexusPeerTestTarget", frame,
         "InputBoxTemplate")
     peerEdit:SetSize(118, 22)
     peerEdit:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 150, 36)
@@ -387,7 +387,7 @@ local function EnsureFrame()
     peerEdit:SetMaxLetters(40)
     peerEdit:SetText("")
 
-    peerStart = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    peerStart = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     peerStart:SetSize(62, 22)
     peerStart:SetPoint("LEFT", peerEdit, "RIGHT", 4, 0)
     peerStart:SetText(T("log.button.peer_start"))
@@ -401,7 +401,7 @@ local function EnsureFrame()
         ScheduleRepaint()
     end)
 
-    peerStop = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    peerStop = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     peerStop:SetSize(62, 22)
     peerStop:SetPoint("LEFT", peerStart, "RIGHT", 4, 0)
     peerStop:SetText(T("log.button.peer_stop"))
@@ -415,7 +415,7 @@ local function EnsureFrame()
     end)
     UpdatePeerControls()
 
-    exportButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exportButton = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportButton:SetSize(220, 22)
     exportButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 7)
     exportButton:SetText(T("log.button.prepare_full_report"))
@@ -428,7 +428,7 @@ local function EnsureFrame()
     end)
     exportButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local clearButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local clearButton = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     clearButton:SetSize(86, 22)
     clearButton:SetPoint("RIGHT", exportButton, "LEFT", -6, 0)
     clearButton:SetText(T("log.button.clear_log"))
@@ -457,7 +457,7 @@ local function EnsureFrame()
         local myResetGeneration = clearResetGeneration
         clearResetButton = self
         if not clearResetRunner then
-            clearResetRunner = CreateFrame("Frame")
+            clearResetRunner = Nexus.FontSupport.CreateFrame("Frame")
             clearResetRunner:Hide()
         end
         local elapsed = 0
@@ -480,12 +480,12 @@ local function EnsureFrame()
     end)
     clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    scroll = CreateFrame("ScrollFrame", "NexusLogScroll", frame,
+    scroll = Nexus.FontSupport.CreateFrame("ScrollFrame", "NexusLogScroll", frame,
         "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -112)
     scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 64)
 
-    editBox = CreateFrame("EditBox", nil, scroll)
+    editBox = Nexus.FontSupport.CreateFrame("EditBox", nil, scroll)
     editBox:SetMultiLine(true)
     editBox:SetMaxLetters(0)
     editBox:SetAutoFocus(false)

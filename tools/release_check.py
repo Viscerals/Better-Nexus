@@ -81,9 +81,10 @@ def main() -> int:
         identity['toc'] += ' internal'
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     from build_package import (toc_directive, toc_directive_lines, TEXTURE_ASSETS, TEXTURE_BYTES,
-                               texture_problems, toc_texture_entries)
+                               texture_problems, toc_texture_entries, FONT_ASSETS, font_problems)
     # The one admitted image, as an archive member: exact path, exact case.
     archive_textures = ['Nexus/' + n for n in TEXTURE_ASSETS]
+    archive_fonts = ['Nexus/' + n for n in FONT_ASSETS]
 
     def toc_version_problem(toc: bytes, where: str, wanted: str) -> str | None:
         lines = toc_directive_lines(toc, 'Version')
@@ -136,6 +137,9 @@ def main() -> int:
                     problems.append(problem)
                 for entry in toc_texture_entries(packaged_toc.decode('utf-8', 'replace')):
                     problems.append(f'packaged Nexus.toc must not load a texture as code: {entry}')
+                for entry in packaged_toc.decode('utf-8', 'replace').splitlines():
+                    if entry.strip().replace('\\', '/') in FONT_ASSETS:
+                        problems.append(f'packaged Nexus.toc must not load a font asset as code: {entry.strip()}')
             # Exactly two addon folders: the addon, and the storage-only
             # support component that owns the report SavedVariables file.
             stray = [n for n in names
@@ -158,7 +162,7 @@ def main() -> int:
                 problems.extend(companion_toc_problems(ctoc, 'NexusSupport.toc'))
                 for name in names:
                     if (pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES
-                            and name not in archive_textures):
+                            and name not in archive_textures and name not in archive_fonts):
                         problems.append(f'unexpected file type in the package: {name}')
                     if '..' in pathlib.PurePosixPath(name).parts:
                         problems.append(f'package entry escapes its folder: {name}')
@@ -177,6 +181,18 @@ def main() -> int:
                     problems.append(f'{member} must be exactly {TEXTURE_BYTES} bytes; the archive declares {size}')
                 else:
                     problems.extend(texture_problems(data, member))
+            for path, (expected_size, _) in FONT_ASSETS.items():
+                member = 'Nexus/' + path
+                if names.count(member) != 1:
+                    problems.append(f'the package must hold {member} exactly once; found {names.count(member)}')
+                    continue
+                with zipfile.ZipFile(ns.zip) as z:
+                    size = z.getinfo(member).file_size
+                    data = z.read(member) if size == expected_size else None
+                if data is None:
+                    problems.append(f'{member} must be exactly {expected_size} bytes; the archive declares {size}')
+                else:
+                    problems.extend(font_problems(data, path))
             if field(packaged, 'version') != version:
                 problems.append(f'packaged version {field(packaged, "version")} differs from {version}')
             if field(packaged, 'buildLabel') != ns.label:

@@ -885,7 +885,7 @@ local function refresh()
 end
 local function ensure()
     if frame then return end
-    frame=CreateFrame("Frame","NexusHelpWindow",UIParent);frame:SetSize(660,540);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    frame=Nexus.FontSupport.CreateFrame("Frame","NexusHelpWindow",UIParent);frame:SetSize(660,540);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
     -- The earlier high-level Help layout rendered its parent at 129 above
     -- children at 128. Keep this band low and every child above its backdrop.
     frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(HELP_LEVEL);frame:EnableMouse(true);frame:SetMovable(true)
@@ -895,12 +895,12 @@ local function ensure()
     frame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
     frame:SetBackdropColor(.035,.04,.05,1)
     frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge");frame.title:SetPoint("TOPLEFT",20,-20)
-    local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
+    local scroll=Nexus.FontSupport.CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
     -- Below the page buttons, the setup row, its one-line route note and the
     -- page's topic card (layoutTopic places it under the card).
     scroll:SetPoint("TOPLEFT",20,TOPIC_TOP-108);scroll:SetSize(595,267)
     scroll:SetFrameLevel(HELP_LEVEL+1);frame.scroll=scroll
-    local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
+    local child=Nexus.FontSupport.CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
     child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(HELP_LEVEL+2)
     frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
     frame.body:SetWidth(585);frame.body:SetJustifyH("LEFT");frame.body:SetJustifyV("TOP");frame.body:SetWordWrap(true)
@@ -909,7 +909,7 @@ local function ensure()
     frame.parts={frame.body}
     for i=2,DocumentPoolSize() do NewPart(i) end
     local function b(x,w,label,fn)
-        local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
+        local f=Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
         f:SetFrameLevel(HELP_LEVEL+2)
         f:SetScript("OnClick",function()fn();scroll:SetVerticalScroll(0)end);return f
     end
@@ -924,7 +924,7 @@ local function ensure()
     local step=83
     if 20+(#pages-1)*step+79>640 then step=math.floor(620/#pages) end
     for i,p in ipairs(pages) do
-        local t=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+        local t=Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
         t:SetPoint("TOPLEFT",20+(i-1)*step,TABS_TOP);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] and T(TAB_KEYS[p.id],TAB_LABELS[p.id]) or PageTitle(p))
         t:SetFrameLevel(HELP_LEVEL+2)
         t:SetScript("OnClick",function()index=i;refresh();scroll:SetVerticalScroll(0)end)
@@ -944,7 +944,7 @@ local function ensure()
     -- H.OpenChecklist); none assigns, spends, sends or turns Auto ON, and a
     -- route that cannot open says why in the note below.
     local function action(x,w,label,fn)
-        local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,WINDOWS_TOP);f:SetSize(w,22)
+        local f=Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,WINDOWS_TOP);f:SetSize(w,22)
         f:SetText(label);f:SetFrameLevel(HELP_LEVEL+2);f:SetScript("OnClick",fn);return f
     end
     action(20,150,T("help.button.setup_welcome","Setup / Welcome"),function()H.OpenGuide()end)
@@ -965,7 +965,7 @@ local function ensure()
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip then
         frame.topicHit=Nexus.LayoutMetrics.FullTextTooltip(frame.topicText,frame)
     end
-    frame.topicOpen=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");frame.topicOpen:SetSize(200,22)
+    frame.topicOpen=Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");frame.topicOpen:SetSize(200,22)
     frame.topicOpen:SetFrameLevel(HELP_LEVEL+2)
     frame.topicOpen:SetScript("OnClick",function() H.OpenTopic(pages[index].id) end)
     frame.reference=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")

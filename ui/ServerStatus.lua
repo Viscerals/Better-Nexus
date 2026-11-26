@@ -604,7 +604,7 @@ function M.Init()
     NexusDB = NexusDB or {}
     if scanner then return end
 
-    scanner = CreateFrame("Frame", "NexusServerStatusScanner", UIParent)
+    scanner = Nexus.FontSupport.CreateFrame("Frame", "NexusServerStatusScanner", UIParent)
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
     -- World entry only drops the frame reference. The difficulty is not reset
     -- here: the next scan reads the service's own known flag again.
