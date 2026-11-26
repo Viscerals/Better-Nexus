@@ -3,7 +3,7 @@
 ## Notes: Plan an Echo Wishlist, follow recommendations or enable automatic rolling, refine with approved Orbs, share builds, and compare recorded DPS. Experimental - back up saved data.
 ## Author: Valentine
 ## Version: 1.20.0-beta.1
-## OptionalDeps: ProjectEbonhold, StutterAlert
+## OptionalDeps: ProjectEbonhold, StutterAlert, Ebonhold_Russian
 ## SavedVariables: NexusDB WishlistRealizerDB
 
 data\Release.lua
@@ -71,6 +71,8 @@ core\GameAdapter.lua
 core\OrbAdapter.lua
 core\OrbRuntime.lua
 core\GuidedSetup.lua
+ui\FontSupport.lua
+ui\EchoText.lua
 ui\VirtualList.lua
 ui\Theme.lua
 ui\OverwriteWarning.lua

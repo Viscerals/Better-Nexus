@@ -110,3 +110,8 @@ implementation. No local export or player report is in this repository.
 The installed tester/client version, actual server delivery and sender/channel
 convention are unverified. See `docs/ORB_BOUNDED_RECOVERY.md` for fail-closed
 behavior when own request observation or qualifying replies are unavailable.
+
+
+## Local Cyrillic font support
+
+The local font support uses DejaVu Sans. Copyright and permission notices are preserved in `Fonts/LICENSE_DEJAVU.txt`. English retains the original client font faces.
