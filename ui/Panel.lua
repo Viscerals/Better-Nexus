@@ -846,7 +846,7 @@ do
             error("Nexus.Panel.CreateDestinationRow: options must be a table", 2)
         end
         local layout = DestLayout()
-        local row = CreateFrame("Frame", nil, parent)
+        local row = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
         local cells, hits = {}, {}
         for index = 1, 4 do
             local cell = index == 1 and firstText or nil
@@ -994,8 +994,10 @@ do
     -- and is at least 24 x 24 units; Close is the design's 24 pixels wide;
     -- Options is as wide as the label it shows and the Auto control as wide
     -- as the widest of its three labels (M.AutoControlWidth), each with the
-    -- design's room around the words and each held to three tenths of the
-    -- panel so the title keeps a slot; the three are the design's 6 apart,
+    -- design's room around the words. Options may use two fifths of the
+    -- panel; Auto uses at most three tenths and leaves the whole brand name
+    -- beside the grip. A passive Auto status needs only its own words.
+    -- The three are the design's 6 apart,
     -- in the middle of the row. `line` and `lineTop` give the row itself.
     -- A label wider than the room such a held control leaves it is not
     -- shortened: `optionsWraps` and `autoWraps` say that its own line is
@@ -1006,7 +1008,7 @@ do
     -- changed is followed, and nothing is measured again for words and a
     -- face already measured (M.PrimaryWidth).
     local COMPACT = {}
-    local function CompactSlots(c)
+    local function CompactSlots(c, showAuto, autoState)
         local s = COMPACT
         local panelW = tonumber(M._panelWidth)
         local limit = panelW and math.floor(panelW * 0.3) or math.huge
@@ -1021,11 +1023,27 @@ do
         s.gripTop = c.headerTop - math.floor((c.grip - c.line1H) / 2)
         s.titleLeft = c.inset + c.grip + c.controlGap
         s.options = s.edge + s.closeWidth + s.gap
-        s.optionsWidth = math.min(limit, (optionsText or c.controlH * 2) + c.optionsPad)
+        s.optionsWidth = math.min(panelW and math.floor(panelW * 0.4) or math.huge,
+            (optionsText or c.controlH * 2) + math.max(c.optionsPad, 24))
         s.optionsWraps = optionsText ~= nil and optionsText > s.optionsWidth - s.caps
         s.auto = s.options + s.optionsWidth + s.gap
         local autoNeed, autoWords, autoClear = M.AutoControlWidth(c)
-        s.autoWidth = math.min(limit, autoNeed or (c.controlH * 2 + c.autoPad))
+        if showAuto == nil then
+            showAuto = not (frame and frame._autoBtn) or frame._autoBtn:IsShown()
+        end
+        if not showAuto then
+            local state = frame and frame._contextAutoState
+            local words = autoState or (state and state:GetText())
+            local measured = state and words and M.PrimaryWidth(state, words)
+            if measured then
+                autoNeed, autoWords, autoClear = measured + s.gap, measured, 0
+            end
+        end
+        local title = frame and frame._contextTitle
+        local titleNeed = (title and M.PrimaryWidth(title, "Nexus") or c.controlH * 2) + s.gap
+        local autoBudget = panelW and math.max(1, panelW - s.titleLeft - s.auto - s.gap - titleNeed)
+            or math.huge
+        s.autoWidth = math.min(limit, autoBudget, autoNeed or (c.controlH * 2 + c.autoPad))
         s.autoRoom = math.max(1, s.autoWidth - (autoClear or 0))
         s.autoWraps = autoWords ~= nil and autoWords > s.autoRoom
         s.reserved = s.auto + s.autoWidth + s.gap
@@ -1034,9 +1052,9 @@ do
 
     -- The line-1 slots (read only): the compact header's while the layout
     -- engine gives its metrics (M.Compact), else the former fixed ones.
-    function M.HeaderSlots()
+    function M.HeaderSlots(showAuto, autoState)
         local c = M.Compact()
-        if c then return CompactSlots(c) end
+        if c then return CompactSlots(c, showAuto, autoState) end
         return SLOTS
     end
 
@@ -1047,8 +1065,8 @@ do
     -- tall as the wrapped label needs (M.FitControlLabel); header line 1
     -- grows for it (M.HeaderControlsNeed). Without the compact metrics the
     -- label keeps its one line. Returns the slots.
-    function M.PlaceOptionsButton()
-        local slots = M.HeaderSlots()
+    function M.PlaceOptionsButton(showAuto, autoState)
+        local slots = M.HeaderSlots(showAuto, autoState)
         local menu = frame and frame._menuBtn
         if not menu then return slots end
         local height = M.FitControlLabel(menu, slots.optionsWidth - slots.caps, slots.height, slots.compact,
@@ -1097,17 +1115,19 @@ end
 -- for the label it shows.
 M.CONTROL_ROLE = "secondary"
 
--- The widest of the given words on one line in the control labels' font
--- (M.CONTROL_ROLE, the header controls' and buttons' own; the name is from
--- when their labels were primary text), in whole units: measured on a hidden
--- text of `owner`, made once, and measured again only for other words or
+-- The widest of the given words on one line in the visible button's font
+-- (M.CONTROL_ROLE is the fallback before its label exists), in whole units:
+-- measured on a hidden text of `owner` (or its parent for a FontString),
+-- made once, and measured again only for other words or
 -- another face (its nominal font and size, or a new GetFont reader, as the
 -- header rows are keyed). nil while it cannot be measured: no words, no
 -- owned font, an owner that makes no text.
 function M.PrimaryWidth(owner, ...)
     local metrics = Nexus.LayoutMetrics
-    if not (owner and metrics and type(metrics.FontObject) == "function"
-        and type(owner.CreateFontString) == "function") then return nil end
+    if not (owner and metrics and type(metrics.FontObject) == "function") then return nil end
+    local parent = type(owner.CreateFontString) == "function" and owner
+        or (type(owner.GetParent) == "function" and owner:GetParent())
+    if not (parent and type(parent.CreateFontString) == "function") then return nil end
     local words = {}
     for index = 1, select("#", ...) do
         local text = select(index, ...)
@@ -1116,15 +1136,32 @@ function M.PrimaryWidth(owner, ...)
     if #words == 0 then return nil end
     local probe = owner._nexusWidthProbe
     if not probe then
-        local text = owner:CreateFontString(nil, "OVERLAY", metrics.FontObject(M.CONTROL_ROLE))
+        local text = parent:CreateFontString(nil, "OVERLAY", metrics.FontObject(M.CONTROL_ROLE))
         if not text then return nil end
         text:Hide()
         probe = {text = text}
         owner._nexusWidthProbe = probe
     end
+    -- A native button can retain its FontString's local font attributes
+    -- after SetNormalFontObject. Measure that actual face and size instead
+    -- of assuming that the shared secondary font reached the visible label.
+    local label = type(owner.GetFontString) == "function" and owner:GetFontString()
+        or (type(owner.GetFont) == "function" and owner or nil)
+    if label and type(label.GetFont) == "function" and type(probe.text.SetFont) == "function" then
+        local okFont, path, size, flags = pcall(label.GetFont, label)
+        if okFont and path and size then
+            local sourceFont = tostring(path) .. "\031" .. tostring(size) .. "\031" .. tostring(flags or "")
+            if probe.sourceFont ~= sourceFont then
+                probe.text:SetFont(path, size, flags or "")
+                probe.sourceFont = sourceFont
+            end
+        end
+    end
     local reader = probe.text.GetFont
-    local ok, path, size = pcall(reader, probe.text)
-    local key = table.concat(words, "\031") .. "\031" .. (ok and (tostring(path) .. "\031" .. tostring(size)) or "?")
+    local ok, path, size, flags = pcall(reader, probe.text)
+    local key = table.concat(words, "\031") .. "\031"
+        .. (ok and (tostring(path) .. "\031" .. tostring(size) .. "\031" .. tostring(flags)) or "?")
+        .. "\031" .. tostring(frame and frame._nexusShownRevision or 0)
     if probe.key ~= key or not rawequal(probe.reader, reader) then
         local widest = 0
         for _, text in ipairs(words) do widest = math.max(widest, M.LineWidth(probe.text, text)) end
@@ -1144,7 +1181,8 @@ function M.LineButtonWidth(c, panelWidth)
     if not words then return nil end
     -- (Also the wider label's own width: a label wider than its room in the
     -- held column wraps in its button, M.UpdateContextHeader.)
-    return math.max(1, math.min(words + c.buttonPad, math.floor((tonumber(panelWidth) or math.huge) * 0.4))), words
+    return math.max(1, math.min(words + math.max(c.buttonPad, 24),
+        math.floor((tonumber(panelWidth) or math.huge) * 0.4))), words
 end
 
 -- The compact four-cell destination row remains an internal formatter and
@@ -1158,7 +1196,7 @@ function M.CreateContextHeader(parent)
         label:SetJustifyH("LEFT")
         label:SetSize(280, 20)
         label:SetWordWrap(false)
-        local hit = CreateFrame("Frame", nil, parent)
+        local hit = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
         hit:SetPoint("TOPLEFT", label, "TOPLEFT", 0, 0)
         hit:SetPoint("BOTTOMRIGHT", label, "BOTTOMRIGHT", 0, 0)
         hit:EnableMouse(true)
@@ -1192,7 +1230,7 @@ function M.CreateContextHeader(parent)
     parent._contextAutoState:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -slots.auto, -(slots.top + 2))
     parent._contextAutoState:SetSize(slots.autoWidth, 18)
     parent._contextAutoState:SetJustifyH("RIGHT")
-    parent._contextChange = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    parent._contextChange = Nexus.FontSupport.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     parent._contextChange:SetText(LT("panel.button.change_wishlist"))
     parent._contextChange:SetScript("OnClick", function(self)
         M.ShowHub("plan", self)
@@ -1340,7 +1378,7 @@ function M.HeaderControlsNeed(showAuto, model)
     local c = M.Compact()
     local menu = frame and frame._menuBtn
     if not (c and menu) then return nil end
-    local slots = M.HeaderSlots()
+    local slots = M.HeaderSlots(showAuto, M.AutoStateWords(model))
     local tallest = M.FitControlLabel(menu, slots.optionsWidth - slots.caps, slots.height, c,
         slots.optionsWraps, true, menu:GetText())
     if showAuto then
@@ -1383,7 +1421,9 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     local labelWidth = c and math.max(1, width - side - edge - buttonW - c.captionGap)
         or math.max(100, width - 134)
     -- The title runs from after the grip to the Auto slot (M.HeaderSlots).
-    local slots = M.HeaderSlots()
+    local autoShown = frame._autoBtn:IsShown() and true or false
+    local autoState = not autoShown and M.AutoStateWords(model) or nil
+    local slots = M.HeaderSlots(autoShown, autoState)
     local titleWidth = c and math.max(1, width - slots.reserved - slots.titleLeft)
         or math.max(100, width - slots.reserved - slots.titleLeft)
     -- Put high-priority state before names: truncation at 420px must not
@@ -1452,8 +1492,6 @@ function M.UpdateContextHeader(model, settled, renderWidth)
     -- whose header words, hovers, widths and Auto state are the ones already
     -- applied, nothing is re-anchored, refitted or set again. A layout pass
     -- always applies the header: it places the My Builds button itself.
-    local autoShown = frame._autoBtn:IsShown() and true or false
-    local autoState = not autoShown and M.AutoStateWords(model) or nil
     -- The captions and their face are part of the key: their measured width
     -- places the names. A face with other metrics under the same nominal
     -- font and size comes with a new GetFont reader, compared by identity
@@ -1603,18 +1641,17 @@ function M.UpdateContextHeader(model, settled, renderWidth)
         -- a label that changed without a layout pass (the "!" of a trusted
         -- update notice) moves them with the title's room. The same slots
         -- as the footer pass gives them (LayoutFooter).
-        M.PlaceOptionsButton()
+        M.PlaceOptionsButton(autoShown, autoState)
         if autoShown then
             frame._autoBtn:ClearAllPoints()
             frame._autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
             -- (As tall as a label that wraps in it needs: M.AutoControlHeight.)
             frame._autoBtn:SetSize(slots.autoWidth, M.AutoControlHeight(slots))
         end
-        -- The Auto state words stand in the Auto control's own compact slot
-        -- while that control is hidden. The slot is as wide as the control's
-        -- labels make it; words wider than it ("Auto unknown", a longer
-        -- translation) wrap in it, whole, at their measured height
-        -- (M.AutoStateHeight), and line 1 grows for them.
+        -- A passive Auto status reserves its own words, without the button's
+        -- end caps or the other states' longer labels. If the remaining room
+        -- beside the brand is narrower, the status wraps at its measured
+        -- height (M.AutoStateHeight), and line 1 grows for it.
         state:ClearAllPoints()
         state:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
         state:SetSize(slots.autoWidth, math.max(slots.height,
@@ -2365,7 +2402,7 @@ local function FmtDps(dps)
 end
 
 local function HitFrame(parent, fs)
-    local hit = CreateFrame("Frame", nil, parent)
+    local hit = Nexus.FontSupport.CreateFrame("Frame", nil, parent)
     hit:SetAllPoints(fs)
     hit:EnableMouse(true)
     return hit
@@ -3273,10 +3310,12 @@ end
 function M.BeginPanelDrag(origin, button)
     if M._panelDrag or not frame or (button ~= nil and button ~= "LeftButton") then return false end
     if not frame:IsShown() then return false end
-    local shiftQuery = IsShiftKeyDown
-    if type(shiftQuery) ~= "function" then return false end
-    local okShift, shift = pcall(shiftQuery)
-    if not okShift or not (shift == 1 or shift == true) then return false end
+    if not (frame._dragGrip and origin == frame._dragGrip) then
+        local shiftQuery = IsShiftKeyDown
+        if type(shiftQuery) ~= "function" then return false end
+        local okShift, shift = pcall(shiftQuery)
+        if not okShift or not (shift == 1 or shift == true) then return false end
+    end
     local x, y = M.PanelCenterOffset()
     -- While this move is active, and only then, the root's OnUpdate also
     -- watches Shift: any answer but 1 or true, a failing query or a missing
@@ -3284,12 +3323,13 @@ function M.BeginPanelDrag(origin, button)
     -- called each frame and is put back when the move ends, unless another
     -- owner has replaced the watch since; a watch left in another owner's
     -- chain only forwards to that earlier callback.
-    local drag = {origin = origin or frame, x = x, y = y}
+    local drag = {origin = origin or frame, x = x, y = y,
+        requiresShift = not (frame._dragGrip and origin == frame._dragGrip)}
     local okPrevious, previous = pcall(frame.GetScript, frame, "OnUpdate")
     if not okPrevious then return false end
     drag.previous = previous
     drag.watch = function(self, elapsed)
-        if M._panelDrag == drag then
+        if M._panelDrag == drag and drag.requiresShift then
             local query, okHeld, held = IsShiftKeyDown, false, nil
             if type(query) == "function" then okHeld, held = pcall(query) end
             if not okHeld or not (held == 1 or held == true) then M.FinishPanelDrag() end
@@ -3487,7 +3527,7 @@ end
 local function EnsureFrame()
     if frame then return frame end
 
-    frame = CreateFrame("Frame", "NexusPanel", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusPanel", UIParent)
     -- (Its width is the render's own from the start: M.TargetPanelWidth.)
     frame:SetSize(M.TargetPanelWidth(), 210)
     frame:SetClampedToScreen(true)
@@ -3516,7 +3556,7 @@ local function EnsureFrame()
     frame._destinationRow:Hide()
     buildHeaderText:Hide() -- first cell belongs to frame, unlike the row's other cells
 
-    switchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    switchBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._switchBtn = switchBtn
     switchBtn:SetSize(90, 19)
     switchBtn:SetPoint("TOPLEFT", 10, -26)
@@ -3553,7 +3593,7 @@ local function EnsureFrame()
     -- Ash HUD. In-progress builds use a slim header treatment. Completed builds
     -- expand this into the primary status card so the familiar server metrics
     -- remain the most visible information.
-    worldStatusBox = CreateFrame("Frame", nil, frame)
+    worldStatusBox = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     -- Protected card: no style or colour choice repaints it (Theme.Exempt).
     worldStatusBox._nexusThemeExempt = true
     worldStatusBox:SetFrameLevel(frame:GetFrameLevel() + 3)
@@ -3583,7 +3623,7 @@ local function EnsureFrame()
     -- Live server Intensity meter. Keep these widgets attached to the status
     -- box instead of adding more module upvalues; WoW 3.3.5 Lua has a strict
     -- 60-upvalue compiler limit for functions.
-    worldStatusBox.intensityBar = CreateFrame("StatusBar", nil, worldStatusBox)
+    worldStatusBox.intensityBar = Nexus.FontSupport.CreateFrame("StatusBar", nil, worldStatusBox)
     worldStatusBox.intensityBar:SetMinMaxValues(0, 500)
     worldStatusBox.intensityBar:SetValue(0)
     worldStatusBox.intensityBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -3634,7 +3674,7 @@ local function EnsureFrame()
     worldStatusBox.PositionIntensityTicks = PositionIntensityTicks
     worldStatusBox.intensityBar:SetScript("OnSizeChanged", PositionIntensityTicks)
 
-    worldStatusHit = CreateFrame("Button", nil, worldStatusBox)
+    worldStatusHit = Nexus.FontSupport.CreateFrame("Button", nil, worldStatusBox)
     worldStatusHit:SetAllPoints(worldStatusBox)
     worldStatusHit:SetFrameLevel(worldStatusBox:GetFrameLevel() + 5)
     worldStatusHit:RegisterForClicks("LeftButtonUp")
@@ -3677,7 +3717,7 @@ local function EnsureFrame()
     worldStatusHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     worldStatusBox:Hide()
 
-    rollArea = CreateFrame("Frame", nil, frame)
+    rollArea = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     frame._rollArea = rollArea
     rollArea:SetPoint("TOPLEFT", 10, -98)
     rollArea:SetSize(280, 104)
@@ -3698,7 +3738,7 @@ local function EnsureFrame()
     -- Its legend on hover (Readout.ChargesLegend): what B/R/F, "?" and "~"
     -- mean. Shown and hidden with the line; reading it changes nothing.
     -- A frame field, not a local (EnsureFrame is near the Lua limits).
-    frame._chargesHover = CreateFrame("Frame", nil, rollArea)
+    frame._chargesHover = Nexus.FontSupport.CreateFrame("Frame", nil, rollArea)
     frame._chargesHover:SetPoint("TOPLEFT", frame._chargesText, "TOPLEFT", 0, 0)
     frame._chargesHover:SetPoint("BOTTOMRIGHT", frame._chargesText, "BOTTOMRIGHT", 0, 0)
     frame._chargesHover:EnableMouse(true)
@@ -3725,7 +3765,7 @@ local function EnsureFrame()
 
     -- Passive navigation only: it opens the Orb window, which reads and
     -- shows state. It starts, resumes, approves and spends nothing.
-    local orbsBtn = CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
+    local orbsBtn = Nexus.FontSupport.CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
     -- The responsive layout gives it its own row (ApplyPanelLayout); this is
     -- only the initial placement.
     orbsBtn:SetSize(104, 17)
@@ -3748,7 +3788,7 @@ local function EnsureFrame()
     orbsBtn:Hide()
     frame._orbsBtn = orbsBtn
 
-    local orbMiniBtn = CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
+    local orbMiniBtn = Nexus.FontSupport.CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
     orbMiniBtn:SetSize(118, 17)
     orbMiniBtn:SetPoint("RIGHT", orbsBtn, "LEFT", -6, 0)
     orbMiniBtn:SetText((Nexus.Localization.Text("panel.button.orb_mini")))
@@ -3809,7 +3849,7 @@ local function EnsureFrame()
     tomesValue = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     tomesValue:SetJustifyH("RIGHT")
     tomesValue:SetTextColor(1, 0.4, 0.4)
-    tomesHit = CreateFrame("Frame", nil, frame)
+    tomesHit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     tomesHit:EnableMouse(true)
     tomesHit:SetScript("OnEnter", function(self)
         if #unknownTomesCache == 0 then return end
@@ -3962,9 +4002,9 @@ local function EnsureFrame()
     lkGlobalValue = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     lkGlobalValue:SetJustifyH("RIGHT")
 
-    dummyHit = CreateFrame("Frame", nil, frame)
+    dummyHit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     dummyHit:EnableMouse(true)
-    lkHit = CreateFrame("Frame", nil, frame)
+    lkHit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     lkHit:EnableMouse(true)
 
     completeBadge = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -3976,17 +4016,20 @@ local function EnsureFrame()
 
     setupText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     setupText:SetJustifyH("CENTER")
+    setupText:SetWordWrap(true)
     setupText:SetTextColor(0.45, 0.84, 1)
     setupHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     setupHint:SetSize(272, 34)
     setupHint:SetJustifyH("CENTER")
     setupHint:SetJustifyV("TOP")
+    setupHint:SetWordWrap(true)
 
     -- First-run primary action. Assignment used to be hidden behind the
     -- top-right Swap button while "Choose Build" opened an unrelated browser.
     -- Use the same server-backed assignment flow as Swap so the next required
     -- step is explicit and immediately reachable from onboarding.
-    setupGetStartedBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    setupGetStartedBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._setupAssignBtn = setupGetStartedBtn
     setupGetStartedBtn:SetSize(126, 24)
     setupGetStartedBtn:SetText((Nexus.Localization.Text("panel.button.assign_wishlist")))
     -- The assignment route (M.OpenAssignment), also offered by the Plan hub.
@@ -4004,7 +4047,8 @@ local function EnsureFrame()
     end)
     setupGetStartedBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    setupImportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    setupImportBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._setupCreateBtn = setupImportBtn
     setupImportBtn:SetSize(126, 24)
     setupImportBtn:SetText((Nexus.Localization.Text("panel.button.create_wishlist")))
     setupImportBtn:SetScript("OnClick", function()
@@ -4027,7 +4071,7 @@ local function EnsureFrame()
     end)
     setupImportBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    autoBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    autoBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._autoBtn = autoBtn
     autoBtn:SetSize(72, 22)
     autoBtn:SetPoint("BOTTOMLEFT", 8, 7)
@@ -4052,7 +4096,7 @@ local function EnsureFrame()
     -- Orbs opens the Orb window, as the Options menu item does. A hub only opens
     -- windows: it assigns, saves, shares, spends and enables nothing. Their
     -- scripts reach this file through M, not new upvalues (see menuBtn).
-    planBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    planBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     planBtn:SetSize(54, 22)
     planBtn:SetText(M.HubLabel("plan"))
     planBtn:SetScript("OnClick", function(self) M.ShowHub("plan", self) end)
@@ -4063,7 +4107,7 @@ local function EnsureFrame()
     -- loads (LoadingStatus), as the Build Library button's was. The OnEnter
     -- set below replaces the binding's hover hook; the hub hover carries the
     -- loading explanation itself (M.ExploreLoadingLines, C-04).
-    exploreBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exploreBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exploreBtn:SetSize(62, 22)
     exploreBtn:SetText(M.HubLabel("explore"))
     if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(exploreBtn,M.HubLabel("explore")) end
@@ -4071,7 +4115,7 @@ local function EnsureFrame()
     exploreBtn:SetScript("OnEnter", function(self) M.ShowHubTooltip("explore", self) end)
     exploreBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    local orbsHub = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local orbsHub = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbsHub:SetSize(52, 22)
     orbsHub:SetText(M.HubLabel("orbs"))
     orbsHub:SetScript("OnClick", function(self) M.ShowHub("orbs", self) end)
@@ -4082,7 +4126,7 @@ local function EnsureFrame()
     -- Options (issue #165): the menu of direct choices, named in words on
     -- header line 1 beside Close (M.PlaceOptionsButton). Navigation stays
     -- visible in the footer while infrequent tools live behind this button.
-    menuBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    menuBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     menuBtn:SetText(M.OptionsText(false))
     frame._menuBtn = menuBtn
     M.PlaceOptionsButton()
@@ -4096,7 +4140,7 @@ local function EnsureFrame()
         if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
         if shown then return end
         NexusDB = NexusDB or {}
-        M._moreMenu = M._moreMenu or CreateFrame("Frame", "NexusPanelMoreMenu", UIParent, "UIDropDownMenuTemplate")
+        M._moreMenu = M._moreMenu or Nexus.FontSupport.CreateFrame("Frame", "NexusPanelMoreMenu", UIParent, "UIDropDownMenuTemplate")
         M.OpenMenu(M.MoreMenuItems(self), M._moreMenu, self)
     end)
     menuBtn:SetScript("OnEnter", function(self)
@@ -4545,7 +4589,7 @@ function M.EnsureHeaderClose()
     if not frame then return nil end
     local close = frame._closeBtn
     if not close then
-        close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        close = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         close:SetText("X")
         close:SetFrameLevel(frame:GetFrameLevel() + 8)
         close:SetScript("OnClick", function() M.HideByPlayer() end)
@@ -4573,19 +4617,17 @@ end
 -- drag handle"): six dots in the header's left corner with a hover highlight
 -- and a "Drag to move" tooltip, on a 24 x 24 UI-unit target (M.HeaderSlots
 -- gripWidth x gripHeight: the maintainer's 2026-11-08 choice of at least
--- 24 x 24 UI units, centred on the 22 px row). A left drag with Shift held
--- moves the panel through its one drag owner (issue #168: M.BeginPanelDrag,
--- clamped to the screen; panelX / panelY saved as before), like the
--- background and every passive label; releasing Shift ends the move
--- (M.FinishPanelDrag, through the root's OnUpdate watch), as does the
--- drag's release. A plain click or an unmodified drag does nothing. Built lazily
+-- 24 x 24 UI units, centred on the 22 px row). A plain left drag on the
+-- handle moves the panel through M.BeginPanelDrag. The background and other
+-- passive surfaces still require Shift. Releasing the mouse ends and saves
+-- the handle's move. A plain click does nothing. Built lazily
 -- (EnsureFrame is at the upvalue ceiling). Its dots are fixed colours, never
 -- from the palette. Native pointer capture while dragging is NOT RUN.
 function M.EnsureHeaderGrip()
     if not frame then return nil end
     local grip = frame._dragGrip
     if not grip then
-        grip = CreateFrame("Button", nil, frame)
+        grip = Nexus.FontSupport.CreateFrame("Button", nil, frame)
         grip._nexusThemeExempt = true
         grip:SetFrameLevel(frame:GetFrameLevel() + 8)
         grip:EnableMouse(true)
@@ -5087,7 +5129,7 @@ function M.ShowHub(kind, anchor)
     end
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
-    M._hubMenu = M._hubMenu or CreateFrame("Frame", "NexusPanelHubMenu", UIParent, "UIDropDownMenuTemplate")
+    M._hubMenu = M._hubMenu or Nexus.FontSupport.CreateFrame("Frame", "NexusPanelHubMenu", UIParent, "UIDropDownMenuTemplate")
     M.OpenMenu(M.HubMenuItems(kind), M._hubMenu, anchor or "cursor")
     return true
 end
@@ -5122,7 +5164,7 @@ local function EnsureMinimapButton()
     local saved = M.SavedLayoutRoot()
     saved.minimapAngle = saved.minimapAngle or 220
 
-    local btn = CreateFrame("Button", "NexusMinimapButton", Minimap)
+    local btn = Nexus.FontSupport.CreateFrame("Button", "NexusMinimapButton", Minimap)
     btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
@@ -5574,7 +5616,7 @@ function M.SyncExtraListLink()
         return false
     end
     if not link then
-        link = CreateFrame("Button", nil, frame)
+        link = Nexus.FontSupport.CreateFrame("Button", nil, frame)
         link:SetFrameLevel(frame:GetFrameLevel() + 6)
         link:RegisterForClicks("LeftButtonUp")
         local hover = link:CreateTexture(nil, "HIGHLIGHT")
@@ -5610,7 +5652,7 @@ function M.EnsureExtraList()
     local list = M._extraList
     if list then return list end
     local L = M.EXTRA_LIST
-    list = CreateFrame("Frame", "NexusExtraCopiesList", UIParent)
+    list = Nexus.FontSupport.CreateFrame("Frame", "NexusExtraCopiesList", UIParent)
     list:SetFrameStrata("DIALOG")
     list:SetSize(L.width, L.minHeight)
     list:SetClampedToScreen(true)
@@ -5631,12 +5673,12 @@ function M.EnsureExtraList()
     -- from before a failed panel update), its warning. Never scrolled away.
     list.title = Text(list, "GameFontNormal")
     list.status = Text(list, "GameFontNormalSmall", 1, 0.45, 0.35)
-    list.closeX = CreateFrame("Button", nil, list, "UIPanelCloseButton")
+    list.closeX = Nexus.FontSupport.CreateFrame("Button", nil, list, "UIPanelCloseButton")
     list.closeX:SetPoint("TOPRIGHT", list, "TOPRIGHT", -2, -2)
     list.closeX:SetSize(32, 32)
     -- Scrolled together: the explanation, then every name.
-    list.scroll = CreateFrame("ScrollFrame", "NexusExtraCopiesListScroll", list, "UIPanelScrollFrameTemplate")
-    list.child = CreateFrame("Frame", nil, list.scroll)
+    list.scroll = Nexus.FontSupport.CreateFrame("ScrollFrame", "NexusExtraCopiesListScroll", list, "UIPanelScrollFrameTemplate")
+    list.child = Nexus.FontSupport.CreateFrame("Frame", nil, list.scroll)
     list.child:SetSize(L.width - L.inset - L.scrollBarRoom, 1)
     list.scroll:SetScrollChild(list.child)
     list.note = Text(list.child, "GameFontHighlightSmall")
@@ -5646,7 +5688,7 @@ function M.EnsureExtraList()
     list.probe = Text(list, "GameFontHighlightSmall")
     list.probe:SetText("Ag")
     list.probe:Hide()
-    list.close = CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
+    list.close = Nexus.FontSupport.CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
     list.close:SetText(LT("panel.button.close_extra_list"))
     list.close:SetSize(90, 22)
     list.close:SetPoint("BOTTOM", list, "BOTTOM", 0, L.closeBottom)
@@ -6055,7 +6097,7 @@ function M.EnsureOfferCards()
     local primary = metrics and metrics.FontObject and metrics.FontObject("normal") or "GameFontHighlight"
     local cards = {}
     for index = 1, 3 do
-        local card = CreateFrame("Frame", nil, area)
+        local card = Nexus.FontSupport.CreateFrame("Frame", nil, area)
         -- The row carries no theme-exempt mark. Theme.lua keeps that mark
         -- for a frame that "keeps its own look" and that styling never
         -- paints; a row's tag, its quality and its outline now take their
@@ -6500,7 +6542,7 @@ function M.OfferMarks()
     if not area then return nil end
     local layer = frame._offerMarks
     if not layer then
-        layer = CreateFrame("Frame", nil, area)
+        layer = Nexus.FontSupport.CreateFrame("Frame", nil, area)
         layer:SetAllPoints(area)
         if type(layer.SetFrameLevel) == "function" and type(area.GetFrameLevel) == "function" then
             layer:SetFrameLevel((tonumber(area:GetFrameLevel()) or 0) + 2)
@@ -7020,13 +7062,18 @@ function M.MeasuredLayout(layout)
     -- side) it is as wide as its lines are even (M.BalancedWidth), and its
     -- height is measured at that very width, the one the layout then gives
     -- its box (spec.setupHintW) and the panel draws it at.
-    if boxes.setupTitle and boxes.setupHint then
-        spec.setupTitleH = Needed(setupText, boxes.setupTitle.w, 1)
+    if boxes.setupHint then
+        spec.setupTitleH = nil
         local hintRoom = tonumber(layout.setupHintRoom) or boxes.setupHint.w
         spec.setupHintW = M.BalancedWidth(setupHint, hintRoom)
         spec.setupHintH = Needed(setupHint, spec.setupHintW or hintRoom, 1)
+        if metrics.ButtonLabelWidth and frame._setupAssignBtn and frame._setupCreateBtn then
+            spec.setupButtonW = math.max(metrics.ButtonLabelWidth(frame._setupAssignBtn),
+                metrics.ButtonLabelWidth(frame._setupCreateBtn)) + 24
+        end
     else
         spec.setupTitleH, spec.setupHintH, spec.setupHintW = nil, nil, nil
+        spec.setupButtonW = nil
     end
     if boxes.completeTitle and boxes.completeText then
         spec.completeTitleH = Needed(completeBadge, boxes.completeTitle.w, 1)
@@ -7138,7 +7185,7 @@ function M.EnsurePlayWidgets()
         return text
     end
     local function Hover(text, onEnter, onMouseUp)
-        local hit = CreateFrame("Frame", nil, frame)
+        local hit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
         hit:EnableMouse(true)
         PlayCover(hit, text)
         hit:SetScript("OnEnter", onEnter)
@@ -7159,7 +7206,7 @@ function M.EnsurePlayWidgets()
 
     -- Show / Hide details: shows or collapses the detail section (the four
     -- counts and the Echo names behind them).
-    p.details = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    p.details = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     -- Its label is the controls' one role (M.CONTROL_ROLE), as Options' is:
     -- an owned font, where it had the template's own. Its width is measured
     -- from the label it then shows (M.DetailsWidth).
@@ -7199,7 +7246,7 @@ function M.EnsurePlayWidgets()
     end, OpenEditor)
     -- Difficulty and Soul Ash on one line, with the card's hover and click.
     p.server = Line()
-    p.serverHit = CreateFrame("Button", nil, frame)
+    p.serverHit = Nexus.FontSupport.CreateFrame("Button", nil, frame)
     p.serverHit:EnableMouse(true)
     PlayCover(p.serverHit, p.server)
     p.serverHit:SetScript("OnClick", function()
@@ -7255,7 +7302,7 @@ function M.EnsurePlayWidgets()
     p.orbDetail = Line()
     p.orbDetail:SetJustifyV("TOP")
     M.Role(p.orbDetail, "text")
-    p.orbOpen = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    p.orbOpen = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     p.orbOpen:SetText(LT("panel.button.orb_open"))
     p.orbOpen:SetScript("OnClick", function()
         if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
@@ -7819,7 +7866,7 @@ end
 function M.EnsureAutoInfoToggle()
     local toggle = frame and frame._autoInfoBtn
     if frame and not toggle then
-        toggle = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        toggle = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         toggle:SetScript("OnClick", function() M.ToggleAutoInfo() end)
         toggle:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
@@ -7923,7 +7970,7 @@ local function EnsureCallboardWidgets()
     label:SetText(LT("panel.heading.callboard"))
     label:SetJustifyH("LEFT")
     frame._callboardLabel = label
-    local icon = CreateFrame("Button", nil, frame)
+    local icon = Nexus.FontSupport.CreateFrame("Button", nil, frame)
     icon:SetSize(22, 22)
     icon:EnableMouse(true)
     local tex = icon:CreateTexture(nil, "ARTWORK")
@@ -7948,7 +7995,7 @@ local function EnsureCallboardWidgets()
     title:SetWordWrap(false)
     title:SetTextColor(1, 0.82, 0)
     frame._callboardTitle = title
-    local titleHit = CreateFrame("Frame", nil, frame)
+    local titleHit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     titleHit:EnableMouse(true)
     frame._callboardTitleHit = titleHit
     local line = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -7971,7 +8018,7 @@ local function EnsureCallboardWidgets()
     M.Role(label, "muted")
     M.Role(title, "text")
     M.Role(line, "text")
-    local lineHit = CreateFrame("Frame", nil, frame)
+    local lineHit = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     lineHit:EnableMouse(true)
     frame._callboardLineHit = lineHit
     -- The detail row shows the first objective line and +N more. Its hover
@@ -8652,7 +8699,7 @@ end
 -- footer contains navigation only; moving between hubs never toggles Auto.
 local function LayoutFooter(showAuto, layout)
     -- Header line 1 (M.HeaderSlots): Options beside Close, Auto beside Options.
-    local slots = M.PlaceOptionsButton()
+    local slots = M.PlaceOptionsButton(showAuto)
 
     local orbsHub = frame._orbsHubBtn
     autoBtn:ClearAllPoints()
@@ -8815,7 +8862,7 @@ local function ApplyPanelLayout(layout, completed)
         end
     end
 
-    PlacePanelBox(setupText, boxes.setupTitle)
+    setupText:Hide()
     PlacePanelBox(setupHint, boxes.setupHint)
     PlacePanelBox(setupGetStartedBtn, boxes.setupAssign)
     PlacePanelBox(setupImportBtn, boxes.setupCreate)
@@ -9346,7 +9393,7 @@ local function ApplyModel(model, signatures, roll)
     unknownTomesCache = type(pr.unknownTomes) == "table" and pr.unknownTomes or {}
     toLockNamesCache = type(pr.toLock) == "table" and pr.toLock or {}
 
-    SetVisible(setupText, noBuild); SetVisible(setupHint, noBuild)
+    setupText:Hide(); SetVisible(setupHint, noBuild)
     SetVisible(setupGetStartedBtn, noBuild); SetVisible(setupImportBtn, noBuild)
     SetVisible(completeBadge, complete and not noBuild); SetVisible(completeSubtext, complete and not noBuild)
     ShowCoreProgress(not noBuild and not complete)
@@ -9916,7 +9963,7 @@ function M.EnsurePauseBanner()
     if not frame then return nil end
     local banner = frame._pauseBanner
     if banner then return banner end
-    banner = CreateFrame("Frame", nil, frame)
+    banner = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     banner._nexusThemeExempt = true
     banner:SetFrameLevel(frame:GetFrameLevel() + 10)
     banner:EnableMouse(true)
@@ -9955,7 +10002,7 @@ function M.EnsurePauseBanner()
         GameTooltip:Show()
     end)
     banner:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
-    local resume = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+    local resume = Nexus.FontSupport.CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
     resume:SetText(LT("panel.button.resume"))
     resume:SetSize(76, 22)
     resume:SetPoint("RIGHT", banner, "RIGHT", -6, 0)

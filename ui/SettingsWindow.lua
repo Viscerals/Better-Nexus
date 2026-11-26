@@ -178,7 +178,7 @@ function M.Activate(index, expectedText)
 end
 
 local function StyledButton(parent, text, width, height, point, x, y)
-    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    local button = Nexus.FontSupport.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     button:SetSize(width, height)
     button:SetPoint(point, x, y)
     button:SetText(text)
@@ -198,7 +198,7 @@ end
 
 local function EnsureFrame()
     if frame then return frame end
-    frame = CreateFrame("Frame", "NexusSettingsWindow", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusSettingsWindow", UIParent)
     frame:SetSize(396, 548)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     frame:SetFrameStrata("DIALOG")
@@ -273,7 +273,7 @@ local function EnsureFrame()
         button._nexusDetail = detail
         -- Disabled stock buttons may not deliver OnEnter. This independent
         -- overlay makes their full informational text inspectable on hover.
-        local infoHover = CreateFrame("Frame", nil, frame)
+        local infoHover = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
         infoHover:SetAllPoints(button)
         infoHover:EnableMouse(true)
         infoHover:SetScript("OnEnter", function() ShowRowTooltip(button) end)

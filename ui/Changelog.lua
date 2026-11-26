@@ -97,7 +97,7 @@ end
 
 local function Create()
     if frame then return frame end
-    frame = CreateFrame("Frame", "NexusChangelogPopup", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusChangelogPopup", UIParent)
     frame:SetSize(520, 330)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 90)
     frame:SetFrameStrata("DIALOG")
@@ -131,7 +131,7 @@ local function Create()
         frame:SetHeight(math.max(330, 52 + height + 54))
     end
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local close = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)
     close:SetPoint("BOTTOM", 0, 14)
     close:SetText(T("release_note.button.acknowledge"))
@@ -169,7 +169,7 @@ function M.ShowIfNeeded()
     popup:Show()
 end
 
-local ev = CreateFrame("Frame")
+local ev = Nexus.FontSupport.CreateFrame("Frame")
 local elapsed, armed, attempts = 0, false, 0
 local MAX_ATTEMPTS = 10 -- bounded: about 20 seconds, then it stops for good
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")

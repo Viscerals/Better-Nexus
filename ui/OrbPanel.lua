@@ -517,7 +517,7 @@ local function text(parent,x,y,w,h,value)
     f:SetText(value or "");return f
 end
 local function button(parent,x,y,w,label,fn)
-    local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
+    local b=Nexus.FontSupport.CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
     b:SetSize(w,24);b:SetPoint("TOPLEFT",x,y);b:SetText(label);b:SetScript("OnClick",fn)
     b:SetFrameLevel(parent:GetFrameLevel()+2);b:EnableMouse(true);return b
 end
@@ -1664,7 +1664,7 @@ function UI.ApplyAutoControls(can,why,partial)
 end
 local function ensure()
     if frame then return end
-    frame=CreateFrame("Frame","NexusOrbPanel",UIParent);frame:Hide();frame:SetSize(RUN_W,RUN_H);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    frame=Nexus.FontSupport.CreateFrame("Frame","NexusOrbPanel",UIParent);frame:Hide();frame:SetSize(RUN_W,RUN_H);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
     frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(30);frame:EnableMouse(true);frame:SetMovable(true);frame:SetClampedToScreen(true)
     frame:RegisterForDrag("LeftButton");frame:SetScript("OnDragStart",function(self)self:StartMoving()end)
     frame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
@@ -1677,7 +1677,7 @@ local function ensure()
     end)
     frame.targets=text(frame,20,-82,580,26);frame.permanent=text(frame,20,-112,580,28);frame.balance=text(frame,20,-144,580,34)
     frame.limitLabel=text(frame,20,-190,170,24,T("orb.label.maximum_this_run"))
-    frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",196,-188)
+    frame.limit=Nexus.FontSupport.CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",196,-188)
     if Nexus.Theme and Nexus.Theme.StyleInput then Nexus.Theme.StyleInput(frame.limit) end
     frame.limit:SetFrameLevel(32);frame.limit:SetAutoFocus(false);frame.limit:SetNumeric(true);frame.limit:SetMaxLetters(5)
     frame.limit:SetScript("OnEditFocusGained",function(self)if not self.editable or not frame:IsShown()then self:ClearFocus()end end)
@@ -1852,7 +1852,7 @@ local function ensure()
     end)
     frame.miniPanel:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
     frame.closeButton=button(frame,515,-414,85,T("orb.button.close"),function()frame:Hide()end)
-    frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
+    frame.advanced=Nexus.FontSupport.CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
     -- Every row from the targets line down takes the room its text needs, so
     -- no fixed blank band stays: the targets, the locked-targets line only
     -- while it has words, and the balance (with its draft line) as measured
@@ -2249,7 +2249,7 @@ end
 -- closes with that page and with the window.
 local function ensureCopyView()
     if logCopyFrame then return logCopyFrame end
-    local f=CreateFrame("Frame","NexusOrbHistoryCopy",logFrame);f:Hide()
+    local f=Nexus.FontSupport.CreateFrame("Frame","NexusOrbHistoryCopy",logFrame);f:Hide()
     logCopyFrame=f
     f:SetSize(640,460);f:SetPoint("CENTER",logFrame,"CENTER",0,0)
     f:SetFrameLevel(logFrame:GetFrameLevel()+20);f:EnableMouse(true)
@@ -2257,7 +2257,7 @@ local function ensureCopyView()
     f:SetBackdropColor(.035,.04,.05,1)
     text(f,20,-14,600,22,T("orb.heading.copy_report"))
     text(f,20,-36,600,32,T("orb.body.copy_report_help"))
-    f.check=CreateFrame("CheckButton","NexusOrbHistoryTechnical",f,"UICheckButtonTemplate")
+    f.check=Nexus.FontSupport.CreateFrame("CheckButton","NexusOrbHistoryTechnical",f,"UICheckButtonTemplate")
     f.check:SetSize(22,22);f.check:SetPoint("TOPLEFT",20,-68)
     f.checkLabel=text(f,46,-72,400,20,T("orb.label.include_technical"))
     f.check:SetScript("OnClick",function(self)
@@ -2265,9 +2265,9 @@ local function ensureCopyView()
         f.editBox:SetText(logReportText(self:GetChecked() and true or false))
         f.editBox:SetCursorPosition(0)
     end)
-    f.scroll=CreateFrame("ScrollFrame","NexusOrbHistoryCopyScroll",f,"UIPanelScrollFrameTemplate")
+    f.scroll=Nexus.FontSupport.CreateFrame("ScrollFrame","NexusOrbHistoryCopyScroll",f,"UIPanelScrollFrameTemplate")
     f.scroll:SetPoint("TOPLEFT",20,-96);f.scroll:SetSize(580,300)
-    f.editBox=CreateFrame("EditBox",nil,f.scroll)
+    f.editBox=Nexus.FontSupport.CreateFrame("EditBox",nil,f.scroll)
     f.editBox:SetMultiLine(true)
     -- The dedicated copy field is sized for the whole report: no name-limited
     -- popup, and nothing is silently cut.
@@ -2286,7 +2286,7 @@ local function ensureCopyView()
 end
 function ensureLog()
     if logFrame then return end
-    logFrame=CreateFrame("Frame","NexusOrbRunLog",frame);logFrame:Hide()
+    logFrame=Nexus.FontSupport.CreateFrame("Frame","NexusOrbRunLog",frame);logFrame:Hide()
     logFrame:SetSize(LOG_W,LOG_H);logFrame:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-LOG_TOP)
     logFrame:SetFrameLevel(frame:GetFrameLevel()+1);logFrame:EnableMouse(true)
     logFrame.current=button(logFrame,20,-4,120,T("orb.button.history_current"),function()
@@ -2305,7 +2305,7 @@ function ensureLog()
     end
     -- The heading row is a frame on the row origin, and each heading is one
     -- font string at its own column's x and width. Same numbers, one source.
-    logFrame.columns=CreateFrame("Frame",nil,logFrame)
+    logFrame.columns=Nexus.FontSupport.CreateFrame("Frame",nil,logFrame)
     logFrame.columns:SetSize(LOG_ROW_W,LOG_BANDS.headings.h)
     logFrame.columns:SetPoint("TOPLEFT",LOG_ROW_X,LOG_BANDS.headings.y)
     logFrame.columnHeadings={}
@@ -2318,7 +2318,7 @@ function ensureLog()
     logFrame.rows={}
     local rowH=LOG_BANDS.rows.h
     for i=1,LOG_ROWS do
-        local row=CreateFrame("Button",nil,logFrame)
+        local row=Nexus.FontSupport.CreateFrame("Button",nil,logFrame)
         row:SetSize(LOG_ROW_W,rowH);row:SetPoint("TOPLEFT",LOG_ROW_X,LOG_BANDS.rows.y-(i-1)*rowH)
         row:SetFrameLevel(logFrame:GetFrameLevel()+1)
         row.highlight=row:CreateTexture(nil,"BACKGROUND")
@@ -2368,11 +2368,11 @@ function ensureLog()
         row:Hide()
         logFrame.rows[i]=row
     end
-    logFrame.detailScroll=CreateFrame("ScrollFrame","NexusOrbHistoryDetailScroll",
+    logFrame.detailScroll=Nexus.FontSupport.CreateFrame("ScrollFrame","NexusOrbHistoryDetailScroll",
         logFrame,"UIPanelScrollFrameTemplate")
     logFrame.detailScroll:SetPoint("TOPLEFT",20,LOG_BANDS.details.y)
     logFrame.detailScroll:SetSize(700,LOG_BANDS.details.h)
-    logFrame.detailChild=CreateFrame("Frame",nil,logFrame.detailScroll)
+    logFrame.detailChild=Nexus.FontSupport.CreateFrame("Frame",nil,logFrame.detailScroll)
     logFrame.detailChild:SetSize(680,LOG_BANDS.details.h)
     logFrame.details=text(logFrame.detailChild,0,0,680,400)
     logFrame.detailScroll:SetScrollChild(logFrame.detailChild)
@@ -2442,7 +2442,7 @@ local function contRefresh()
 end
 local function ensureContinue()
     if contFrame then return end
-    local f=CreateFrame("Frame","NexusOrbContinue",UIParent);contFrame=f;f:Hide()
+    local f=Nexus.FontSupport.CreateFrame("Frame","NexusOrbContinue",UIParent);contFrame=f;f:Hide()
     f:SetSize(580,330);f:SetPoint("CENTER",UIParent,"CENTER",30,10)
     f:SetFrameStrata("DIALOG");f:SetFrameLevel(50);f:EnableMouse(true);f:SetMovable(true);f:SetClampedToScreen(true)
     f:RegisterForDrag("LeftButton")
@@ -2507,7 +2507,7 @@ function UI.Hide()if frame then frame:Hide()end end
 -- The ticker reads compact state only. It never advances an operation.
 function UI.AttachMainPanel(parent)
     if parent._orbControls then return parent._orbControls end
-    local f=CreateFrame("Frame",nil,parent);parent._orbControls=f
+    local f=Nexus.FontSupport.CreateFrame("Frame",nil,parent);parent._orbControls=f
     f:SetPoint("TOPLEFT",parent,"BOTTOMLEFT",0,-2);f:SetSize(parent:GetWidth(),100);f:SetFrameLevel(parent:GetFrameLevel()+3)
     f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"});f:SetBackdropColor(.035,.04,.05,.95)
     f.summary=text(f,8,-6,252,52)
@@ -3186,7 +3186,7 @@ end
 local function miniLine(f,key,about)
     local fs=text(f,MINI_PAD,MINI_Y[key],MINI_TEXT_W,MINI_LINE)
     if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(fs,nil,MINI_LINE) end
-    local hit=CreateFrame("Frame",nil,f);hit:SetAllPoints(fs);hit:EnableMouse(true)
+    local hit=Nexus.FontSupport.CreateFrame("Frame",nil,f);hit:SetAllPoints(fs);hit:EnableMouse(true)
     hit:SetScript("OnEnter",function(self)
         local full=fs._nexusFullText or fs:GetText() or ""
         if not (GameTooltip and (full~="" or about)) then return end
@@ -3200,7 +3200,7 @@ local function miniLine(f,key,about)
 end
 local function ensureMini()
     if mini then return mini end
-    local f=CreateFrame("Frame","NexusOrbMini",UIParent);f:Hide()
+    local f=Nexus.FontSupport.CreateFrame("Frame","NexusOrbMini",UIParent);f:Hide()
     f:SetSize(MINI_W,MINI_H);f:SetPoint("TOPLEFT",UIParent,"TOPLEFT",16,-150)
     -- Below the Orb window and Help (DIALOG): a status panel, not a dialog.
     f:SetFrameStrata("HIGH");f:SetFrameLevel(20);f:EnableMouse(true);f:SetMovable(true);f:SetClampedToScreen(true)
@@ -3211,7 +3211,7 @@ local function ensureMini()
     f.title:SetText(T("orb.title.mini"))
     -- The title bar moves the panel. Its place lasts for this session only:
     -- the client is asked not to keep it in its layout cache.
-    f.drag=CreateFrame("Frame",nil,f);f.drag:SetPoint("TOPLEFT",6,-4);f.drag:SetSize(274,24)
+    f.drag=Nexus.FontSupport.CreateFrame("Frame",nil,f);f.drag:SetPoint("TOPLEFT",6,-4);f.drag:SetSize(274,24)
     f.drag:SetFrameLevel(f:GetFrameLevel()+1);f.drag:EnableMouse(true);f.drag:RegisterForDrag("LeftButton")
     f.drag:SetScript("OnDragStart",function()f:StartMoving()end)
     f.drag:SetScript("OnDragStop",function()

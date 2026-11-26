@@ -480,7 +480,7 @@ end
 local function GetRow(parent)
     local r = table.remove(rowPool)
     if r then r:SetParent(parent); r:Show(); return r end
-    r = CreateFrame("Button",nil,parent); virtualStats.created=virtualStats.created+1; r:SetHeight(ROW_H); r:EnableMouse(true); SetBackdrop(r,0.80)
+    r = Nexus.FontSupport.CreateFrame("Button",nil,parent); virtualStats.created=virtualStats.created+1; r:SetHeight(ROW_H); r:EnableMouse(true); SetBackdrop(r,0.80)
     -- Each line box is a full line (17 px) also for a taller replacement face;
     -- the upper and lower lines of a row meet without overlapping.
     r.rank=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); r.rank:SetPoint("LEFT",8,0); r.rank:SetSize(30,17); r.rank:SetJustifyH("CENTER")
@@ -961,44 +961,44 @@ local function EnsureDetail(parent)
     if detail then return end
     -- The window has a fixed size, so the detail's height is stated, not
     -- derived from a second anchor.
-    detail=CreateFrame("Frame",nil,parent); detail:SetSize(335,math.max(300,(tonumber(parent:GetHeight()) or 640)-120)); detail:SetPoint("TOPRIGHT",-18,-102); SetBackdrop(detail,0.90)
+    detail=Nexus.FontSupport.CreateFrame("Frame",nil,parent); detail:SetSize(335,math.max(300,(tonumber(parent:GetHeight()) or 640)-120)); detail:SetPoint("TOPRIGHT",-18,-102); SetBackdrop(detail,0.90)
     detail.title=detail:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); detail.title:SetPoint("TOPLEFT",14,-14); detail.title:SetSize(305,22); detail.title:SetJustifyH("LEFT")
     detail.owner=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.owner:SetPoint("TOPLEFT",14,-39); detail.owner:SetSize(305,16); detail.owner:SetJustifyH("LEFT")
     -- One line each; a shortened title or name is read in full here.
-    detail.headerHit=CreateFrame("Frame",nil,detail); detail.headerHit:SetPoint("TOPLEFT",detail.title,"TOPLEFT"); detail.headerHit:SetPoint("BOTTOMRIGHT",detail.owner,"BOTTOMRIGHT"); detail.headerHit:EnableMouse(true)
+    detail.headerHit=Nexus.FontSupport.CreateFrame("Frame",nil,detail); detail.headerHit:SetPoint("TOPLEFT",detail.title,"TOPLEFT"); detail.headerHit:SetPoint("BOTTOMRIGHT",detail.owner,"BOTTOMRIGHT"); detail.headerHit:EnableMouse(true)
     detail.headerHit:SetScript("OnEnter",function(self)
         local metrics=Nexus.LayoutMetrics
         if not (metrics and (metrics.Shortened(detail.title) or metrics.Shortened(detail.owner))) then return end
         GameTooltip:SetOwner(self,"ANCHOR_BOTTOMLEFT"); GameTooltip:AddLine(tostring(detail.title:GetText() or ""),1,0.82,0,true); GameTooltip:AddLine(tostring(detail.owner:GetText() or ""),0.8,0.8,0.8,true); GameTooltip:Show()
     end)
     detail.headerHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
-    detail.bodyScroll=CreateFrame("ScrollFrame","NexusLeaderboardDetailScroll",detail,"UIPanelScrollFrameTemplate"); detail.bodyScroll.scrollBarHideable=1
-    local body=CreateFrame("Frame",nil,detail.bodyScroll); body:SetSize(287,1); detail.bodyScroll:SetScrollChild(body); detail.body=body
+    detail.bodyScroll=Nexus.FontSupport.CreateFrame("ScrollFrame","NexusLeaderboardDetailScroll",detail,"UIPanelScrollFrameTemplate"); detail.bodyScroll.scrollBarHideable=1
+    local body=Nexus.FontSupport.CreateFrame("Frame",nil,detail.bodyScroll); body:SetSize(287,1); detail.bodyScroll:SetScrollChild(body); detail.body=body
     detail.record=body:CreateFontString(nil,"OVERLAY","GameFontNormal"); detail.record:SetSize(305,42); detail.record:SetJustifyH("LEFT"); detail.record:SetJustifyV("TOP")
     detail.desc=body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.desc:SetSize(305,48); detail.desc:SetJustifyH("LEFT"); detail.desc:SetJustifyV("TOP")
     detail.lockedTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.lockedTitle:SetText(T("leaderboard.heading.locked_echoes"))
     detail.lockedIcons={}
     for i=1,6 do
-        local b=CreateFrame("Button",nil,body); b:SetSize(32,32); b.icon=b:CreateTexture(nil,"OVERLAY"); b.icon:SetAllPoints(b)
+        local b=Nexus.FontSupport.CreateFrame("Button",nil,body); b:SetSize(32,32); b.icon=b:CreateTexture(nil,"OVERLAY"); b.icon:SetAllPoints(b)
         b:SetScript("OnEnter",function(self) if self.tip then GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:SetHyperlink("spell:"..tostring(self.tip)); GameTooltip:Show() end end)
         b:SetScript("OnLeave",function() GameTooltip:Hide() end); b:Hide(); detail.lockedIcons[i]=b
     end
     detail.echoTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.echoTitle:SetText(T("leaderboard.heading.exact_loadout"))
     detail.icons={}
     for i=1,80 do
-        local b=CreateFrame("Button",nil,body); b:SetSize(22,22)
+        local b=Nexus.FontSupport.CreateFrame("Button",nil,body); b:SetSize(22,22)
         b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(b); b.count=b:CreateFontString(nil,"OVERLAY","NumberFontNormalSmall"); b.count:SetPoint("BOTTOMRIGHT",1,-1)
         b:SetScript("OnEnter",function(self) if self.tip then GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:SetHyperlink("spell:"..tostring(self.tip)); GameTooltip:Show() end end)
         b:SetScript("OnLeave",function() GameTooltip:Hide() end); b:Hide(); detail.icons[i]=b
     end
     detail.more=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.more:SetSize(305,18); detail.more:SetJustifyH("LEFT"); detail.more:SetJustifyV("TOP")
-    detail.moreHit=CreateFrame("Frame",nil,detail); detail.moreHit:SetAllPoints(detail.more); detail.moreHit:EnableMouse(true)
+    detail.moreHit=Nexus.FontSupport.CreateFrame("Frame",nil,detail); detail.moreHit:SetAllPoints(detail.more); detail.moreHit:EnableMouse(true)
     detail.moreHit:SetScript("OnEnter",function(self)
         if not (self.capped and detail.more:IsShown()) then return end
         GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:AddLine(tostring(detail.more:GetText() or ""),1,1,1,true); GameTooltip:Show()
     end)
     detail.moreHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
-    detail.copy=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.copy:SetSize(138,24); detail.copy:SetPoint("BOTTOMLEFT",14,14); detail.copy:SetText(T("leaderboard.button.copy_into_editor"))
+    detail.copy=Nexus.FontSupport.CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.copy:SetSize(138,24); detail.copy:SetPoint("BOTTOMLEFT",14,14); detail.copy:SetText(T("leaderboard.button.copy_into_editor"))
     -- Keep ordinary and permanently locked evidence in separate immutable
     -- pools.  Neither ordering nor a shared spell ID may redefine its role.
     detail.copy:SetScript("OnClick",function()
@@ -1026,7 +1026,7 @@ local function EnsureDetail(parent)
         local opened=Nexus.WishlistEditor.OpenForCandidate(validated)
         if opened~=false then M.Hide() end
     end)
-    detail.open=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.open:SetSize(138,24); detail.open:SetPoint("LEFT",detail.copy,"RIGHT",8,0); detail.open:SetText(T("leaderboard.button.open_build"))
+    detail.open=Nexus.FontSupport.CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.open:SetSize(138,24); detail.open:SetPoint("LEFT",detail.copy,"RIGHT",8,0); detail.open:SetText(T("leaderboard.button.open_build"))
     detail.open:SetScript("OnClick",function()
         local id,reason=ResolveOpenBuildId(detail.row)
         if not id or not (Nexus.CommunityBuilds
@@ -1317,11 +1317,11 @@ applySelection = function(row)
 end
 
 local function MakeNavButton(parent,text,w)
-    local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate"); b:SetSize(w,22); b:SetText(text); return b
+    local b=Nexus.FontSupport.CreateFrame("Button",nil,parent,"UIPanelButtonTemplate"); b:SetSize(w,22); b:SetText(text); return b
 end
 
 local function MakeTab(parent,text,w)
-    local b=CreateFrame("Button",nil,parent); b:SetSize(w,24); SetBackdrop(b,0.88)
+    local b=Nexus.FontSupport.CreateFrame("Button",nil,parent); b:SetSize(w,24); SetBackdrop(b,0.88)
     b.text=b:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); b.text:SetPoint("CENTER"); b.text:SetText(text)
     b.active=b:CreateTexture(nil,"BACKGROUND"); b.active:SetPoint("BOTTOMLEFT",4,3); b.active:SetPoint("BOTTOMRIGHT",-4,3); b.active:SetHeight(2); b.active:SetTexture(1,0.82,0,0.9); b.active:Hide()
     return b
@@ -1329,7 +1329,7 @@ end
 
 local function EnsureFrame()
     if frame then return frame end
-    frame=CreateFrame("Frame","NexusLeaderboardFrame",UIParent); frame:SetClampedToScreen(true); if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusLeaderboardFrame") end
+    frame=Nexus.FontSupport.CreateFrame("Frame","NexusLeaderboardFrame",UIParent); frame:SetClampedToScreen(true); if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusLeaderboardFrame") end
     -- The workspaces' common width (Plan and Explore are 1040 too), so the
     -- shared header stands at the same place in each.
     frame:SetSize(Nexus.LayoutMetrics and Nexus.LayoutMetrics.WORKSPACE_WIDTH or 1040,640); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(55); frame:EnableMouse(true); frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
@@ -1339,7 +1339,7 @@ local function EnsureFrame()
     -- The workspace's own name, as its tab says (Records); the window used to
     -- carry the older "Explore / Leaderboard" heading.
     local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText(T("leaderboard.title.records")); frame._title=title
-    local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-6,-6)
+    local close=Nexus.FontSupport.CreateFrame("Button",nil,frame,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-6,-6)
     local builds=MakeNavButton(frame,T("leaderboard.button.nav_builds"),88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,T("leaderboard.button.nav_leaderboard"),102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200"..T("leaderboard.button.nav_leaderboard").."|r"); board:Disable()
     local wish=MakeNavButton(frame,T("leaderboard.button.nav_wishlists"),92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
@@ -1359,16 +1359,16 @@ local function EnsureFrame()
         })
     end
 
-    searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
+    searchBox=Nexus.FontSupport.CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
     local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText(T("leaderboard.placeholder.search"))
     searchBox:SetScript("OnEditFocusGained",function() ph:Hide() end); searchBox:SetScript("OnEditFocusLost",function(self) if self:GetText()=="" then ph:Show() end end)
 
-    classBtn=CreateFrame("Button",nil,frame); classBtn:SetSize(150,22); classBtn:SetPoint("LEFT",searchBox,"RIGHT",10,0); SetBackdrop(classBtn,0.94)
+    classBtn=Nexus.FontSupport.CreateFrame("Button",nil,frame); classBtn:SetSize(150,22); classBtn:SetPoint("LEFT",searchBox,"RIGHT",10,0); SetBackdrop(classBtn,0.94)
     classBtn.text=classBtn:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); classBtn.text:SetPoint("LEFT",10,0); classBtn.text:SetSize(118,14); classBtn.text:SetJustifyH("LEFT")
     classBtn.arrow=classBtn:CreateTexture(nil,"ARTWORK"); classBtn.arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow"); classBtn.arrow:SetSize(12,12); classBtn.arrow:SetPoint("RIGHT",-8,0)
-    classMenu=CreateFrame("Frame",nil,UIParent); classMenu:SetFrameStrata("TOOLTIP"); classMenu:SetSize(170,#CLASS_ORDER*22+8); classMenu:EnableMouse(true); classMenu:Hide(); SetBackdrop(classMenu,0.99,0.32)
+    classMenu=Nexus.FontSupport.CreateFrame("Frame",nil,UIParent); classMenu:SetFrameStrata("TOOLTIP"); classMenu:SetSize(170,#CLASS_ORDER*22+8); classMenu:EnableMouse(true); classMenu:Hide(); SetBackdrop(classMenu,0.99,0.32)
     for i,k in ipairs(CLASS_ORDER) do
-        local rb=CreateFrame("Button",nil,classMenu); rb:SetSize(160,22); rb:SetPoint("TOPLEFT",5,-4-(i-1)*22)
+        local rb=Nexus.FontSupport.CreateFrame("Button",nil,classMenu); rb:SetSize(160,22); rb:SetPoint("TOPLEFT",5,-4-(i-1)*22)
         rb.bg=rb:CreateTexture(nil,"BACKGROUND"); rb.bg:SetAllPoints(rb); rb.bg:SetTexture(0.12,0.12,0.17,0); local t=rb:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); t:SetPoint("LEFT",9,0)
         local c=CLASS_COLOR[k] or {1,0.82,0}; t:SetText(k=="ALL" and T("leaderboard.label.all_classes") or ClassText(k)); t:SetTextColor(c[1],c[2],c[3])
         rb:SetScript("OnEnter",function(self) self.bg:SetTexture(0.14,0.18,0.25,0.9) end); rb:SetScript("OnLeave",function(self) self.bg:SetTexture(0.12,0.12,0.17,0) end)
@@ -1420,13 +1420,13 @@ local function EnsureFrame()
     statusText=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); statusText:SetPoint("LEFT",combinedBtn,"RIGHT",12,0); statusText:SetSize(250,14); statusText:SetJustifyH("LEFT")
     countText=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); countText:SetPoint("TOPLEFT",18,-113); countText:SetSize(LIST_W,14); countText:SetJustifyH("LEFT")
 
-    local head=CreateFrame("Frame",nil,frame); head:SetSize(LIST_W,22); head:SetPoint("TOPLEFT",18,-133); SetBackdrop(head,0.74)
+    local head=Nexus.FontSupport.CreateFrame("Frame",nil,frame); head:SetSize(LIST_W,22); head:SetPoint("TOPLEFT",18,-133); SetBackdrop(head,0.74)
     local labels={{T("leaderboard.column.rank"),8,30,"CENTER"},{T("leaderboard.column.character_loadout"),80,300,"LEFT"},{T("leaderboard.column.result"),430,145,"RIGHT"}}
     for _,x in ipairs(labels) do local t=head:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); t:SetPoint("LEFT",x[2],0); t:SetSize(x[3],14); t:SetJustifyH(x[4]); t:SetText(x[1]) end
     -- 440 units (eleven whole 40-unit rows at 640 high) above a line for the
     -- overflow cue, so the list does not end in a half-cut row.
-    local clip=CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,42); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
-    listScroll=CreateFrame("ScrollFrame",nil,clip); listScroll:SetAllPoints(clip); listScroll:EnableMouseWheel(true); listChild=CreateFrame("Frame",nil,listScroll); listChild:SetWidth(LIST_W); listChild:SetHeight(1); listScroll:SetScrollChild(listChild)
+    local clip=Nexus.FontSupport.CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,42); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
+    listScroll=Nexus.FontSupport.CreateFrame("ScrollFrame",nil,clip); listScroll:SetAllPoints(clip); listScroll:EnableMouseWheel(true); listChild=Nexus.FontSupport.CreateFrame("Frame",nil,listScroll); listChild:SetWidth(LIST_W); listChild:SetHeight(1); listScroll:SetScrollChild(listChild)
     setScrollValue=function(value,reason)
         value=tonumber(value)
         if value==math.huge then value=scrollMax end

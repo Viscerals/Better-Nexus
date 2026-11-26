@@ -651,7 +651,7 @@ end
 
 function RolePicker.Ensure()
     if RolePicker.frame then return RolePicker.frame end
-    local f=CreateFrame("Frame","NexusWishlistRolePicker",UIParent)
+    local f=Nexus.FontSupport.CreateFrame("Frame","NexusWishlistRolePicker",UIParent)
     RolePicker.frame=f
     f:Hide() -- before OnHide is installed; do not discard the new role draft
     f:SetSize(610,510);f:SetPoint("CENTER",UIParent,"CENTER",0,0)
@@ -689,7 +689,7 @@ function RolePicker.Ensure()
     f.count=label("GameFontNormal",20,-83,570)
     f.rows={}
     for n=1,RolePicker.visibleRows do
-        local rf=CreateFrame("Frame",nil,p);rf:SetSize(570,28);rf:SetPoint("TOPLEFT",20,-109-(n-1)*28)
+        local rf=Nexus.FontSupport.CreateFrame("Frame",nil,p);rf:SetSize(570,28);rf:SetPoint("TOPLEFT",20,-109-(n-1)*28)
         rf:SetFrameStrata("FULLSCREEN_DIALOG");rf:SetFrameLevel(41)
         local row={frame=rf};f.rows[n]=row
         row.label=rf:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
@@ -698,17 +698,17 @@ function RolePicker.Ensure()
         if Nexus.LayoutMetrics then rf:EnableMouse(true);Nexus.LayoutMetrics.OneLineLabel(row.label,rf,28) end
         row.count=rf:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         row.count:SetPoint("RIGHT",-32,0);row.count:SetWidth(66)
-        row.minus=CreateFrame("Button","NexusWishlistRoleMinus"..n,rf,"UIPanelButtonTemplate")
+        row.minus=Nexus.FontSupport.CreateFrame("Button","NexusWishlistRoleMinus"..n,rf,"UIPanelButtonTemplate")
         row.minus:SetFrameStrata("FULLSCREEN_DIALOG");row.minus:SetFrameLevel(42);row.minus:EnableMouse(true)
         row.minus:SetSize(26,23);row.minus:SetPoint("RIGHT",-104,0);row.minus:SetText("-")
-        row.plus=CreateFrame("Button","NexusWishlistRolePlus"..n,rf,"UIPanelButtonTemplate")
+        row.plus=Nexus.FontSupport.CreateFrame("Button","NexusWishlistRolePlus"..n,rf,"UIPanelButtonTemplate")
         row.plus:SetFrameStrata("FULLSCREEN_DIALOG");row.plus:SetFrameLevel(42);row.plus:EnableMouse(true)
         row.plus:SetSize(26,23);row.plus:SetPoint("RIGHT",0,0);row.plus:SetText("+")
         row.minus:SetScript("OnClick",function() RolePicker.Adjust(row.index,-1) end)
         row.plus:SetScript("OnClick",function() RolePicker.Adjust(row.index,1) end)
     end
     local function button(name,text,x,y,w,fn)
-        local b=CreateFrame("Button",name,p,"UIPanelButtonTemplate")
+        local b=Nexus.FontSupport.CreateFrame("Button",name,p,"UIPanelButtonTemplate")
         b:SetFrameStrata("FULLSCREEN_DIALOG");b:SetFrameLevel(42);b:EnableMouse(true)
         b:SetSize(w,24);b:SetPoint("TOPLEFT",x,y);b:SetText(text);b:SetScript("OnClick",fn);return b
     end

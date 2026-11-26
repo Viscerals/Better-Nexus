@@ -131,7 +131,7 @@ end
 
 local function EnsureFrame()
     if frame then return frame end
-    frame = CreateFrame("Frame", "NexusOverlay", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusOverlay", UIParent)
     stats.framesCreated = stats.framesCreated + 1
     frame:SetSize(COLUMNS * COLUMN_WIDTH + 20, ROWS_PER_COLUMN * ROW_HEIGHT + 30)
     frame:SetFrameStrata("DIALOG")
@@ -171,7 +171,7 @@ local function EnsureFrame()
 
     -- The control strip is a sibling of the click-through list. Disabling
     -- mouse input on the overlay body must never disable these controls.
-    controlsFrame = CreateFrame("Frame", "NexusOverlayControls", UIParent)
+    controlsFrame = Nexus.FontSupport.CreateFrame("Frame", "NexusOverlayControls", UIParent)
     stats.framesCreated = stats.framesCreated + 1
     controlsFrame:SetSize(152, 22)
     controlsFrame:SetFrameStrata("DIALOG")
@@ -180,7 +180,7 @@ local function EnsureFrame()
     controlsFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 4)
     controlsFrame:Hide()
 
-    lockBtn = CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
+    lockBtn = Nexus.FontSupport.CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
     stats.framesCreated = stats.framesCreated + 1
     lockBtn:SetSize(122, 18)
     lockBtn:SetPoint("LEFT", 0, 0)
@@ -191,7 +191,7 @@ local function EnsureFrame()
 
     -- Hide button: lets the player collapse the overlay without going
     -- into the editor or typing /nexus overlay.
-    hideBtn = CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
+    hideBtn = Nexus.FontSupport.CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
     stats.framesCreated = stats.framesCreated + 1
     hideBtn:SetSize(22, 18)
     hideBtn:SetPoint("LEFT", lockBtn, "RIGHT", 4, 0)

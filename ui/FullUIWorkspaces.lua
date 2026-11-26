@@ -99,8 +99,9 @@ function M.ApplyHeader(frame, root, parts)
     if not (frame and type(parts) == "table" and LM
         and type(LM.WorkspaceHeader) == "function") then return nil end
     root = root or frame
+    local helpWidth = parts.help and LM.ButtonLabelWidth and (LM.ButtonLabelWidth(parts.help) + 24) or nil
     local header = LM.WorkspaceHeader(tonumber(root:GetWidth())
-        or tonumber(frame:GetWidth()))
+        or tonumber(frame:GetWidth()), helpWidth)
     local function Place(widget, box, fromRight)
         if not (widget and box) then return end
         widget:ClearAllPoints()

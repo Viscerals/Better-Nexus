@@ -92,7 +92,7 @@ local function text(parent, x, y, w, h, value)
 end
 
 local function button(parent, x, y, w, label, fn)
-    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    local b = Nexus.FontSupport.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(w, 24); b:SetPoint("TOPLEFT", x, y); b:SetText(label)
     b:SetScript("OnClick", fn)
     b:SetFrameLevel(parent:GetFrameLevel() + 2); b:EnableMouse(true)
@@ -203,7 +203,7 @@ end
 
 local function ensure()
     if frame then return end
-    frame = CreateFrame("Frame", "NexusSupportReport", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusSupportReport", UIParent)
     frame:Hide()
     frame:SetSize(720, 560)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -239,7 +239,7 @@ local function ensure()
     button(frame, 156, -318, 160, T("support.button.prepare_report_file"), function()
         UI.PrepareFile(false)
     end)
-    frame.advanced = CreateFrame("CheckButton", "NexusSupportExtended", frame,
+    frame.advanced = Nexus.FontSupport.CreateFrame("CheckButton", "NexusSupportExtended", frame,
         "UICheckButtonTemplate")
     frame.advanced:SetSize(22, 22); frame.advanced:SetPoint("TOPLEFT", 330, -316)
     text(frame, 356, -320, 340, 20, T("support.label.advanced_private"))
@@ -271,11 +271,11 @@ local function ensure()
             Nexus.LayoutMetrics.FullTextTooltip(fs, frame)
         end
     end
-    frame.copyScroll = CreateFrame("ScrollFrame", "NexusSupportCopyScroll", frame,
+    frame.copyScroll = Nexus.FontSupport.CreateFrame("ScrollFrame", "NexusSupportCopyScroll", frame,
         "UIPanelScrollFrameTemplate")
     frame.copyScroll:SetPoint("TOPLEFT", 20, -448)
     frame.copyScroll:SetSize(660, 70)
-    frame.copyBox = CreateFrame("EditBox", nil, frame.copyScroll)
+    frame.copyBox = Nexus.FontSupport.CreateFrame("EditBox", nil, frame.copyScroll)
     frame.copyBox:SetMultiLine(true)
     frame.copyBox:SetMaxLetters(0)
     frame.copyBox:SetAutoFocus(false)

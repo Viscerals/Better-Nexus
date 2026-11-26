@@ -8,8 +8,9 @@ local Renderer = {}
 
 -- Visible editor copy comes from the reviewed seam (core/Localization.lua,
 -- keys "editor.*" and, for the display popup, "overlay.*"), looked up when it
--- is shown, never cached at load. Names, codes and game data fill template
--- text slots and are never translated. Raw English producer values that other
+-- is shown, never cached at load. Echo display names and tooltips use the
+-- installed dictionary through EchoText; catalog and stored names stay raw.
+-- Codes and game data fill template text slots. Raw English producer values that other
 -- code compares (reason codes, stored names) stay raw; only their display is
 -- localized here.
 local function T(key) return (Nexus.Localization.Text(key)) end
@@ -162,7 +163,7 @@ function Renderer.New(options)
 
     local function BuildAvailableList(catalog, catalogRevision)
         local filters = Controller.FilterState()
-        local search = filters.search:lower()
+        local search = Nexus.EchoText.Fold(filters.search)
         local classOnly = filters.classOnly
         if catalogRevision ~= nil and refreshCache.available
             and refreshCache.availableCatalog == catalogRevision
@@ -175,9 +176,8 @@ function Renderer.New(options)
         for _, row in pairs((catalog and catalog.rows) or {}) do
             local okClass = (not classOnly)
                 or MaskMatch(row.classMask, playerMask)
-            local name = tostring(row.name or ""):lower()
             if okClass and (search == ""
-                or name:find(search, 1, true)) then
+                or Nexus.EchoText.Matches(row.name, search)) then
                 out[#out + 1] = row
             end
         end
@@ -266,6 +266,7 @@ local function ShowEchoTooltip(owner, spellId, anchor)
     if id and GameTooltip.SetHyperlink then
         local ok = pcall(GameTooltip.SetHyperlink, GameTooltip, "spell:" .. tostring(id))
         if ok then
+            Nexus.EchoText.Tooltip(GameTooltip)
             GameTooltip:Show()
             return
         end
@@ -279,7 +280,8 @@ local function ShowEchoTooltip(owner, spellId, anchor)
         end
     end
 
-    GameTooltip:AddLine(name or TF("editor.value.echo_id_fallback", {id = tostring(id or "")}), 1, 1, 1)
+    GameTooltip:AddLine(Nexus.EchoText.Text(name)
+        or TF("editor.value.echo_id_fallback", {id = tostring(id or "")}), 1, 1, 1)
     if icon then
         GameTooltip:AddTexture(icon)
     end
@@ -350,7 +352,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
     local undone = Controller.ForgottenPlansProjection() or {}
     local menu = M._manageMenu
     if not menu then
-        menu = CreateFrame("Frame", "NexusWishlistManageMenu", frame or UIParent)
+        menu = Nexus.FontSupport.CreateFrame("Frame", "NexusWishlistManageMenu", frame or UIParent)
         menu:SetFrameStrata("TOOLTIP")
         menu:SetFrameLevel((frame and frame:GetFrameLevel() or 50) + 100)
         menu:SetToplevel(true)
@@ -403,7 +405,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
     for i = 1, visible do
         local row = menu.rows[i]
         if not row then
-            row = CreateFrame("Button", nil, menu)
+            row = Nexus.FontSupport.CreateFrame("Button", nil, menu)
             row:SetSize(344, 22)
             row:EnableMouse(true)
             row:RegisterForClicks("LeftButtonUp")
@@ -663,7 +665,7 @@ end
 function M.RarityModeRow(menu, rowsAbove)
     local row = menu.modeRow
     if not row then
-        row = CreateFrame("Button", "NexusWishlistEditorRarityRow", menu)
+        row = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistEditorRarityRow", menu)
         row:SetSize(270, 22)
         row:EnableMouse(true)
         row:RegisterForClicks("LeftButtonUp")
@@ -724,7 +726,7 @@ local function ShowWishlistSwitchMenu(anchor, offset)
     local candidates = (View and View.GetWishlistCandidates and View.GetWishlistCandidates()) or {}
     local editingContext = EditingContext()
     if not wishlistSwitchMenu then
-        wishlistSwitchMenu = CreateFrame("Frame", "NexusWishlistEditorSwitchMenu", frame or UIParent)
+        wishlistSwitchMenu = Nexus.FontSupport.CreateFrame("Frame", "NexusWishlistEditorSwitchMenu", frame or UIParent)
         wishlistSwitchMenu:SetFrameStrata("TOOLTIP")
         wishlistSwitchMenu:SetFrameLevel((frame and frame:GetFrameLevel() or 50) + 100)
         wishlistSwitchMenu:SetToplevel(true)
@@ -763,7 +765,7 @@ local function ShowWishlistSwitchMenu(anchor, offset)
         if not row then
             -- Real template buttons stay visibly enabled and reliably clickable
             -- above the editor on 3.3.5 clients.
-            row = CreateFrame("Button", nil, wishlistSwitchMenu)
+            row = Nexus.FontSupport.CreateFrame("Button", nil, wishlistSwitchMenu)
             row:SetSize(270, 22)
             row:SetPoint("TOPLEFT", 8, -8 - ((i - 1) * 24))
             row:EnableMouse(true)
@@ -931,7 +933,7 @@ local function ShowLoadoutSwitchMenu(anchor)
         }
     end
     if not loadoutSwitchMenu then
-        loadoutSwitchMenu = CreateFrame("Frame", "NexusWishlistEditorLoadoutMenu", frame or UIParent)
+        loadoutSwitchMenu = Nexus.FontSupport.CreateFrame("Frame", "NexusWishlistEditorLoadoutMenu", frame or UIParent)
         loadoutSwitchMenu:SetFrameStrata("TOOLTIP")
         loadoutSwitchMenu:SetFrameLevel((frame and frame:GetFrameLevel() or 50) + 101)
         loadoutSwitchMenu:SetToplevel(true)
@@ -955,7 +957,7 @@ local function ShowLoadoutSwitchMenu(anchor)
     for i = 1, math.max(1, visible) do
         local row = loadoutSwitchMenu.rows[i]
         if not row then
-            row = CreateFrame("Button", nil, loadoutSwitchMenu)
+            row = Nexus.FontSupport.CreateFrame("Button", nil, loadoutSwitchMenu)
             row:SetSize(214, 22)
             row:SetPoint("TOPLEFT", 8, -8 - ((i - 1) * 24))
             row:EnableMouse(true)
@@ -1044,7 +1046,7 @@ local function EnsureDisplayPopup()
     -- editor made its visibility and mouse state depend on a much larger
     -- window, which could leave the popup visible but unable to receive
     -- clicks after the editor was hidden.
-    local p = CreateFrame("Frame", "NexusDisplayPopup", UIParent)
+    local p = Nexus.FontSupport.CreateFrame("Frame", "NexusDisplayPopup", UIParent)
     p:SetSize(300, 218)
     p:SetFrameStrata("TOOLTIP")
     p:SetFrameLevel(100)
@@ -1065,7 +1067,7 @@ local function EnsureDisplayPopup()
     -- Only the title bar drags the dialog. Making the entire popup a drag
     -- target can steal mouse-down events from checkboxes, sliders and
     -- buttons on older clients.
-    local dragBar = CreateFrame("Frame", nil, p)
+    local dragBar = Nexus.FontSupport.CreateFrame("Frame", nil, p)
     dragBar:SetPoint("TOPLEFT", 10, -8)
     dragBar:SetPoint("TOPRIGHT", -34, -8)
     dragBar:SetHeight(30)
@@ -1086,7 +1088,7 @@ local function EnsureDisplayPopup()
     subtitle:SetJustifyH("LEFT")
     subtitle:SetText(T("overlay.body.settings_subtitle"))
 
-    local close = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    local close = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     close:SetSize(22, 22)
     close:SetPoint("TOPRIGHT", -5, -5)
     close:SetFrameLevel(p:GetFrameLevel() + 5)
@@ -1095,7 +1097,7 @@ local function EnsureDisplayPopup()
     close:SetText("X")
     close:SetScript("OnClick", function() p:Hide() end)
 
-    displayCheck = CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
+    displayCheck = Nexus.FontSupport.CreateFrame("CheckButton", nil, p, "UICheckButtonTemplate")
     displayCheck:SetPoint("TOPLEFT", 16, -68)
     displayCheck:SetFrameLevel(p:GetFrameLevel() + 5)
     displayCheck:EnableMouse(true)
@@ -1116,7 +1118,7 @@ local function EnsureDisplayPopup()
     moveLabel:SetPoint("TOPLEFT", 18, -102)
     moveLabel:SetText(T("overlay.label.position"))
 
-    displayLockBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    displayLockBtn = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     displayLockBtn:SetSize(92, 22)
     displayLockBtn:SetPoint("LEFT", moveLabel, "RIGHT", 16, 0)
     displayLockBtn:SetFrameLevel(p:GetFrameLevel() + 5)
@@ -1130,7 +1132,7 @@ local function EnsureDisplayPopup()
         end
     end)
 
-    local resetBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    local resetBtn = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     resetBtn:SetSize(100, 22)
     resetBtn:SetPoint("LEFT", displayLockBtn, "RIGHT", 10, 0)
     resetBtn:SetFrameLevel(p:GetFrameLevel() + 5)
@@ -1154,7 +1156,7 @@ local function EnsureDisplayPopup()
     sizeLabel:SetPoint("TOPLEFT", 18, -164)
     sizeLabel:SetText(T("overlay.label.size"))
 
-    local scaleMinus = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    local scaleMinus = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     scaleMinus:SetSize(22, 22)
     scaleMinus:SetPoint("LEFT", sizeLabel, "RIGHT", 22, 0)
     scaleMinus:SetFrameLevel(p:GetFrameLevel() + 5)
@@ -1166,14 +1168,14 @@ local function EnsureDisplayPopup()
     scaleValueText:SetSize(48, 22)
     scaleValueText:SetJustifyH("CENTER")
 
-    local scalePlus = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    local scalePlus = Nexus.FontSupport.CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     scalePlus:SetSize(22, 22)
     scalePlus:SetPoint("LEFT", scaleValueText, "RIGHT", 7, 0)
     scalePlus:SetFrameLevel(p:GetFrameLevel() + 5)
     scalePlus:EnableMouse(true)
     scalePlus:SetText("+")
 
-    local scaleSlider = CreateFrame("Slider", "NexusScaleSlider", p,
+    local scaleSlider = Nexus.FontSupport.CreateFrame("Slider", "NexusScaleSlider", p,
         "OptionsSliderTemplate")
     scaleSlider:SetSize(250, 16)
     scaleSlider:SetPoint("TOPLEFT", 20, -195)
@@ -1350,7 +1352,7 @@ function M.EnsureLockedIcon(i)
     if lockedIcons[i] then return lockedIcons[i] end
     -- Each slot sits right of the one before it, which is made first.
     local previous = i > 1 and M.EnsureLockedIcon(i - 1) or nil
-    local btn = CreateFrame("Button", nil, frame)
+    local btn = Nexus.FontSupport.CreateFrame("Button", nil, frame)
     btn:SetSize(18, 18)
     if i == 1 then
         btn:SetPoint("LEFT", lockedLabel, "RIGHT", 8, 0)
@@ -1414,7 +1416,7 @@ function M.EnsureLockedIcon(i)
         local cat = View and View.Catalog and View.Catalog()
         local row = cat and cat.rows and cat.rows[self.spellId]
         if row and row.name and searchBox then
-            searchBox:SetText(row.name)
+            searchBox:SetText(Nexus.EchoText.Text(row.name))
         end
     end)
     btn:Hide()
@@ -1429,7 +1431,7 @@ end
 -- two unrelated icons sitting side by side.
 function M.EnsureLockedNeedIcon(i)
     if lockedNeedIcons[i] then return lockedNeedIcons[i] end
-    local btn = CreateFrame("Button", nil, frame)
+    local btn = Nexus.FontSupport.CreateFrame("Button", nil, frame)
     btn:SetSize(14, 14)
     btn:SetPoint("BOTTOM", M.EnsureLockedIcon(i), "TOP", 0, 2)
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
@@ -1461,7 +1463,7 @@ local function EnsureFrame()
         return identity.DisplaySafeText(value, maxBytes, allowEmpty,
             allowLineBreaks)
     end
-    frame = CreateFrame("Frame", "NexusEditorFrame", UIParent)
+    frame = Nexus.FontSupport.CreateFrame("Frame", "NexusEditorFrame", UIParent)
     frame:SetClampedToScreen(true)
     if type(UISpecialFrames) == "table" then
         table.insert(UISpecialFrames, "NexusEditorFrame")
@@ -1555,7 +1557,7 @@ local function EnsureFrame()
     wishlistNameLabel:SetPoint("TOPLEFT", 34, -96)
     wishlistNameLabel:SetText(Nexus.Localization.Text("editor.label.wishlist_name"))
 
-    wishlistNameBox = CreateFrame("EditBox", "NexusWishlistNameInput", frame, "InputBoxTemplate")
+    wishlistNameBox = Nexus.FontSupport.CreateFrame("EditBox", "NexusWishlistNameInput", frame, "InputBoxTemplate")
     wishlistNameBox:SetSize(260, 22)
     wishlistNameBox:SetPoint("LEFT", wishlistNameLabel, "RIGHT", 10, 0)
     wishlistNameBox:SetAutoFocus(false)
@@ -1604,10 +1606,10 @@ local function EnsureFrame()
     wishlistNameBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     wishlistNameBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    local close = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -6, -6)
 
-    local buildsNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local buildsNav = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     buildsNav:SetSize(108, 22)
     buildsNav:SetPoint("TOPLEFT", 18, -12)
     buildsNav:SetText(Nexus.Localization.Text("editor.button.build_library_nav"))
@@ -1616,7 +1618,7 @@ local function EnsureFrame()
         frame:Hide()
         if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
     end)
-    local boardNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local boardNav = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     boardNav:SetSize(102, 22)
     boardNav:SetPoint("LEFT", buildsNav, "RIGHT", 4, 0)
     boardNav:SetText(Nexus.Localization.Text("editor.button.leaderboard_nav"))
@@ -1625,7 +1627,7 @@ local function EnsureFrame()
         frame:Hide()
         if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
     end)
-    local wishNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local wishNav = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     wishNav:SetSize(92, 22)
     wishNav:SetPoint("LEFT", boardNav, "RIGHT", 4, 0)
     wishNav:SetText("|cffffd200" .. Nexus.Localization.Text("editor.button.wishlists_nav") .. "|r")
@@ -1634,14 +1636,14 @@ local function EnsureFrame()
     -- Reference, at the top right clear of the centred title, is the manual's
     -- Wishlists page. The editor stays open below either (HIGH under their
     -- DIALOG); nothing is saved or discarded.
-    frame._helpNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._helpNav = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._helpNav:SetSize(56, 22)
     frame._helpNav:SetPoint("LEFT", wishNav, "RIGHT", 4, 0)
     frame._helpNav:SetText(Nexus.Localization.Text("editor.button.help"))
     frame._helpNav:SetScript("OnClick", function()
         if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("wishlists") end
     end)
-    frame._referenceNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._referenceNav = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._referenceNav:SetSize(84, 22)
     frame._referenceNav:SetPoint("TOPRIGHT", -40, -12)
     frame._referenceNav:SetText(Nexus.Localization.Text("editor.button.reference"))
@@ -1669,7 +1671,7 @@ local function EnsureFrame()
         })
     end
 
-    loadoutSwitchBtn = CreateFrame("Button", nil, frame)
+    loadoutSwitchBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)
     loadoutSwitchBtn:SetPoint("TOPLEFT", 34, -66)
     loadoutSwitchBtn:SetText(Nexus.Localization.Text("editor.button.saved_build_choose"))
@@ -1698,7 +1700,7 @@ local function EnsureFrame()
 
     -- Named like the other editor controls, so the switch list can be driven
     -- by the prototype suite the way a player drives it.
-    wishlistSwitchBtn = CreateFrame("Button", "NexusWishlistEditorSwitchButton", frame)
+    wishlistSwitchBtn = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistEditorSwitchButton", frame)
     wishlistSwitchBtn:SetSize(270, 22)
     wishlistSwitchBtn:SetPoint("LEFT", loadoutSwitchBtn, "RIGHT", 8, 0)
     wishlistSwitchBtn:SetText(Nexus.Localization.Text("editor.button.wishlist_choose"))
@@ -1728,7 +1730,7 @@ local function EnsureFrame()
     end)
     wishlistSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    frame._manageBtn = CreateFrame("Button", "NexusWishlistEditorManageButton",
+    frame._manageBtn = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistEditorManageButton",
         frame, "UIPanelButtonTemplate")
     frame._manageBtn:SetSize(88, 22)
     frame._manageBtn:SetText(Nexus.Localization.Text("editor.button.manage"))
@@ -1748,7 +1750,7 @@ local function EnsureFrame()
     end)
     frame._manageBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    newWishlistBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    newWishlistBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     newWishlistBtn:SetSize(112, 22)
     newWishlistBtn:SetPoint("LEFT", wishlistSwitchBtn, "RIGHT", 8, 0)
     frame._manageBtn:SetPoint("LEFT", newWishlistBtn, "RIGHT", 6, 0)
@@ -1760,7 +1762,7 @@ local function EnsureFrame()
     -- Plan's deliberate game routes remain visible alongside the editor.
     -- The assignment chooser makes no choice on opening, and navigation is
     -- refused while a Save confirmation/retry could be cancelled by OnHide.
-    frame._workspaceAssignBtn = CreateFrame("Button", nil, frame,
+    frame._workspaceAssignBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame,
         "UIPanelButtonTemplate")
     frame._workspaceAssignBtn:SetSize(94, 22)
     frame._workspaceAssignBtn:SetPoint("LEFT", frame._manageBtn, "RIGHT", 4, 0)
@@ -1785,7 +1787,7 @@ local function EnsureFrame()
     -- Display Settings): the same height and baseline, under the left list
     -- and short of the divider. Its click asks the Journal's owner
     -- (M.ChooseRarityMode); nothing is chosen by showing or hovering it.
-    frame._rarityBtn = CreateFrame("Button", "NexusWishlistEditorRarityButton", frame,
+    frame._rarityBtn = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistEditorRarityButton", frame,
         "UIPanelButtonTemplate")
     frame._rarityBtn:SetSize(150, 26)
     frame._rarityBtn:SetPoint("BOTTOMLEFT", 496, 24)
@@ -1825,7 +1827,7 @@ local function EnsureFrame()
     -- board automation without also handing Nexus this specific, more
     -- consequential write action (LockPerk/UnlockPerk). Sits in the open
     -- space to the right of the locked-slot icon strip.
-    autoLockCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    autoLockCheck = Nexus.FontSupport.CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     autoLockCheck:SetSize(22, 22)
     autoLockCheck:SetPoint("LEFT", lockedIcons[6], "RIGHT", 26, 0)
     autoLockCheck._nexusAnchorSlot = 6
@@ -1851,19 +1853,21 @@ local function EnsureFrame()
     -- the global StaticPopup_Show and a string literal -- no module-level
     -- upvalues added to this function (see the EnsureFrame upvalue-limit
     -- crash, Dev Test 17; Create() gets the same treatment on principle).
-    local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local exportBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._exportBtn = exportBtn
     exportBtn:SetSize(70, 22)
     exportBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -100)
     exportBtn:SetText(Nexus.Localization.Text("editor.button.export"))
     exportBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_EXPORT_WISHLIST") end)
 
-    local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local importBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._importBtn = importBtn
     importBtn:SetSize(70, 22)
     importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -4, 0)
     importBtn:SetText(Nexus.Localization.Text("editor.button.import"))
     importBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_IMPORT_WISHLIST") end)
 
-    local planBtn = CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
+    local planBtn = Nexus.FontSupport.CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
     planBtn:SetSize(148, 22)
     -- Above the Selected Echoes list it can replace, right-aligned with that
     -- pane and Export: clear of the save-result line, its hover area, Assign
@@ -1886,7 +1890,7 @@ local function EnsureFrame()
     -- active -- one button per candidate, click to make it the active one.
     candidateButtons = {}
     for i = 1, 4 do
-        local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        local b = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         b:SetSize(115, 20)
         b:SetPoint("TOP", frame, "TOP", -180 + ((i - 1) * 121), -112)
         -- A wishlist name stays inside its button; the full label is in a tooltip.
@@ -1901,7 +1905,8 @@ local function EnsureFrame()
 
     -- Overlay controls, moved to the top-right where they're actually
     -- visible instead of buried at the bottom of a long window.
-    local displayBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    local displayBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._displayBtn = displayBtn
     displayBtn:SetSize(150, 22)
     displayBtn:SetPoint("TOPRIGHT", -34, -66)
     displayBtn:SetText(Nexus.Localization.Text("editor.button.display_settings"))
@@ -1915,7 +1920,7 @@ local function EnsureFrame()
     end)
     displayBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    searchBox = CreateFrame("EditBox", "NexusEditorSearch", frame,
+    searchBox = Nexus.FontSupport.CreateFrame("EditBox", "NexusEditorSearch", frame,
         "InputBoxTemplate")
     -- 250 units (was 330) leave the locked-slot strip and its automation
     -- caption room to the left of My Builds; see frame._fitAutoLock.
@@ -1941,7 +1946,7 @@ local function EnsureFrame()
     searchBox:HookScript("OnEditFocusLost", function(self) self._nexusFocused = nil; SyncSearchHint(self) end)
     SyncSearchHint(searchBox)
 
-    classCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    classCheck = Nexus.FontSupport.CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     classCheck:SetPoint("LEFT", searchBox, "RIGHT", 12, 0)
     classCheck:SetChecked(Controller.FilterState().classOnly)
     classCheck.text = classCheck:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1955,7 +1960,7 @@ local function EnsureFrame()
     -- The native My Builds route is distinct from the Nexus Build Library
     -- (the Explore tab above). It used to be hidden here, which made the
     -- Plan footer's promise unreachable inside the real workspace.
-    frame._workspaceMyBuildsBtn = CreateFrame("Button", nil, frame,
+    frame._workspaceMyBuildsBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame,
         "UIPanelButtonTemplate")
     frame._workspaceMyBuildsBtn:SetSize(140, 22)
     frame._workspaceMyBuildsBtn:SetPoint("TOPRIGHT", -34, -126)
@@ -2009,7 +2014,10 @@ local function EnsureFrame()
         local full = Nexus.Localization.Text("editor.label.autolock_full")
         local short = Nexus.Localization.Text("editor.label.autolock_short")
         local n = math.max(1, math.min(8, math.floor(tonumber(slots) or 6)))
-        local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
+        frame._lockedSlotCount = n
+        local toolbarDrop = frame._toolbarDrop or 0
+        local right = (tonumber(frame:GetWidth()) or 1040) - 34
+            - (tonumber(frame._workspaceMyBuildsBtn:GetWidth()) or 140) - 8
         -- The strip's left edge: after the class filter's caption, as that
         -- caption is anchored (search box, 12, check box, -2), never right of
         -- the former fixed x 540.
@@ -2021,7 +2029,7 @@ local function EnsureFrame()
             origin = math.min(540, math.ceil(34 + sw + 12 + bw - 2 + cw + 12))
         end
         lockedLabel:ClearAllPoints()
-        lockedLabel:SetPoint("TOPLEFT", origin, -130)
+        lockedLabel:SetPoint("TOPLEFT", origin, -130 - toolbarDrop)
         local okL, lw = pcall(lockedLabel.GetStringWidth, lockedLabel)
         lw = okL and tonumber(lw) or 60
         local cap = math.floor(right - 22 - 6 - (22 * n - 4) - 8 - origin)
@@ -2090,7 +2098,8 @@ local function EnsureFrame()
             lines = room >= 24 and (Wrap(full) or Wrap(short)) or nil
             local lineBox = math.max(22, lineHeight * (lines and #lines or 1))
             autoLockCheck:ClearAllPoints()
-            autoLockCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", origin, -(top + math.floor((lineBox - 22) / 2)))
+            autoLockCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", origin,
+                -(top + toolbarDrop + math.floor((lineBox - 22) / 2)))
             frame._autoLockClear = origin + 22 <= right
             drop = math.max(0, top + lineBox + 4 - 154)
         end
@@ -2099,18 +2108,21 @@ local function EnsureFrame()
         autoLockLabel._nexusFullText = full
         if lines then autoLockLabel:Show() else autoLockLabel:Hide() end
         if autoLockHit then if lines then autoLockHit:Show() else autoLockHit:Hide() end end
-        frame._contentDrop = drop
+        frame._autoLockDrop = drop
+        frame._contentDrop = math.max(drop, frame._filterExtra or 0)
+            + toolbarDrop + (frame._catalogHeadingExtra or 0)
         if frame._applyContentDrop then frame._applyContentDrop(drop) end
         return room
     end
     frame._fitAutoLock(6)
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame._catalogHeader = header
     header:SetPoint("TOPLEFT", 34, -158)
     header:SetText(Nexus.Localization.Text("editor.label.list_header"))
 
     -- Left: browsable catalog -----------------------------------------
-    local leftArea = CreateFrame("Frame", nil, frame)
+    local leftArea = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     leftArea:SetPoint("TOPLEFT", 34, -180)
     leftArea:SetSize(600, MAX_ROWS * ROW_HEIGHT)
     frame._leftArea = leftArea
@@ -2122,7 +2134,7 @@ local function EnsureFrame()
 
     rows = {}
     for i = 1, MAX_ROWS do
-        local row = CreateFrame("Button", nil, leftArea)
+        local row = Nexus.FontSupport.CreateFrame("Button", nil, leftArea)
         row:SetSize(600, ROW_HEIGHT)
         row:SetPoint("TOPLEFT", 0, -((i - 1) * ROW_HEIGHT))
         row:EnableMouse(true)
@@ -2183,7 +2195,7 @@ local function EnsureFrame()
     pickTitle:SetPoint("TOPLEFT", 674, -158)
     pickTitle:SetText(Nexus.Localization.Text("editor.heading.selected"))
 
-    local pickArea = CreateFrame("Frame", nil, frame)
+    local pickArea = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
     pickArea:SetPoint("TOPLEFT", 674, -180)
     pickArea:SetSize(332, PICK_ROWS * ROW_HEIGHT)
     frame._pickArea = pickArea
@@ -2195,7 +2207,7 @@ local function EnsureFrame()
 
     pickRows = {}
     for i = 1, PICK_ROWS do
-        local row = CreateFrame("Button", nil, pickArea)
+        local row = Nexus.FontSupport.CreateFrame("Button", nil, pickArea)
         row:SetSize(332, ROW_HEIGHT)
         row:SetPoint("TOPLEFT", 0, -((i - 1) * ROW_HEIGHT))
         row:EnableMouse(true)
@@ -2222,11 +2234,11 @@ local function EnsureFrame()
         row.count:SetSize(1, ROW_HEIGHT)
         row.count:SetJustifyH("RIGHT")
 
-        row.minus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.minus = Nexus.FontSupport.CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         row.minus:SetSize(22, 20); row.minus:SetPoint("RIGHT", -48, 0); row.minus:SetText("-")
-        row.plus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.plus = Nexus.FontSupport.CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         row.plus:SetSize(22, 20); row.plus:SetPoint("RIGHT", -24, 0); row.plus:SetText("+")
-        row.remove = CreateFrame("Button", nil, row, "UIPanelCloseButton")
+        row.remove = Nexus.FontSupport.CreateFrame("Button", nil, row, "UIPanelCloseButton")
         row.remove:SetSize(22, 22); row.remove:SetPoint("RIGHT", 0, 0)
         -- Legible controls, same click areas: - and + are 22x22 with the
         -- large template fonts for their glyphs; the remove X keeps its 22x22
@@ -2316,7 +2328,7 @@ local function EnsureFrame()
 
     -- Apply remains a presentation binding: the controller prepares and
     -- submits only after the established confirmation popup is accepted.
-    applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    applyBtn = Nexus.FontSupport.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     applyBtn:SetSize(332, 26)
     applyBtn:SetPoint("BOTTOMLEFT", 674, 24)
     applyBtn:SetText((M.ApplyAction()))
@@ -2364,17 +2376,20 @@ local function EnsureFrame()
     -- bottom edge, the Selected Echoes list to those above its footer.
     frame._applyContentDrop = function(drop)
         drop = math.max(0, math.floor(tonumber(drop) or 0))
+        local headerDrop = math.max(drop, frame._filterExtra or 0) + (frame._toolbarDrop or 0)
+        drop = headerDrop + (frame._catalogHeadingExtra or 0)
+        frame._contentDrop = drop
         header:ClearAllPoints()
-        header:SetPoint("TOPLEFT", 34, -158 - drop)
+        header:SetPoint("TOPLEFT", 34, -158 - headerDrop)
         pickTitle:ClearAllPoints()
-        pickTitle:SetPoint("TOPLEFT", 674, -158 - drop)
+        pickTitle:SetPoint("TOPLEFT", 674, -158 - headerDrop)
         planBtn:ClearAllPoints()
-        planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154 - drop)
+        planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154 - headerDrop)
         leftArea:ClearAllPoints()
         leftArea:SetPoint("TOPLEFT", 34, -180 - drop)
         local pitch = frame._rowPitch or ROW_HEIGHT
         leftArea:SetHeight(math.max(1, math.min(MAX_ROWS, math.floor(
-            (MAX_ROWS * ROW_HEIGHT - drop) / pitch))) * pitch)
+            (MAX_ROWS * ROW_HEIGHT - drop - (frame._localizedFooterReserve or 0)) / pitch))) * pitch)
         pickArea:ClearAllPoints()
         pickArea:SetPoint("TOPLEFT", 674, -180 - drop)
         if frame._divider then
@@ -2383,7 +2398,7 @@ local function EnsureFrame()
             frame._divider:SetHeight(MAX_ROWS * ROW_HEIGHT - drop)
         end
     end
-    frame._applyContentDrop(frame._contentDrop or 0)
+    frame._applyContentDrop(frame._autoLockDrop or 0)
 
     -- Background -- this was simply never added (not a crash, just an
     -- oversight, 2026-07-24). Separate pcall from the divider above so
@@ -2397,6 +2412,7 @@ local function EnsureFrame()
         })
     end)
 
+    M.FitEditorToolbar()
     return frame
 end
 
@@ -2842,7 +2858,7 @@ local function RefreshView(catalogRevision)
     M.ApplyRowPitch(rows, rowPitch)
     M.ApplyRowPitch(pickRows, rowPitch)
     local catalogVisible = math.max(1, math.min(MAX_ROWS, math.floor(
-        (MAX_ROWS * ROW_HEIGHT - (frame._contentDrop or 0)) / rowPitch)))
+        (MAX_ROWS * ROW_HEIGHT - (frame._contentDrop or 0) - (frame._localizedFooterReserve or 0)) / rowPitch)))
     if frame._leftArea then frame._leftArea:SetHeight(catalogVisible * rowPitch) end
     scrollOffset = Controller.ClampScroll(#available, catalogVisible)
     for i, row in ipairs(rows) do
@@ -2858,7 +2874,7 @@ local function RefreshView(catalogRevision)
             if chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
                 suffix = "  |cff4dff80" .. T("editor.value.catalog_selected_marker") .. "|r"
             end
-            row.text:SetText(data.name .. suffix)
+            row.text:SetText(Nexus.EchoText.Text(data.name) .. suffix)
             local exactProgress = EntryProgress and EntryProgress({{
                 spellId=data.spellId,quality=data.quality,stacks=1,locked=false,
             }}, owned, nil) or nil
@@ -2957,11 +2973,11 @@ local function RefreshView(catalogRevision)
     -- designedCount/toLockCount above are already fixed (computed from the
     -- full, unfiltered pending/pendingLock) so the lock-budget checks and
     -- footer counts stay correct while a search is active.
-    local searchTerm = Controller.FilterState().search:lower()
+    local searchTerm = Nexus.EchoText.Fold(Controller.FilterState().search)
     if searchTerm ~= "" then
         local filtered = {}
         for _, e in ipairs(list) do
-            if tostring(e.name or ""):lower():find(searchTerm, 1, true) then
+            if Nexus.EchoText.Matches(e.name, searchTerm) then
                 filtered[#filtered + 1] = e
             end
         end
@@ -3003,7 +3019,8 @@ local function RefreshView(catalogRevision)
             row.icon:SetTexture(SpellIcon(data.spellId))
             row.icon:SetVertexColor(0.5, 0.5, 0.5)
             row.text:SetTextColor(0.6, 0.6, 0.6)
-            M.SetPickRowText(row, "    |cff8a8a8a-> " .. T("editor.value.pick_replaces") .. "|r " .. data.name,
+            M.SetPickRowText(row, "    |cff8a8a8a-> " .. T("editor.value.pick_replaces") .. "|r "
+                .. Nexus.EchoText.Text(data.name),
                 "|cff8a8a8a" .. T("editor.value.pick_currently_locked") .. "|r", true)
             if row.minus then row.minus:Hide() end
             if row.plus then row.plus:Hide() end
@@ -3150,6 +3167,7 @@ end
         end
         RefreshTimerStatus()
         RefreshTheme()
+        M.FitEditorToolbar()
         -- Row-only update, warm or cold, after the one-time theme pass so it
         -- measures final fonts. Pure: the captured descriptor from the held
         -- Slots and selected-role observation (nil when none) and the
@@ -3251,6 +3269,7 @@ end
     -- the rest (the client shortens a long one, whose whole name is on the
     -- row's Echo tooltip).
     function M.SetPickRowText(row, name, note, controlsHidden)
+        name = Nexus.EchoText.Text(name)
         local count = row.count
         if not count then
             row.text:SetText(name .. "  " .. note)
@@ -3468,13 +3487,146 @@ end
         return lines
     end
 
+    -- Russian actions share one measured row with the name field: New,
+    -- Manage and Assign immediately follow it; Import/Export have a separate
+    -- group at the right. Larger fonts can move the actions onto their own
+    -- row, with the search strip and lists following below.
+    function M.FitEditorToolbar()
+        if not frame or Nexus.Localization.ActiveLanguage() ~= "ruRU" then return end
+        local metrics = Nexus.LayoutMetrics
+        if not (metrics and metrics.FitButtonWidth and frame._displayBtn and frame._importBtn) then return end
+        local controls = {newWishlistBtn, frame._manageBtn, frame._workspaceAssignBtn,
+            frame._importBtn, frame._exportBtn, frame._displayBtn, frame._workspaceMyBuildsBtn}
+        local parts, rowH = {tostring(frame:GetWidth())}, 22
+        for _, button in ipairs(controls) do
+            local path, size, flags = button:GetFontString():GetFont()
+            parts[#parts + 1] = tostring(path) .. ":" .. tostring(size) .. ":" .. tostring(flags)
+            rowH = math.max(rowH, math.ceil(tonumber(size) or 12) + 8)
+        end
+        local path, size = frame._catalogHeader:GetFont()
+        parts[#parts + 1] = tostring(path) .. ":" .. tostring(size)
+        local key = table.concat(parts, "|")
+        if frame._localizedToolbarKey == key then return end
+        frame._localizedToolbarKey = key
+        newWishlistBtn:SetText("+ " .. T("editor.button.new_wishlist"))
+        newWishlistBtn._fullCaption = nil
+        local newW = metrics.FitButtonWidth(newWishlistBtn, 112)
+        local manageW = metrics.FitButtonWidth(frame._manageBtn, 88)
+        local assignW = metrics.FitButtonWidth(frame._workspaceAssignBtn, 94)
+        local displayW = metrics.FitButtonWidth(frame._displayBtn, 150)
+        local importW = metrics.FitButtonWidth(frame._importBtn, 70)
+        local exportW = metrics.FitButtonWidth(frame._exportBtn, 70)
+        metrics.FitButtonWidth(frame._workspaceMyBuildsBtn, 140)
+        local right = frame:GetWidth() - 34
+        local groupW = newW + manageW + assignW + 16
+        local ioW = importW + exportW + 8
+        local nameLeft = 34 + math.ceil(wishlistNameLabel:GetStringWidth()) + 10
+        local nameRoom = right - ioW - 16 - groupW - 16 - nameLeft
+        if nameRoom < 100 then
+            newWishlistBtn:SetText("+ " .. T("editor.button.new_wishlist_short"))
+            newWishlistBtn._fullCaption = T("editor.button.new_wishlist")
+            newW = metrics.FitButtonWidth(newWishlistBtn, 112)
+            groupW = newW + manageW + assignW + 16
+            nameRoom = right - ioW - 16 - groupW - 16 - nameLeft
+            if not newWishlistBtn._fullCaptionHook then
+                newWishlistBtn._fullCaptionHook = true
+                newWishlistBtn:HookScript("OnEnter", function(self)
+                    if self._fullCaption then
+                        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                        GameTooltip:AddLine(self._fullCaption, 1, 1, 1, true)
+                        GameTooltip:Show()
+                    end
+                end)
+                newWishlistBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+            end
+        end
+        local separate = nameRoom < 100
+        local nameTop = math.max(96, 66 + rowH + 8)
+        local nameW = separate and math.min(260, math.max(100, right - nameLeft))
+            or math.min(260, nameRoom)
+        local groupX = separate and 34 or (nameLeft + nameW + 16)
+        local groupY = separate and (nameTop + rowH + 8) or nameTop
+        local ioY = groupY
+        if separate and groupW + ioW + 16 > right - 34 then ioY = groupY + rowH + 8 end
+        frame._toolbarDrop = math.max(0, ioY + rowH + 8 - 126)
+        frame._filterExtra = math.max(0, rowH + 8 - 32)
+        for _, button in ipairs(controls) do button:SetHeight(rowH) end
+        local labelH = tonumber(wishlistNameLabel:GetStringHeight()) or 12
+        wishlistNameLabel:ClearAllPoints()
+        wishlistNameLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 34,
+            -nameTop - math.max(0, math.floor((rowH - labelH) / 2)))
+        wishlistNameBox:SetHeight(rowH)
+        searchBox:SetHeight(rowH)
+        newWishlistBtn:ClearAllPoints()
+        newWishlistBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", groupX, -groupY)
+        frame._manageBtn:ClearAllPoints()
+        frame._manageBtn:SetPoint("LEFT", newWishlistBtn, "RIGHT", 8, 0)
+        frame._workspaceAssignBtn:ClearAllPoints()
+        frame._workspaceAssignBtn:SetPoint("LEFT", frame._manageBtn, "RIGHT", 8, 0)
+        frame._exportBtn:ClearAllPoints()
+        frame._exportBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -ioY)
+        frame._importBtn:ClearAllPoints()
+        frame._importBtn:SetPoint("RIGHT", frame._exportBtn, "LEFT", -8, 0)
+        searchBox:ClearAllPoints()
+        searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", 34, -126 - frame._toolbarDrop)
+        frame._workspaceMyBuildsBtn:ClearAllPoints()
+        frame._workspaceMyBuildsBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -126 - frame._toolbarDrop)
+        -- The dropdowns keep their bounded labels and full-name hovers.
+        wishlistSwitchBtn:SetWidth(math.min(350, math.max(270, right - displayW - 16 - 272)))
+        if wishlistSwitchBtn:GetFontString() then
+            wishlistSwitchBtn:GetFontString():SetWidth(wishlistSwitchBtn:GetWidth() - 34)
+        end
+        wishlistNameBox:SetWidth(nameW)
+        -- The catalog explanation belongs to the left pane, never the
+        -- Selected Echoes heading. Reserve any extra wrapped lines below it.
+        local header = frame._catalogHeader
+        header:SetWidth(600)
+        header:SetWordWrap(true)
+        local headerH = metrics.WrapHeight(header, 600, 1)
+        frame._catalogHeadingExtra = math.max(0, math.ceil(headerH) + 4 - 22)
+        -- Leave a separate line for the catalog count above the footer.
+        frame._localizedFooterReserve = 48
+        footerText:ClearAllPoints()
+        footerText:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 34, 56)
+        footerText:SetSize(610, 28)
+        footerText:SetWordWrap(true)
+        frame._rarityBtn:ClearAllPoints()
+        frame._rarityBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 34, 24)
+        metrics.FitButtonWidth(frame._rarityBtn, 150)
+        if frame._fitAutoLock then frame._fitAutoLock(frame._lockedSlotCount or 6) end
+    end
+
+    function M.FitEditorFooter(apply, button, choice)
+        if not frame or Nexus.Localization.ActiveLanguage() ~= "ruRU" then return end
+        local metrics = Nexus.LayoutMetrics
+        if not (metrics and metrics.ButtonLabelWidth) then return end
+        local path, size = apply:GetFontString():GetFont()
+        local key = tostring(path) .. ":" .. tostring(size) .. ":" .. tostring(choice)
+            .. ":" .. tostring(apply:GetText()) .. ":" .. tostring(button:GetText())
+        local fit = frame._localizedActionFit
+        if not fit or fit.key ~= key then
+            fit = {key = key, primary = math.max(choice and 188 or 332,
+                math.ceil(metrics.ButtonLabelWidth(apply) + 24)), secondary = 0}
+            if choice then fit.secondary = math.max(140, math.ceil(metrics.ButtonLabelWidth(button) + 24)) end
+            frame._localizedActionFit = fit
+            apply:ClearAllPoints()
+            apply:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
+                -34 - (choice and fit.secondary + 8 or 0), 24)
+            button:ClearAllPoints()
+            button:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -34, 24)
+        end
+        -- RenderIntentControls may have restored its English widths this tick.
+        apply:SetWidth(fit.primary)
+        if choice then button:SetWidth(fit.secondary) end
+    end
+
     -- "Create unassigned": the Save changes intent of a new plan that could be
     -- assigned. It shares the apply row (the apply button narrows) and is
     -- shown only while that choice exists. Kept on the frame (Renderer.New is
     -- near the Lua 5.1 local limit).
     function M.EnsureIntentControls(apply, applyIntent)
         if not frame or frame._saveOnlyBtn then return end
-        local button = CreateFrame("Button", "NexusWishlistSaveOnlyButton", frame, "UIPanelButtonTemplate")
+        local button = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistSaveOnlyButton", frame, "UIPanelButtonTemplate")
         button:SetSize(140, 26)
         button:SetPoint("BOTTOMLEFT", 866, 24)
         button:SetText(T("editor.button.create_unassigned"))
@@ -3578,6 +3730,7 @@ end
             apply:SetWidth(332)
             button:Hide()
         end
+        M.FitEditorFooter(apply, button, choice)
     end
 
     -- The second line of the Save/Create confirmation: the planned count,
@@ -3849,7 +4002,7 @@ end
         text:SetText("")
         text:Hide()
         frame._saveResultText = text
-        local hover = CreateFrame("Frame", nil, frame)
+        local hover = Nexus.FontSupport.CreateFrame("Frame", nil, frame)
         hover:SetPoint("TOPLEFT", text, "TOPLEFT", 0, 0)
         hover:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", 0, 0)
         hover:EnableMouse(true)
@@ -3870,7 +4023,7 @@ end
         hover:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         hover:Hide()
         frame._saveResultHover = hover
-        local button = CreateFrame("Button", "NexusWishlistAssignNowButton", frame, "UIPanelButtonTemplate")
+        local button = Nexus.FontSupport.CreateFrame("Button", "NexusWishlistAssignNowButton", frame, "UIPanelButtonTemplate")
         button:SetSize(120, 20)
         button:SetPoint("TOPLEFT", 736, -91)
         button:SetText(T("editor.button.assign_now"))

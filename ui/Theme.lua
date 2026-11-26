@@ -537,7 +537,7 @@ function T.StyleWindow(window, alpha)
     -- the window gives each style a solid floor behind its text while the
     -- window still draws its own backdrop, texture, shade and border on top
     -- (the same identity). Native effective opacity is not established here.
-    local base = CreateFrame("Frame", nil, window)
+    local base = Nexus.FontSupport.CreateFrame("Frame", nil, window)
     local fill = base:CreateTexture(nil, "BACKGROUND")
     stats.textures = stats.textures + 1
     fill:SetTexture(WHITE)
@@ -596,7 +596,7 @@ function T.EnsureTooltipBase()
     if not (tip and tip.HookScript and type(hooksecurefunc) == "function"
         and type(CreateFrame) == "function") then return false end
     tooltipHooked = true
-    local base = CreateFrame("Frame", nil, tip)
+    local base = Nexus.FontSupport.CreateFrame("Frame", nil, tip)
     base:SetPoint("TOPLEFT", tip, "TOPLEFT", 3, -3)
     base:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", -3, 3)
     local fill = base:CreateTexture(nil, "BACKGROUND")
@@ -649,11 +649,13 @@ local function SyncMenuList(list)
     if not fill then return false end
     local open = _G.UIDROPDOWNMENU_OPEN_MENU
     if not (open ~= nil and menuOwners[open] and list:IsShown()) then
+        if Nexus.FontSupport then Nexus.FontSupport.ApplyShared(list, false) end
         fill:Hide()
         menuLists[list] = nil
         return false
     end
     if not active then Active() end
+    if Nexus.FontSupport then Nexus.FontSupport.ApplyShared(list, true) end
     local c = active.style.baseColor or active.style.windowColor
     pcall(fill.SetVertexColor, fill, c[1], c[2], c[3], 1)
     fill:Show()
@@ -662,6 +664,7 @@ local function SyncMenuList(list)
 end
 
 local function HideMenuFill(list)
+    if Nexus.FontSupport then Nexus.FontSupport.ApplyShared(list, false) end
     local fill = menuFills[list]
     if fill then fill:Hide() end
     menuLists[list] = nil
@@ -1086,7 +1089,7 @@ end
 function T.ShowMenu(anchor)
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
-    T._menu = T._menu or CreateFrame("Frame", "NexusAppearanceMenu", UIParent, "UIDropDownMenuTemplate")
+    T._menu = T._menu or Nexus.FontSupport.CreateFrame("Frame", "NexusAppearanceMenu", UIParent, "UIDropDownMenuTemplate")
     return T.OpenMenu(T.MenuItems(CloseDropDownMenus), T._menu, anchor or "cursor", 0, 0)
 end
 
